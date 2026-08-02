@@ -117,3 +117,9 @@ export function resetConsentStore(): void {
   profiles().clear();
   persistToDisk(profiles());
 }
+
+/** Remove a single consent profile (account deletion). */
+export function deleteConsentProfile(userId: string): void {
+  profiles().delete(userId);
+  persistToDisk(profiles());
+}

@@ -37,7 +37,7 @@ export {
   seedVerifyConsent,
   updateDataImprovementConsent,
 } from "./consent-manager";
-export { resetConsentStore } from "./consent-store";
+export { resetConsentStore, deleteConsentProfile } from "./consent-store";
 export { evaluateDataUseRules } from "./data-use-rules";
 export {
   detectMedicalAdviceRequest,

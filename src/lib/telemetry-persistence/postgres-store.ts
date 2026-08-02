@@ -247,6 +247,19 @@ export class PostgresTelemetryStore implements TelemetryStore {
       ],
     );
   }
+
+  async deleteUser(userId: string): Promise<void> {
+    // Delete in dependency order — feedback references interactions.
+    await this.pool.query(
+      `DELETE FROM feedback WHERE interaction_id IN (
+         SELECT id FROM interactions WHERE user_id = $1
+       )`,
+      [userId],
+    );
+    await this.pool.query(`DELETE FROM interactions WHERE user_id = $1`, [userId]);
+    await this.pool.query(`DELETE FROM documents WHERE user_id = $1`, [userId]);
+    await this.pool.query(`DELETE FROM users WHERE id = $1`, [userId]);
+  }
 }
 
 export async function createPostgresPool(): Promise<Pool> {

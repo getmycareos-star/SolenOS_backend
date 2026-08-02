@@ -47,6 +47,8 @@ export interface TelemetryStore {
   retrieveKnowledgeChunks(limit?: number): Promise<readonly KnowledgeChunkRow[]>;
   loadPolicyFacts(categories?: readonly string[]): Promise<readonly PolicyFactRow[]>;
   isEnabled(): boolean;
+  /** Remove a user and all associated rows (interactions, feedback, documents). */
+  deleteUser(userId: string): Promise<void>;
 }
 
 export type { GroundingContextPackage };
