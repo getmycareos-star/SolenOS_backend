@@ -259,6 +259,20 @@ export class MemoryTelemetryStore implements TelemetryStore {
     });
   }
 
+  async deleteUser(userId: string): Promise<void> {
+    const user = this.users.get(userId);
+    if (!user) return;
+
+    const interactionIds = new Set(
+      this.interactions.filter((row) => row.user_id === userId).map((row) => row.id),
+    );
+
+    this.interactions = this.interactions.filter((row) => row.user_id !== userId);
+    this.feedback = this.feedback.filter((row) => !interactionIds.has(row.interaction_id));
+    this.documents = this.documents.filter((row) => row.user_id !== userId);
+    this.users.delete(userId);
+  }
+
   peekUsers(): readonly MemoryUser[] {
     return [...this.users.values()];
   }

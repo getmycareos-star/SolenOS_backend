@@ -82,3 +82,36 @@ export function bindSessionToUser(
   });
   return upgradeSessionToPersistent(session, userId);
 }
+
+/**
+ * Change the password for a persistent user.
+ * Returns false when the user does not exist or the current password is wrong.
+ */
+export async function changeUserPassword(params: {
+  user_id: string;
+  current_password: string;
+  new_password: string;
+}): Promise<boolean> {
+  const creds = userCredentials.get(params.user_id);
+  if (!creds || creds.password_hash !== hashPassword(params.current_password)) {
+    return false;
+  }
+  if (!params.new_password || params.new_password.length < 8) {
+    throw new Error("new password must be at least 8 characters");
+  }
+  userCredentials.set(params.user_id, {
+    email: creds.email,
+    password_hash: hashPassword(params.new_password),
+  });
+  await getTelemetryStore().then((store) => store.ensureUser(params.user_id));
+  return true;
+}
+
+/** Remove stored credentials + email binding for a user (used on account deletion). */
+export function deleteUserCredentials(userId: string): void {
+  const creds = userCredentials.get(userId);
+  if (creds) {
+    emailToUserId.delete(creds.email);
+  }
+  userCredentials.delete(userId);
+}

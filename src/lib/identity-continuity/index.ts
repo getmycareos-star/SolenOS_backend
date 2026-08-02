@@ -63,6 +63,8 @@ export {
   upgradeEphemeralToPersistent,
   authenticatePersistentUser,
   bindSessionToUser,
+  changeUserPassword,
+  deleteUserCredentials,
   resetAuthCredentialsForTests,
   type StateUpgradeResult,
 } from "./state-upgrade";
