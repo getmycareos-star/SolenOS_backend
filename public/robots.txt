@@ -1,6 +1,0 @@
-User-agent: *
-Disallow: /ops
-Disallow: /metrics
-Disallow: /api/track
-
-Sitemap: https://solenosai.netlify.app/sitemap.xml
