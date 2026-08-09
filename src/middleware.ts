@@ -17,16 +17,28 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:8888",
 ]);
 
-const ALLOWED_METHODS = "GET, POST, OPTIONS";
-const ALLOWED_HEADERS = "Content-Type";
+const NETLIFY_SUFFIX = ".netlify.app";
+
+const ALLOWED_METHODS = "GET, POST, PUT, DELETE, OPTIONS";
+const ALLOWED_HEADERS =
+  "Content-Type, Authorization, X-Requested-With";
+
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.has(origin)) return true;
+  // Allow any Netlify deploy/preview domain (e.g. <site>.netlify.app).
+  if (origin.startsWith("https://") && origin.endsWith(NETLIFY_SUFFIX)) return true;
+  return false;
+}
 
 function applyCorsHeaders(response: NextResponse, origin: string | null) {
-  const allowed = origin && ALLOWED_ORIGINS.has(origin) ? origin : null;
+  const allowed = isAllowedOrigin(origin) ? origin : null;
   if (allowed) {
     response.headers.set("Access-Control-Allow-Origin", allowed);
     response.headers.set("Vary", "Origin");
     response.headers.set("Access-Control-Allow-Methods", ALLOWED_METHODS);
     response.headers.set("Access-Control-Allow-Headers", ALLOWED_HEADERS);
+    response.headers.set("Access-Control-Max-Age", "86400");
   }
   return response;
 }
