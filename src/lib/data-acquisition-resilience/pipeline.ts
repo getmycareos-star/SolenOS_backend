@@ -1,5 +1,8 @@
 import { applyRepeatedSignalBoost } from "./confidence-evolution";
 
+import { enforceSourcePointersForRawInput } from "./source-pointer";
+import { recordDowngrade } from "./source-pointer-store";
+
 import { reconcileCrossDocument } from "./cross-document-reconcile";
 
 import { classifySourceReliability } from "../continuity-properties/source-reliability";
@@ -147,7 +150,15 @@ function normalizedToValidated(
 
     },
 
-    document_id: documentId,
+document_id: documentId,
+
+    // Source-pointer trust fields (conservative by construction). The normalized
+    // event is not automatically "confirmed" — default to inferred/unknown until
+    // the source-pointer invariant is explicitly satisfied.
+    evidence_status: "inferred" as const,
+    source_span_verified: false,
+    source_span_start_offset: null,
+    source_span_end_offset: null,
 
   };
 
@@ -273,18 +284,29 @@ export function ingestRawInput(params: IngestRawInputParams): DareIngestResult {
 
 
 
-  let candidates = extractCandidatesFromRawInput(rawInput);
+let candidates = extractCandidatesFromRawInput(rawInput);
+
+  // SOURCE-POINTER TRUST LAYER (mandated order):
+  //   ... extractCandidatesFromRawInput
+  //   -> verifySourcePointer
+  //   -> enforceSourcePointer
+  //   -> applyRepeatedSignalBoost (gated: never boosts a pointer-invalid claim)
+  const enforced = enforceSourcePointersForRawInput(candidates, rawInput);
+  candidates = enforced.candidates;
+  for (const downgrade of enforced.downgrades) {
+    recordDowngrade(downgrade);
+  }
 
   const priorValidated = listValidatedForCaregiver(caregiverId);
 
 
 
   candidates = candidates.map((c) => {
-
+    // A repeated signal must NOT manufacture trusted status for a claim whose
+    // source pointer failed verification. Only boost claims that are verified.
+    if (!c.source_span_verified) return { ...c };
     const boosted = applyRepeatedSignalBoost(c, priorValidated);
-
     return { ...c, confidence: boosted.confidence, confidence_sources: boosted.sources };
-
   });
 
 

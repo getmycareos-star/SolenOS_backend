@@ -81,8 +81,12 @@ export function applyCorrection(input: ApplyCorrectionInput): {
         entities: Array.isArray(input.corrected_fields.entities)
           ? (input.corrected_fields.entities as ValidatedCareEvent["entities"])
           : [],
-        attributes: { ...input.corrected_fields },
+attributes: { ...input.corrected_fields },
         document_id: null,
+        evidence_status: "inferred" as const,
+        source_span_verified: false,
+        source_span_start_offset: null,
+        source_span_end_offset: null,
       };
       storeValidatedEvent(event, input.caregiver_id);
       return { correction, updated_event: event, deleted_event_id: null };
@@ -125,8 +129,12 @@ export function applyCorrection(input: ApplyCorrectionInput): {
         validated_at: correctionCareEvent.timestamp,
         validation_method: "user_confirmation",
         entities: [],
-        attributes: correctionCareEvent.attributes,
+attributes: correctionCareEvent.attributes,
         document_id: null,
+        evidence_status: "inferred" as const,
+        source_span_verified: false,
+        source_span_start_offset: null,
+        source_span_end_offset: null,
       };
       storeValidatedEvent(corrValidated, input.caregiver_id);
       storeCommittedEvents(input.caregiver_id, [correctionCareEvent]);
@@ -174,7 +182,11 @@ export function promoteCandidateToValidated(
           /\b(march|january|february|\d{1,2}[/-]\d{1,2}|yesterday|today)\b/i,
         )?.[0] ?? null,
     },
-    document_id: null,
+document_id: null,
+    evidence_status: candidate.evidence_status,
+    source_span_verified: candidate.source_span_verified,
+    source_span_start_offset: candidate.source_span_start_offset,
+    source_span_end_offset: candidate.source_span_end_offset,
   };
 
   storeValidatedEvent(event, caregiverId);

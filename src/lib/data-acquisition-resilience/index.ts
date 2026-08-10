@@ -26,6 +26,8 @@ export type {
   AmbiguityFlag,
   CorrectionType,
   CompletenessLevel,
+  EvidenceStatus,
+  ClaimDowngradeRecord,
 } from "./types";
 
 export {
@@ -49,3 +51,18 @@ export {
 
 export { evolveConfidence } from "./confidence-evolution";
 export { reconcileCrossDocument } from "./cross-document-reconcile";
+
+export {
+  verifySourcePointer,
+  enforceSourcePointer,
+  enforceSourcePointersForRawInput,
+  enforceValidatedEventPointer,
+  enforceEvidenceStatus,
+  requiresSourcePointer,
+} from "./source-pointer";
+export {
+  recordDowngrade,
+  listDowngrades,
+  listDowngradesForClaim,
+  clearDowngradeLog,
+} from "./source-pointer-store";
