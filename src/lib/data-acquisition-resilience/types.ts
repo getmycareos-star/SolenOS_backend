@@ -12,6 +12,21 @@ export type CorrectionType = (typeof CORRECTION_TYPES)[number];
 export type ExtractionMethod = (typeof EXTRACTION_METHODS)[number];
 export type CompletenessLevel = (typeof COMPLETENESS_LEVELS)[number];
 
+/**
+ * Evidentiary status — an independent dimension from numeric `confidence`.
+ *
+ * - confirmed / reported => REQUIRE a verified, exact source pointer.
+ * - inferred / unknown / contradictory => no source pointer required.
+ *
+ * The validator may only DOWNGRADE this status (never upgrade).
+ */
+export type EvidenceStatus =
+  | "confirmed"
+  | "reported"
+  | "inferred"
+  | "unknown"
+  | "contradictory";
+
 export type RawInputType = "text" | "ocr_text" | "pdf" | "image" | "voice_transcript";
 
 /** Step 1 — never process directly into graph. */
@@ -40,6 +55,12 @@ export type ExtractionCandidate = {
   completeness: CompletenessLevel;
   missing_fields: string[];
   created_at: string;
+  /** Evidentiary status — independent of numeric confidence. */
+  evidence_status: EvidenceStatus;
+  /** true only if originalText.slice(start,end) === source_span exactly. */
+  source_span_verified: boolean;
+  source_span_start_offset: number | null;
+  source_span_end_offset: number | null;
 };
 
 export type UncertainEventCandidate = {
@@ -113,6 +134,28 @@ export type ValidatedCareEvent = {
   entities: { kind: string; label: string }[];
   attributes: Record<string, unknown>;
   document_id: string | null;
+  /** Evidentiary status — independent of numeric confidence. */
+  evidence_status: EvidenceStatus;
+  /** true only if originalText.slice(start,end) === source_span exactly. */
+  source_span_verified: boolean;
+  source_span_start_offset: number | null;
+  source_span_end_offset: number | null;
+};
+
+/** A recorded automatic evidence-status downgrade (product-quality + audit data). */
+export type ClaimDowngradeRecord = {
+  id: string;
+  claim_id: string;
+  evidence_id: string | null;
+  original_confidence: number | null;
+  final_confidence: number | null;
+  original_status: EvidenceStatus;
+  final_status: EvidenceStatus;
+  reason: string;
+  source_span_before: string | null;
+  source_span_start_offset: number | null;
+  source_span_end_offset: number | null;
+  created_at: string;
 };
 
 export type DareIngestResult = {

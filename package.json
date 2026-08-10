@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "fastify:shim": "tsx fastify-shim/run.mts"
+    "fastify:shim": "tsx fastify-shim/run.mts",
+    "test:trust": "tsx src/lib/data-acquisition-resilience/trust-layer.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-polly": "^3.1100.0",
@@ -34,4 +35,3 @@
     "typescript": "~5.8.3"
   }
 }
-

@@ -8,6 +8,7 @@ import type {
   ConfidenceSource,
   DisambiguationQuestion,
   DocumentUnreadableSection,
+  EvidenceStatus,
   ExtractionCandidate,
   ExtractionMethod,
   RawInput,
@@ -174,8 +175,38 @@ function splitIntoSpans(content: string): string[] {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 
-  if (lines.length === 0 && content.trim()) return [content.trim()];
+if (lines.length === 0 && content.trim()) return [content.trim()];
   return lines.length > 0 ? lines : [];
+}
+
+/**
+ * Deterministic initial evidence status from extraction semantics.
+ *
+ * NOT derived from the numeric confidence score. Reflects provenance/ambiguity:
+ *  - contradictory_sources flag => "contradictory"
+ *  - insufficient / partial / ambiguous / OCR evidence => "inferred" or "unknown"
+ *  - otherwise "reported" (a directly evidenced observation, not yet confirmed)
+ *
+ * "confirmed" is NEVER assigned here — only established downstream by explicit
+ * user confirmation / reconciliation.
+ */
+export function initialEvidenceStatus(
+  candidate: Pick<
+    ExtractionCandidate,
+    "ambiguity_flags" | "completeness" | "source_span" | "confidence_sources"
+  >,
+): EvidenceStatus {
+  if (candidate.ambiguity_flags.includes("contradictory_sources")) return "contradictory";
+  if (!candidate.source_span) return "unknown";
+  if (candidate.completeness === "insufficient") return "unknown";
+  if (
+    candidate.completeness === "partial" ||
+    candidate.ambiguity_flags.length > 0 ||
+    candidate.confidence_sources.includes("ocr")
+  ) {
+    return "inferred";
+  }
+  return "reported";
 }
 
 export function extractCandidatesFromRawInput(rawInput: RawInput): ExtractionCandidate[] {
@@ -207,6 +238,14 @@ export function extractCandidatesFromRawInput(rawInput: RawInput): ExtractionCan
       method,
     );
 
+const startOffset = rawInput.content.indexOf(span);
+    const candidateSeed = {
+      ambiguity_flags,
+      completeness,
+      confidence_sources: sources,
+      source_span: span,
+    };
+
     candidates.push({
       id: createCandidateId(),
       raw_input_id: rawInput.id,
@@ -220,6 +259,10 @@ export function extractCandidatesFromRawInput(rawInput: RawInput): ExtractionCan
       completeness,
       missing_fields,
       created_at: new Date().toISOString(),
+      evidence_status: initialEvidenceStatus(candidateSeed),
+      source_span_verified: false,
+      source_span_start_offset: startOffset === -1 ? null : startOffset,
+      source_span_end_offset: startOffset === -1 ? null : startOffset + span.length,
     });
   }
 
