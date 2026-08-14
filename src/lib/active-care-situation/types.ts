@@ -67,6 +67,13 @@ export type ActiveCareSituation = {
   pattern_label?: string | null;
   /** Person familiarity baseline statements (G34) — not population dementia. */
   familiarity_baseline?: string[];
+  compound_signal?: string | null;
+  trajectory_by_domain?: Record<string, "worsening" | "improving" | "stable" | "unknown">;
+  cross_signal_correlations?: Array<{
+    signal_a: string;
+    signal_b: string;
+    correlation: "correlated" | "inverse" | "independent" | "unknown";
+  }>;
 };
 
 export type ActiveSituationTurn = {
@@ -106,8 +113,20 @@ export type ActiveSituationTurn = {
   identity_mismatch_input?: string | null;
   /** Caregiver explicitly corrected prior held understanding (Phase 12). */
   memory_correction_applied?: boolean;
+  /**
+   * Continuity decision from Care Identity engine — how this input relates to
+   * prior care reality. Enables the composer to branch for new vs returning.
+   */
+  continuity_decision?: import("../care-identity").ContinuityDecision;
   disclosure_stage: CareRealityDisclosureStage;
   disclosure_plan: DisclosurePlan;
   response_evolution: ResponseEvolutionEvaluation;
   primary_screen_question: string;
+  compound_signal?: string | null;
+  trajectory_by_domain?: Record<string, "worsening" | "improving" | "stable" | "unknown">;
+  cross_signal_correlations?: Array<{
+    signal_a: string;
+    signal_b: string;
+    correlation: "correlated" | "inverse" | "independent" | "unknown";
+  }>;
 };

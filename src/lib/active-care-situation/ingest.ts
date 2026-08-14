@@ -291,6 +291,8 @@ function turnFromProgressive(
       pattern_label: progressive.pattern_label,
       what_can_wait: progressive.what_can_wait,
       what_may_become_serious: progressive.what_may_become_serious,
+      compound_signal: progressive.compound_signal,
+      trajectory_by_domain: progressive.trajectory_by_domain,
     },
     crs,
   );
@@ -472,7 +474,7 @@ function ingestIdentityMismatchHold(params: {
     what_needs_context: [ask],
     confirmation_title: "Need a quick clarification",
     confirmation_body:
-      "This update is held for now — it will not be linked to the care story until it is clear who it is about.",
+      "This update is saved — it will be linked to the care record once we confirm who it is about.",
     what_changed_in_understanding: null,
   };
 }
@@ -623,6 +625,11 @@ export function ingestActiveCareObservation(params: {
   identityMismatch?: boolean;
   /** SRE improvement outcome link — not a care decision for Decision Memory. */
   isImprovementOutcome?: boolean;
+  /**
+   * Continuity decision from Care Identity engine.
+   * Enables the composer to branch behavior for new vs returning caregivers.
+   */
+  continuityDecision?: import("../care-identity").ContinuityDecision;
 }): ActiveSituationTurn {
   const nowIso = params.nowIso ?? new Date().toISOString();
   const careRecipientId = realityKey(params.caregiverId);
@@ -1224,11 +1231,14 @@ export function ingestActiveCareObservation(params: {
     relation: finalRelation,
     nowIso,
   });
+  const continuityDecision = params.continuityDecision;
+
   return {
     ...turnFromProgressive(situation, finalRelation, progressiveOriented, crs),
     what_changed_in_understanding: what_changed,
     pattern_label,
     resolved_uncertainties: mergedResolved,
     relation: finalRelation,
+    continuity_decision: continuityDecision,
   };
 }

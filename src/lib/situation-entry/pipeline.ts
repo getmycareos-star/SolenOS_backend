@@ -17,7 +17,16 @@ import {
 import { toCaregiverFacingLine } from "../mvp-input-architecture";
 import { getTemporalTimeline, getIngestionTimeline, getTimelineViews } from "./dual-time";
 import type { CanonicalCareEvent, ProcessSituationInput, SituationResponse } from "./types";
-import { resolveDurableCareKey } from "../care-identity";
+import {
+  resolveDurableCareKey,
+  detectContinuity,
+  createCareIdentity,
+  getCareIdentity,
+  getCareIdentitySummary,
+  incrementSessionCount,
+  recordCareEvent as recordIdentityCareEvent,
+  resolveActiveCareRecipientId as resolveIdentityActiveRecipient,
+} from "../care-identity";
 import {
   resolveClinicalProfileFromCareContext,
 } from "../clinical-profile";
@@ -83,6 +92,7 @@ import { processForbiddenBuildZone } from "../forbidden-build-zone";
 import { processProductRealityModel } from "../product-reality-model";
 import { processTimelineReconstruction } from "../timeline-reconstruction-engine";
 import { processContradictionDetection } from "../contradiction-detection-engine";
+import { detectCareStateChanges } from "../care-state-change-detector";
 import {
   attachTransparencyToFinalOutput,
   processCareTransparency,
@@ -200,6 +210,23 @@ export async function processSituationInput(
   // Locked B: Care Reality keyed by care recipient; contributor is attribution.
   ensureContributorCareReality(contributorId, input.care_recipient_id);
   const caregiverId = contributorId;
+
+  // Phase 10 — Care Identity: ensure identity record exists, detect continuity type.
+  // This runs before pipeline processing so the entire stack benefits from continuity awareness.
+  const careRecipientIdForIdentity = input.care_recipient_id ?? caregiverId;
+  let existingIdentity = getCareIdentity(careRecipientIdForIdentity);
+  if (!existingIdentity) {
+    existingIdentity = createCareIdentity({
+      caregiverId,
+      careRecipientId: careRecipientIdForIdentity,
+    });
+  }
+  const identitySummary = getCareIdentitySummary(careRecipientIdForIdentity);
+  const continuityDecision = detectContinuity({
+    caregiverId,
+    careRecipientId: careRecipientIdForIdentity,
+    rawText: input.raw_input ?? "",
+  });
 
   const hasDocuments = (input.documents?.length ?? 0) > 0;
   if (
@@ -709,6 +736,23 @@ export async function processSituationInput(
     as_of: input.timestamp ?? new Date().toISOString(),
   });
 
+  const care_state_change_report = detectCareStateChanges({
+    priorContext: priorContext,
+    currentContext: context,
+    eventsCreated: markedEvents,
+    baselineFacts: baseline_intelligence_layer.baseline_facts,
+    baselineDeviations: baseline_intelligence_layer.deviations,
+    contradictions: {
+      open_contradictions: contradiction_detection_layer.open_contradictions.map((c) => ({
+        field: c.field,
+        event_ids: c.event_ids,
+        shared_message: c.shared_message,
+        affects_safety: c.affects_safety,
+      })),
+      change_classifications: [],
+    },
+  });
+
   const createdTimelineEvents = markedEvents
     .map(mapCanonicalToTimelineEvent)
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -905,6 +949,7 @@ export async function processSituationInput(
       ...buildPolicyEngineLayer(caregiverId),
       ingestion: ingestionPolicy,
     },
+    care_state_change_report,
   };
 
   const arbitration = processRuntimeArbitrationLayers({
@@ -1045,7 +1090,7 @@ export async function processSituationInput(
       situationId,
       rootEventId: acsRootEventId,
     });
-    acsTurn =
+acsTurn =
       threadResult.turns[threadResult.turns.length - 1] ??
       ingestActiveCareObservation({
         caregiverId,
@@ -1061,6 +1106,7 @@ export async function processSituationInput(
         isReinforcement: spineLink?.is_reinforcement,
         identityMismatch: spineLink?.identity_mismatch,
         isImprovementOutcome: spineLink?.is_improvement_outcome,
+        continuityDecision,
       });
   } else {
     acsTurn = ingestActiveCareObservation({
@@ -1078,6 +1124,9 @@ export async function processSituationInput(
       isReinforcement: spineLink?.is_reinforcement,
       identityMismatch: spineLink?.identity_mismatch,
       isImprovementOutcome: spineLink?.is_improvement_outcome,
+      // Phase 10: Carries continuity decision so the composer can branch
+      // behavior for new vs returning caregivers.
+      continuityDecision,
     });
   }
 
@@ -1273,6 +1322,9 @@ export async function processSituationInput(
     care_reality_engine_layer,
     care_signal_understanding_layer,
     generalized_care_understanding_layer,
+    // Phase 10 — Care Identity: surface continuity summary and decision for composer branching.
+    care_identity_summary: identitySummary ?? undefined,
+    continuity_decision: continuityDecision,
     // care_key = contributor session identity; Care Reality id is context.care_recipient_id.
     care_key: caregiverId,
     resolution_engine_layer: trackedSync.resolution_engine_layer,
@@ -1283,7 +1335,42 @@ export async function processSituationInput(
     active_care_situation: acsTurn.situation,
     active_care_situation_turn: acsTurn,
     care_situation_groups,
+};
+}
+
+/**
+ * Intelligence-boundary entry point — routes through the SolenOS Intelligence
+ * Layer while preserving full engine stack compatibility for backward compatibility.
+ *
+ * This is the canonical caregiver path: Intent → Memory → Data Acquisition →
+ * Understanding → Memory Strategy → Reasoning → Active Situation → Communication.
+ */
+export async function processSituationInputWithIntelligence(
+  input: ProcessSituationInput,
+): Promise<SituationResponse> {
+  const { runIntelligencePipeline, buildMinimalFinalOutput } = await import(
+    "../solenos-intelligence"
+  );
+
+  const intelligenceResult = await runIntelligencePipeline(input);
+
+  const final_output = buildMinimalFinalOutput({
+    understanding: intelligenceResult.understanding.understanding,
+    composedResponse: intelligenceResult.composedResponse,
+    continuityDecision: intelligenceResult.memory.continuityDecision,
+    careRealityState: intelligenceResult.careRealityState,
+    events: intelligenceResult.situationResponse.events_created,
+  });
+
+  const base = intelligenceResult.situationResponse;
+
+  const situationResponse: SituationResponse = {
+    ...base,
+    final_output,
+    care_key: intelligenceResult.input.caregiverId,
   };
+
+  return situationResponse;
 }
 
 /**
@@ -1574,6 +1661,23 @@ export async function processSituationRecompile(input: {
     as_of: new Date().toISOString(),
   });
 
+  const care_state_change_report = detectCareStateChanges({
+    priorContext: priorContext,
+    currentContext: context,
+    eventsCreated: recentEvents,
+    baselineFacts: baseline_intelligence_layer.baseline_facts,
+    baselineDeviations: baseline_intelligence_layer.deviations,
+    contradictions: {
+      open_contradictions: contradiction_detection_layer.open_contradictions.map((c) => ({
+        field: c.field,
+        event_ids: c.event_ids,
+        shared_message: c.shared_message,
+        affects_safety: c.affects_safety,
+      })),
+      change_classifications: [],
+    },
+  });
+
   const recompileTimelineCreated = recentEvents
     .map(mapCanonicalToTimelineEvent)
     .filter((e): e is NonNullable<typeof e> => e !== null);
@@ -1737,6 +1841,7 @@ export async function processSituationRecompile(input: {
     care_timeline_engine_layer,
     timeline_reconstruction_layer,
     contradiction_detection_layer,
+    care_state_change_report,
     task_extraction_layer,
     current_state_view_layer,
     adoption_wedge_layer,
