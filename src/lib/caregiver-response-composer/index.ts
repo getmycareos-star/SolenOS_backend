@@ -137,12 +137,13 @@ import {
   composeConnectionLine,
   composeRecognitionLine,
   containsInternalLanguage,
-  containsRawNoteEchoInCopy,
+containsRawNoteEchoInCopy,
   formatDecisionMemoryForCaregiver,
   isNearRawCaregiverFacet,
   looksLikeCaregiverLoadLanguage,
   scrubInternalLanguage,
   composeCareStoryUpdate,
+  INTERNAL_LANGUAGE_BANS,
 } from "../output-quality";
 import { assertResponseAcceptanceGate } from "../response-acceptance-gate";
 import { applyRealCaregiverTestComposeGate } from "../real-caregiver-test";
@@ -364,6 +365,8 @@ export type ComposedCaregiverResponse = {
   follow_up_items: string[];
   /** Structured contract trace — engine schema aligned to caregiver copy. */
   contract_output: ResponseIntelligenceOutput;
+  /** Caregiver mental load signal — brief, non-judgmental. */
+  mental_load_signal: string | null;
 };
 
 function containsBanned(text: string): boolean {
@@ -523,6 +526,19 @@ function composeIdentityMismatchTurn(params: {
     evidence_maturity: 1,
     follow_up_items: [],
     contract_output: intelligence,
+    mental_load_signal: (() => {
+      const openGaps = still_unclear.length;
+      if (openGaps >= 3) {
+        return "Several things need attention at once — nothing has to be solved tonight.";
+      }
+      if (openGaps >= 2) {
+        return "A few pieces are still missing — the most important one is enough for now.";
+      }
+      if (openGaps === 1) {
+        return "One question is still open — it can wait until you have the answer.";
+      }
+      return null;
+    })(),
   };
   assertComposedResponseProfessional(composed);
   assertResponseAcceptanceGate({
@@ -843,11 +859,11 @@ export function composeCaregiverResponse(params: {
   ) {
     if (improvement && turn.pattern_label !== "day-to-day fluctuation") {
       what_changed =
-        "The latest update changes what we understand. Earlier understanding stays in the care story.";
-      } else if (continuitySymptom) {
+        "The latest update changes what we understand. Earlier understanding stays in the care record.";
+    } else if (continuitySymptom) {
       what_changed =
         "Oriented from held care reality — preparation for your next conversation, not advice.";
-      } else {
+    } else {
       what_changed = scrub(turn.what_changed_in_understanding);
       if (
         what_changed &&
@@ -860,6 +876,10 @@ export function composeCaregiverResponse(params: {
         what_changed = null;
       }
     }
+  }
+
+  if (turn.compound_signal && !what_changed && !gatheringContext) {
+    what_changed = scrub(turn.compound_signal);
   }
 
   // Prefer Care Reality Situation Model (baseline→change) over weak echo / storage theater.
@@ -1277,6 +1297,19 @@ export function composeCaregiverResponse(params: {
       });
       if (profileMatters && (!what_matters_now || containsWeakOrientation(what_matters_now) || /how (?:this|these concerns) sit/i.test(what_matters_now))) {
         what_matters_now = profileMatters;
+      }
+    }
+
+    // Trajectory-aware what_matters_now: if domains are worsening, surface that focus.
+    if (show_clarity && what_matters_now && turn.trajectory_by_domain) {
+      const worseningDomains = Object.entries(turn.trajectory_by_domain)
+        .filter(([, t]) => t === "worsening")
+        .map(([d]) => d.replace(/_/g, " "));
+      if (worseningDomains.length > 0 && !/worsening|declin|getting worse/i.test(what_matters_now)) {
+        const trajectoryNote = `${worseningDomains[0]?.replace(/_/g, " ")} changes are showing a concerning pattern`;
+        if (!what_matters_now.includes(trajectoryNote)) {
+          what_matters_now = `${trajectoryNote}. ${what_matters_now}`;
+        }
       }
     }
   }
@@ -1716,7 +1749,7 @@ what_matters_now = buildMattersNowOrientation({
     Boolean(connection_note?.trim()) && connection_note !== what_changed;
 
 
-  if (show_clarity && !pushback && what_matters_now) {
+if (show_clarity && !pushback && what_matters_now) {
     what_matters_now = buildMattersNowOrientation({
       subjectLabel: named,
       heldFocus: heldFocusLines(situation, 1)[0] ?? null,
@@ -1724,6 +1757,40 @@ what_matters_now = buildMattersNowOrientation({
       topUnknown: null,
       patternContinues: careWorthyCount >= 3,
     });
+  }
+
+  // Release-blocking relief default (Response Contract "What can wait" pillar):
+  // Orientable Clarity must always relieve pressure with a "what can wait" line.
+  // Improvement turns set matters_now but skip the projection path (understandingCanPrioritize
+  // is false when improvement), leaving can_wait null → acceptance gate would throw and blank
+  // the panel. Provide a genuine relief default — never blank Clarity, never a new ask.
+  if (show_clarity && !pushback && !what_can_wait) {
+    what_can_wait = improvement
+      ? "Explaining every detail of the earlier concern tonight."
+      : "Explaining every detail or deciding everything for the week tonight.";
+  }
+  // Hidden-blocker relief default: Clarity also demands what_matters_now (acceptance gate).
+  // Some orientable turns (guidance / confidence-low / projection-off) leave matters_now null
+  // while show_clarity is true → gate throws "Clarity without what_matters_now rejected".
+  // Anchor matters from what the caregiver can act on — evidence-held focus, never a new ask.
+  if (
+    show_clarity &&
+    !pushback &&
+    !what_matters_now &&
+    heldFocusLines(situation, 1)[0]
+  ) {
+    what_matters_now = buildMattersNowOrientation({
+      subjectLabel: named,
+      heldFocus: heldFocusLines(situation, 1)[0] ?? null,
+      baselineChange: baselineChangeNote,
+      topUnknown: still_unclear[0] ?? null,
+      patternContinues: careWorthyCount >= 3,
+    });
+    if (!what_matters_now) {
+      what_matters_now = improvement
+        ? "Noticing whether today's change holds."
+        : "Understanding what is changing for the person receiving care.";
+    }
   }
 
   // After asks settle: rebuild situation summary with structural unknowns (not the ask text).
@@ -2019,11 +2086,33 @@ return text;
   };
 
   // Scrub each field — never dump raw notes into caregiver-facing fields.
-  connection_note = scrubPasteField(connection_note);
+connection_note = scrubPasteField(connection_note);
   evidence_line = scrubPasteField(evidence_line);
   what_changed = scrubPasteField(what_changed);
   recognition_line = scrubPasteField(recognition_line);
   what_matters_now = scrubPasteField(what_matters_now);
+
+  // Final relief guarantee (release-blocking): the paste-scrub above can null a valid
+  // what_matters_now (it flags any line that echoes the raw note). Orientable Clarity must
+  // never render with a blank "what matters now" — the acceptance gate would throw and blank
+  // the whole panel. Anchor from what the caregiver can act on, never a new ask, never echo.
+  if (show_clarity && !pushback && !what_matters_now) {
+    const heldFocus = heldFocusLines(situation, 1)[0] ?? null;
+    const oriented = heldFocus
+      ? buildMattersNowOrientation({
+          subjectLabel: named,
+          heldFocus,
+          baselineChange: baselineChangeNote,
+          topUnknown: still_unclear[0] ?? null,
+          patternContinues: careWorthyCount >= 3,
+        })
+      : null;
+    what_matters_now = oriented ?? (
+      improvement
+        ? "Noticing whether today's change holds."
+        : "Understanding what is changing for the person receiving care."
+    );
+  }
 
   // Profile matters hint applies only when understanding projection did NOT fill what_matters_now.
   // Dementia-entry nutrition/sleep safety gaps are secondary biases, never primary.
@@ -2081,6 +2170,21 @@ return text;
     evidence_maturity: facets.evidence_maturity,
     follow_up_items,
     contract_output: intelligence,
+    mental_load_signal: (() => {
+      const openGaps = still_unclear.length;
+      const caregiverLoad =
+        /a lot is unsettled|weight of keeping/i.test(recognition_line ?? "");
+      if (caregiverLoad || openGaps >= 3) {
+        return "Several things need attention at once — nothing has to be solved tonight.";
+      }
+      if (openGaps >= 2) {
+        return "A few pieces are still missing — the most important one is enough for now.";
+      }
+      if (openGaps === 1) {
+        return "One question is still open — it can wait until you have the answer.";
+      }
+      return null;
+    })(),
   };
 
   assertComposedResponseProfessional(composed);
@@ -2227,8 +2331,13 @@ export function assertComposedResponseProfessional(
       throw new Error(`Caregiver response banned phrase: ${phrase}`);
     }
   }
-  if (containsInternalLanguage(blob)) {
-    throw new Error("Caregiver response contains internal architecture language");
+if (containsInternalLanguage(blob)) {
+    const diagMatch = INTERNAL_LANGUAGE_BANS.filter((p) =>
+      blob.toLowerCase().includes(p.toLowerCase()),
+    );
+    throw new Error(
+      `Caregiver response contains internal architecture language: ${JSON.stringify(diagMatch)} :: ${blob.slice(0, 400)}`,
+    );
   }
   assertNoAiProductLanguage(
     [

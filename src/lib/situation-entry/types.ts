@@ -186,6 +186,7 @@ export type SituationResponse = {
   contradiction_detection_layer?: import("../contradiction-detection-engine/types").ContradictionDetectionResult;
   care_transparency_layer?: import("../care-transparency-layer/types").CareTransparencyResult;
   baseline_intelligence_layer?: import("../baseline-intelligence-engine/types").BaselineIntelligenceResult;
+  care_state_change_report?: import("../care-state-change-detector").CareStateChangeReport;
   care_reality_profile_layer?: import("../care-reality-profile-engine/types").CareRealityProfileResult;
   moment_of_need_layer?: import("../moment-of-need-engine/types").MomentOfNeedResult;
   retention_engine_layer?: import("../retention-engine/types").RetentionEngineResult;
@@ -208,6 +209,17 @@ export type SituationResponse = {
   care_signal_understanding_layer?: import("../care-signal-understanding").CareSignalUnderstandingResult;
 /** Generalized care understanding — 10 rules; Observed/Derived/Unknown; open loops. */
   generalized_care_understanding_layer?: import("../generalized-care-understanding").GeneralizedCareUnderstandingResult;
+
+  /**
+   * Care Identity summary — lifecycle state, session count, active care recipient.
+   * Enables the pipeline to distinguish new caregivers from returning ones.
+   */
+  care_identity_summary?: import("../care-identity").CareIdentitySummary;
+  /**
+   * Continuity decision — how this input relates to prior care reality.
+   * Used by the response composer to branch: new user orientation vs returning continuity.
+   */
+  continuity_decision?: import("../care-identity").ContinuityDecision;
 
   /**
    * Server-composed caregiver response — moves understanding to the server path.
@@ -237,6 +249,7 @@ export type SituationResponse = {
     root_event_id: string | null;
     event_ids: string[];
   }[];
+  architectural_boundaries_layer?: import("../architectural-boundaries/types").ArchitecturalBoundariesResult;
 };
 
 export type ProcessSituationInput = {
@@ -263,6 +276,7 @@ export type ProcessSituationInput = {
     extracted_text: string;
     mime_type?: string | null;
     ocr_confidence?: number | null;
+    extraction_source?: string | null;
   }[];
 };
 
