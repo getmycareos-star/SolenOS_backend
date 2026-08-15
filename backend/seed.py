@@ -79,7 +79,7 @@ def seed():
             occurred_at_timezone="America/Los_Angeles",
             title="Morning dizziness noted",
             description="Alex felt lightheaded when standing. Sat back down.",
-            evidence_ids=f'["{ev1.id}"]',
+            evidence_ids=[ev1.id],
             location="Home",
             time_provenance="Caregiver observation",
             created_by_caregiver_id=caregiver.id,
@@ -94,7 +94,7 @@ def seed():
             description="Recurring dizziness upon standing may indicate blood pressure changes. This is not confirmed.",
             insight_type="observation",
             confidence=0.72,
-            evidence_ids=f'["{ev1.id}","{ev2.id}"]',
+            evidence_ids=[ev1.id, ev2.id],
             possible_context="Blood pressure readings during morning hours would help confirm.",
             time_provenance="AI-generated with evidence",
         )

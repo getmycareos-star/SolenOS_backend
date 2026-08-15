@@ -31,6 +31,9 @@ class Observation(Base):
     structured_data = Column(JSONList, nullable=True)
     tags = Column(JSONList, nullable=True)
     location = Column(String, nullable=True)
+    location_provenance = Column(String, nullable=True)
+    time_provenance = Column(String, nullable=True)
+    evidence_ids = Column(JSONList, nullable=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

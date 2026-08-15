@@ -71,7 +71,9 @@ class CareTransitionBase(BaseModel):
     occurred_at: datetime
     time_provenance: Optional[str] = None
     location_provenance: Optional[str] = None
+    evidence_ids: Optional[List[str]] = None
     notes: Optional[str] = None
+    created_by_caregiver_id: Optional[str] = None
 
 
 class CareTransitionCreate(CareTransitionBase):
@@ -127,6 +129,9 @@ class DailyIntelligenceBase(BaseModel):
     active_windows: Optional[List[Dict[str, Any]]] = None
     expired_windows: Optional[List[Dict[str, Any]]] = None
     daily_summary: Optional[str] = None
+    source_event_ids: Optional[List[str]] = None
+    source_appointment_ids: Optional[List[str]] = None
+    source_care_window_ids: Optional[List[str]] = None
 
 
 class DailyIntelligenceCreate(DailyIntelligenceBase):

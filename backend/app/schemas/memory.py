@@ -35,6 +35,9 @@ class ObservationBase(BaseModel):
     structured_data: Optional[List[Any]] = None
     tags: Optional[List[str]] = None
     location: Optional[str] = None
+    location_provenance: Optional[str] = None
+    time_provenance: Optional[str] = None
+    evidence_ids: Optional[List[str]] = None
     caregiver_id: str
 
 

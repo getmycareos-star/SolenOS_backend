@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, Boolean, ForeignKey, Float
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -57,7 +57,9 @@ class CareTransition(Base):
     occurred_at = Column(DateTime(timezone=True), nullable=False)
     time_provenance = Column(String, nullable=True)
     location_provenance = Column(String, nullable=True)
+    evidence_ids = Column(JSONList, nullable=True)
     notes = Column(Text, nullable=True)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -80,7 +82,9 @@ class Location(Base):
     specialists = Column(JSONList, nullable=True)
     nearby_hospitals = Column(JSONList, nullable=True)
     location_provenance = Column(String, nullable=True)
+    evidence_ids = Column(JSONList, nullable=True)
     extra_metadata = Column(JSONList, nullable=True)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -95,6 +99,9 @@ class DailyIntelligence(Base):
     active_windows = Column(JSONList, nullable=True)
     expired_windows = Column(JSONList, nullable=True)
     daily_summary = Column(Text, nullable=True)
+    source_event_ids = Column(JSONList, nullable=True)
+    source_appointment_ids = Column(JSONList, nullable=True)
+    source_care_window_ids = Column(JSONList, nullable=True)
     generated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -105,6 +112,7 @@ class TimezoneContext(Base):
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     timezone_id = Column(String, nullable=False)
     is_primary = Column(Boolean, default=False)
+    source = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -116,5 +124,6 @@ class TemporalRelationship(Base):
     event_b_id = Column(String, ForeignKey("care_events.id"), nullable=True)
     relationship_type = Column(String, nullable=False)
     time_difference_seconds = Column(String, nullable=True)
-    confidence = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    evidence_ids = Column(JSONList, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

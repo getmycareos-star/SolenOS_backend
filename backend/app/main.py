@@ -1,7 +1,11 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
 from app.core.config import get_settings
+from app.core.database import get_db
+from app.schemas.situation import SituationInput, SituationResponse
+from app.services.situation import process_situation_input
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -15,6 +19,20 @@ app.add_middleware(
 )
 
 app.include_router(api_v1_router, prefix="/api/v1")
+
+situation_router = APIRouter()
+
+
+@situation_router.post("/situation", response_model=SituationResponse)
+def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
+    try:
+        result = process_situation_input(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return result
+
+
+app.include_router(situation_router, prefix="/api")
 
 
 @app.get("/health")
