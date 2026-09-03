@@ -177,6 +177,8 @@ export async function POST(req: NextRequest) {
         ...hydrated,
         care_key: caregiverId,
         care_session_id: careSessionId,
+        // Alias for clients that still read `situations`
+        situations: caregiverBody.ui_situations,
       });
     }
 
@@ -267,6 +269,7 @@ export async function POST(req: NextRequest) {
       care_session_id: careSessionId,
       care_recipient_id: careRecipientId,
       care_recipient_display_name: getCareRecipientDisplayName(careRecipientId),
+      care_key: caregiverId,
       ...caregiverBody,
       // Alias for clients that still read `situations`
       situations: caregiverBody.ui_situations,

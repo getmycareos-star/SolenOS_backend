@@ -62,5 +62,6 @@ export type FinalOutputContract = {
 export type FinalOutputValidationError = {
   type: "INVALID_FINAL_OUTPUT";
   message: string;
+  raw_output: unknown;
   validation_errors?: string;
 };

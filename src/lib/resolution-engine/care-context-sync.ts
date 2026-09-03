@@ -24,11 +24,6 @@ import { runResolutionEngineGuarantee } from "./guarantee";
 import { resolveSituation } from "./resolve";
 import type { ResolutionEngineLayerPayload, TrackedSituation } from "./types";
 import { mapLifecycleToUiStatus } from "./ui-bridge";
-import {
-  trackedSituationToAssertions,
-  expireAssertionsForResolution,
-  supersedeAssertionsForNewSituation,
-} from "../longitudinal-care-state";
 
 function titleFromInput(raw: string): string {
   const cleaned = raw.replace(/\s+/g, " ").trim();

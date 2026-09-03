@@ -150,7 +150,7 @@ export function validateFinalOutput(output: unknown): FinalOutputContract {
     return result.data;
   }
 
-  const errorDetails = result.error.errors
+  const errorDetails = result.error.issues
     .map((entry) => `${entry.path.join(".") || "root"}: ${entry.message}`)
     .join("; ");
 
@@ -158,8 +158,9 @@ export function validateFinalOutput(output: unknown): FinalOutputContract {
   Object.assign(err, {
     type: "INVALID_FINAL_OUTPUT",
     message: "Output failed strict final output contract validation",
+    raw_output: output,
     validation_errors: errorDetails,
-  } satisfies Pick<FinalOutputValidationError, "type" | "message"> & {
+  } satisfies Pick<FinalOutputValidationError, "type" | "message" | "raw_output"> & {
     validation_errors: string;
   });
   throw err;
