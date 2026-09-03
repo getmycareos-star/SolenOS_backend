@@ -1,11 +1,11 @@
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Any
 
 
 class PersonBase(BaseModel):
     name: str
-    date_of_birth: Optional[str] = None
+    date_of_birth: Optional[date] = None
 
 
 class PersonCreate(PersonBase):

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 from app.core.database import get_db
 from app.models.care import (
     Person as PersonModel,
@@ -24,6 +24,11 @@ from app.models.time_location import (
     DailyIntelligence as DailyIntelligenceModel,
     TimezoneContext as TimezoneContextModel,
     TemporalRelationship as TemporalRelationshipModel,
+)
+from app.models.temporal import (
+    TemporalFact as TemporalFactModel,
+    TemporalRelation as TemporalRelationModel,
+    TemporalReferenceFrame as TemporalReferenceFrameModel,
 )
 from app.schemas.care import (
     PersonCreate,
@@ -61,6 +66,21 @@ from app.schemas.time_location import (
     TemporalRelationship as TemporalRelationshipSchema,
     NaturalLanguageTimeParse,
 )
+from app.schemas.temporal import (
+    TemporalFactCreate,
+    TemporalFactUpdate,
+    TemporalFact as TemporalFactSchema,
+    TemporalRelationCreate,
+    TemporalRelation as TemporalRelationSchema,
+    TemporalReferenceFrameCreate,
+    TemporalReferenceFrame as TemporalReferenceFrameSchema,
+    TemporalContradictionCreate,
+    TemporalContradictionUpdate,
+    TemporalContradiction as TemporalContradictionSchema,
+    RelativeTimeResolution,
+    TemporalViewAtPoint,
+    SubjectTemporalView,
+)
 from app.services.learning import LearningEngine, SavePipelineEvent
 from app.services.time_intelligence import (
     parse_natural_language_time,
@@ -82,6 +102,24 @@ from app.services.location_intelligence import (
     enrich_location_with_geographic_intelligence,
     format_location_for_display,
 )
+from app.services.temporal_intelligence import (
+    create_temporal_fact,
+    update_temporal_fact,
+    supersede_temporal_fact,
+    create_temporal_relation,
+    create_temporal_reference_frame,
+    resolve_relative_time,
+    infer_temporal_relation,
+    detect_temporal_conflicts,
+    create_temporal_contradiction,
+    update_temporal_contradiction,
+    get_temporal_view_at_point,
+    get_subject_temporal_view,
+    calculate_duration,
+    classify_temporal_status,
+    check_temporal_conflict,
+)
+from app.api.actions import router as actions_router
 
 router = APIRouter()
 
@@ -107,7 +145,21 @@ def _log_and_learn(
 
 @router.post("/persons", response_model=Person)
 def create_person(person: PersonCreate, db: Session = Depends(get_db)):
-    db_person = PersonModel(**person.model_dump())
+    dob = person.date_of_birth
+    if isinstance(dob, str) and dob:
+        try:
+            dob = date.fromisoformat(dob)
+        except ValueError:
+            try:
+                dob = datetime.strptime(dob, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="date_of_birth must be an ISO date string (YYYY-MM-DD)",
+                )
+    elif dob is None:
+        dob = None
+    db_person = PersonModel(name=person.name, date_of_birth=dob)
     db.add(db_person)
     db.commit()
     db.refresh(db_person)
@@ -753,3 +805,125 @@ def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depen
     ]
     patterns = detect_time_patterns(event_dicts, window_days=window_days)
     return {"person_id": person_id, "window_days": window_days, "patterns": patterns}
+
+
+@router.post("/temporal/facts", response_model=TemporalFactSchema)
+def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depends(get_db)):
+    return create_temporal_fact(db, fact)
+
+
+@router.patch("/temporal/facts/{fact_id}", response_model=TemporalFactSchema)
+def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: Session = Depends(get_db)):
+    result = update_temporal_fact(db, fact_id, update)
+    if not result:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    return result
+
+
+@router.post("/temporal/facts/{fact_id}/supersede")
+def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session = Depends(get_db)):
+    result = supersede_temporal_fact(db, fact_id, new_fact_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    return {"id": result.id, "status": result.status.value, "superseded_by_fact_id": result.superseded_by_fact_id}
+
+
+@router.get("/temporal/facts/{person_id}", response_model=List[TemporalFactSchema])
+def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(TemporalFactModel).filter(TemporalFactModel.person_id == person_id)
+    if subject_type:
+        query = query.filter(TemporalFactModel.subject_type == subject_type)
+    if subject_id:
+        query = query.filter(TemporalFactModel.subject_id == subject_id)
+    return query.order_by(TemporalFactModel.created_at.desc()).all()
+
+
+@router.post("/temporal/relations", response_model=TemporalRelationSchema)
+def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Session = Depends(get_db)):
+    return create_temporal_relation(db, relation)
+
+
+@router.get("/temporal/relations/{person_id}", response_model=List[TemporalRelationSchema])
+def list_temporal_relations(person_id: str, db: Session = Depends(get_db)):
+    return db.query(TemporalRelationModel).filter(TemporalRelationModel.person_id == person_id).order_by(TemporalRelationModel.created_at.desc()).all()
+
+
+@router.post("/temporal/reference-frames", response_model=TemporalReferenceFrameSchema)
+def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Session = Depends(get_db)):
+    return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
+
+
+@router.get("/temporal/reference-frames/{person_id}", response_model=List[TemporalReferenceFrameSchema])
+def list_reference_frames(person_id: str, db: Session = Depends(get_db)):
+    return db.query(TemporalReferenceFrameModel).filter(TemporalReferenceFrameModel.person_id == person_id).order_by(TemporalReferenceFrameModel.created_at.desc()).all()
+
+
+@router.post("/temporal/relative-time", response_model=RelativeTimeResolution)
+def resolve_relative_time_endpoint(person_id: str, expression: str, reference_frame_id: Optional[str] = None, db: Session = Depends(get_db)):
+    return resolve_relative_time(db, person_id, expression, reference_frame_id)
+
+
+@router.post("/temporal/infer-relation")
+def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+    result = infer_temporal_relation(db, fact_a_id, fact_b_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Unable to infer relation")
+    return result
+
+
+@router.get("/temporal/conflicts/{person_id}")
+def list_temporal_conflicts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
+    return detect_temporal_conflicts(db, person_id, subject_type, subject_id)
+
+
+@router.post("/temporal/contradictions", response_model=TemporalContradictionSchema)
+def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, db: Session = Depends(get_db)):
+    return create_temporal_contradiction(db, contradiction)
+
+
+@router.patch("/temporal/contradictions/{contradiction_id}", response_model=TemporalContradictionSchema)
+def update_temporal_contradiction_endpoint(contradiction_id: str, update: TemporalContradictionUpdate, db: Session = Depends(get_db)):
+    result = update_temporal_contradiction(db, contradiction_id, update)
+    if not result:
+        raise HTTPException(status_code=404, detail="Temporal contradiction not found")
+    return result
+
+
+@router.get("/temporal/check-conflict")
+def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+    result = check_temporal_conflict(db, fact_a_id, fact_b_id)
+    if not result:
+        return {"has_conflict": False}
+    return {"has_conflict": True, **result}
+
+
+@router.get("/temporal/view/{person_id}", response_model=TemporalViewAtPoint)
+def get_temporal_view_endpoint(person_id: str, point_in_time: str, db: Session = Depends(get_db)):
+    point = datetime.fromisoformat(point_in_time.replace("Z", "+00:00"))
+    return get_temporal_view_at_point(db, person_id, point)
+
+
+@router.get("/temporal/subject/{person_id}/{subject_type}/{subject_id}", response_model=SubjectTemporalView)
+def get_subject_temporal_view_endpoint(person_id: str, subject_type: str, subject_id: str, db: Session = Depends(get_db)):
+    return get_subject_temporal_view(db, person_id, subject_type, subject_id)
+
+
+@router.get("/temporal/duration/{fact_id}")
+def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db)):
+    result = calculate_duration(db, fact_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    return result
+
+
+@router.get("/temporal/status/{fact_id}")
+def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = None, db: Session = Depends(get_db)):
+    fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    if not fact:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    ref = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
+    status = classify_temporal_status(fact, ref)
+    return {"fact_id": fact_id, "temporal_status": status}
+
+
+router.include_router(actions_router, prefix="/actions", tags=["actions"])
