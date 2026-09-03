@@ -5,7 +5,7 @@ import {
   CANONICAL_RISK_LEVELS,
 } from "./contract-constants";
 import { createEmptyConfidenceState, createEmptyDecisionTrace, createEmptyTrustLayer, createEmptyTransparencyPanel } from "./degrade";
-import type { FinalOutputContract, FinalOutputValidationError } from "./types";
+import type { FinalOutputContract } from "./types";
 
 function normalizeCanonicalRisk(value: unknown): FinalOutputContract["risk_level"] {
   if (value === "critical" || value === "high") return "high";
@@ -144,16 +144,25 @@ export const FinalOutputContractSchema = z.preprocess(
     .strict(),
 );
 
+export class FinalOutputValidationError extends Error {
+  readonly type = "INVALID_FINAL_OUTPUT" as const;
+  readonly raw_output: unknown;
+  constructor(message: string, raw_output: unknown) {
+    super(message);
+    this.name = "FinalOutputValidationError";
+    this.raw_output = raw_output;
+  }
+}
+
 export function validateFinalOutput(output: unknown): FinalOutputContract {
   const result = FinalOutputContractSchema.safeParse(output);
   if (result.success) {
     return result.data;
   }
-  throw {
-    type: "INVALID_FINAL_OUTPUT",
-    message: "Output failed strict final output contract validation",
-    raw_output: output,
-  } satisfies FinalOutputValidationError;
+  throw new FinalOutputValidationError(
+    "Output failed strict final output contract validation",
+    output,
+  );
 }
 
 export function isFinalOutputValidationError(
