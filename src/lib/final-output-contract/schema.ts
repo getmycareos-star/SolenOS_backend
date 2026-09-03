@@ -149,20 +149,35 @@ export function validateFinalOutput(output: unknown): FinalOutputContract {
   if (result.success) {
     return result.data;
   }
-  throw {
+
+  const errorDetails = result.error.errors
+    .map((entry) => `${entry.path.join(".") || "root"}: ${entry.message}`)
+    .join("; ");
+
+  const err = new Error("Output failed strict final output contract validation");
+  Object.assign(err, {
     type: "INVALID_FINAL_OUTPUT",
     message: "Output failed strict final output contract validation",
-    raw_output: output,
-  } satisfies FinalOutputValidationError;
+    validation_errors: errorDetails,
+  } satisfies Pick<FinalOutputValidationError, "type" | "message"> & {
+    validation_errors: string;
+  });
+  throw err;
 }
 
 export function isFinalOutputValidationError(
   error: unknown,
 ): error is FinalOutputValidationError {
+  if (!(error instanceof Error)) {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      (error as FinalOutputValidationError).type === "INVALID_FINAL_OUTPUT"
+    );
+  }
+
   return (
-    typeof error === "object" &&
-    error !== null &&
-    (error as FinalOutputValidationError).type === "INVALID_FINAL_OUTPUT"
+    (error as Error & { type?: string }).type === "INVALID_FINAL_OUTPUT"
   );
 }
 

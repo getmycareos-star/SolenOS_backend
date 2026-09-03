@@ -46,6 +46,7 @@ import {
   planSituationSpineLink,
   stampSituationSpineLink,
 } from "../active-care-situation/spine-link";
+import { eventsToAssertions } from "../longitudinal-care-state";
 import { classifyCareEventKind } from "../living-care-record-ux/event-clarifiers";
 import { resolveCaregiverWords } from "../mvp-input-architecture";
 import { attachPriorityToEvents, getTopEvents, queryPriorityEvents } from "../care-event-priority";
@@ -416,6 +417,7 @@ export async function processSituationInput(
       primaryEventId: events[0]!.id,
     });
     stampSituationSpineLink(events, spineLink);
+    const stateAssertions = eventsToAssertions(events);
     for (const event of events) {
       persistCanonicalEvent(event, caregiverId, input.provenance);
     }

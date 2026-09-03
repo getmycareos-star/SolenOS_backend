@@ -138,138 +138,172 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const rawInput = record.raw_input ?? record.content;
-  const documents = Array.isArray(record.documents)
-    ? (
-        record.documents as {
-          id: string;
-          name: string;
-          extracted_text: string;
-          mime_type?: string | null;
-          ocr_confidence?: number | null;
-        }[]
-      ).filter((d) => d?.id && d?.extracted_text?.trim())
-    : undefined;
-
-  const rawInputStr = typeof rawInput === "string" ? rawInput.trim() : "";
-  const hasDocText = (documents?.length ?? 0) > 0;
-
-  // Empty body with no documents → session reentry (continuity hydrate).
-  if (!rawInputStr && !hasDocText) {
-    const { processSessionReentry } = await import("@/lib/situation-entry/pipeline");
-    const result = await processSessionReentry({
-      caregiver_id: caregiverId,
-      raw_input: "",
-      timestamp:
-        typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
-    });
-    validateFinalOutput(result.final_output);
-    const hydrated = hydrateFromContext(caregiverId, joinCareRecipientId);
-    const { toCaregiverSituationResponse } = await import(
-      "@/lib/situation-entry/caregiver-response-dto"
-    );
-    const caregiverBody = toCaregiverSituationResponse(result);
-    return NextResponse.json({
-      identity: FINAL_OUTPUT_CONTRACT_IDENTITY,
-      situation_identity: SITUATION_ENTRY_IDENTITY,
-      ...caregiverBody,
-      ...hydrated,
-      care_key: caregiverId,
-      care_session_id: careSessionId,
-    });
-  }
-
-  // Document-only is valid: raw_input may be "" when documents[] carry extracted_text.
-  const provenance =
-    record.provenance && typeof record.provenance === "object"
-      ? (record.provenance as {
-          input_type?: "voice" | "text" | "document";
-          entry_method?: "scan" | "snap" | "upload" | "share" | "text" | "voice";
-          captured_at?: string;
-          recognition_confidence?: number | null;
-          transcript_uncertain?: boolean;
-        })
+  try {
+    const rawInput = record.raw_input ?? record.content;
+    const documents = Array.isArray(record.documents)
+      ? (
+          record.documents as {
+            id: string;
+            name: string;
+            extracted_text: string;
+            mime_type?: string | null;
+            ocr_confidence?: number | null;
+          }[]
+        ).filter((d) => d?.id && d?.extracted_text?.trim())
       : undefined;
 
-  const result = await processSituationInput({
-    raw_input: rawInputStr,
-    caregiver_id: caregiverId,
-    contributor_id: contributorId,
-    care_recipient_id: careRecipientId,
-    care_session_id: careSessionId,
-    timestamp:
-      typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
-    provenance: provenance?.input_type
-      ? {
-          input_type: provenance.input_type,
-          entry_method: provenance.entry_method,
-          captured_at: provenance.captured_at,
-          recognition_confidence: provenance.recognition_confidence ?? null,
-          transcript_uncertain: provenance.transcript_uncertain ?? false,
-        }
-      : hasDocText
+    const rawInputStr = typeof rawInput === "string" ? rawInput.trim() : "";
+    const hasDocText = (documents?.length ?? 0) > 0;
+
+    // Empty body with no documents → session reentry (continuity hydrate).
+    if (!rawInputStr && !hasDocText) {
+      const { processSessionReentry } = await import("@/lib/situation-entry/pipeline");
+      const result = await processSessionReentry({
+        caregiver_id: caregiverId,
+        raw_input: "",
+        timestamp:
+          typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
+      });
+      validateFinalOutput(result.final_output);
+      const hydrated = hydrateFromContext(caregiverId, joinCareRecipientId);
+      const { toCaregiverSituationResponse } = await import(
+        "@/lib/situation-entry/caregiver-response-dto"
+      );
+      const caregiverBody = toCaregiverSituationResponse(result);
+      return NextResponse.json({
+        identity: FINAL_OUTPUT_CONTRACT_IDENTITY,
+        situation_identity: SITUATION_ENTRY_IDENTITY,
+        ...caregiverBody,
+        ...hydrated,
+        care_key: caregiverId,
+        care_session_id: careSessionId,
+      });
+    }
+
+    // Document-only is valid: raw_input may be "" when documents[] carry extracted_text.
+    const provenance =
+      record.provenance && typeof record.provenance === "object"
+        ? (record.provenance as {
+            input_type?: "voice" | "text" | "document";
+            entry_method?: "scan" | "snap" | "upload" | "share" | "text" | "voice";
+            captured_at?: string;
+            recognition_confidence?: number | null;
+            transcript_uncertain?: boolean;
+          })
+        : undefined;
+
+    const result = await processSituationInput({
+      raw_input: rawInputStr,
+      caregiver_id: caregiverId,
+      contributor_id: contributorId,
+      care_recipient_id: careRecipientId,
+      care_session_id: careSessionId,
+      timestamp:
+        typeof record.timestamp === "string" ? record.timestamp : new Date().toISOString(),
+      provenance: provenance?.input_type
         ? {
-            input_type: "document" as const,
-            entry_method: provenance?.entry_method,
-            captured_at:
-              typeof record.captured_at === "string"
-                ? record.captured_at
-                : new Date().toISOString(),
+            input_type: provenance.input_type,
+            entry_method: provenance.entry_method,
+            captured_at: provenance.captured_at,
+            recognition_confidence: provenance.recognition_confidence ?? null,
+            transcript_uncertain: provenance.transcript_uncertain ?? false,
           }
-        : typeof record.captured_at === "string"
-          ? { input_type: "text" as const, captured_at: record.captured_at }
-          : undefined,
-    documents,
-  });
+        : hasDocText
+          ? {
+              input_type: "document" as const,
+              entry_method: provenance?.entry_method,
+              captured_at:
+                typeof record.captured_at === "string"
+                  ? record.captured_at
+                  : new Date().toISOString(),
+            }
+          : typeof record.captured_at === "string"
+            ? { input_type: "text" as const, captured_at: record.captured_at }
+            : undefined,
+      documents,
+    });
 
-  validateFinalOutput(result.final_output);
+    validateFinalOutput(result.final_output);
 
-  const { emitOpsEventServer } = await import("@/lib/ops-console/emit-server");
-  emitOpsEventServer({
-    event_name: "input_submitted",
-    user_id: caregiverId,
-    session_id:
-      typeof record.session_id === "string" ? record.session_id : careSessionId,
-    metadata: {
-      input_type: provenance?.input_type ?? (hasDocText ? "photo" : "text"),
-      case_id: result.context?.id ?? null,
-      has_documents: hasDocText,
-      care_key: caregiverId,
-    },
-  });
-  if (hasDocText) {
+    const { emitOpsEventServer } = await import("@/lib/ops-console/emit-server");
     emitOpsEventServer({
-      event_name: "document_uploaded",
+      event_name: "input_submitted",
       user_id: caregiverId,
       session_id:
         typeof record.session_id === "string" ? record.session_id : careSessionId,
       metadata: {
-        doc_type: "care_document",
+        input_type: provenance?.input_type ?? (hasDocText ? "photo" : "text"),
         case_id: result.context?.id ?? null,
-        count: documents?.length ?? 0,
+        has_documents: hasDocText,
         care_key: caregiverId,
       },
     });
+    if (hasDocText) {
+      emitOpsEventServer({
+        event_name: "document_uploaded",
+        user_id: caregiverId,
+        session_id:
+          typeof record.session_id === "string" ? record.session_id : careSessionId,
+        metadata: {
+          doc_type: "care_document",
+          case_id: result.context?.id ?? null,
+          count: documents?.length ?? 0,
+          care_key: caregiverId,
+        },
+      });
+    }
+
+    markInteractionTouched(caregiverId);
+
+    // Caregiver JSON — Input Reality: care reality only; engine dumps stay ops-only.
+    const { toCaregiverSituationResponse } = await import(
+      "@/lib/situation-entry/caregiver-response-dto"
+    );
+    const caregiverBody = toCaregiverSituationResponse(result);
+
+    return NextResponse.json({
+      identity: FINAL_OUTPUT_CONTRACT_IDENTITY,
+      situation_identity: SITUATION_ENTRY_IDENTITY,
+      care_session_id: careSessionId,
+      care_recipient_id: careRecipientId,
+      care_recipient_display_name: getCareRecipientDisplayName(careRecipientId),
+      ...caregiverBody,
+      // Alias for clients that still read `situations`
+      situations: caregiverBody.ui_situations,
+    });
+  } catch (error) {
+    let errorMessage = "Unexpected error processing situation input.";
+    let errorDetails: Record<string, unknown> = {};
+
+    if (error instanceof Error) {
+      errorMessage = error.message;
+      errorDetails = {
+        name: error.name,
+        stack: error.stack,
+      };
+    } else if (typeof error === "object" && error !== null) {
+      const err = error as Record<string, unknown>;
+      if (typeof err.message === "string") {
+        errorMessage = err.message;
+      }
+      if (typeof err.type === "string") {
+        errorDetails = { type: err.type };
+      }
+    }
+
+    console.error("[api/situation] POST failed:", {
+      message: errorMessage,
+      ...errorDetails,
+    });
+
+    return NextResponse.json(
+      {
+        error: "internal_server_error",
+        message: "We couldn't process this situation right now. Please try again.",
+      },
+      { status: 500 },
+    );
   }
-
-  markInteractionTouched(caregiverId);
-
-  // Caregiver JSON — Input Reality: care reality only; engine dumps stay ops-only.
-  const { toCaregiverSituationResponse } = await import(
-    "@/lib/situation-entry/caregiver-response-dto"
-  );
-  const caregiverBody = toCaregiverSituationResponse(result);
-
-  return NextResponse.json({
-    identity: FINAL_OUTPUT_CONTRACT_IDENTITY,
-    situation_identity: SITUATION_ENTRY_IDENTITY,
-    care_session_id: careSessionId,
-    care_recipient_id: careRecipientId,
-    care_recipient_display_name: getCareRecipientDisplayName(careRecipientId),
-    ...caregiverBody,
-    // Alias for clients that still read `situations`
-    situations: caregiverBody.ui_situations,
-  });
 }
 
 function hydrateFromContext(caregiverId: string, joinCareRecipientId?: string | null) {

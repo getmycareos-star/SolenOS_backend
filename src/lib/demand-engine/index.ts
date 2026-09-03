@@ -60,3 +60,10 @@ export {
   formatDemandEngineObservation,
   type ProcessDemandEngineParams,
 } from "./process";
+
+export {
+  linkDemandToStateDimension,
+  getDemandsForDimension,
+  annotateDemandWithStateContext,
+  demandsAffectedByStateChange,
+} from "./state-bridge";

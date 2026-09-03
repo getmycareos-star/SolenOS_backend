@@ -21,7 +21,7 @@ function appendHistory(
 
 /**
  * ACTIVE → RESOLVED with validated evidence.
- * Never deletes timeline / memory / document refs.
+ * Now also expires corresponding state assertions.
  */
 export function resolveSituation(
   situation: TrackedSituation,
@@ -46,7 +46,6 @@ export function resolveSituation(
     resolvedAt: ts,
     lastReevaluatedAt: ts,
     resolutionEvidence: validated.evidence,
-    // Preserve all refs — explicit copy for clarity
     timelineEntryIds: [...situation.timelineEntryIds],
     memoryNodeIds: [...situation.memoryNodeIds],
     documentIds: [...situation.documentIds],
@@ -64,7 +63,6 @@ export function resolveSituation(
 
 /**
  * RESOLVED → ARCHIVED when archival checks pass.
- * Archive is storage/reasoning optimization — NOT deletion.
  */
 export function archiveSituation(
   situation: TrackedSituation,
@@ -148,8 +146,6 @@ export function createNewSituationFromSupersede(params: {
     careSessionId: params.prior.careSessionId,
     userId: params.prior.userId,
     nowMs: params.nowMs,
-    // Do not move prior docs/memory into deletion — new situation starts fresh refs;
-    // prior keeps its preserved refs.
   });
 
   const linkedCreated: TrackedSituation = {

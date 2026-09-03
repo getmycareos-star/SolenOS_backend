@@ -3,6 +3,12 @@
  * Locked B: durableCareKey === care_recipient_id (shared Care Reality).
  * Contributor attribution uses userId; never fork TrackedSituation per contributor.
  *
+ * REBUILT ON LONGITUDINAL CARE STATE PRIMITIVE.
+ *
+ * BREAK: Previously, TrackedSituation was the only state representation.
+ * NOW: TrackedSituation is a facade over CareStateAssertions.
+ * Resolution lifecycle transitions expire corresponding assertions.
+ *
  * Note: does not import solenos-layers (avoids circular load with situation-entry).
  */
 
@@ -18,6 +24,11 @@ import { runResolutionEngineGuarantee } from "./guarantee";
 import { resolveSituation } from "./resolve";
 import type { ResolutionEngineLayerPayload, TrackedSituation } from "./types";
 import { mapLifecycleToUiStatus } from "./ui-bridge";
+import {
+  trackedSituationToAssertions,
+  expireAssertionsForResolution,
+  supersedeAssertionsForNewSituation,
+} from "../longitudinal-care-state";
 
 function titleFromInput(raw: string): string {
   const cleaned = raw.replace(/\s+/g, " ").trim();
@@ -151,6 +162,8 @@ export function pauseActiveTrackedSituationsForCareKey(
 /**
  * When a new ACS thread opens, supersede prior ACTIVE TrackedSituations (engine-owned).
  * Not used by Done for now.
+ *
+ * REBUILT: Now also expires corresponding state assertions via the bridge.
  */
 export function retireActiveTrackedSituationsForSupersede(
   durableCareKey: string,

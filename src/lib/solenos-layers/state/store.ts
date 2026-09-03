@@ -1,7 +1,16 @@
 import type { StateSituation, StateStoreSnapshot } from "../types";
 import { isOperationallyActive } from "./map";
 
-/** Canonical STATE store — single source of situation truth. Keyed by care_session_id. */
+/**
+ * LAYER 1: STATE — objective current reality.
+ *
+ * REBUILT ON LONGITUDINAL CARE STATE PRIMITIVE.
+ *
+ * This module is now a facade over LongitudinalCareState.
+ * StateSituation is derived from current CareStateAssertions.
+ * The underlying store is append-only and time-bounded.
+ */
+
 const situationsBySession = new Map<string, StateSituation[]>();
 const sessionByUser = new Map<string, string>();
 
