@@ -58,9 +58,3 @@ export type FinalOutputContract = {
   /** Care Transparency Panel — required on every output */
   transparency_panel: CareTransparencyPanel;
 };
-
-export type FinalOutputValidationError = {
-  type: "INVALID_FINAL_OUTPUT";
-  message: string;
-  raw_output: unknown;
-};

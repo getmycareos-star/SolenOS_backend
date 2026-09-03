@@ -74,6 +74,52 @@ export async function POST(req: NextRequest) {
     joinCareRecipientId,
   );
 
+  // Wrap all downstream processing so the endpoint NEVER returns an empty body.
+  // Any unexpected exception is logged server-side and returned as a safe
+  // structured JSON error. No stack traces, DB errors, or env values leak.
+  try {
+    return await handleSituationRequest({
+      record,
+      caregiverId,
+      careSessionId,
+      joinCareRecipientId,
+      contributorId,
+      careRecipientId,
+    });
+  } catch (err) {
+    logSituationError("process_situation", err, {
+      caregiverId,
+      careSessionId,
+      has_raw_input: typeof record.raw_input === "string" && record.raw_input.trim().length > 0,
+      has_documents: Array.isArray(record.documents) && record.documents.length > 0,
+    });
+    return NextResponse.json(
+      {
+        error: "internal_server_error",
+        message: "We couldn't process this situation right now. Please try again.",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+async function handleSituationRequest(params: {
+  record: Record<string, unknown>;
+  caregiverId: string;
+  careSessionId: string;
+  joinCareRecipientId: string | null;
+  contributorId: string;
+  careRecipientId: string;
+}): Promise<NextResponse> {
+  const {
+    record,
+    caregiverId,
+    careSessionId,
+    joinCareRecipientId,
+    contributorId,
+    careRecipientId,
+  } = params;
+
   // Ask-once care recipient display name (MVP identity naming).
   // Identity lives on the Care Reality (care recipient), not the contributor session.
   if (record.action === "set_care_recipient_display_name") {
@@ -306,6 +352,63 @@ function hydrateFromContext(caregiverId: string, joinCareRecipientId?: string | 
       : null,
     care_situation_groups,
   };
+}
+
+/**
+ * Server-side error logger for /api/situation.
+ *
+ * Captures the full exception (including non-Error throws, plain objects,
+ * and the special `FinalOutputValidationError` carrying `raw_output`).
+ *
+ * NEVER exposes the error to the HTTP response. The caregiver always sees
+ * the safe "We couldn't process this situation right now." message.
+ */
+function logSituationError(
+  stage: string,
+  err: unknown,
+  context: Record<string, unknown>,
+): void {
+  const isError = err instanceof Error;
+  const name = isError ? err.name : "NonErrorThrown";
+  const message = isError
+    ? err.message
+    : typeof err === "string"
+      ? err
+      : safeStringify(err);
+  const stack = isError ? err.stack : undefined;
+  const type = (err as { type?: unknown })?.type;
+
+  const safeContext: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(context)) {
+    safeContext[k] = v;
+  }
+
+  // Best-effort structured log line. Next.js / Railway will capture stdout.
+  try {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        source: "api_situation",
+        stage,
+        name,
+        type: typeof type === "string" ? type : undefined,
+        message,
+        stack,
+        context: safeContext,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  } catch {
+    console.error(`[api_situation] ${stage} failed: ${name}: ${message}`);
+  }
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 /** GET /api/situation — CareContextRoot + TrackedSituation + Active Care Situation */
