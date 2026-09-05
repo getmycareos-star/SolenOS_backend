@@ -11,6 +11,19 @@ import type {
   FormalRule,
 } from "./contract-constants";
 
+export type {
+  EvidenceKind,
+  EpistemicStatus,
+  ClaimLifecycleStatus,
+  InferenceConfidenceDimension,
+  UncertaintyLevel,
+  AbsenceModel,
+  ReasoningType,
+  EpistemicRule,
+  EpistemicViolation,
+  FormalRule,
+} from "./contract-constants";
+
 export type EvidenceId = string;
 export type ClaimId = string;
 export type InferenceId = string;
@@ -173,7 +186,7 @@ export interface AssumptionRecord {
 export interface EpistemicViolationRecord {
   id: string;
   violation: EpistemicViolation;
-  rule: EpistemicRule;
+  rule: string;
   description: string;
   objectId?: string;
   objectType?: "evidence" | "claim" | "inference";

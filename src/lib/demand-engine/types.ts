@@ -1,4 +1,5 @@
 import type { DEMAND_CATEGORIES, DEMAND_STATUSES } from "./contract-constants";
+export type { CareStateDimension } from "../longitudinal-care-state/types";
 
 export type DemandStatus = (typeof DEMAND_STATUSES)[number];
 

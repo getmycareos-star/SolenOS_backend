@@ -1,4 +1,4 @@
-import type { CanonicalCareEvent } from "../situation-entry/types";
+export type { CanonicalCareEvent } from "../situation-entry/types";
 
 /**
  * LONGITUDINAL CARE STATE — IRREDUCIBLE MODEL

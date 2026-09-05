@@ -29,6 +29,7 @@ import type {
   EvidenceToClaimTraceResult,
   InferenceValidationResult,
   FormalRule,
+  DerivationId,
 } from "./types";
 import { FORMAL_RULES } from "./contract-constants";
 
@@ -165,7 +166,7 @@ export function createEpistemicFoundationEngine(): EpistemicFoundationEngine {
     const record: EpistemicViolationRecord = {
       id: nextViolationId(),
       violation: params.violation,
-      rule: rule?.id ?? ("UNKNOWN_RULE" as EpistemicRule),
+      rule: rule?.id ?? "UNKNOWN_RULE",
       description: params.description,
       objectId: params.objectId,
       objectType: params.objectType,
@@ -268,7 +269,7 @@ export function createEpistemicFoundationEngine(): EpistemicFoundationEngine {
       }
       if (claim.status === "reported" && claim.provenance.evidenceIds.length === 0) {
         recordViolation({
-          violation: "REPORTED_AS_OBSERVED",
+          violation: "REPORTED_TO_OBSERVED",
           description: `Reported claim "${claim.statement}" has no evidence provenance`,
           objectId: id,
           objectType: "claim",
