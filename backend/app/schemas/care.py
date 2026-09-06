@@ -49,6 +49,11 @@ class EvidenceBase(BaseModel):
     extra_metadata: Optional[dict[str, Any]] = None
     time_provenance: Optional[str] = None
     location: Optional[str] = None
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    evidence_status: Optional[str] = None
+    source_type: Optional[str] = None
+    source_span_start: Optional[int] = None
+    source_span_end: Optional[int] = None
 
 
 class EvidenceCreate(EvidenceBase):
@@ -78,6 +83,11 @@ class CareEventBase(BaseModel):
     time_provenance: Optional[str] = None
     tags: Optional[List[str]] = None
     created_by_caregiver_id: str
+    significance_verdict: Optional[str] = None
+    attention_candidate: Optional[bool] = False
+    follow_up_candidate: Optional[bool] = False
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    situation_id: Optional[str] = None
 
 
 class CareEventCreate(CareEventBase):

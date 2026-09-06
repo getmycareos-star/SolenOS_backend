@@ -1244,7 +1244,7 @@ def test_case_j_future_event():
                 subject_type="appointment",
                 subject_id="appt-1",
                 temporal_mode=TemporalMode.SCHEDULED,
-                asserted_point=datetime(2026, 9, 4, 12, 0, 0, tzinfo=timezone.utc),
+                asserted_point=datetime(2027, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
                 precision=TemporalPrecision.DAY,
                 time_provenance="caregiver_entered",
                 evidence_ids=["ev-1"],

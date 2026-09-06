@@ -665,12 +665,13 @@ def infer_temporal_relationship(event_a: dict, event_b: dict) -> Optional[dict]:
     }
 
 
-def detect_time_patterns(events: list, window_days: int = 30) -> list[dict]:
+def detect_time_patterns(events: list, window_days: int = 30, reference_time: Optional[datetime] = None) -> list[dict]:
     if not events:
         return []
 
-    reference = utc_now()
-    cutoff = reference - timedelta(days=window_days)
+    if reference_time is None:
+        reference_time = utc_now()
+    cutoff = reference_time - timedelta(days=window_days)
 
     recent_events = []
     for e in events:
