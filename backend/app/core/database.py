@@ -15,6 +15,7 @@ import app.models.change  # noqa: E402, F401
 import app.models.significance  # noqa: E402, F401
 import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
+import app.models.causal  # noqa: E402, F401
 
 Base.metadata.create_all(bind=engine)
 

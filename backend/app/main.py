@@ -6,6 +6,7 @@ from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
+from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.schemas.situation import SituationInput, SituationResponse
@@ -27,6 +28,7 @@ app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
+app.include_router(causal_router, prefix="/api/v1")
 
 situation_router = APIRouter()
 
