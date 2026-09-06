@@ -282,7 +282,7 @@ def test_detect_time_patterns():
             "event_type": "observation",
             "occurred_at": (ref - timedelta(hours=20 * i)).replace(hour=21, minute=0).isoformat(),
         })
-    patterns = detect_time_patterns(events, window_days=30)
+    patterns = detect_time_patterns(events, window_days=30, reference_time=ref)
     assert len(patterns) >= 1
     time_patterns = [p for p in patterns if p["pattern_type"] == "time_of_day"]
     assert len(time_patterns) >= 1

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -37,6 +37,11 @@ class Evidence(Base):
     extra_metadata = Column(Text, nullable=True)
     time_provenance = Column(String, nullable=True)
     location = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)
+    evidence_status = Column(String, nullable=True)
+    source_type = Column(String, nullable=True)
+    source_span_start = Column(Integer, nullable=True)
+    source_span_end = Column(Integer, nullable=True)
 
 
 class CareEvent(Base):
@@ -57,6 +62,11 @@ class CareEvent(Base):
     tags = Column(JSONList, nullable=True)
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    significance_verdict = Column(String, nullable=True)
+    attention_candidate = Column(Boolean, nullable=True, default=False)
+    follow_up_candidate = Column(Boolean, nullable=True, default=False)
+    confidence = Column(Float, nullable=True)
+    situation_id = Column(String, ForeignKey("situations.id"), nullable=True)
 
 
 class Insight(Base):

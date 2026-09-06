@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 
 
 class SituationProvenance(BaseModel):
@@ -46,3 +46,7 @@ class SituationResponse(BaseModel):
     care_event_id: str
     message: str
     events: List[SituationEvent]
+    situations: Optional[List[dict[str, Any]]] = None
+    attention_candidate: bool = False
+    follow_up_candidate: bool = False
+    what_changed: Optional[str] = None

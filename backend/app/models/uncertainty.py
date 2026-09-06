@@ -10,7 +10,6 @@ from app.core.uncertainty_enums import (
     GapLifecycleStatus,
     ResolutionMechanism,
 )
-from app.models.care import Caregiver  # noqa: F401
 
 
 class InformationGap(Base):
