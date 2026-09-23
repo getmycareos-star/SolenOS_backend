@@ -8,6 +8,7 @@ import {
   filterByStatus,
 } from "../care-event-integrity";
 import { buildSituationUnderstanding } from "./parse-situation";
+import { projectLlmUnderstanding } from "../care-situation-understanding";
 import {
   caregiverLineFromDareUncertain,
   caregiverLineFromUnreadableSection,
@@ -129,6 +130,7 @@ import {
   processRuntimeArbitrationLayers,
 } from "../priority-resolution-system";
 import { processCareStateEngine } from "../care-state-engine";
+import { processStateReconstruction } from "../state-reconstruction";
 import {
   nextInteractionIndex,
   processSingleUserJourney,
@@ -463,8 +465,29 @@ export async function processSituationInput(
   const whatChanged = continuous_execution_loop_layer.what_changed;
 
   const { understood, uncertain, clarification, tracked } = buildSituationUnderstanding(events_created);
+
+  // Local-LLM (Ollama / qwen3-coder:30b) structured extraction enrichment.
+  // Projects typed claims (BP, meds, symptoms, times, disagreements, open questions)
+  // from the raw caregiver note onto the caregiver-facing understanding fields.
+  // Always degrades to the deterministic path on any LLM failure — ingestion is never blocked.
+  const llmProjection = await projectLlmUnderstanding({
+    rawText: input.raw_input ?? "",
+    contributorId: input.contributor_id ?? contributorId,
+  });
+
+  const enrichedUnderstood = [
+    ...understood,
+    ...llmProjection.observationLabels.map((label) => ({
+      label,
+      extracted_type: "observation" as const,
+      event_id: events_created[0]?.id ?? "",
+    })),
+  ];
+
   const mergedUncertain = sanitizeCaregiverFacingLines([
     ...uncertain,
+    ...llmProjection.unknownQuestions,
+    ...llmProjection.disagreementFacts,
     ...provisionalFromDare,
     ...continuous_execution_loop_layer.open_uncertainties,
   ]);
@@ -839,6 +862,27 @@ export async function processSituationInput(
     as_of: input.timestamp ?? new Date().toISOString(),
   });
 
+  const state_reconstruction_layer = await processStateReconstruction({
+    care_recipient_id: context.care_recipient_id,
+    all_events: context.events,
+    events_created: markedEvents,
+    what_is_uncertain: mergedUncertain,
+    what_needs_clarification: [
+      ...new Set([
+        ...mergedClarification,
+        ...multi_caregiver_context_layer.clarification_needed,
+        ...contradiction_detection_layer.clarification_triggers,
+        ...timeline_reconstruction_layer.clarification_triggers,
+      ]),
+    ],
+    baseline: baseline_intelligence_layer,
+    care_reality_profile: care_reality_profile_layer,
+    care_state: state_reconstruction_layer.care_state,
+    continuity_properties: continuity_properties_layer,
+    moment_of_need: moment_of_need_layer,
+    as_of: input.timestamp ?? new Date().toISOString(),
+  });
+
   const whatMergedOrSplit =
     dare?.normalization?.actions.map((a) => a.description) ?? [];
 
@@ -856,7 +900,7 @@ export async function processSituationInput(
   };
 
   const situationResponse = {
-    what_i_understood: understood,
+    what_i_understood: enrichedUnderstood,
     what_is_uncertain: mergedUncertain,
     what_needs_clarification: [
       ...new Set([
@@ -969,6 +1013,7 @@ export async function processSituationInput(
     adoption_wedge_layer,
     product_reality_model_layer,
     care_state_engine_layer,
+    state_reconstruction_layer,
     policy_engine_layer: {
       ...buildPolicyEngineLayer(caregiverId),
       ingestion: ingestionPolicy,
@@ -1043,15 +1088,19 @@ export async function processSituationInput(
 
   const continuity_properties_layer = processContinuityProperties({
     caregiver_id: caregiverId,
-    care_recipient_id: care_state_engine_layer.care_state.care_recipient_id,
+    care_recipient_id: state_reconstruction_layer.care_state.care_recipient_id,
     raw_input: input.raw_input,
     all_events: finalized.context.events,
     events_created: markedEvents,
     what_is_happening: finalized.final_output.what_is_happening,
     what_changed: finalized.what_changed,
     what_needs_clarification: finalized.what_needs_clarification ?? [],
-    what_needs_attention: care_state_engine_layer.care_state.needs_attention,
-    what_is_stable: care_state_engine_layer.care_state.what_is_stable,
+    what_needs_attention: state_reconstruction_layer.care_state.domains
+      .filter((d) => d.uncertainty === "high" || d.uncertainty === "unknown")
+      .map((d) => `${d.domain}/${d.subdomain}: ${d.uncertainty_narrative}`),
+    what_is_stable: state_reconstruction_layer.care_state.domains
+      .filter((d) => d.stable)
+      .map((d) => `${d.domain}/${d.subdomain}`),
     conflict_count:
       (finalized.contradiction_detection_layer?.open_contradictions.length ?? 0) +
       (finalized.care_timeline_engine_layer?.conflicts_detected ?? 0),
@@ -1062,16 +1111,18 @@ export async function processSituationInput(
   });
 
   const care_reality_intelligence_layer = processCareRealityIntelligence({
-    care_recipient_id: care_state_engine_layer.care_state.care_recipient_id,
+    care_recipient_id: state_reconstruction_layer.care_state.care_recipient_id,
     all_events: finalized.context.events,
     events_created: markedEvents,
     what_changed: finalized.what_changed,
     what_is_happening: finalized.final_output.what_is_happening,
-    what_needs_attention: care_state_engine_layer.care_state.needs_attention,
+    what_needs_attention: state_reconstruction_layer.care_state.domains
+      .filter((d) => d.uncertainty === "high" || d.uncertainty === "unknown")
+      .map((d) => `${d.domain}/${d.subdomain}: ${d.uncertainty_narrative}`),
     what_is_uncertain: finalized.what_is_uncertain ?? [],
     baseline: finalized.baseline_intelligence_layer,
     care_reality_profile: finalized.care_reality_profile_layer,
-    care_state: care_state_engine_layer.care_state,
+    care_state: state_reconstruction_layer.care_state,
     continuity_properties: continuity_properties_layer,
     moment_of_need: finalized.moment_of_need_layer,
     as_of: input.timestamp ?? new Date().toISOString(),
@@ -1156,12 +1207,12 @@ acsTurn =
 
   // Constitution CareRecord spine after ACS — person_profile uses caregiver display name.
   const product_constitution_layer = processProductConstitution({
-    care_recipient_id: care_state_engine_layer.care_state.care_recipient_id,
+    care_recipient_id: state_reconstruction_layer.care_state.care_recipient_id,
     all_events: finalized.context.events,
     events_created: markedEvents,
     what_is_uncertain: finalized.what_is_uncertain ?? [],
     what_needs_clarification: finalized.what_needs_clarification ?? [],
-    care_state: care_state_engine_layer.care_state,
+    care_state: state_reconstruction_layer.care_state,
     care_context_diff: finalized.care_context_diff_layer,
     state_of_care: finalized.state_of_care_summary_layer,
     subject_label: acsTurn.situation.subject_label ?? null,
@@ -1208,7 +1259,7 @@ acsTurn =
 
   // Care Reality Engine Foundation — all phases connected on the live path.
   const care_reality_engine_layer = processCareRealityEngineFoundation({
-    care_recipient_id: care_state_engine_layer.care_state.care_recipient_id,
+    care_recipient_id: state_reconstruction_layer.care_state.care_recipient_id,
     contributor_id: caregiverId,
     raw_input: input.raw_input,
     document_texts: (input.documents ?? [])
@@ -1221,6 +1272,7 @@ acsTurn =
     what_is_uncertain: finalized.what_is_uncertain ?? [],
     what_to_ask_next: searchRedirect.final_output.what_to_ask_next,
     what_can_wait: searchRedirect.final_output.what_can_wait,
+    care_state: state_reconstruction_layer.care_state,
     baseline_facts: finalized.baseline_intelligence_layer?.baseline_facts?.map((f) => ({
       domain: f.domain,
       label: f.label,
@@ -1728,6 +1780,24 @@ export async function processSituationRecompile(input: {
     as_of: new Date().toISOString(),
   });
 
+  const state_reconstruction_layer = await processStateReconstruction({
+    care_recipient_id: context.care_recipient_id,
+    all_events: context.events,
+    events_created: [],
+    what_is_uncertain: mergedUncertainRecompile,
+    what_needs_clarification: [
+      ...new Set([
+        ...mergedClarification,
+        ...multi_caregiver_context_layer.clarification_needed,
+        ...contradiction_detection_layer.clarification_triggers,
+      ]),
+    ],
+    care_state: state_reconstruction_layer.care_state,
+    care_context_diff: care_context_diff_layer,
+    state_of_care: state_of_care_summary_layer,
+    as_of: new Date().toISOString(),
+  });
+
   const situationResponse = {
     what_i_understood: understood,
     what_is_uncertain: [...new Set([...uncertain, ...continuous_execution_loop_layer.open_uncertainties])],
@@ -1836,6 +1906,7 @@ export async function processSituationRecompile(input: {
     adoption_wedge_layer,
     product_reality_model_layer,
     care_state_engine_layer,
+    state_reconstruction_layer,
     policy_engine_layer: buildPolicyEngineLayer(caregiverId),
   };
 

@@ -197,6 +197,7 @@ export type SituationResponse = {
   engine_execution_contract_layer?: import("../engine-execution-contract/types").EngineExecutionContractResult;
   confidence_calibration_layer?: import("../confidence-calibration-system/types").ConfidenceCalibrationResult;
   care_state_engine_layer?: import("../care-state-engine/types").CareStateEngineResult;
+  state_reconstruction_layer?: import("../state-reconstruction/pipeline").StateReconstructionLayerPayload;
   single_user_journey_layer?: import("../single-user-journey/types").SingleUserJourneyResult;
   product_north_star_layer?: import("../product-north-star/types").ProductNorthStarResult;
   product_constitution_layer?: import("../product-constitution/types").ProductConstitutionResult;
