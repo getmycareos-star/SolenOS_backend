@@ -1,0 +1,10 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SHARE_TOKEN_TTL_HOURS = exports.SHARE_DEFAULT_EXCLUDED = exports.DEFAULT_CAREGIVER_ID = exports.RUNWAY_DISCLAIMER = exports.CHECKIN_CLOSING_TEMPLATE = exports.COGNITIVE_RELIEF_BOUNDARY = exports.COGNITIVE_RELIEF_IDENTITY = void 0;
+exports.COGNITIVE_RELIEF_IDENTITY = "Removes recurring mental taxes — not ranking, not urgency, not prioritization.";
+exports.COGNITIVE_RELIEF_BOUNDARY = "Organize, surface, and relieve cognitive load. Never decide medical, financial, or legal actions for the caregiver.";
+exports.CHECKIN_CLOSING_TEMPLATE = "You do not need to keep all of this active in your head right now. What is logged is held here — it is safe to put it down until you choose to return.";
+exports.RUNWAY_DISCLAIMER = "Soft estimate only — not accounting. Assumptions are shown; inputs may be incomplete.";
+exports.DEFAULT_CAREGIVER_ID = "default_caregiver";
+exports.SHARE_DEFAULT_EXCLUDED = ["financial_specifics", "medical_specifics"];
+exports.SHARE_TOKEN_TTL_HOURS = 72;

@@ -17,7 +17,6 @@ export type {
   ConfidenceState,
   TrustLayerOutput,
   FinalOutputContract,
-  FinalOutputValidationError,
 } from "./types";
 
 export {
@@ -27,6 +26,7 @@ export {
   validateFinalOutput,
   isFinalOutputValidationError,
   extractFinalOutputPayload,
+  FinalOutputValidationError,
 } from "./schema";
 
 export {

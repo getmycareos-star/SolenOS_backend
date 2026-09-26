@@ -7,7 +7,7 @@ import {
   parseAnalyzeRequest,
   runAnalyzePipelineWithObservability,
 } from "@/lib/analyze-pipeline";
-import { GEMINI_MVP_MODEL } from "@/lib/gemini-contract";
+import { LLM_MVP_MODEL } from "@/lib/llm-contract";
 import { MULTILINGUAL_RESPONSE_HEADER } from "@/lib/multilingual-execution/constants";
 import { resolveUserLanguage } from "@/lib/multilingual-execution/resolve-language";
 import { resolveUserSettings } from "@/lib/settings-governance/resolve-settings";
@@ -18,7 +18,8 @@ import { emitSystemEvent } from "@/lib/system-architecture/emit-event";
 import { recordReliefMeasurementEvent, getTelemetryStore } from "@/lib/telemetry-persistence/server";
 import { TELEMETRY_RESPONSE_HEADERS } from "@/lib/telemetry-persistence/schema";
 
-import { GEMINI_ENV_MISSING_MESSAGE, getGeminiApiKey } from "@/lib/env/gemini";
+import { getLlmProvider } from "@/lib/llm";
+import { LLM_ENV_MISSING_MESSAGE } from "@/lib/env/llm";
 import {
   ANALYZE_OPS_KEY_HEADER,
   analyzePipelineDisabledResponse,
@@ -62,10 +63,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const geminiApiKey = getGeminiApiKey();
-  if (!geminiApiKey) {
+  // Local-LLM availability gate (Ollama / qwen3-coder:30b). No API key required.
+  const llmProvider = getLlmProvider();
+  if (!(await llmProvider.isAvailable())) {
     return NextResponse.json(
-      { error: GEMINI_ENV_MISSING_MESSAGE, reason: GEMINI_ENV_MISSING_MESSAGE },
+      { error: LLM_ENV_MISSING_MESSAGE, reason: LLM_ENV_MISSING_MESSAGE },
       { status: 503 },
     );
   }
@@ -130,8 +132,7 @@ export async function POST(req: NextRequest) {
     care_journey_graph_layer,
   } = await runAnalyzePipelineWithObservability({
     input: normalized,
-    geminiApiKey,
-    geminiModel: process.env.SOLENOS_GEMINI_MODEL ?? GEMINI_MVP_MODEL,
+    llmModel: process.env.OLLAMA_MODEL ?? LLM_MVP_MODEL,
     telemetry_user_id: request.telemetry_user_id,
     care_session_id: request.care_session_id,
     source_type: request.source_type,

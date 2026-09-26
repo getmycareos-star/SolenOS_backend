@@ -36,7 +36,7 @@ export type VoiceModeResult =
 
 /**
  * Build a short, non-conversational confirmation / briefing reply in the user's language preference.
- * STUB: does not call Gemini when key missing — returns English template wrapped for language awareness.
+ * STUB: does not call the local LLM when unavailable — returns English template wrapped for language awareness.
  */
 export function buildVoiceModeReply(params: {
   surface: VoiceModeSurface;
@@ -64,7 +64,7 @@ export function buildVoiceModeReply(params: {
 }
 
 /**
- * Voice Mode stub pipeline. Uses Whisper + TTS facade. Optional Gemini left for FUTURE.
+ * Voice Mode stub pipeline. Uses Whisper + TTS facade. Local LLM (Ollama / qwen3-coder:30b) integration left for FUTURE.
  */
 export async function runVoiceModeStub(params: {
   surface: VoiceModeSurface;

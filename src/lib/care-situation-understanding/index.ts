@@ -31,3 +31,7 @@ export {
   llmStructuredUnderstanding,
   deterministicUnderstanding,
 } from "./llm-understanding";
+export {
+  projectLlmUnderstanding,
+  type LlmUnderstandingProjection,
+} from "./llm-integration";

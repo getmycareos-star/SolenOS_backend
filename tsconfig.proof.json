@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "allowJs": false,
+    "strict": true,
+    "noEmit": false,
+    "noEmitOnError": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "isolatedModules": false,
+    "incremental": false,
+    "types": ["node"],
+    "outDir": "proof/build",
+    "rootDir": ".",
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/lib/llm/**/*.ts",
+    "src/lib/solenos-langchain-adapter/raw-text.ts",
+    "src/lib/care-situation-understanding/llm-understanding.ts",
+    "src/lib/care-situation-understanding/llm-schema.ts",
+    "src/lib/care-situation-understanding/llm-prompt.ts",
+    "src/lib/care-reality-extraction/**/*.ts",
+    "proof/harness.ts"
+  ],
+  "exclude": ["node_modules", "scripts"]
+}

@@ -1,0 +1,30 @@
+"use strict";
+/**
+ * Caregiver Depletion Signals — observational labels only (NOT a system mode).
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAREGIVER_DEPLETION_OBSERVATION_TAG_PREFIX = exports.CAREGIVER_DEPLETION_FORBIDDEN_USES = exports.CAREGIVER_DEPLETION_ANTI_DRIFT_RULES = exports.ENVIRONMENTAL_DEPENDENCY_FLAGS = exports.CAREGIVER_DEPLETION_STATES = exports.CAREGIVER_DEPLETION_ONE_LINE_TRUTH = exports.CAREGIVER_DEPLETION_BOUNDARY = void 0;
+exports.CAREGIVER_DEPLETION_BOUNDARY = "caregiver depletion signals are LABEL ONLY — shallow surface-signals for telemetry observation; they do NOT create a system mode, route lifecycle, branch UX, or trigger intervention.";
+exports.CAREGIVER_DEPLETION_ONE_LINE_TRUTH = "Observing caregiver depletion does not change what SolenOS is — it records explicit surface signals for measurement only.";
+exports.CAREGIVER_DEPLETION_STATES = ["normal", "elevated", "critical"];
+exports.ENVIRONMENTAL_DEPENDENCY_FLAGS = ["none", "support_anchor_present"];
+exports.CAREGIVER_DEPLETION_ANTI_DRIFT_RULES = [
+    "Observing depletion does NOT create a system mode",
+    "Depletion signals are LABEL ONLY — no behavioral branching or intervention routing",
+    "No UX changes, no lifecycle routing, no output schema changes",
+    "Telemetry persistence is observational — not profiling or segmentation",
+];
+exports.CAREGIVER_DEPLETION_FORBIDDEN_USES = [
+    "lifecycle routing",
+    "UI branching",
+    "output schema changes",
+    "state machine transitions",
+    "user profiling",
+    "care journey tracking",
+    "segmentation",
+    "burnout intervention",
+    "caregiver coaching",
+    "behavioral nudging",
+    "depletion product mode",
+];
+exports.CAREGIVER_DEPLETION_OBSERVATION_TAG_PREFIX = "CAREGIVER_DEPLETION:";

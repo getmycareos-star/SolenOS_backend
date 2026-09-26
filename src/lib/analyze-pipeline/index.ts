@@ -1,4 +1,4 @@
-import { strictParseModelJson } from "../gemini-contract";
+import { strictParseModelJson } from "../llm-contract";
 import {
   FailureObservabilityCollector,
   classifyDeterminismFailure,
@@ -102,7 +102,7 @@ import {
 import { enforceMedicalBoundary } from "../medical-responsibility-boundary";
 import { enforceEpistemicSafety } from "../epistemic-safety-engine";
 import { runPreReasoningGrounding } from "../grounding-retrieval";
-import { invokeGeminiExecution } from "../solenos-langchain-adapter/gemini";
+import { invokeLlmExecution } from "../solenos-langchain-adapter/llm";
 import {
   validateMultilingualExecution,
   type MultilingualExecutionMeta,
@@ -362,8 +362,7 @@ import {
 
 export interface AnalyzePipelineParams {
   input: string;
-  geminiApiKey: string;
-  geminiModel?: string;
+  llmModel?: string;
   telemetry_user_id?: string;
   care_session_id?: string;
   source_type?: "text" | "document";
@@ -627,7 +626,7 @@ function assembleTrustLayer(
 }
 
 /**
- * Gemini 1.5 Pro cognitive pipeline with failure observability (metadata only).
+ * LLM (Ollama / qwen3-coder:30b) cognitive pipeline with failure observability (metadata only).
  */
 export async function runAnalyzePipeline(
   params: AnalyzePipelineParams,
@@ -1373,7 +1372,7 @@ export async function runAnalyzePipelineWithObservability(
 
   for (let attempt = 0; attempt <= ANALYZE_MAX_RETRIES; attempt++) {
     // Step 8: STRUCTURED RESPONSE GENERATION
-    const raw = await invokeGeminiExecution({
+    const raw = await invokeLlmExecution({
       contextWindow,
       documentIntake,
       groundingContext: preReasoning.grounding_context,
@@ -1404,8 +1403,7 @@ export async function runAnalyzePipelineWithObservability(
           ...(clarityGate.constraintLine ? [clarityGate.constraintLine] : []),
         ],
       },
-      apiKey: params.geminiApiKey,
-      model: params.geminiModel,
+    model: params.llmModel,
       retry: attempt > 0,
       userLanguage,
     });

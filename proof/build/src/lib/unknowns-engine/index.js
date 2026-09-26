@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getClinicalUnknownsProfile = exports.DEMENTIA_UNKNOWNS_PROFILE = exports.DEFAULT_CLINICAL_PROFILE_ID = exports.CLINICAL_UNKNOWNS_PROFILES = exports.questionsFromUnknowns = exports.clarificationTargetsFromUnknowns = exports.deriveExplicitUnknowns = exports.UNKNOWN_DERIVATIONS = exports.UNKNOWN_STATUSES = exports.UNKNOWN_PRIORITIES = void 0;
+var types_1 = require("./types");
+Object.defineProperty(exports, "UNKNOWN_PRIORITIES", { enumerable: true, get: function () { return types_1.UNKNOWN_PRIORITIES; } });
+Object.defineProperty(exports, "UNKNOWN_STATUSES", { enumerable: true, get: function () { return types_1.UNKNOWN_STATUSES; } });
+Object.defineProperty(exports, "UNKNOWN_DERIVATIONS", { enumerable: true, get: function () { return types_1.UNKNOWN_DERIVATIONS; } });
+var engine_1 = require("./engine");
+Object.defineProperty(exports, "deriveExplicitUnknowns", { enumerable: true, get: function () { return engine_1.deriveExplicitUnknowns; } });
+Object.defineProperty(exports, "clarificationTargetsFromUnknowns", { enumerable: true, get: function () { return engine_1.clarificationTargetsFromUnknowns; } });
+Object.defineProperty(exports, "questionsFromUnknowns", { enumerable: true, get: function () { return engine_1.questionsFromUnknowns; } });
+var profiles_1 = require("./profiles");
+Object.defineProperty(exports, "CLINICAL_UNKNOWNS_PROFILES", { enumerable: true, get: function () { return profiles_1.CLINICAL_UNKNOWNS_PROFILES; } });
+Object.defineProperty(exports, "DEFAULT_CLINICAL_PROFILE_ID", { enumerable: true, get: function () { return profiles_1.DEFAULT_CLINICAL_PROFILE_ID; } });
+Object.defineProperty(exports, "DEMENTIA_UNKNOWNS_PROFILE", { enumerable: true, get: function () { return profiles_1.DEMENTIA_UNKNOWNS_PROFILE; } });
+Object.defineProperty(exports, "getClinicalUnknownsProfile", { enumerable: true, get: function () { return profiles_1.getClinicalUnknownsProfile; } });

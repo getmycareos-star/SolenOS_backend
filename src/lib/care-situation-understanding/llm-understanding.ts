@@ -1,9 +1,10 @@
 /**
  * LLM Understanding Orchestrator.
  *
- * Tries structured LLM extraction first (Gemini) with Zod validation + medical boundary check.
- * Falls back to deterministic/regex extraction (existing path) when:
- * - No API key is available
+ * Tries structured LLM extraction first (Ollama / qwen3-coder:30b, local) with
+ * Zod validation + medical boundary check. Falls back to deterministic/regex
+ * extraction (existing path) when:
+ * - Local LLM (Ollama) is not available
  * - LLM call fails
  * - LLM output fails Zod validation
  * - LLM output violates medical boundary (diagnosis/advice/empathy/causation)
@@ -18,6 +19,7 @@ import {
   validateMedicalBoundary,
   type LlmUnderstandingOutput,
 } from "./llm-schema";
+import { getLlmProvider } from "../llm";
 
 /**
  * Map LLM typed output to existing CareRealityExtractionResult types.
@@ -116,7 +118,7 @@ function mapLlmOutputToExtractionResult(
 }
 
 /**
- * Attempt to extract care reality using Gemini LLM for structured understanding.
+ * Attempt to extract care reality using the local LLM (Ollama / qwen3-coder:30b) for structured understanding.
  * Falls back to deterministic/regex extraction on any failure.
  *
  * @param rawText - The caregiver's raw input text (any length, any structure)
@@ -137,43 +139,24 @@ export async function llmStructuredUnderstanding(params: {
     return extractCareRealityFromText({ rawText: "", source });
   }
 
-  // Check if Gemini API key is available
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey || apiKey.length === 0) {
-    // Fallback to deterministic extraction when no LLM available
+  // Gate: only attempt local-LLM extraction when Ollama is reachable.
+  // If it is not available, fall back to deterministic extraction (no external
+  // dependency, no blocked input — raw caregiver text is always preserved).
+  const provider = getLlmProvider();
+  if (!(await provider.isAvailable(params.signal))) {
     return extractCareRealityFromText({ rawText: trimmedText, source });
   }
 
   try {
-    // Dynamic import to avoid hard dependency when LLM not used
-    const { ChatGoogleGenerativeAI } = await import(
-      "@langchain/google-genai"
-    );
-    const { HumanMessage, SystemMessage } = await import(
-      "@langchain/core/messages"
-    );
-
-    const model = new ChatGoogleGenerativeAI({
-      model: process.env.SOLENOS_LLM_MODEL ?? "gemini-2.0-flash",
-      apiKey,
+    const response = await provider.invoke({
+      system: CARE_UNDERSTANDING_LLM_SYSTEM_PROMPT,
+      user: trimmedText,
       temperature: 0,
-      maxRetries: 0,
+      json: true,
+      signal: params.signal,
     });
 
-    const response = await model.invoke(
-      [
-        new SystemMessage(CARE_UNDERSTANDING_LLM_SYSTEM_PROMPT),
-        new HumanMessage(trimmedText),
-      ],
-      { signal: params.signal },
-    );
-
-    const content =
-      typeof response.content === "string"
-        ? response.content
-        : Array.isArray(response.content)
-          ? response.content.map((c) => (typeof c === "string" ? c : "")).join("")
-          : "";
+    const content = response.content;
 
     // Extract JSON from response (handle markdown-wrapped JSON)
     const jsonMatch = content.match(/\{[\s\S]*\}/);

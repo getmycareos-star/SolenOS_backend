@@ -26,7 +26,7 @@ export const MVP_ALLOWED_FRONTEND_SHELL = [
   "src/app/globals.css",
 ] as const;
 
-export const MVP_LLM = "gemini-1.5-pro" as const;
+export const MVP_LLM = "qwen3-coder:30b" as const;
 
 export const MVP_MAX_LLM_CALLS = 3;
 
@@ -34,7 +34,7 @@ export const MVP_MAX_RETRIES = 2;
 
 export const MVP_LATENCY_BUDGET_MS = 10_000;
 
-export const MVP_GEMINI_KEY_ROUTE = "src/app/api/analyze/route.ts";
+export const MVP_LLM_KEY_ROUTE = "src/app/api/analyze/route.ts";
 
 export const MVP_LAYERS = [
   "input",

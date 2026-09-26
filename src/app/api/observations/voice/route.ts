@@ -16,7 +16,7 @@ const DEFAULT_CAREGIVER_ID = "default_caregiver";
  * POST /api/observations/voice — observation record from voice or edited transcript.
  *
  * MVP: caregivers use browser Web Speech for dictation; POST with `edited_transcript` only.
- * FUTURE: optional server STT (Whisper/Gemini) when audio blob provided and keys configured.
+ * FUTURE: optional server STT (Whisper) when audio blob provided and keys configured.
  * Voice Conversation Mode does NOT use this route — see src/lib/voice + POST /api/analyze.
  */
 export async function POST(req: NextRequest) {

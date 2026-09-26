@@ -13,7 +13,6 @@
     "@aws-sdk/client-polly": "^3.1100.0",
     "@google-cloud/text-to-speech": "^6.4.1",
     "@langchain/core": "^1.2.2",
-    "@langchain/google-genai": "^2.2.0",
     "@langchain/openai": "^1.5.5",
     "lucide-react": "^1.24.0",
     "next": "^15.1.0",

@@ -5,9 +5,9 @@
 -- This migration activates voice I/O columns + SCHEMA for observation tables
 -- (runtime store remains IN-MEMORY until Postgres adapter is wired).
 
--- Refresh comments: language_preference now drives Gemini + TTS output language.
+-- Refresh comments: language_preference now drives local-LLM output and ALL TTS voice output.
 COMMENT ON COLUMN users.language_preference IS
-  'Primary SolenOS language — controls Gemini output and ALL TTS voice output (user.language_preference). Exact set: en,es,zh,tl,vi,ko,fa,ar,ru,hy.';
+  'Primary SolenOS language — controls local-LLM (qwen3-coder:30b) output and ALL TTS voice output (user.language_preference). Exact set: en,es,zh,tl,vi,ko,fa,ar,ru,hy.';
 
 COMMENT ON COLUMN users.voice_language IS
   'Mirrors language_preference for TTS routing (Polly vs Google Cloud TTS).';

@@ -10,7 +10,7 @@ export {
 
   MVP_LLM,
 
-  MVP_GEMINI_KEY_ROUTE,
+  MVP_LLM_KEY_ROUTE,
 
   MVP_MAX_LLM_CALLS,
 

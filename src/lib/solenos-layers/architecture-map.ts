@@ -1052,7 +1052,7 @@ export const VOICE_CONVERSATION_MVP = {
   status: "FUTURE" as const,
   speechInput: "browser-web-speech",
   speechOutput: "browser-speech-synthesis",
-  reasoning: "Gemini via POST /api/analyze only — no server STT",
+  reasoning: "Ollama / qwen3-coder:30b via POST /api/analyze only — local LLM, no external API key",
   moduleRoot: "src/lib/voice",
   ui: "src/components/ops-devtools/VoiceConversationPanel.tsx",
   states: ["idle", "listening", "processing", "responding"] as const,
@@ -1595,7 +1595,7 @@ export const FACADE_DEPRECATION = {
   "mvp-input-architecture":
     "text + documents only → understanding → Care Record / timeline / actions — ADR-018; voice later on same path",
   "voice-conversation":
-    "FUTURE — browser Web Speech in + speechSynthesis out + Gemini analyze — ADR-017 superseded for MVP by ADR-018",
+    "FUTURE — browser Web Speech in + speechSynthesis out + local-LLM analyze — ADR-017 superseded for MVP by ADR-018",
   "voice-observation":
     "FUTURE — browser dictation → observation records; server STT also FUTURE",
   tts: "FUTURE — browser speechSynthesis first path (ADR-017); Polly + Google Cloud TTS upgrade (ADR-013); not MVP UI",

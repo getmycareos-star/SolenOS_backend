@@ -3,10 +3,9 @@
  * MVP voice I/O uses browser Web Speech only (ADR-017).
  */
 
-import { transcribeWithGemini } from "./gemini-stt";
 import { transcribeWithWhisper } from "./whisper";
 
-export type SttProvider = "whisper" | "gemini" | "browser";
+export type SttProvider = "whisper" | "browser";
 
 export type TranscribeSuccess = {
   ok: true;
@@ -25,13 +24,16 @@ export type TranscribeResult = TranscribeSuccess | TranscribeFailure;
 
 export function resolveServerSttProvider(): SttProvider | null {
   if (process.env.OPENAI_API_KEY?.trim()) return "whisper";
-  if (process.env.GEMINI_API_KEY?.trim()) return "gemini";
   return null;
 }
 
 /**
  * Server-side transcription with provider priority:
- * Whisper (OPENAI_API_KEY) → Gemini (GEMINI_API_KEY) → NO_SERVER_STT.
+ * Whisper (OPENAI_API_KEY) → NO_SERVER_STT (browser Web Speech fallback).
+ *
+ * NOTE: qwen3-coder:30b is a text/code model with no audio input; audio speech-to-text
+ * is intentionally not routed through the local LLM. Server STT uses Whisper when an
+ * OPENAI_API_KEY is present, otherwise the product uses on-device browser recognition.
  */
 export async function transcribeAudio(params: {
   audio: Blob | Buffer | ArrayBuffer;
@@ -45,14 +47,6 @@ export async function transcribeAudio(params: {
     const result = await transcribeWithWhisper(params);
     if (result.ok) {
       return { ...result, provider: "whisper" };
-    }
-    return result;
-  }
-
-  if (provider === "gemini") {
-    const result = await transcribeWithGemini(params);
-    if (result.ok) {
-      return { ...result, provider: "gemini" };
     }
     return result;
   }
