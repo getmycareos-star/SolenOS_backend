@@ -9,7 +9,7 @@
  * boundary) degrades to an empty projection so the deterministic path is
  * unchanged. The raw caregiver input is always preserved upstream regardless.
  */
-import { llmStructuredUnderstanding } from "./llm-understanding";
+import { llmStructuredUnderstanding, type LlmExtractionContext } from "./llm-understanding";
 import type { CareRealityExtractionResult } from "../care-reality-extraction/types";
 
 export interface LlmUnderstandingProjection {
@@ -25,6 +25,12 @@ export async function projectLlmUnderstanding(params: {
   rawText: string;
   contributorId?: string;
   timeoutMs?: number;
+  /**
+   * Care-record context injected per call so the stateless model can resolve
+   * pronouns and avoid inventing "normal". Read-only evidence — never model
+   * memory. Continuity is managed by CRS/state stores.
+   */
+  context?: LlmExtractionContext;
 }): Promise<LlmUnderstandingProjection> {
   const empty: LlmUnderstandingProjection = {
     observationLabels: [],
@@ -43,6 +49,7 @@ export async function projectLlmUnderstanding(params: {
     const extraction: CareRealityExtractionResult = await llmStructuredUnderstanding({
       rawText: trimmed,
       contributorId: params.contributorId ?? "caregiver",
+      context: params.context,
       signal,
     });
 

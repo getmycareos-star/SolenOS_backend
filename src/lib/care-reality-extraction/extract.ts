@@ -293,3 +293,22 @@ export function extractCareRealityFromText(params: {
     ),
   };
 }
+
+/**
+ * Pull every raw_fragment out of a deterministic extraction result.
+ * Used by the LLM coverage-merge step: the deterministic path is the floor,
+ * and any fragment the LLM missed must be merged back in.
+ */
+export function deterministicFragmentsFromResult(
+  result: CareRealityExtractionResult,
+): string[] {
+  return [
+    ...result.observations.map((o) => o.raw_fragment),
+    ...result.events.map((e) => e.raw_fragment),
+    ...result.decisions.map((d) => d.raw_fragment),
+    ...result.actions.map((a) => a.raw_fragment),
+    ...result.outcomes.map((o) => o.raw_fragment),
+    ...result.unknowns.map((u) => u.raw_fragment),
+    ...result.non_care_facts.map((n) => n.raw_fragment),
+  ];
+}

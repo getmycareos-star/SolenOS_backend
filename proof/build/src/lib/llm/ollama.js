@@ -47,12 +47,20 @@ class OllamaProvider {
             stream: false,
             options: {
                 temperature: request.temperature ?? 0,
+                ...(request.seed !== undefined ? { seed: request.seed } : {}),
                 ...(request.maxTokens ? { num_predict: request.maxTokens } : {}),
+                ...(request.numCtx ? { num_ctx: request.numCtx } : {}),
             },
         };
         // Qwen3 supports Ollama `format` JSON mode for structured output.
         if (request.json) {
             body.options.format = "json";
+        }
+        // Qwen3 hidden chain-of-thought pass. The reasoning block is emitted before
+        // the JSON contract and is stripped by extractRawLLMText — it never enters
+        // the typed output, so it cannot leak diagnosis, causation, or prose.
+        if (request.thinking) {
+            body.think = true;
         }
         const res = await fetch(`${base}/api/chat`, {
             method: "POST",

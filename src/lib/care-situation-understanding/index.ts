@@ -30,6 +30,7 @@ export {
 export {
   llmStructuredUnderstanding,
   deterministicUnderstanding,
+  type LlmExtractionContext,
 } from "./llm-understanding";
 export {
   projectLlmUnderstanding,

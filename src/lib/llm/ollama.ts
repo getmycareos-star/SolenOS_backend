@@ -26,6 +26,8 @@ interface OllamaChatResponse {
   message?: {
     role: string;
     content: string;
+    /** Qwen3 hidden reasoning block — stripped, never enters typed output. */
+    thinking?: string;
   };
   prompt_eval_count?: number;
   eval_count?: number;
@@ -66,13 +68,22 @@ export class OllamaProvider implements LlmProvider {
       stream: false,
       options: {
         temperature: request.temperature ?? 0,
+        ...(request.seed !== undefined ? { seed: request.seed } : {}),
         ...(request.maxTokens ? { num_predict: request.maxTokens } : {}),
+        ...(request.numCtx ? { num_ctx: request.numCtx } : {}),
       },
     };
 
     // Qwen3 supports Ollama `format` JSON mode for structured output.
     if (request.json) {
       (body.options as Record<string, unknown>).format = "json";
+    }
+
+    // Qwen3 hidden chain-of-thought pass. The reasoning block is emitted before
+    // the JSON contract and is stripped by extractRawLLMText — it never enters
+    // the typed output, so it cannot leak diagnosis, causation, or prose.
+    if (request.thinking) {
+      body.think = true;
     }
 
     const res = await fetch(`${base}/api/chat`, {

@@ -30,6 +30,7 @@ async function projectLlmUnderstanding(params) {
         const extraction = await (0, llm_understanding_1.llmStructuredUnderstanding)({
             rawText: trimmed,
             contributorId: params.contributorId ?? "caregiver",
+            context: params.context,
             signal,
         });
         return {

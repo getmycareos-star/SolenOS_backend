@@ -1,5 +1,5 @@
 /**
- * PROOF HARNESS — Phase 15 runtime evidence.
+ * PROOF HARNESS — Phase 15+ runtime evidence.
  *
  * Exercises the REAL SolenOS OllamaProvider + the REAL llmStructuredUnderstanding
  * extractor against a LOCAL Ollama-API-compatible stub server.
@@ -13,6 +13,8 @@
  * Cases:
  *  (A) valid fixture response  -> real Zod validation + medical-boundary + mapping
  *  (B) invalid JSON response   -> real deterministic fallback (no throw)
+ *  (C) valid fixture with one bad raw_fragment -> retry path with CORRECTION_HINTS
+ *  (D) valid fixture missing a deterministic fragment -> coverage merge
  */
 import http from "node:http";
 import { getLlmProvider, getLlmModel, getLlmBaseUrl } from "../src/lib/llm";
@@ -67,7 +69,13 @@ const FACTURE: LlmUnderstandingOutput = {
 };
 
 let stubMode: "valid" | "invalid" = "valid";
-let lastRequest: { model?: string; userSnippet?: string } | null = null;
+let lastRequest: {
+  model?: string;
+  userSnippet?: string;
+  think?: boolean;
+  seed?: number;
+  temperature?: number;
+} | null = null;
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url ?? "/", "http://127.0.0.1:11434");
@@ -84,6 +92,9 @@ const server = http.createServer((req, res) => {
         const parsed = JSON.parse(body);
         lastRequest = {
           model: parsed.model,
+          think: parsed.think,
+          seed: parsed.options?.seed,
+          temperature: parsed.options?.temperature,
           userSnippet: Array.isArray(parsed.messages)
             ? String(parsed.messages.find((m: { role: string }) => m.role === "user")?.content ?? "").slice(0, 40)
             : "",
@@ -105,11 +116,28 @@ const server = http.createServer((req, res) => {
 const pass = (n: string, cond: boolean, extra = "") =>
   console.log((cond ? "PASS " : "FAIL ") + n + (extra ? " -> " + extra : ""));
 
+/** Pick a free ephemeral port so the stub never conflicts with a real ollama serve. */
+function pickFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const port = (srv.address() as { port: number }).port;
+      srv.close(() => resolve(port));
+    });
+    srv.on("error", reject);
+  });
+}
+
 async function main() {
   const provider = getLlmProvider();
 
-  await new Promise<void>((resolve) => server.listen(11434, "127.0.0.1", resolve));
-  console.log("stub Ollama on http://127.0.0.1:11434 (mode=valid)");
+  // Pick a free port so the harness never conflicts with a real `ollama serve`.
+  const stubPort = await pickFreePort();
+  process.env.OLLAMA_BASE_URL = `http://127.0.0.1:${stubPort}`;
+  process.env.OLLAMA_MODEL = "qwen3-coder:30b";
+
+  await new Promise<void>((resolve) => server.listen(stubPort, "127.0.0.1", resolve));
+  console.log(`stub Ollama on http://127.0.0.1:${stubPort} (mode=valid)`);
 
   console.log("\nmodel name      :", getLlmModel());
   console.log("base url        :", getLlmBaseUrl());
@@ -129,9 +157,17 @@ async function main() {
   const extraction: CareRealityExtractionResult = await llmStructuredUnderstanding({
     rawText: HARD_CASE,
     contributorId: "caregiver-1",
+    context: {
+      careRecipient: "Alex",
+      caregiverDisplayName: "Sarah",
+      knownMeds: ["lorazepam 1mg", "metoprolol 50mg"],
+    },
   });
 
   pass("provider received model=qwen3-coder:30b on /api/chat", lastRequest?.model === "qwen3-coder:30b", lastRequest?.model ?? "undefined");
+  pass("thinking mode enabled (Qwen3 hidden CoT, stripped from output)", lastRequest?.think === true, String(lastRequest?.think));
+  pass("deterministic seed set (identical inputs → identical output)", lastRequest?.seed === 42, String(lastRequest?.seed));
+  pass("temperature pinned to 0 for determinism", lastRequest?.temperature === 0, String(lastRequest?.temperature));
   const obsText = extraction.observations.map((o) => o.description).join("\n  ");
   pass("LLM structured output used (BP 90/55 + confusion surfaced, not 'observation changed')",
     extraction.observations.some((o) => /90\/55/.test(o.description)) &&

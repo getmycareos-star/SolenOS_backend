@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 /**
- * PROOF HARNESS — Phase 15 runtime evidence.
+ * PROOF HARNESS — Phase 15+ runtime evidence.
  *
  * Exercises the REAL SolenOS OllamaProvider + the REAL llmStructuredUnderstanding
  * extractor against a LOCAL Ollama-API-compatible stub server.
@@ -18,6 +18,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * Cases:
  *  (A) valid fixture response  -> real Zod validation + medical-boundary + mapping
  *  (B) invalid JSON response   -> real deterministic fallback (no throw)
+ *  (C) valid fixture with one bad raw_fragment -> retry path with CORRECTION_HINTS
+ *  (D) valid fixture missing a deterministic fragment -> coverage merge
  */
 const node_http_1 = __importDefault(require("node:http"));
 const llm_1 = require("../src/lib/llm");
@@ -77,6 +79,9 @@ const server = node_http_1.default.createServer((req, res) => {
                 const parsed = JSON.parse(body);
                 lastRequest = {
                     model: parsed.model,
+                    think: parsed.think,
+                    seed: parsed.options?.seed,
+                    temperature: parsed.options?.temperature,
                     userSnippet: Array.isArray(parsed.messages)
                         ? String(parsed.messages.find((m) => m.role === "user")?.content ?? "").slice(0, 40)
                         : "",
@@ -114,8 +119,16 @@ async function main() {
     const extraction = await (0, llm_understanding_1.llmStructuredUnderstanding)({
         rawText: HARD_CASE,
         contributorId: "caregiver-1",
+        context: {
+            careRecipient: "Alex",
+            caregiverDisplayName: "Sarah",
+            knownMeds: ["lorazepam 1mg", "metoprolol 50mg"],
+        },
     });
     pass("provider received model=qwen3-coder:30b on /api/chat", lastRequest?.model === "qwen3-coder:30b", lastRequest?.model ?? "undefined");
+    pass("thinking mode enabled (Qwen3 hidden CoT, stripped from output)", lastRequest?.think === true, String(lastRequest?.think));
+    pass("deterministic seed set (identical inputs → identical output)", lastRequest?.seed === 42, String(lastRequest?.seed));
+    pass("temperature pinned to 0 for determinism", lastRequest?.temperature === 0, String(lastRequest?.temperature));
     const obsText = extraction.observations.map((o) => o.description).join("\n  ");
     pass("LLM structured output used (BP 90/55 + confusion surfaced, not 'observation changed')", extraction.observations.some((o) => /90\/55/.test(o.description)) &&
         extraction.observations.some((o) => /confusion/i.test(o.description)), "\n  " + obsText);

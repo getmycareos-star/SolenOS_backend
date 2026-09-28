@@ -8,7 +8,7 @@ import {
   filterByStatus,
 } from "../care-event-integrity";
 import { buildSituationUnderstanding } from "./parse-situation";
-import { projectLlmUnderstanding } from "../care-situation-understanding";
+import { projectLlmUnderstanding, type LlmExtractionContext } from "../care-situation-understanding";
 import {
   caregiverLineFromDareUncertain,
   caregiverLineFromUnreadableSection,
@@ -17,7 +17,7 @@ import {
 } from "./caregiver-facing-uncertainty";
 import { toCaregiverFacingLine } from "../mvp-input-architecture";
 import { getTemporalTimeline, getIngestionTimeline, getTimelineViews } from "./dual-time";
-import type { CanonicalCareEvent, ProcessSituationInput, SituationResponse } from "./types";
+import type { CanonicalCareEvent, CareContextRoot, ProcessSituationInput, SituationResponse } from "./types";
 import {
   resolveDurableCareKey,
   detectContinuity,
@@ -470,9 +470,20 @@ export async function processSituationInput(
   // Projects typed claims (BP, meds, symptoms, times, disagreements, open questions)
   // from the raw caregiver note onto the caregiver-facing understanding fields.
   // Always degrades to the deterministic path on any LLM failure — ingestion is never blocked.
+  //
+  // Care-record context is injected per call so the stateless model can resolve
+  // pronouns and avoid inventing "normal". Continuity is managed by CRS/state
+  // stores — this is read-only evidence, never model memory.
   const llmProjection = await projectLlmUnderstanding({
     rawText: input.raw_input ?? "",
     contributorId: input.contributor_id ?? contributorId,
+    context: buildLlmContextFromPipeline({
+      input,
+      careRecipientId,
+      contributorId,
+      context,
+      events_created,
+    }),
   });
 
   const enrichedUnderstood = [
@@ -2197,4 +2208,75 @@ function finalizeSituationResponse(
   } as SituationResponse;
 
   return sanitizeSituationUncertaintyFields(finalized);
+}
+
+/**
+ * Build the per-call LLM extraction context from pipeline state.
+ *
+ * Injects care-record evidence so the stateless model can resolve pronouns
+ * and avoid inventing "normal". This is read-only evidence — continuity is
+ * managed by CRS/state stores, never by the model.
+ *
+ * Pulls from the care context root (identity, prior observations) and the
+ * current events being created. Never includes caregiver-facing summaries,
+ * 5-field compression, or clinical judgments.
+ */
+function buildLlmContextFromPipeline(params: {
+  input: ProcessSituationInput;
+  careRecipientId: string;
+  contributorId: string;
+  context: CareContextRoot;
+  events_created: CanonicalCareEvent[];
+}): LlmExtractionContext {
+  const { input, careRecipientId, contributorId, context, events_created } = params;
+
+  const priorObservations = context.events
+    .slice(0, 8)
+    .map((e) => e.raw_input?.trim())
+    .filter((s): s is string => !!s && s.length > 3);
+
+  const knownMeds = extractKnownMedsFromEvents(events_created);
+  const ambiguityHints = detectAmbiguityHints(input.raw_input ?? "");
+  const documentMeta = input.documents?.length
+    ? `document upload, ${input.documents.length} file(s)`
+    : undefined;
+
+  return {
+    careRecipient: careRecipientId,
+    caregiverDisplayName: contributorId,
+    priorObservations: priorObservations.length > 0 ? priorObservations : undefined,
+    knownMeds,
+    ambiguityHints,
+    documentMeta,
+  };
+}
+
+/** Pull medication labels from prior events so the model can anchor med identity. */
+function extractKnownMedsFromEvents(
+  events: CanonicalCareEvent[],
+): readonly string[] | undefined {
+  const meds: string[] = [];
+  for (const ev of events) {
+    const desc = ev.description ?? "";
+    const m = desc.match(
+      /\b([A-Z][a-z]+(?:\s+[a-z]+)*\s+\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml|units?|tabs?|caps?)\b)/g,
+    );
+    if (m) meds.push(...m);
+  }
+  return meds.length > 0 ? meds.slice(0, 10) : undefined;
+}
+
+/** Structural ambiguity detection — flag pronoun chains and missing anchors. */
+function detectAmbiguityHints(raw: string): readonly string[] | undefined {
+  const hints: string[] = [];
+  if (/\b(he|she|they|them)\b/i.test(raw) && !/\b(mom|dad|mother|father|husband|wife|son|daughter|alex|sarah)\b/i.test(raw)) {
+    hints.push("pronoun without named referent in this note");
+  }
+  if (/\b(usually|normally|her normal|his normal)\b/i.test(raw)) {
+    hints.push("baseline-establishment language present — do not treat as current fact");
+  }
+  if (/\b(not sure|unsure|don't know|can't remember|maybe|probably)\b/i.test(raw)) {
+    hints.push("explicit uncertainty language present — preserve as unknown");
+  }
+  return hints.length > 0 ? hints : undefined;
 }

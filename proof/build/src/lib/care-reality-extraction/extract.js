@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.splitCompoundCareClauses = splitCompoundCareClauses;
 exports.splitExtractionFragments = splitExtractionFragments;
 exports.extractCareRealityFromText = extractCareRealityFromText;
+exports.deterministicFragmentsFromResult = deterministicFragmentsFromResult;
 const classify_1 = require("./classify");
 const relationships_1 = require("./relationships");
 const events_1 = require("./events");
@@ -228,4 +229,20 @@ function extractCareRealityFromText(params) {
         relationships,
         observation_focus_lines: observations.map((o) => o.description.endsWith(".") ? o.description : `${o.description}.`),
     };
+}
+/**
+ * Pull every raw_fragment out of a deterministic extraction result.
+ * Used by the LLM coverage-merge step: the deterministic path is the floor,
+ * and any fragment the LLM missed must be merged back in.
+ */
+function deterministicFragmentsFromResult(result) {
+    return [
+        ...result.observations.map((o) => o.raw_fragment),
+        ...result.events.map((e) => e.raw_fragment),
+        ...result.decisions.map((d) => d.raw_fragment),
+        ...result.actions.map((a) => a.raw_fragment),
+        ...result.outcomes.map((o) => o.raw_fragment),
+        ...result.unknowns.map((u) => u.raw_fragment),
+        ...result.non_care_facts.map((n) => n.raw_fragment),
+    ];
 }

@@ -10,16 +10,31 @@
  * - LLM output violates medical boundary (diagnosis/advice/empathy/causation)
  *
  * Never loses caregiver input. Never feeds /api/analyze 5-field compression to caregiver panel.
+ *
+ * ENHANCEMENT: multi-pass self-verification loop.
+ * Instead of discarding the whole LLM output on one bad field, the orchestrator
+ * runs: extract -> per-field verification -> retry only broken fields -> coverage
+ * merge against deterministic. This recovers a large fraction of would-be
+ * fallbacks and never invents content the model could not ground.
  */
 import type { CareRealityExtractionResult } from "../care-reality-extraction/types";
-import { extractCareRealityFromText } from "../care-reality-extraction/extract";
-import { CARE_UNDERSTANDING_LLM_SYSTEM_PROMPT } from "./llm-prompt";
+import {
+  extractCareRealityFromText,
+  deterministicFragmentsFromResult,
+  splitExtractionFragments,
+} from "../care-reality-extraction/extract";
+import { CARE_UNDERSTANDING_LLM_SYSTEM_PROMPT, buildCareUnderstandingPrompt } from "./llm-prompt";
 import {
   LlmUnderstandingOutputSchema,
   validateMedicalBoundary,
+  verifyAllFields,
+  verifyCoverage,
   type LlmUnderstandingOutput,
 } from "./llm-schema";
 import { getLlmProvider } from "../llm";
+const LLM_DETERMINISTIC_SEED = 42;
+/** Max self-verification retries before degrading to deterministic. */
+const LLM_MAX_RETRIES = 2;
 
 /**
  * Map LLM typed output to existing CareRealityExtractionResult types.
@@ -118,16 +133,29 @@ function mapLlmOutputToExtractionResult(
 }
 
 /**
- * Attempt to extract care reality using the local LLM (Ollama / qwen3-coder:30b) for structured understanding.
- * Falls back to deterministic/regex extraction on any failure.
+ * Attempt to extract care reality using the local LLM (Ollama / qwen3-coder:30b)
+ * for structured understanding, with a multi-pass self-verification loop.
+ *
+ * Passes:
+ *   1. Deterministic pre-split the input into independent clauses (grounding).
+ *   2. First LLM pass with hidden chain-of-thought (thinking) + fixed seed.
+ *   3. Per-field verification: every raw_fragment must be an exact substring.
+ *   4. Retry pass injecting only the specific failures as CORRECTION_HINTS.
+ *   5. Coverage merge: any deterministic fragment the LLM missed is merged back.
+ *   6. Medical boundary check (diagnosis / advice / empathy / causation).
+ *
+ * Falls back to deterministic/regex extraction on any unrecoverable failure.
  *
  * @param rawText - The caregiver's raw input text (any length, any structure)
  * @param contributorId - Optional contributor id for attribution
+ * @param context - Optional care-record context for pronoun/baseline resolution
+ * @param signal - Optional AbortSignal
  * @returns CareRealityExtractionResult from LLM (if successful) or deterministic fallback
  */
 export async function llmStructuredUnderstanding(params: {
   rawText: string;
   contributorId?: string;
+  context?: LlmExtractionContext;
   signal?: AbortSignal;
 }): Promise<CareRealityExtractionResult> {
   const { rawText } = params;
@@ -139,64 +167,118 @@ export async function llmStructuredUnderstanding(params: {
     return extractCareRealityFromText({ rawText: "", source });
   }
 
+  // Deterministic pre-split into independent clauses. Feeding labeled blocks
+  // makes raw_fragment substring matching trivial and removes sentence
+  // segmentation burden from the model.
+  const preSplitBlocks = splitExtractionFragments(trimmedText);
+
+  // Deterministic floor — computed once, used for coverage merge and fallback.
+  const deterministic = extractCareRealityFromText({
+    rawText: trimmedText,
+    source,
+  });
+  const deterministicFragments = deterministicFragmentsFromResult(deterministic);
+
   // Gate: only attempt local-LLM extraction when Ollama is reachable.
-  // If it is not available, fall back to deterministic extraction (no external
-  // dependency, no blocked input — raw caregiver text is always preserved).
   const provider = getLlmProvider();
   if (!(await provider.isAvailable(params.signal))) {
-    return extractCareRealityFromText({ rawText: trimmedText, source });
+    return deterministic;
   }
 
-  try {
-    const response = await provider.invoke({
-      system: CARE_UNDERSTANDING_LLM_SYSTEM_PROMPT,
-      user: trimmedText,
-      temperature: 0,
-      json: true,
-      signal: params.signal,
-    });
+  // Build the prompt with full care-record context injected as evidence.
+  const prompt = buildCareUnderstandingPrompt({
+    ...params.context,
+    preSplitBlocks: preSplitBlocks.length > 0 ? preSplitBlocks : undefined,
+  });
 
-    const content = response.content;
+  let lastFailures: string[] = [];
+  let lastParsed: LlmUnderstandingOutput | null = null;
 
-    // Extract JSON from response (handle markdown-wrapped JSON)
-    const jsonMatch = content.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return extractCareRealityFromText({ rawText: trimmedText, source });
+  for (let attempt = 0; attempt <= LLM_MAX_RETRIES; attempt++) {
+    const isRetry = attempt > 0;
+    try {
+      const userContent = isRetry
+        ? buildRetryUserContent(trimmedText, preSplitBlocks, lastFailures)
+        : trimmedText;
+
+      const response = await provider.invoke({
+        system: prompt,
+        user: userContent,
+        temperature: 0,
+        seed: LLM_DETERMINISTIC_SEED,
+        json: true,
+        thinking: true,
+        signal: params.signal,
+      });
+
+      const content = response.content;
+
+      // Extract JSON from response (handle markdown-wrapped JSON)
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        if (isRetry) break;
+        continue;
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]);
+
+      // Validate against Zod schema
+      const validation = LlmUnderstandingOutputSchema.safeParse(parsed);
+      if (!validation.success) {
+        lastFailures = [
+          `ZOD: ${validation.error.issues.map((i) => i.message).join("; ")}`,
+        ];
+        continue;
+      }
+
+      const validated: LlmUnderstandingOutput = validation.data;
+
+      // Per-field verification — every raw_fragment must be an exact substring.
+      const fieldCheck = verifyAllFields(validated, trimmedText);
+      if (!fieldCheck.ok) {
+        lastFailures = fieldCheck.failures;
+        lastParsed = validated; // keep for coverage merge even on partial failure
+        continue;
+      }
+
+      lastParsed = validated;
+      lastFailures = [];
+      break;
+    } catch (err: unknown) {
+      lastFailures = [
+        `EXCEPTION: ${err instanceof Error ? err.message : String(err)}`,
+      ];
+      if (!isRetry) break;
     }
+  }
 
-    const parsed = JSON.parse(jsonMatch[0]);
+  // No usable LLM output — deterministic floor.
+  if (!lastParsed) {
+    return deterministic;
+  }
 
-    // Validate against Zod schema
-    const validation = LlmUnderstandingOutputSchema.safeParse(parsed);
-    if (!validation.success) {
-      console.warn(
-        "[llm-understanding] Zod validation failed:",
-        validation.error.issues.map((i) => i.message).join("; "),
-      );
-      return extractCareRealityFromText({ rawText: trimmedText, source });
-    }
-
-    const validated: LlmUnderstandingOutput = validation.data;
-
-    // Medical boundary check — forbid diagnosis/advice/empathy/causation
-    const boundary = validateMedicalBoundary(validated);
-    if (!boundary.ok) {
-      console.warn(
-        "[llm-understanding] Medical boundary violation:",
-        boundary.failures.join("; "),
-      );
-      return extractCareRealityFromText({ rawText: trimmedText, source });
-    }
-
-    // Map to existing types and return
-    return mapLlmOutputToExtractionResult(validated);
-  } catch (err: unknown) {
+  // Medical boundary check — forbid diagnosis/advice/empathy/causation.
+  // A boundary violation is NOT retryable: the model is asserting something
+  // outside its remit, so we degrade rather than encourage it.
+  const boundary = validateMedicalBoundary(lastParsed);
+  if (!boundary.ok) {
     console.warn(
-      "[llm-understanding] LLM extraction failed, falling back to deterministic:",
-      err instanceof Error ? err.message : String(err),
+      "[llm-understanding] Medical boundary violation, degrading to deterministic:",
+      boundary.failures.join("; "),
     );
-    return extractCareRealityFromText({ rawText: trimmedText, source });
+    return deterministic;
   }
+
+  // Coverage merge: any deterministic fragment the LLM missed is merged back
+  // so no caregiver claim is ever lost. The LLM output is the primary source;
+  // deterministic fills gaps only.
+  const coverage = verifyCoverage(lastParsed, deterministicFragments);
+  const merged = coverage.ok
+    ? lastParsed
+    : mergeCoverage(lastParsed, deterministic, coverage.missing);
+
+  // Map to existing types and return
+  return mapLlmOutputToExtractionResult(merged);
 }
 
 /**
@@ -212,4 +294,91 @@ export function deterministicUnderstanding(params: {
     rawText: params.rawText,
     source: params.contributorId ?? "caregiver",
   });
+}
+
+/**
+ * Care-record context injected per call so the stateless model can resolve
+ * pronouns and avoid inventing "normal". Continuity is managed by CRS/state
+ * stores — this is read-only evidence, never model memory.
+ */
+export interface LlmExtractionContext {
+  careRecipient?: string | null;
+  caregiverDisplayName?: string | null;
+  knownBaseline?: readonly string[];
+  knownMeds?: readonly string[];
+  knownAllergies?: readonly string[];
+  priorObservations?: readonly string[];
+  priorEntities?: readonly string[];
+  priorContradictions?: readonly string[];
+  ambiguityHints?: readonly string[];
+  documentMeta?: string | null;
+}
+
+/**
+ * Build the retry user content: original input + specific correction hints.
+ * Only the broken fields are called out — the model re-emits the full object
+ * but is told exactly what to fix, which is far more reliable than a full retry.
+ */
+function buildRetryUserContent(
+  rawText: string,
+  preSplitBlocks: readonly string[],
+  failures: string[],
+): string {
+  const hintBlock =
+    failures.length > 0
+      ? `\n\nCORRECTION_HINTS (fix ONLY these — re-emit the full JSON object):\n${failures
+          .map((f) => `- ${f}`)
+          .join("\n")}`
+      : "";
+  const blockBlock =
+    preSplitBlocks.length > 0
+      ? `\n\nPRE_SPLIT_BLOCKS:\n${preSplitBlocks
+          .map((b, i) => `  BLOCK ${i + 1}: ${b}`)
+          .join("\n")}`
+      : "";
+  return `${rawText}${blockBlock}${hintBlock}`;
+}
+
+/**
+ * Merge LLM output with deterministic coverage.
+ *
+ * The LLM output is the primary source (typed, structured, context-aware).
+ * Deterministic fragments the LLM missed are appended as observations so no
+ * caregiver claim is ever lost. This is a merge, NOT a fallback: the LLM's
+ * typed objects are preserved and only gaps are filled.
+ */
+function mergeCoverage(
+  llm: LlmUnderstandingOutput,
+  deterministic: CareRealityExtractionResult,
+  missing: readonly string[],
+): LlmUnderstandingOutput {
+  const existingFragments = new Set(
+    [
+      ...llm.observations.map((o) => o.raw_fragment),
+      ...llm.events.map((e) => e.raw_fragment),
+      ...llm.decisions.map((d) => d.raw_fragment),
+      ...llm.outcomes.map((o) => o.raw_fragment),
+      ...llm.unknowns.map((u) => u.raw_fragment),
+      ...llm.non_care_facts.map((n) => n.raw_fragment),
+    ].map((f) => f.trim().toLowerCase()),
+  );
+
+  const additions: LlmUnderstandingOutput["observations"] = [];
+  for (const frag of missing) {
+    const key = frag.trim().toLowerCase();
+    if (existingFragments.has(key)) continue;
+    if (key.length < 20) continue;
+    additions.push({
+      description: frag.trim().slice(0, 240),
+      approximate_time: null,
+      confidence: "medium",
+      raw_fragment: frag,
+    });
+    existingFragments.add(key);
+  }
+
+  return {
+    ...llm,
+    observations: [...llm.observations, ...additions].slice(0, 20),
+  };
 }

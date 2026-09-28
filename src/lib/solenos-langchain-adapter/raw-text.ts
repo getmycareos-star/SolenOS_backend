@@ -1,24 +1,42 @@
-/** Extract plain text from LangChain message content — no parsing or validation. */
+/**
+ * Extract plain text from LangChain message content — no parsing or validation.
+ *
+ * When Qwen3 hidden chain-of-thought is enabled, Ollama may emit the reasoning
+ * block either as a separate `thinking` field on the message or inline inside
+ * `content` wrapped in <thinking>...</thinking> tags. Both forms are stripped
+ * here so the reasoning block can never reach the typed JSON contract.
+ */
 export function extractRawLLMText(content: unknown): string {
   if (typeof content === "string") {
-    return content;
+    return stripThinkingBlock(content);
   }
 
   if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part) {
-          return String((part as { text: unknown }).text);
-        }
-        return "";
-      })
-      .join("");
+    return stripThinkingBlock(
+      content
+        .map((part) => {
+          if (typeof part === "string") return part;
+          if (part && typeof part === "object" && "text" in part) {
+            return String((part as { text: unknown }).text);
+          }
+          return "";
+        })
+        .join(""),
+    );
   }
 
   if (content == null) {
     return "";
   }
 
-  return String(content);
+  return stripThinkingBlock(String(content));
+}
+
+/** Remove any inline <thinking>...</thinking> reasoning block from model output. */
+function stripThinkingBlock(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/^\s*```(?:json)?\s*([\s\S]*?)\s*```\s*$/s, "$1")
+    .trim();
 }
