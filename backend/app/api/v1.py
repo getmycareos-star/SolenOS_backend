@@ -199,6 +199,22 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     return db_caregiver
 
 
+@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema])
+def list_caregivers(person_id: str, db: Session = Depends(get_db)):
+    """Everyone caring for this person.
+
+    The care circle view needs the list of people attributable on the record,
+    not just the one currently signed in. Ordered by creation so the list is
+    stable rather than reflecting insertion order incidentally.
+    """
+    return (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.person_id == person_id)
+        .order_by(CaregiverModel.created_at.asc())
+        .all()
+    )
+
+
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
     db_evidence = EvidenceModel(**evidence.model_dump())

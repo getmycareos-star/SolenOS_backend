@@ -438,6 +438,29 @@ class TestConfidenceFix:
         assert result["guard_verdict"] is not None
 
 
+class TestCaregiverListing:
+    def test_the_care_circle_can_list_the_people_on_the_record(self, db, caregiver, client):
+        """The care circle view needs attribution, not just the signed-in user."""
+        response = client.get("/api/v1/caregivers/{0}".format(caregiver.person_id))
+        assert response.status_code == 200
+        people = response.json()
+        assert len(people) == 1
+        assert people[0]["id"] == caregiver.id
+        assert people[0]["relationship"] == "daughter"
+
+    def test_caregivers_are_scoped_to_their_person(self, db, caregiver, client):
+        """One person's care circle must not leak another's."""
+        from app.models.care import Person
+
+        other = Person(id="p2", name="Someone else")
+        db.add(other)
+        db.commit()
+
+        response = client.get("/api/v1/caregivers/p2")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
 class TestCompanionEndpoint:
     def test_an_ungrounded_answer_is_reported_as_ungrounded(self, db, person, caregiver, client):
         """A client must be able to tell prose from a finding."""
