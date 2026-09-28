@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Tuple
 from dataclasses import dataclass
 
@@ -94,7 +94,7 @@ class ActionExtractionEngine:
 
     def extract(self, document_text: str, source_evidence_id: str, source_document_type: str = None, source_authority: str = "unknown", reference_date: datetime = None) -> List[ActionCandidate]:
         if reference_date is None:
-            reference_date = datetime.utcnow()
+            reference_date = datetime.now(timezone.utc)
 
         candidates = []
         sentences = self._split_sentences(document_text)

@@ -10,6 +10,33 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
 
+    # Local-only language model (Ollama). No cloud endpoint is configurable on
+    # purpose: caregiver data must never leave the machine it was entered on.
+    #
+    # Default is the smallest model that reliably loads on a modest machine.
+    # This is a deliberate choice rather than a shrug: the reasoning layer is
+    # assistive, every caller has a deterministic fallback, and the trust guard
+    # treats model output as untrusted until checked. A weaker model costs
+    # enrichment quality, never safety. Point this at a larger model with
+    # llm_model= once one loads in reasonable time.
+    llm_enabled: bool = True
+    llm_base_url: str = "http://127.0.0.1:11434"
+    llm_model: str = "qwen2.5-coder:1.5b"
+    llm_timeout_seconds: float = 45.0
+    llm_temperature: float = 0.1
+    llm_context_tokens: int = 8192
+    # Bounded output. A small local model will happily write 2000 tokens of
+    # padding, which on a modest machine is most of the wait, and a long answer
+    # is a long answer to audit.
+    llm_max_output_tokens: int = 900
+
+    # A local model is fast but never allowed to be the only thing standing
+    # between a hallucination and a caregiver. When reasoning is unavailable the
+    # deterministic engines must still answer, so failures open a circuit
+    # instead of retrying on every request.
+    llm_circuit_failure_threshold: int = 3
+    llm_circuit_reset_seconds: float = 120.0
+
     class Config:
         env_file = ".env"
 

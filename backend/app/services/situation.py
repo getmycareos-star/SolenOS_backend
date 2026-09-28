@@ -10,6 +10,11 @@ from app.services.prioritization import PrioritizationEngine
 from app.services.safety import SafetyEngine
 from app.services.action_extraction import ActionExtractionEngine
 from app.services.caregiver_intelligence import CaregiverIntelligenceService
+from app.services.source_pointer import (
+    enforce_source_pointer,
+    verify_source_pointer,
+)
+from app.services.source_pointer_store import record_downgrade
 from app.services.temporal_intelligence import create_temporal_fact
 from app.services.uncertainty import UncertaintyEngine
 from app.services.learning import LearningEngine, SavePipelineEvent
@@ -230,6 +235,44 @@ def _record_open_items(
     db.flush()
 
 
+def _enforce_claim_source_pointers(
+    claims: List,
+    original_text: str,
+    evidence_id: Optional[str],
+    warnings: List[str],
+) -> None:
+    """Apply source-pointer trust layer to extracted claims.
+
+    Each claim's source_span is verified to exist as an exact substring in the
+    original_text. Claims with evidence_status=confirmed|reported whose pointer
+    is missing or invalid are downgraded to 'unknown'. Downgrades are recorded
+    in the trust-layer log but claims are NOT deleted.
+    """
+    for claim in claims:
+        span = getattr(claim, "source_span", None) or getattr(claim, "text", "")
+        start = original_text.find(span) if span else -1
+        end = start + len(span) if start >= 0 else None
+
+        candidate = {
+            "id": f"claim_{id(claim)}",
+            "evidence_status": "reported",
+            "source_span": span,
+            "source_span_start_offset": start if start >= 0 else None,
+            "source_span_end_offset": end if start >= 0 else None,
+            "confidence": getattr(claim, "confidence", None),
+        }
+        updated, downgrade = enforce_source_pointer(candidate, original_text, evidence_id)
+
+        if not updated["source_span_verified"]:
+            setattr(claim, "confidence", 0.0)
+            if getattr(claim, "confidence", 0.0) == 0.0:
+                warnings.append(
+                    f"Claim source pointer unverified: '{span[:60]}...'"
+                )
+        if downgrade:
+            record_downgrade(downgrade)
+
+
 def process_situation_input(db: Session, payload: SituationInput) -> SituationResponse:
     caregiver = db.query(Caregiver).filter(Caregiver.id == payload.caregiver_id).first()
     if not caregiver:
@@ -367,6 +410,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         safety_engine = SafetyEngine(db)
         claim_extractor = ClaimExtractionEngine()
         claims = claim_extractor.extract(combined_text, evidence_ids[0])
+
+        _enforce_claim_source_pointers(claims, combined_text, evidence_ids[0], warnings)
 
         evidence_refs = []
         for ev_id in evidence_ids:

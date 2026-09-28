@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from sqlalchemy.orm import Session
 from app.models.memory import (
@@ -14,7 +14,7 @@ class SavePipelineEvent:
         self.step = step
         self.person_id = person_id
         self.detail = detail
-        self.timestamp = datetime.utcnow().isoformat()
+        self.timestamp = datetime.now(timezone.utc).isoformat()
 
 
 class LearningEngine:
@@ -22,7 +22,14 @@ class LearningEngine:
         self.db = db
 
     def log_pipeline_event(self, event: SavePipelineEvent):
-        pass
+        le = LearningEventModel(
+            person_id=event.person_id,
+            event_type=f"pipeline:{event.step}",
+            detail=event.detail,
+            source_type="pipeline",
+        )
+        self.db.add(le)
+        self.db.commit()
 
     def record_learning_event(
         self,
@@ -45,10 +52,38 @@ class LearningEngine:
         self.db.commit()
 
     def after_save(self, person_id: str):
+        self.log_pipeline_event(
+            SavePipelineEvent(
+                step="evaluate_understanding",
+                person_id=person_id,
+                detail=f"Ran post-save evaluation for person {person_id}",
+            )
+        )
         self.evaluate_understanding(person_id)
 
     def evaluate_understanding(self, person_id: str):
-        pass
+        from app.models.care import CareEvent
+        from datetime import datetime, timezone, timedelta
+
+        recent = (
+            self.db.query(CareEvent)
+            .filter(
+                CareEvent.person_id == person_id,
+                CareEvent.recorded_at
+                >= datetime.now(timezone.utc) - timedelta(days=14),
+            )
+            .all()
+        )
+        if len(recent) >= 3:
+            unique_types = {e.event_type for e in recent}
+            self.record_learning_event(
+                person_id,
+                "pattern:repeated_observation",
+                f"{len(recent)} events in 14 days across {len(unique_types)} type(s)",
+                "evaluation",
+                None,
+                None,
+            )
 
     def apply_correction(self, correction):
         target_type = correction.target_type
@@ -62,7 +97,7 @@ class LearningEngine:
             if insight:
                 old_description = insight.description
                 insight.description = corrected_text
-                insight.updated_at = datetime.utcnow()
+                insight.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
                 self._log_correction_memory(person_id, target_type, target_id, old_description, corrected_text, reason)
                 self._invalidate_derived_state(person_id, insight.evidence_ids or [])
@@ -77,7 +112,7 @@ class LearningEngine:
                     care_event.description = corrected_text
                 if care_event.title == (correction.original_text or "")[:200] or not care_event.title or care_event.title == "Document observation":
                     care_event.title = (corrected_text or "")[:200]
-                care_event.updated_at = datetime.utcnow()
+                care_event.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
                 self._log_correction_memory(person_id, target_type, target_id, old_description, corrected_text, reason)
                 self._recompute_derived_state(person_id, care_event)
@@ -87,7 +122,7 @@ class LearningEngine:
             if evidence:
                 old_text = evidence.source_text
                 evidence.source_text = corrected_text
-                evidence.updated_at = datetime.utcnow()
+                evidence.updated_at = datetime.now(timezone.utc)
                 self.db.commit()
                 self._log_correction_memory(person_id, target_type, target_id, old_text, corrected_text, reason)
                 self._recompute_derived_state_for_evidence(person_id, evidence, old_text)
@@ -112,7 +147,7 @@ class LearningEngine:
                     "original": original,
                     "corrected": corrected,
                     "reason": reason,
-                    "corrected_at": datetime.utcnow().isoformat(),
+                    "corrected_at": datetime.now(timezone.utc).isoformat(),
                 }
             ],
             confidence=1.0,
@@ -216,7 +251,7 @@ class LearningEngine:
                 {
                     "detail": detail,
                     "caregiver_id": caregiver_id,
-                    "recorded_at": datetime.utcnow().isoformat(),
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
                 }
             ],
             confidence=1.0,

@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import get_settings
 
@@ -24,8 +24,34 @@ import app.models.time_location
 import app.models.prioritization
 import app.models.meaning
 import app.models.knowledge_revision
+import app.models.llm
+import app.models.person_context
+import app.models.continuity
+import app.models.what_matters
+import app.models.trajectory
+import app.models.behavior
+import app.models.contradiction
+import app.models.care_planning
+import app.models.follow_up
+import app.models.conversation
+import app.models.daily_capture
 
-Base.metadata.create_all(bind=engine)
+_initialized = False
+
+
+def init_db():
+    """Create tables and backfill missing columns. Safe to call repeatedly.
+
+    Called from the FastAPI startup event so importing this module (which
+    happens at app-construction time) no longer triggers a synchronous
+    SQLite round-trip.
+    """
+    global _initialized
+    if _initialized:
+        return
+    Base.metadata.create_all(bind=engine)
+
+    _initialized = True
 
 
 def get_db():
@@ -61,7 +87,7 @@ def ensure_database_schema(bind=None):
         dialect = target.dialect
     except Exception:
         return
-    
+
     from sqlalchemy import text as _text
     new_tables = [
         (name, table) for name, table in Base.metadata.tables.items()
@@ -72,7 +98,7 @@ def ensure_database_schema(bind=None):
             Base.metadata.create_all(bind=target)
         except Exception:
             pass
-    
+
     for table_name, table in Base.metadata.tables.items():
         if not insp.has_table(table_name):
             continue  # create_all already handles table creation; this guard adds columns only
@@ -98,8 +124,6 @@ def ensure_database_schema(bind=None):
                 with target.begin() as conn:
                     conn.execute(stmt)
             except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
                 pass
 
 

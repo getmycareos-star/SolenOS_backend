@@ -272,14 +272,22 @@ def test_upload_creates_care_record_entry():
         teardown_db()
 
 
-def test_frontend_served():
+def test_root_identifies_the_api_and_points_at_the_frontend():
+    """The backend is API-only.
+
+    The interface is the separate frontend app, so the backend does not serve
+    a page. This asserts the root says what the service is and points at the
+    real interface, rather than resurrecting a placeholder page that would
+    shadow the genuine one.
+    """
     setup_db()
     try:
         client = TestClient(app)
         response = client.get("/")
         assert response.status_code == 200
-        assert "text/html" in response.headers.get("content-type", "")
-        assert "upload" in response.text.lower()
-        assert "/api/files/upload" in response.text
+        body = response.json()
+        assert body["role"] == "api"
+        assert body["docs"] == "/docs"
+        assert "5173" in body["interface"]
     finally:
         teardown_db()
