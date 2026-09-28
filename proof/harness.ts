@@ -28,9 +28,6 @@ import {
 } from "../src/lib/care-situation-understanding/llm-schema";
 import type { CareRealityExtractionResult } from "../src/lib/care-reality-extraction/types";
 
-process.env.OLLAMA_BASE_URL = "http://127.0.0.1:11434";
-process.env.OLLAMA_MODEL = "qwen3-coder:30b";
-
 const HARD_CASE = [
   "Sarah saw Alex this morning at 9am with a blood pressure of 90/55 and clear",
   "confusion. Med list shows lorazepam 1mg and metoprolol 50mg — these are",
@@ -142,7 +139,7 @@ async function main() {
   console.log("\nmodel name      :", getLlmModel());
   console.log("base url        :", getLlmBaseUrl());
   pass("model ident == qwen3-coder:30b", getLlmModel() === "qwen3-coder:30b");
-  pass("endpoint == local Ollama", getLlmBaseUrl() === "http://127.0.0.1:11434");
+  pass("endpoint == local Ollama", getLlmBaseUrl() === `http://127.0.0.1:${stubPort}`);
 
   stubMode = "valid";
   const avail = await provider.isAvailable();
