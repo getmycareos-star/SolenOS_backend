@@ -312,6 +312,68 @@ export interface LlmExtractionContext {
   priorContradictions?: readonly string[];
   ambiguityHints?: readonly string[];
   documentMeta?: string | null;
+  /**
+   * Recurring care patterns detected by the compounding care-reality memory
+   * index (reality-signature recurrence, not quote matching). Read-only
+   * evidence — the model uses it to recognise "this again" and to anchor
+   * "what is normal", never to invent new facts.
+   */
+  recurringPatterns?: readonly string[];
+  /**
+   * Open unknowns held by the index across captures. The model must NOT
+   * resolve these — it surfaces them as unknowns and moves on.
+   */
+  heldOpenUnknowns?: readonly string[];
+}
+
+/**
+ * Compose the per-call LLM extraction context from the compounding
+ * care-reality memory index and the baseline profile.
+ *
+ * This is the 100000x lever: instead of the stateless model re-deriving
+ * everything from one note, it is handed the already-understood care record
+ * (typed observations, baseline, recurring patterns, held contradictions)
+ * and asked only to surface the delta. Continuity is managed by the index —
+ * this is read-only evidence, never model memory.
+ *
+ * Never includes caregiver-facing summaries, 5-field compression, or clinical
+ * judgments. Those stay in their own deterministic engines.
+ */
+export function composeLlmContextFromIndex(params: {
+  careKey: string;
+  careRecipientId?: string | null;
+  baselineFacts?: readonly string[];
+  recurringPatterns?: readonly string[];
+  heldOpenUnknowns?: readonly string[];
+  priorObservations?: readonly string[];
+  priorContradictions?: readonly string[];
+  ambiguityHints?: readonly string[];
+  documentMeta?: string | null;
+}): LlmExtractionContext {
+  const ctx: LlmExtractionContext = {};
+
+  if (params.careRecipientId) ctx.careRecipient = params.careRecipientId;
+  if (params.baselineFacts && params.baselineFacts.length > 0) {
+    ctx.knownBaseline = params.baselineFacts.slice(0, 8);
+  }
+  if (params.recurringPatterns && params.recurringPatterns.length > 0) {
+    ctx.recurringPatterns = params.recurringPatterns.slice(0, 6);
+  }
+  if (params.heldOpenUnknowns && params.heldOpenUnknowns.length > 0) {
+    ctx.heldOpenUnknowns = params.heldOpenUnknowns.slice(0, 6);
+  }
+  if (params.priorObservations && params.priorObservations.length > 0) {
+    ctx.priorObservations = params.priorObservations.slice(0, 12);
+  }
+  if (params.priorContradictions && params.priorContradictions.length > 0) {
+    ctx.priorContradictions = params.priorContradictions.slice(0, 6);
+  }
+  if (params.ambiguityHints && params.ambiguityHints.length > 0) {
+    ctx.ambiguityHints = params.ambiguityHints;
+  }
+  if (params.documentMeta) ctx.documentMeta = params.documentMeta;
+
+  return ctx;
 }
 
 /**

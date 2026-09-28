@@ -10,6 +10,12 @@ import {
 import { buildSituationUnderstanding } from "./parse-situation";
 import { projectLlmUnderstanding, type LlmExtractionContext } from "../care-situation-understanding";
 import {
+  listPrimaryCareRealityMemory,
+} from "../care-reality-intelligence";
+import {
+  getBaselineProfile,
+} from "../care-reality-engine";
+import {
   caregiverLineFromDareUncertain,
   caregiverLineFromUnreadableSection,
   sanitizeCaregiverFacingLines,
@@ -2211,14 +2217,18 @@ function finalizeSituationResponse(
 }
 
 /**
- * Build the per-call LLM extraction context from pipeline state.
+ * Build the per-call LLM extraction context from the compounding care-reality
+ * memory index and the baseline profile.
  *
- * Injects care-record evidence so the stateless model can resolve pronouns
- * and avoid inventing "normal". This is read-only evidence — continuity is
- * managed by CRS/state stores, never by the model.
+ * This is the 100000x lever: instead of the stateless model re-deriving
+ * everything from one note, it is handed the already-understood care record —
+ * typed observations, baseline facts, recurring patterns, held contradictions,
+ * held open unknowns — and asked only to surface the delta. Continuity is
+ * managed by the index; this is read-only evidence, never model memory.
  *
- * Pulls from the care context root (identity, prior observations) and the
- * current events being created. Never includes caregiver-facing summaries,
+ * Pulls from the care context root (identity, prior observations), the
+ * compounding care-reality memory index (recurring patterns, held unknowns),
+ * and the baseline profile. Never includes caregiver-facing summaries,
  * 5-field compression, or clinical judgments.
  */
 function buildLlmContextFromPipeline(params: {
@@ -2241,11 +2251,34 @@ function buildLlmContextFromPipeline(params: {
     ? `document upload, ${input.documents.length} file(s)`
     : undefined;
 
+  // Pull the compounding index: recurring patterns and held open unknowns.
+  // These let the model recognise "this again" and anchor "what is normal"
+  // without inventing new facts.
+  const careKey = resolveDurableCareKey(careRecipientId);
+  const memory = listPrimaryCareRealityMemory(careKey);
+  const recurringPatterns = memory
+    .filter((o) => o.recurrence_count >= 2 && o.priority <= 2)
+    .slice(0, 6)
+    .map((o) => `${o.description} (${o.recurrence_count}×, last ${o.last_seen_at})`);
+  const heldOpenUnknowns = memory
+    .filter((o) => o.type === "unknown" && o.status === "unknown")
+    .slice(0, 6)
+    .map((o) => o.description);
+
+  // Baseline facts from the baseline profile (domain-anchored, not phrase templates).
+  const baseline = getBaselineProfile(careRecipientId);
+  const knownBaseline = baseline?.entries
+    .slice(0, 8)
+    .map((e) => `${e.domain}: ${e.summary} (${e.confidence})`);
+
   return {
     careRecipient: careRecipientId,
     caregiverDisplayName: contributorId,
     priorObservations: priorObservations.length > 0 ? priorObservations : undefined,
     knownMeds,
+    knownBaseline: knownBaseline && knownBaseline.length > 0 ? knownBaseline : undefined,
+    recurringPatterns: recurringPatterns.length > 0 ? recurringPatterns : undefined,
+    heldOpenUnknowns: heldOpenUnknowns.length > 0 ? heldOpenUnknowns : undefined,
     ambiguityHints,
     documentMeta,
   };
