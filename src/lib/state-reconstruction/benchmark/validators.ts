@@ -9,9 +9,9 @@ import type {
   Claim,
   Contradiction,
   ReconstructionResult,
-} from "./types";
+} from "../types";
 
-import { FAILURE_TAXONOMY } from "./contract-constants";
+import { FAILURE_TAXONOMY } from "../contract-constants";
 
 /**
  * Validate a reconstructed care state against all failure modes
@@ -297,9 +297,10 @@ function hasCognitiveStateError(careState: CareState): boolean {
   if (!cognitive) return false;
 
   // Cognitive state should not be just diagnosis
-  return cognitive.current_value?.toLowerCase().includes("dementia") &&
-    !cognitive.current_value.toLowerCase().includes("memory") &&
-    !cognitive.current_value.toLowerCase().includes("orientation");
+  const cognitiveValue = cognitive.current_value?.toLowerCase() ?? "";
+  return cognitiveValue.includes("dementia") &&
+    !cognitiveValue.includes("memory") &&
+    !cognitiveValue.includes("orientation");
 }
 
 /**
@@ -475,8 +476,8 @@ function hasDependencyFailure(careState: CareState): boolean {
   const medication = careState.domains.find((d) => d.domain === "medication");
 
   if (cognitive && medication) {
-    const cognitiveImpaired = cognitive.current_value?.includes("impair") || cognitive.current_value?.includes("confus");
-    const adherenceCertain = medication.current_value?.includes("adherent") || medication.current_value?.includes("taken as prescribed");
+    const cognitiveImpaired = Boolean(cognitive.current_value?.includes("impair") || cognitive.current_value?.includes("confus"));
+    const adherenceCertain = Boolean(medication.current_value?.includes("adherent") || medication.current_value?.includes("taken as prescribed"));
 
     return cognitiveImpaired && adherenceCertain; // Cognitive impairment but perfect adherence claimed
   }

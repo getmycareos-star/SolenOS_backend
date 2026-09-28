@@ -21,7 +21,31 @@ import type {
   ReconstructionConfidence,
   FailureTaxonomy,
   BenchmarkRequirement,
+  StateReconstructionStage,
 } from "./contract-constants";
+
+// Re-export the contract-constant types so consumers can import them from
+// "./types" (the canonical entry point for this module's type surface).
+export type {
+  CareStateDomain,
+  PhysicalSubdomain,
+  CognitiveSubdomain,
+  FunctionalSubdomain,
+  MedicationSubdomain,
+  CareNetworkSubdomain,
+  OperationalSubdomain,
+  ClaimStatus,
+  EvidenceWeight,
+  UncertaintyLevel,
+  ContradictionType,
+  SupersessionRelation,
+  ContextDimension,
+  StateTemporalStatus,
+  ReconstructionConfidence,
+  FailureTaxonomy,
+  BenchmarkRequirement,
+  StateReconstructionStage,
+};
 
 /** Represents a single claim extracted from evidence */
 export type Claim = {
@@ -115,7 +139,7 @@ export type CareState = {
   domains: DomainState[];
   open_loops: OpenLoop[];
   overall_confidence: ReconstructionConfidence;
-  traceability: TraceabilityMap;
+  traceability: TraceabilityMap[];
   failures: FailureTaxonomy[];
 };
 

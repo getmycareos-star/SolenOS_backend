@@ -13,20 +13,20 @@ import type {
   Contradiction,
   OpenLoop,
   SupersessionChain,
-} from "./types";
+} from "../types";
 
 import {
   BENCHMARK_REQUIREMENTS,
   FAILURE_TAXONOMY,
   CARE_STATE_DOMAINS,
-} from "./contract-constants";
+} from "../contract-constants";
 
 import {
   stateReconstructionEngine,
   reconstructCareState,
-} from "./engine";
+} from "../engine";
 
-import { CanonicalCareEvent } from "../situation-entry/types";
+import { CanonicalCareEvent } from "../../situation-entry/types";
 
 /**
  * Benchmark test case
@@ -312,7 +312,7 @@ function createContextPreservationTest(): BenchmarkCase {
         (indoorValue && stairsValue && indoorValue !== stairsValue);
 
       return {
-        pass: hasVariance && mobility.contextual_values.length >= 2,
+        pass: Boolean(hasVariance && mobility.contextual_values.length >= 2),
         details: `Indoor: ${indoorValue}, Outdoor: ${outdoorValue}, Stairs: ${stairsValue}, Contexts: ${mobility.contextual_values.length}`,
       };
     },
@@ -365,13 +365,13 @@ function createCapabilityVsDiagnosisTest(): BenchmarkCase {
       if (!cognitive || !functional) return { pass: false, details: "Domains not found" };
 
       // Should NOT just say "dementia" - should have specific capability observations
-      const cognitiveSpecific = cognitive.current_value &&
-        !cognitive.current_value.toLowerCase().includes("dementia") &&
-        (cognitive.current_value.includes("memory") || cognitive.current_value.includes("orientation"));
+      const cognitiveSpecific = Boolean(cognitive.current_value) &&
+        !cognitive.current_value!.toLowerCase().includes("dementia") &&
+        (cognitive.current_value!.includes("memory") || cognitive.current_value!.includes("orientation"));
 
-      const functionalSpecific = functional.current_value &&
-        (functional.current_value.includes("dress") || functional.current_value.includes("feed") ||
-         functional.current_value.includes("bathe") || functional.current_value.includes("independ"));
+      const functionalSpecific = Boolean(functional.current_value) &&
+        (functional.current_value!.includes("dress") || functional.current_value!.includes("feed") ||
+         functional.current_value!.includes("bathe") || functional.current_value!.includes("independ"));
 
       // No domain should be just the diagnosis
       const noDiagnosisOnly = care_state.domains.every((d) =>
@@ -379,7 +379,7 @@ function createCapabilityVsDiagnosisTest(): BenchmarkCase {
       );
 
       return {
-        pass: cognitiveSpecific && functionalSpecific && noDiagnosisOnly,
+        pass: Boolean(cognitiveSpecific && functionalSpecific && noDiagnosisOnly),
         details: `Cognitive: ${cognitive.current_value}, Functional: ${functional.current_value}, No diagnosis-only: ${noDiagnosisOnly}`,
       };
     },
@@ -498,12 +498,12 @@ function createImprovementPreservationTest(): BenchmarkCase {
       const trajectory = mobility.trajectory;
       const hasDecline = trajectory.some((t) => t.value.includes("walker") || t.value.includes("hospital"));
       const hasImprovement = trajectory.some((t) => t.value.includes("better") || t.value.includes("improv"));
-      const currentReflectsImprovement = mobility.current_value?.includes("improv") ||
+      const currentReflectsImprovement = Boolean(mobility.current_value?.includes("improv") ||
         mobility.current_value?.includes("better") ||
-        (mobility.current_value?.includes("independent") && mobility.current_value?.includes("supervision"));
+        (mobility.current_value?.includes("independent") && mobility.current_value?.includes("supervision")));
 
       return {
-        pass: hasDecline && hasImprovement && currentReflectsImprovement,
+        pass: Boolean(hasDecline && hasImprovement && currentReflectsImprovement),
         details: `Has decline: ${hasDecline}, Has improvement: ${hasImprovement}, Current reflects: ${currentReflectsImprovement}`,
       };
     },
@@ -785,7 +785,7 @@ function createEvent(
         extracted_fact: { extraction: "medium", user_confirmed: false },
         event_time: { extraction: "high", user_confirmed: false },
       },
-      sources: ["caregiver_observation"],
+      sources: ["validated_document"],
       superseded_by_id: null,
       supersedes_id: null,
       original_extraction: null,
@@ -793,12 +793,15 @@ function createEvent(
       audit_trail_ids: [],
     },
     priority: {
-      score: 50,
-      tier: "routine",
-      factors: { recency: 0.5, clinical: 0.5, uncertainty: 0.5, caregiver: 0.5, dependency: 0.5 },
-      computed_at: new Date().toISOString(),
+      urgency: 30,
+      uncertainty: 70,
+      dependency_count: 1,
+      recency_days: 0,
+      priority_score: 50,
+      tier: "BACKGROUND",
+      attention_status: "active",
     },
-    source_attribution: { caregiver_id: "cg1", source_type: source, confidence: 0.8 },
+    source_attribution: { caregiver_id: "cg1", care_recipient_id: "person_123", source_type: "direct_observation", observed_at: new Date(date).toISOString(), ingestion_context: null },
   };
 }
 

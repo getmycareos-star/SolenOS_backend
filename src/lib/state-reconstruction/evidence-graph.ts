@@ -3,6 +3,16 @@
  * SoT: docs/02-product/solenos-state-reconstruction.md
  */
 
+import {
+  CONTEXT_DIMENSIONS,
+  PHYSICAL_SUBDOMAINS,
+  COGNITIVE_SUBDOMAINS,
+  FUNCTIONAL_SUBDOMAINS,
+  MEDICATION_SUBDOMAINS,
+  CARE_NETWORK_SUBDOMAINS,
+  OPERATIONAL_SUBDOMAINS,
+} from "./contract-constants";
+
 import type {
   CareStateDomain,
   PhysicalSubdomain,
@@ -31,7 +41,6 @@ import type {
 } from "./types";
 
 import { CanonicalCareEvent } from "../situation-entry/types";
-import { CONTEXT_DIMENSIONS } from "./contract-constants";
 
 const ENTITY_TYPE_KEYWORDS: Record<string, ResolvedEntity["type"]> = {
   medication: "medication",
@@ -167,7 +176,7 @@ export type DomainDefinition = {
   domain: CareStateDomain;
   subdomains: string[];
   keywords: string[];
-  context_dimensions: ContextDimension[];
+  context_dimensions: string[];
   evidence_weight_default: EvidenceWeight;
 };
 

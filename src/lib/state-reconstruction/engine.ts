@@ -18,6 +18,8 @@ import type {
   StateChangeReport,
   SupersessionChain,
   ContradictionSet,
+  ReconstructionConfidence,
+  FailureTaxonomy,
 } from "./types";
 
 import { STATE_RECONSTRUCTION_STAGES, CARE_STATE_DOMAINS } from "./contract-constants";
@@ -242,13 +244,14 @@ export class StateReconstructionEngine {
       }
     }
 
-    // From preserved contradictions
+// From preserved contradictions
     for (const cs of contradictionSets) {
       if (cs.preserved) {
+        const firstClaim = cs.claims[0] ? claims.find((c) => c.id === cs.claims[0]) : undefined;
         openLoops.push({
           id: `openloop_contradiction_${cs.id}`,
-          domain: cs.claims[0] ? (claims.find((c) => c.id === cs.claims[0])?.domain || "unknown") : "unknown",
-          subdomain: cs.claims[0] ? (claims.find((c) => c.id === cs.claims[0])?.subdomain || "unknown") : "unknown",
+          domain: firstClaim?.domain ?? "operational",
+          subdomain: firstClaim?.subdomain ?? "coordination_state",
           question: `Contradiction between sources not resolved: ${cs.type}`,
           why_it_matters: `Conflicting information affects care decisions`,
           related_claim_ids: cs.claims,
@@ -282,7 +285,7 @@ export class StateReconstructionEngine {
   /**
    * Calculate overall confidence
    */
-  private calculateOverallConfidence(domainStates: DomainState[]): import("./contract-constants").ReconstructionConfidence {
+  private calculateOverallConfidence(domainStates: DomainState[]): ReconstructionConfidence {
     const confidences = domainStates.map((d) => d.confidence);
     const order = {
       well_supported: 4,
@@ -309,8 +312,8 @@ export class StateReconstructionEngine {
     claims: Claim[],
     contradictions: Contradiction[],
     supersessionChains: SupersessionChain[]
-  ): import("./contract-constants").FailureTaxonomy[] {
-    const failures: import("./contract-constants").FailureTaxonomy[] = [];
+  ): FailureTaxonomy[] {
+    const failures: FailureTaxonomy[] = [];
 
     // Check for snapshot-only reasoning (no historical trajectory)
     const hasTrajectory = domainStates.some((d) => d.trajectory.length > 1);

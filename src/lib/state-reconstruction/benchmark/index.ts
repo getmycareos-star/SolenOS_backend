@@ -16,7 +16,7 @@ export {
   formatValidationReport,
 } from "./validators";
 
-export { BENCHMARK_REQUIREMENTS, FAILURE_TAXONOMY } from "./contract-constants";
+export { BENCHMARK_REQUIREMENTS, FAILURE_TAXONOMY } from "../contract-constants";
 
 /**
  * Run full benchmark and validation

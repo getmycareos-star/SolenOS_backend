@@ -11,7 +11,7 @@ import type {
   Contradiction,
   OpenLoop,
   TraceabilityMap,
-} from "./types";
+} from "../types";
 
 import {
   PHYSICAL_SUBDOMAINS,
@@ -20,10 +20,10 @@ import {
   MEDICATION_SUBDOMAINS,
   CARE_NETWORK_SUBDOMAINS,
   OPERATIONAL_SUBDOMAINS,
-} from "./contract-constants";
+} from "../contract-constants";
 
-import { propagateUncertainty } from "./uncertainty";
-import { extractContextualStates, mergeContextualStates, hasContextVariance } from "./context";
+import { propagateUncertainty } from "../uncertainty";
+import { extractContextualStates, mergeContextualStates, hasContextVariance, formatContextualState } from "../context";
 
 /**
  * Base domain reconstructor interface
