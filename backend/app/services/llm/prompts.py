@@ -330,9 +330,9 @@ Never break character to mention that you are an AI. Never promise anything you 
     + """
 Reply with a single JSON object and nothing else.
 
-- "reply": the text to show the caregiver. Short, natural, spoken-language. No bullet points, no headers, no markdown.
+- "reply": the text to show the caregiver. Short, natural, spoken-language. No bullet points, no headers, no markdown. When the evidence is given, name the actual things in it - if the record says Donepezil 10mg, say Donepezil 10mg. Never replace a specific name with a vague description of it.
 - "stage": the stage you judged this turn to be, one of in_care_context, drifting, out_of_care_context, returning.
-- "grounded_claims": array of evidence ids, only if you stated something about the person's care. Otherwise [].
+- "grounded_claims": copy the evidence ids you actually used, exactly as they appear in the "evidence" block, character for character. This is not optional: if your reply states anything about the person's care, list every id you drew it from. If you did not use the evidence, return []. A reply that cites nothing is treated as ungrounded and will be discarded, so an accurate answer with no citation is thrown away exactly like a fabricated one.
 - "possible_context": null unless the reply itself asserted something about the person. If it did, what is still unknown about it.
 - "confidence": null unless you cited evidence. Do not invent a number.
 - "safety_note": non-null only if the caregiver appears to be describing an emergency, and then a short instruction to contact emergency services.

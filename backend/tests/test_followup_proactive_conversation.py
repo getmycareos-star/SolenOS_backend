@@ -372,7 +372,11 @@ class TestConversationSafety:
         db.commit()
         assert "stop the medication" not in result["reply"].lower()
         assert result["reply"]
-        assert "could not give you an answer" in result["reply"]
+        # A rejected reply is a model failure, not a gap in the record, and the
+        # wording says so. Telling a caregiver their mother's record is empty
+        # because a local process misbehaved would be both alarming and false.
+        assert "could not" in result["reply"].lower()
+        assert "record" in result["reply"].lower()
 
     def test_out_of_context_pulls_no_evidence_in(self, db, person, evidence):
         evidence("e1", "She slept badly.")

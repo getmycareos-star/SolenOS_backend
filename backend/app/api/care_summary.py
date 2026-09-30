@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
@@ -14,6 +14,8 @@ from app.services.care_common import utc_now
 from app.services.person_model import PersonModelEngine
 from app.services.meaning import MeaningEngine
 from app.services.behavior import BehaviorEngine
+from app.services.care_summary import CareSummaryBuilder
+from app.services.care_summary_pdf import render_summary_pdf
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -222,3 +224,49 @@ def get_care_summary(person_id: str, include_evidence: bool = False, db: Session
     }
 
     return {"ok": True, "person_id": person_id, "summary": summary}
+
+
+# ----------------------------------------------------------------------
+# Living Care Summary export
+# ----------------------------------------------------------------------
+
+export_router = APIRouter(prefix="/care-summary", tags=["care-summary"])
+
+
+@export_router.get("/{person_id}/json")
+def export_json(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
+    """The structured record, for another system or a GP portal."""
+    try:
+        return CareSummaryBuilder(db).build(person_id, window_days=window_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@export_router.get("/{person_id}/pdf")
+def export_pdf(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
+    """One-tap PDF for an appointment.
+
+    Served as an attachment rather than rendered in a page, because a clinician
+    wants a document they can keep, not a screen they have to read on a phone in
+    a waiting room.
+    """
+    try:
+        summary = CareSummaryBuilder(db).build(person_id, window_days=window_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    try:
+        pdf_bytes = render_summary_pdf(summary)
+    except Exception as exc:  # pragma: no cover - reportlab layout failure
+        raise HTTPException(status_code=500, detail=f"could not render the summary: {exc}")
+
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in "-_" else "-" for ch in (summary["person"]["name"] or "person")
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="care-summary-{}.pdf"'.format(safe_name)
+        },
+    )

@@ -513,12 +513,18 @@ def _fallback_reply(original: Optional[str], stage: Optional[ConversationStage] 
     """Something honest to say when there is no usable drafted reply.
 
     Never an apology for being a system, never a promise, and never a reassurance.
+
+    The wording distinguishes "the local model did not answer" from "the record
+    has nothing". Those are completely different situations for a caregiver, and
+    collapsing them into one sentence made a system outage look like a gap in the
+    record - which is the more alarming of the two and the one that was false.
     """
-    return (
-        "I could not give you an answer to that just now. Nothing has been added to the record."
-        if stage in (None, ConversationStage.IN_CARE_CONTEXT, ConversationStage.RETURNING)
-        else "I could not give you an answer to that just now."
-    )
+    if stage in (None, ConversationStage.IN_CARE_CONTEXT, ConversationStage.RETURNING):
+        return (
+            "I could not reach my local reasoning just now, so I have not answered this. "
+            "Nothing has been added to the record."
+        )
+    return "I could not give you an answer to that just now."
 
 
 def _to_dict(result: LLMReasoningResult) -> Dict[str, Any]:

@@ -39,6 +39,30 @@ class CompanionAnswer(BaseModel):
     grounded: bool
     guard_verdict: Optional[str] = None
     session_id: Optional[str] = None
+    # True when the answer is absent because the local model did not respond,
+    # rather than because the record does not support one. Without this the two
+    # are indistinguishable, and a caregiver reads an outage as a gap in the
+    # record - the more alarming of the two, and the one that is wrong.
+    unavailable: bool = False
+
+
+def _to_answer(person_id: str, result: dict) -> CompanionAnswer:
+    evidence_ids = result.get("evidence_ids") or []
+    # The engine reports a model outage as verdict "unavailable" and leaves no
+    # citations. Anything else with no citation is a genuine refusal.
+    unavailable = result.get("guard_verdict") == "unavailable" and not result.get("reasoned_locally")
+    reply = result.get("reply") or ""
+    return CompanionAnswer(
+        person_id=person_id,
+        answer=reply or NO_EVIDENCE_REPLY,
+        evidence_ids=list(evidence_ids),
+        confidence=result.get("confidence"),
+        possible_context=result.get("possible_context"),
+        grounded=bool(evidence_ids),
+        guard_verdict=result.get("guard_verdict"),
+        session_id=result.get("session_id"),
+        unavailable=unavailable,
+    )
 
 
 def get_engine(db: Session = Depends(get_db)) -> ConversationEngine:
@@ -68,20 +92,7 @@ def query(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    evidence_ids = result.get("evidence_ids") or []
-    return CompanionAnswer(
-        person_id=payload.person_id,
-        answer=result.get("reply") or NO_EVIDENCE_REPLY,
-        evidence_ids=list(evidence_ids),
-        confidence=result.get("confidence"),
-        possible_context=result.get("possible_context"),
-        # A reply with no surviving citation is not an answer, whatever it says.
-        # The guard already stripped the unsupported parts; this states the
-        # outcome so a client cannot mistake prose for a finding.
-        grounded=bool(evidence_ids),
-        guard_verdict=result.get("guard_verdict"),
-        session_id=result.get("session_id"),
-    )
+    return _to_answer(payload.person_id, result)
 
 
 @router.post("/conversation", response_model=CompanionAnswer)
@@ -109,14 +120,4 @@ def conversation(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    evidence_ids = result.get("evidence_ids") or []
-    return CompanionAnswer(
-        person_id=payload.person_id,
-        answer=result.get("reply") or NO_EVIDENCE_REPLY,
-        evidence_ids=list(evidence_ids),
-        confidence=result.get("confidence"),
-        possible_context=result.get("possible_context"),
-        grounded=bool(evidence_ids),
-        guard_verdict=result.get("guard_verdict"),
-        session_id=result.get("session_id"),
-    )
+    return _to_answer(payload.person_id, result)

@@ -178,7 +178,18 @@ class LocalReasoningEngine:
             allow_medical_action=allow_medical_action,
             require_evidence=require_evidence,
         )
-        guarded = guard.guard_insight(parsed)
+
+        # The conversation prompt asks for a different shape than every other
+        # task: "reply" plus "grounded_claims" rather than "summary" plus
+        # "evidence_ids". Guarding a conversational reply as an insight rejected
+        # every one of them with "model returned no summary", which the caller
+        # cannot distinguish from the model being unavailable, so the product
+        # silently answered nothing at all. The guard is chosen to match the
+        # shape the prompt actually asked for.
+        if task_value == LLMTask.CONVERSATION_REPLY.value:
+            guarded = guard.guard_conversation(parsed)
+        else:
+            guarded = guard.guard_insight(parsed)
 
         call = self._audit(
             person_id,
@@ -208,7 +219,14 @@ class LocalReasoningEngine:
             call_id=call.id if call is not None else None,
             subject_type=subject_type,
             subject_id=subject_id,
-            summary=guarded.payload.get("summary", ""),
+            # A conversational reply is stored in the same column as a finding,
+            # because the caller reads one field either way. Reading only
+            # "summary" here would persist an empty string for every chat turn.
+            summary=(
+                guarded.payload.get("summary")
+                or guarded.payload.get("reply")
+                or ""
+            ),
             detail=_build_detail(guarded.payload),
             evidence_ids=guarded.output_evidence_ids,
             possible_context=guarded.payload.get("possible_context"),

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.daily_capture_enums import MedicationStatus
 from app.main import app
 from app.models.care import CareEvent, Evidence
 from app.models.daily_capture import MedicationRecord, ScaleObservation, VitalSign
@@ -438,6 +439,147 @@ class TestConfidenceFix:
         assert result["guard_verdict"] is not None
 
 
+class TestDailyCareMerge:
+    """The legacy /daily-care form must feed the typed daily-capture tables.
+
+    The form sends a boolean checkbox, which cannot distinguish a refusal from a
+    missed dose. Rather than break the existing client, the endpoint now keeps
+    that distinction on the way in and writes the typed rows, so adherence
+    tracking and range-checking see the same data the new form produces.
+    """
+
+    def test_a_refusal_is_not_recorded_as_a_miss(self, db, person, caregiver, client):
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "medication": [
+                    {
+                        "name": "Donepezil",
+                        "taken": False,
+                        "dose_or_notes": "she spat it out",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        record = db.query(MedicationRecord).one()
+        assert record.status == MedicationStatus.REFUSED
+        assert record.note == "she spat it out"
+
+    def test_an_unchecked_box_with_no_refusal_word_is_a_miss(self, db, person, caregiver, client):
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "medication": [{"name": "Donepezil", "taken": False}],
+            },
+        )
+        assert response.status_code == 200
+        assert db.query(MedicationRecord).one().status == MedicationStatus.MISSED
+
+    def test_an_explicit_status_overrides_the_checkbox(self, db, person, caregiver, client):
+        """A newer client can say "delayed" without abusing the note field."""
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "medication": [
+                    {
+                        "name": "Donepezil",
+                        "taken": True,
+                        "status": "refused",
+                        "dose_or_notes": "would not take it",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 200
+        assert db.query(MedicationRecord).one().status == MedicationStatus.REFUSED
+
+    def test_a_checked_box_is_recorded_as_given(self, db, person, caregiver, client):
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "medication": [{"name": "Ropinirole", "taken": True}],
+            },
+        )
+        assert response.status_code == 200
+        assert db.query(MedicationRecord).one().status == MedicationStatus.GIVEN
+
+    def test_string_vitals_become_typed_and_range_checked(self, db, person, caregiver, client):
+        """The form sends strings. A string "195" cannot be flagged, so it is converted."""
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "vitals": {"heart_rate": "72", "systolic_bp": "195"},
+            },
+        )
+        assert response.status_code == 200
+        vitals = {v.vital_type.value: v for v in db.query(VitalSign).all()}
+        assert vitals["heart_rate"].value == 72.0
+        assert vitals["heart_rate"].is_out_of_range is False
+        assert vitals["systolic_bp"].is_out_of_range is True
+
+    def test_an_unrecognised_vital_name_does_not_lose_the_reading(self, db, person, caregiver, client):
+        """Free-text vital names must not be dropped just because they are not typed."""
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "vitals": {"sitting_bp": "120/80"},
+            },
+        )
+        assert response.status_code == 200
+        # It is not in the typed table, but it is still in the record.
+        assert db.query(VitalSign).count() == 0
+        event = db.query(CareEvent).filter(CareEvent.event_type == "vital_signs").one()
+        assert "sitting_bp" in event.description
+
+    def test_the_five_button_scales_land_in_the_typed_table(self, db, person, caregiver, client):
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "mood_scale": 2,
+                "agitation_scale": 4,
+            },
+        )
+        assert response.status_code == 200
+        axes = {s.axis.value: s for s in db.query(ScaleObservation).all()}
+        assert axes["mood"].score == 2
+        assert axes["agitation"].score == 4
+        assert axes["agitation"].high_label == "Very agitated"
+
+    def test_the_existing_evidence_row_is_still_written(self, db, person, caregiver, client):
+        """The form's own combined evidence row must survive the merge."""
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "general_notes": "settled afternoon",
+            },
+        )
+        assert response.status_code == 200
+        combined = (
+            db.query(Evidence)
+            .filter(Evidence.type == "daily_care_entry")
+            .order_by(Evidence.uploaded_at.desc())
+            .first()
+        )
+        assert "settled afternoon" in combined.source_text
+
+
 class TestCaregiverListing:
     def test_the_care_circle_can_list_the_people_on_the_record(self, db, caregiver, client):
         """The care circle view needs attribution, not just the signed-in user."""
@@ -550,8 +692,6 @@ class TestDailyEndpoint:
         reaching the transaction - which is the version of this test that
         asserted nothing.
         """
-        original = DailyCaptureService.record_scale
-
         def explode(self, payload):
             raise ValueError("scale axis not recognised")
 

@@ -18,6 +18,9 @@ dependencies = [
     "pillow>=10.0.0",
     "pytesseract>=0.3.10",
     "pypdf>=4.0.0",
+    # Writes the Living Care Summary PDF. Local-only, no network calls: the
+    # summary contains a person's care record and must never leave the machine.
+    "reportlab>=4.0.0",
 ]
 
 [build-system]

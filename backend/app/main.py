@@ -27,6 +27,7 @@ from app.api.daily_capture import router as daily_capture_router
 from app.api.companion import router as companion_router
 from app.api.daily_care import router as daily_care_router
 from app.api.care_summary import router as summary_router
+from app.api.care_summary import export_router as care_summary_router
 from app.api.actions import router as actions_router
 
 try:
@@ -82,6 +83,7 @@ app.include_router(daily_capture_router, prefix="/api/v1")
 app.include_router(companion_router, prefix="/api/v1")
 app.include_router(daily_care_router, prefix="/api/v1")
 app.include_router(summary_router, prefix="/api/v1")
+app.include_router(care_summary_router, prefix="/api/v1")
 app.include_router(actions_router, prefix="/api/v1")
 if files_router is not None:
     app.include_router(files_router, prefix="/api/files")

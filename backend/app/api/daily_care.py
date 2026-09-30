@@ -3,10 +3,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
-from enum import Enum
 
 from app.core.database import get_db
+from app.core.daily_capture_enums import MedicationStatus, VitalType
 from app.models.care import Person as PersonModel, Caregiver as CaregiverModel, Evidence as EvidenceModel, CareEvent as CareEventModel
+from app.services.daily_capture import DailyCaptureService
 from app.services.learning import LearningEngine, SavePipelineEvent
 
 
@@ -16,8 +17,36 @@ router = APIRouter(prefix="/daily-care", tags=["daily-care"])
 class MedicationEntry(BaseModel):
     name: str
     scheduled_time: Optional[str] = None
+    # Kept for the existing form, which sends a checkbox. It is not the stored
+    # value: a boolean cannot say whether a dose was refused, missed because it
+    # was never offered, or given late, and those are three different
+    # conversations with a prescriber. status is authoritative when present and
+    # taken is only the fallback for older clients.
     taken: bool = True
+    status: Optional[MedicationStatus] = None
+    administered_at: Optional[str] = None
     dose_or_notes: Optional[str] = None
+    photo_evidence_id: Optional[str] = None
+
+    def resolved_status(self) -> MedicationStatus:
+        """The status to store, preferring the explicit one.
+
+        When only the checkbox is supplied, the note is read for a refusal
+        rather than defaulting every false to "missed", because a caregiver
+        writing "she spat it out" has told us something the checkbox cannot.
+        """
+        if self.status is not None:
+            return self.status
+        if self.taken:
+            return MedicationStatus.GIVEN
+        note = (self.dose_or_notes or "").lower()
+        refusal_words = (
+            "refus", "spat", "spit", "rejected", "would not", "wouldn't",
+            "pushed away", "threw", "knocked", "no", "declined", "rejected it",
+        )
+        if any(word in note for word in refusal_words):
+            return MedicationStatus.REFUSED
+        return MedicationStatus.MISSED
 
 
 class DailyCareEntry(BaseModel):
@@ -80,19 +109,47 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
     tags: List[str] = []
     events_to_create: List[Dict[str, Any]] = []
 
+    # The typed service, used to write the rows the daily-capture endpoints and
+    # the adherence tracker read. Declared once here so every section below can
+    # reach it, including when no medication was recorded.
+    capture = DailyCaptureService(db)
+
     # --- Medication ---
     if entry.medication:
         for med in entry.medication:
-            status = "taken" if med.taken else "missed"
+            # The checkbox collapses to two values, but the stored status keeps
+            # the distinction a prescriber actually needs.
+            status = med.resolved_status()
             notes = med.dose_or_notes or ""
-            text = f"Medication '{med.name}' {status}" + (f" — {notes}" if notes else "")
+            text = f"Medication '{med.name}' {status.value}" + (f" — {notes}" if notes else "")
             evidence_texts.append(text)
             events_to_create.append({
                 "event_type": "medication",
-                "title": f"{med.name} — {status}",
+                "title": f"{med.name} — {status.value}",
                 "description": f"Scheduled: {med.scheduled_time or 'not specified'}. Notes: {notes}" if notes else f"Scheduled: {med.scheduled_time or 'not specified'}",
-                "tags": ["medication", status, "daily_care"],
+                "tags": ["medication", status.value, "daily_care"],
             })
+
+            # Also written through the typed service, so adherence tracking and
+            # the daily-capture timeline see this dose rather than having to
+            # reconstruct it from tags.
+            administered_at = None
+            if med.administered_at:
+                administered_at = datetime.fromisoformat(
+                    med.administered_at.replace("Z", "+00:00")
+                )
+            capture.record_medication(
+                {
+                    "person_id": entry.person_id,
+                    "caregiver_id": entry.caregiver_id,
+                    "medication_name": med.name,
+                    "status": status.value,
+                    "scheduled_for": None,
+                    "administered_at": administered_at,
+                    "note": med.dose_or_notes,
+                    "photo_evidence_id": med.photo_evidence_id,
+                }
+            )
 
     # --- Mood ---
     if entry.mood or entry.mood_scale is not None:
@@ -106,6 +163,15 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             "description": entry.mood or "",
             "tags": ["mood", "daily_care", f"scale_{entry.mood_scale}" if entry.mood_scale else "scale_recorded"],
         })
+        if entry.mood_scale is not None:
+            capture.record_scale({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "axis": "mood",
+                "score": entry.mood_scale,
+                "observed_at": ts,
+                "note": entry.mood or None,
+            })
 
     # --- Agitation ---
     if entry.agitation_level or entry.agitation_scale is not None:
@@ -119,6 +185,18 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             "description": entry.agitation_level or "",
             "tags": ["agitation", "daily_care", f"scale_{entry.agitation_scale}" if entry.agitation_scale else "scale_recorded"],
         })
+        if entry.agitation_scale is not None:
+            # A five-button agitation scale is exactly what the typed scale
+            # table exists for, so the value lands there rather than existing
+            # only as a tag on a text event.
+            capture.record_scale({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "axis": "agitation",
+                "score": entry.agitation_scale,
+                "observed_at": ts,
+                "note": entry.agitation_level or None,
+            })
 
     # --- Vitals ---
     if entry.vitals:
@@ -131,6 +209,34 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             "description": vitals_text,
             "tags": ["vitals", "daily_care"] + [f"v_{k}" for k in entry.vitals.keys()],
         })
+
+        # The free-text form above stays for the record's readability, but the
+        # values are also written through the typed service so they carry a
+        # unit and get range-checked. A string "195" cannot be flagged, and an
+        # unusual reading nobody noticed is worse than one that was recorded.
+        for key, raw_value in entry.vitals.items():
+            try:
+                vital_type = VitalType(key)
+            except ValueError:
+                # The form allows free-text names. An unrecognised vital is
+                # still kept in the evidence above rather than being dropped,
+                # because losing a reading is worse than not typing it up.
+                continue
+            try:
+                numeric = float(raw_value)
+            except (TypeError, ValueError):
+                continue
+            capture.record_vital(
+                {
+                    "person_id": entry.person_id,
+                    "caregiver_id": entry.caregiver_id,
+                    "vital_type": vital_type.value,
+                    "value": numeric,
+                    "unit": None,
+                    "measured_at": ts,
+                    "note": None,
+                }
+            )
 
     # --- Behavior ---
     if entry.behavior_notes:

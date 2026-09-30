@@ -22,7 +22,15 @@ class Settings(BaseSettings):
     llm_enabled: bool = True
     llm_base_url: str = "http://127.0.0.1:11434"
     llm_model: str = "qwen2.5-coder:1.5b"
-    llm_timeout_seconds: float = 45.0
+    # A measured conversation reply on a modest machine takes roughly 35s, so a
+    # 45s budget sat close enough to the edge that any background load turned it
+    # into a timeout. Timeouts are not a safe failure mode here: the engine
+    # treats an unavailable model as "no local reasoning", the guard then strips
+    # every citation, and the caregiver gets "I could not give you an answer" to
+    # a question the record can answer. The user is waiting on an answer about
+    # their mother, so the budget is set well above the real cost and is
+    # configurable for faster hardware.
+    llm_timeout_seconds: float = 120.0
     llm_temperature: float = 0.1
     llm_context_tokens: int = 8192
     # Bounded output. A small local model will happily write 2000 tokens of

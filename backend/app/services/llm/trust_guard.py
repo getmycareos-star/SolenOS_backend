@@ -54,14 +54,91 @@ _DIAGNOSTIC_PATTERNS = [
     r"\bprogressive\s+(deterioration|condition|decline)\b",
     r"\bcognitive\s+(decline|impairment)\s+(is|has)\b",
     r"\bsuffering\s+from\b",
-    r"\bcondition\s+is\s+\w+",
+    # "condition is <word>" catches "his condition is dementia" but must not
+    # swallow the negation: "her condition is not established" would otherwise
+    # match on "condition is not" and consume the very word that makes the
+    # sentence a denial rather than a diagnosis.
+    r"\bcondition\s+is\s+(?!not\b|no\b|un\w+|never\b)([\w-]+\s+){0,2}(dementia|alzheimers|alzheimer'?s|stroke|dementia|declin\w+|impair\w+|illness|disease|disorder)\b",
     r"\bstage\s+\d\b",
     r"\bprognosis\b",
     r"\bwill\s+live\b",
     r"\bexpected\s+lifespan\b",
     r"\bmildly\s+moderately\s+severe(ly)?\s+impaired\b",
     r"\bthis\s+is\s+(early|late|advanced|moderate|severe)\b",
+    # Acute conditions a layperson names directly. "This is a stroke" matched
+    # nothing above, because the earlier "this is ..." rule required an
+    # adjective like "severe". A bald assertion of an acute event is the single
+    # most dangerous sentence this system could pass, and it was passing.
+    r"\bthis\s+is\s+(a\s+|an\s+)?(stroke|heart\s+attack|cardiac\s+arrest|seizure|sepsis|infection|haemorrhage|hemorrhage|stroke|TIA|transient\s+ischaemic|unconsciousness|coma|poisoning|overdose|choking|anaphylaxis)\b",
+    r"\b(he|she|they|this)\s+(is|are|has|have|had)\s+(a\s+|an\s+)?(stroke|heart\s+attack|cardiac\s+arrest|seizure|sepsis|anaphylaxis|unconscious|unconsciousness|intoxicated|overdosed)\b",
+    # "is having a seizure" and "has Alzheimer's disease" state the same thing
+    # through different grammar, and matched nothing above. Naming a condition
+    # outright is the plainest way a model makes a diagnosis, so it is matched
+    # directly instead of relying on the hedged constructions.
+    r"\b(is|are)\s+(having|showing|experiencing|displaying|developing)\s+(a\s+|an\s+)?(stroke|seizure|sepsis|anaphylaxis|infection|hallucinations?|delirium|chest\s+pain)\b",
+    r"\b(has|have|had)\s+(early|late|advanced|moderate|severe|some)\s+(dementia|alzheimers|alzheimer'?s)\b",
+    # "He has Alzheimer's disease" names no stage, and "diagnos(e|ed|tic)"
+    # above does not catch it either. Named neurodegenerative conditions after
+    # a plain present-tense verb are asserted as fact, so they are refused.
+    r"\b(has|have|had)\s+(alzheimer'?s|alzheimers|dementia|vascular\s+dementia|lewy\s+body\s+dementia|parkinson'?s|frontotemporal\s+dementia)\b",
+    r"\b(is|are)\s+(diabetic|hypoglycemic|hypoglycaemic|hyperglycemic|hyperglycaemic|anaemic|anemic|dehydrated|septic|cognitively\s+impaired)\b",
+    r"\b(he|she|they)\s+(is|are)\s+(demented|diabetic|hypoglycemic|hypoglycaemic|hyperglycemic|hyperglycaemic|anaemic|anemic|dehydrated|septic|cognitively\s+impaired)\b",
+    r"\blook\s+like\s+(a\s+)?(stroke|seizure|infection|heart\s+attack)\b",
+    r"\bwhat\s+(is|was)\s+(the\s+)?(diagnosis|prognosis|cause)\s*\??\s*$",
 ]
+
+# An assertion of a diagnosis is a diagnosis. Saying that the record does not
+# establish one is the opposite, and is the behaviour the prompts ask for.
+# Without this distinction the guard threw away hedged denials - "the evidence
+# does not establish a cause for her condition" tripped "condition is \w+" - so
+# the safest-sounding answer was the one most likely to be blocked.
+_NEGATION_MARKERS = (
+    "not established",
+    "not diagnosed",
+    "no diagnosis",
+    "does not establish",
+    "does not show",
+    "do not know",
+    "dont know",
+    "cannot tell",
+    "can't tell",
+    "not clear",
+    "unclear",
+    "not possible to say",
+    "no way to know",
+    "not confirmed",
+    "no confirmed",
+    "not yet known",
+    "is not known",
+    "are not known",
+    "unknown",
+    "not documented",
+    "nothing in the record",
+    "record does not",
+    "no evidence of",
+    "not what",
+    "rather than",
+    "no cause",
+    "not a diagnosis",
+    "no sign of",
+    "not shown",
+)
+
+
+def _states_uncertainty_before(text: str, match_start: int, match_end: int = 0) -> bool:
+    """Is the diagnostic phrase actually a denial rather than an assertion?
+
+    Looks around the match rather than only before it, because English puts the
+    hedge on either side: "does not establish a cause for her condition" leads,
+    while "her condition is not established by the record" follows. Reading only
+    backwards blocked the second form and allowed the first, which is the
+    opposite of what a guard should do.
+    """
+    before = text[max(0, match_start - 120) : match_start].lower()
+    after = text[match_end : match_end + 90].lower()
+    return any(marker in before for marker in _NEGATION_MARKERS) or any(
+        marker in after for marker in _NEGATION_MARKERS
+    )
 
 _MEDICAL_ACTION_PATTERNS = [
     r"\b(you|we|i)\s+should\s+(start|stop|increase|decrease|reduce|change|switch|add)\b",
@@ -119,6 +196,35 @@ _FALSE_REASSURANCE_MARKERS = [
     "nothing to be concerned about",
     "not a concern",
     "nothing unusual",
+    # Paraphrases of the same reassurance. A model that cannot say "no need to
+    # worry" will say "he seems fine" or "there is nothing to be concerned
+    # about", and a guard that only catches the literal phrasing stops being a
+    # guard the moment the model chooses different words. A record cannot
+    # support reassurance about a person's state, so these are rejected the same
+    # way whichever way they are phrased.
+    "seems fine",
+    "seems okay",
+    "seems well",
+    "looks fine",
+    "looks okay",
+    "looks well",
+    "seems normal",
+    "looks normal",
+    "nothing to be concerned",
+    "nothing to worry",
+    "not an emergency",
+    "no emergency",
+    "there is no cause for concern",
+    "no cause for concern",
+    "is fine",
+    "are fine",
+    "is well",
+    "are well",
+    "all is well",
+    "nothing has changed",
+    "nothing to report",
+    "take no action",
+    "no action needed",
 ]
 
 _OVERCONFIDENT_PATTERN = re.compile(
@@ -361,10 +467,17 @@ class TrustGuard:
 
         if not self.allow_diagnostic:
             for pattern in _DIAGNOSTIC_PATTERNS:
-                if re.search(pattern, lowered):
-                    reasons.append(
-                        "model output made a diagnostic or prognostic claim, which the record cannot support: "
-                        + pattern
+                match = re.search(pattern, lowered)
+                if not match:
+                    continue
+                # A hedged denial is not a diagnosis. Blocking it would mean the
+                # guard discards the most honest sentence a model can produce
+                # while letting bald assertions through.
+                if _states_uncertainty_before(lowered, match.start(), match.end()):
+                    continue
+                reasons.append(
+                    "model output made a diagnostic or prognostic claim, which the record cannot support: "
+                    + pattern
                     )
         if not self.allow_medical_action:
             for pattern in _MEDICAL_ACTION_PATTERNS:
