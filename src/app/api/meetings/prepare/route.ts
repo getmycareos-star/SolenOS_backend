@@ -8,6 +8,39 @@ import {
   recordMeetingOutcome,
   toMeetingPreparationLayerPayload,
 } from "@/lib/meeting-preparation";
+import {
+  listPublicPosts,
+  findSimilarExperiences,
+} from "@/lib/community";
+
+function findCommunityWisdom(whatChanged: string[]): {
+  change: string;
+  matches: {
+    post_id: string;
+    author_label: string;
+    author_type: string;
+    content: string;
+    tags: string[];
+  }[];
+}[] {
+  if (!whatChanged || whatChanged.length === 0) return [];
+  const posts = listPublicPosts({ limit: 100 });
+  return whatChanged
+    .map((change) => {
+      const result = findSimilarExperiences(change, posts, undefined, 3);
+      return {
+        change,
+        matches: result.matches.map((m) => ({
+          post_id: m.post_id,
+          author_label: m.author_label,
+          author_type: m.author_type,
+          content: m.body_preview,
+          tags: m.matched_tags,
+        })),
+      };
+    })
+    .filter((w) => w.matches.length > 0);
+}
 
 /** POST /api/meetings/prepare — generate preparation pack now */
 export async function POST(req: NextRequest) {
@@ -36,6 +69,11 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     meeting,
     layer: toMeetingPreparationLayerPayload(meeting),
+    identity: "SolenOS Appointment Preparation",
+    boundary: "Community wisdom shows how other caregivers handled similar situations. Peer experiences are not medical advice.",
+    community_wisdom: findCommunityWisdom(
+      meeting.preparation_pack?.what_changed ?? [],
+    ),
   });
 }
 
@@ -124,5 +162,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     meeting,
     layer: toMeetingPreparationLayerPayload(meeting),
+    identity: "SolenOS Appointment Preparation",
+    boundary: "Community wisdom shows how other caregivers handled similar situations. Peer experiences are not medical advice.",
+    community_wisdom: findCommunityWisdom(
+      meeting.preparation_pack?.what_changed ?? [],
+    ),
   });
 }
