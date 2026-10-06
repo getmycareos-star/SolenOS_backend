@@ -92,6 +92,16 @@ class OllamaClient:
             "system": system_prompt,
             "format": "json",
             "stream": False,
+            # Without this the runtime unloads the model after its own short
+            # default idle window, and the next call pays a full reload - about
+            # 72s for the small model on this machine, against a ~2s answer.
+            # That single reload turned every caregiver question into a timeout,
+            # and three timeouts in a row opened the circuit breaker, so the
+            # product answered nothing at all. A caregiver's questions arrive
+            # in bursts with gaps between, so the model has to stay resident
+            # across them. The cost is the memory for one model, on a machine
+            # that already has it downloaded.
+            "keep_alive": settings.llm_keep_alive,
             "options": {
                 "temperature": settings.llm_temperature,
                 "num_ctx": settings.llm_context_tokens,

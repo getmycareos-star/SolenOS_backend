@@ -35,8 +35,17 @@ class Settings(BaseSettings):
     llm_context_tokens: int = 8192
     # Bounded output. A small local model will happily write 2000 tokens of
     # padding, which on a modest machine is most of the wait, and a long answer
-    # is a long answer to audit.
-    llm_max_output_tokens: int = 900
+    # is a long answer to audit. The conversation asks for two or three
+    # sentences, so a small ceiling is enough and keeps a rambling turn from
+    # pushing the call past the timeout.
+    llm_max_output_tokens: int = 400
+    # How long the local runtime keeps the model resident after a call. The
+    # runtime's own default unloads it quickly, and reloading costs far more
+    # than answering: measured here, a warm reply is ~2s and a cold one ~72s.
+    # A caregiver opens the app, asks a few questions and closes it, which is
+    # exactly the pattern that guarantees a reload on the next question and a
+    # timeout with it. Set to "0" to release memory immediately instead.
+    llm_keep_alive: str = "30m"
 
     # A local model is fast but never allowed to be the only thing standing
     # between a hallucination and a caregiver. When reasoning is unavailable the

@@ -35,6 +35,9 @@ import app.models.care_planning
 import app.models.follow_up
 import app.models.conversation
 import app.models.daily_capture
+import app.models.wellbeing
+import app.models.care_sharing
+import app.models.community
 
 _initialized = False
 

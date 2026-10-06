@@ -16,6 +16,7 @@ from app.services.meaning import MeaningEngine
 from app.services.behavior import BehaviorEngine
 from app.services.care_summary import CareSummaryBuilder
 from app.services.care_summary_pdf import render_summary_pdf
+from app.services.care_sharing import CareSharingService
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -233,27 +234,62 @@ def get_care_summary(person_id: str, include_evidence: bool = False, db: Session
 export_router = APIRouter(prefix="/care-summary", tags=["care-summary"])
 
 
-@export_router.get("/{person_id}/json")
-def export_json(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
-    """The structured record, for another system or a GP portal."""
+def _build_or_refuse(person_id: str, window_days: int, caregiver_id: Optional[str], db):
+    """Assemble a summary for this viewer, or refuse.
+
+    When caregiver_id is supplied it is a request from within a care circle, and
+    the grants decide what comes back. When it is absent this is the local
+    single-user install, where there is nobody to withhold anything from.
+    """
+    sharing = CareSharingService(db)
+    if caregiver_id is not None:
+        allowed = sharing.visible_categories(person_id, caregiver_id)
+        if not allowed:
+            # Logged as a denial so a request that produced nothing is still a
+            # recorded event rather than a silent empty response.
+            sharing.can_see(
+                person_id, caregiver_id, "clinical_documents", surface="care_summary", log=True
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Nothing has been shared with this caregiver yet, so there is no "
+                    "summary to give them. Ask the family to share what you need."
+                ),
+            )
     try:
-        return CareSummaryBuilder(db).build(person_id, window_days=window_days)
+        return CareSummaryBuilder(db).build(
+            person_id, window_days=window_days, viewer_caregiver_id=caregiver_id, surface="care_summary"
+        )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@export_router.get("/{person_id}/json")
+def export_json(
+    person_id: str,
+    window_days: int = 30,
+    caregiver_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """The structured record, for another system or a GP portal."""
+    return _build_or_refuse(person_id, window_days, caregiver_id, db)
+
+
 @export_router.get("/{person_id}/pdf")
-def export_pdf(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
+def export_pdf(
+    person_id: str,
+    window_days: int = 30,
+    caregiver_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
     """One-tap PDF for an appointment.
 
     Served as an attachment rather than rendered in a page, because a clinician
     wants a document they can keep, not a screen they have to read on a phone in
     a waiting room.
     """
-    try:
-        summary = CareSummaryBuilder(db).build(person_id, window_days=window_days)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+    summary = _build_or_refuse(person_id, window_days, caregiver_id, db)
 
     try:
         pdf_bytes = render_summary_pdf(summary)

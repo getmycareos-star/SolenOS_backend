@@ -29,6 +29,9 @@ from app.api.daily_care import router as daily_care_router
 from app.api.care_summary import router as summary_router
 from app.api.care_summary import export_router as care_summary_router
 from app.api.actions import router as actions_router
+from app.api.community import router as community_router, team_router
+from app.api.wellbeing import router as wellbeing_router
+from app.api.care_sharing import router as care_sharing_router
 
 try:
     from app.api.files import router as files_router
@@ -85,6 +88,10 @@ app.include_router(daily_care_router, prefix="/api/v1")
 app.include_router(summary_router, prefix="/api/v1")
 app.include_router(care_summary_router, prefix="/api/v1")
 app.include_router(actions_router, prefix="/api/v1")
+app.include_router(wellbeing_router, prefix="/api/v1")
+app.include_router(care_sharing_router, prefix="/api/v1")
+app.include_router(community_router, prefix="/api/v1")
+app.include_router(team_router, prefix="/api/v1")
 if files_router is not None:
     app.include_router(files_router, prefix="/api/files")
 

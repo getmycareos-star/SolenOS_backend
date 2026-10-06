@@ -181,7 +181,7 @@ def message(
     payload: ConversationMessage, engine: ConversationEngine = Depends(get_conversation_engine)
 ):
     try:
-        return engine.respond(
+        result = engine.respond(
             person_id=payload.person_id,
             text=payload.text,
             session_id=payload.session_id,
@@ -189,6 +189,29 @@ def message(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # Derived here rather than left to the caller, because the two failures
+    # look identical in the response body otherwise. A model that is down
+    # produces no reply and no citation, exactly like a record that does not
+    # support an answer, and the caregiver is the one who has to tell them
+    # apart.
+    unavailable = bool(
+        not result.get("reasoned_locally")
+        and result.get("guard_verdict") == "unavailable"
+    )
+    return ConversationResponse(
+        session_id=result["session_id"],
+        person_id=result["person_id"],
+        reply=result["reply"],
+        stage=result["stage"],
+        evidence_ids=result.get("evidence_ids") or [],
+        possible_context=result.get("possible_context"),
+        confidence=result.get("confidence"),
+        guard_verdict=result.get("guard_verdict"),
+        safety_note=result.get("safety_note"),
+        reasoned_locally=bool(result.get("reasoned_locally")),
+        unavailable=unavailable,
+    )
 
 
 @conversation_router.get("/session/{session_id}")

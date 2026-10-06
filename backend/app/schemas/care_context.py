@@ -648,3 +648,10 @@ class ConversationResponse(BaseModel):
     guard_verdict: Optional[str] = None
     safety_note: Optional[str] = None
     reasoned_locally: bool
+    # True when no answer was produced because the local model did not respond.
+    # This is not the same as "the record does not support an answer", and the
+    # two must not be shown to a caregiver as the same thing: the first is a
+    # fault in this system, the second is a fact about their mother. Without the
+    # flag the UI can only render one ambiguous "no answer" and the outage
+    # reads as a gap in the record.
+    unavailable: bool = False

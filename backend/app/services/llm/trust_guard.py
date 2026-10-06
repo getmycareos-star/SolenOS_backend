@@ -411,6 +411,24 @@ class TrustGuard:
             reasons.append("dropped ungrounded conversation claim(s): " + ", ".join(dropped))
             qualifications.append("A claim about the person was removed for lack of evidence.")
 
+        # Citing everything is not grounding, it is opting out of the check. A
+        # citation exists to point at the specific thing a claim rests on; a
+        # model that returns the entire evidence block has not identified
+        # anything, and the guard has nothing to verify the claim against. This
+        # is the exact failure a small model falls into - it pattern-matches
+        # "list the ids from the evidence block" - and it fails OPEN, because
+        # every id is technically permitted. Left unchecked it produced a
+        # confident, fully-cited account of a doctor's appointment that no
+        # evidence supported.
+        if cited and self._is_nonselective(cited):
+            reasons.append(
+                "model cited every available piece of evidence, which does not identify what the claim rests on"
+            )
+            qualifications.append(
+                "I could not tell which part of the record this answer came from, so I have not treated it as established."
+            )
+            cited = []
+
         verdict, hard_reasons = self._screen_text(reply)
         if hard_reasons:
             return GuardResult(
@@ -516,6 +534,26 @@ class TrustGuard:
             elif candidate not in dropped:
                 dropped.append(candidate)
         return kept, dropped
+
+    def _is_nonselective(self, cited: Sequence[str]) -> bool:
+        """Did the model cite the whole evidence block rather than choose from it?
+
+        Judged as a ratio rather than an exact match, because a model that
+        cites most of the record has made the same statement of confidence as
+        one that cites all of it. The threshold tolerates a couple of misses so
+        that a genuinely selective answer is not punished for leaving out one
+        item, and it never fires when only a small amount of evidence was on
+        offer, where citing it all is normal and says nothing either way.
+        """
+        permitted = self.permitted
+        if not permitted:
+            return False
+        if len(permitted) < 4:
+            # Too little evidence for "cited all of it" to mean anything.
+            return False
+        cited_set = set(cited)
+        cited_share = len(cited_set & set(permitted)) / float(len(permitted))
+        return cited_share >= 0.75
 
     def _resolve_confidence(
         self,

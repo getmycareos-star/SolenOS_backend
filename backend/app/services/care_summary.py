@@ -15,15 +15,17 @@ rather than dropped, so a gap is visible instead of invisible.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Set
 
 from sqlalchemy.orm import Session
 
+from app.core.sharing_enums import ShareCategory
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.contradiction import ContradictionAnalysis
 from app.models.daily_capture import MedicationRecord, ScaleObservation, VitalSign
 from app.models.follow_up import FollowUp
 from app.models.meaning import Meaning
+from app.services.care_sharing import CareSharingService
 from app.services.daily_capture import DailyCaptureService
 
 DISCLAIMER = (
@@ -45,14 +47,51 @@ class CareSummaryBuilder:
         self,
         person_id: str,
         window_days: int = 30,
+        viewer_caregiver_id: Optional[str] = None,
+        surface: str = "care_summary",
     ) -> Dict[str, Any]:
+        """Assemble the summary, filtered to what this viewer may see.
+
+        The boundary is applied inside the builder rather than at the route, so
+        that no caller can forget it. That matters most for the PDF: it is the
+        one surface that leaves the device, lands in an email, and gets read by
+        someone outside the circle. A route that checked a flag and then called a
+        builder that ignored it would look correct in review and export the lot.
+
+        With no viewer - the local single-user case - everything is shown. That
+        is a deliberate exception for the install that has one caregiver on it,
+        and it is the reason the parameter is optional rather than required.
+        """
         person = self.db.query(Person).filter(Person.id == person_id).first()
         if person is None:
             raise ValueError("Person not found")
 
         since = datetime.now(timezone.utc) - timedelta(days=window_days)
         caregivers = self._caregiver_names()
-        adherence = self._medication_adherence(person_id, window_days)
+        allowed = self._allowed_categories(person_id, viewer_caregiver_id, surface)
+
+        if ShareCategory.MEDICATIONS in allowed:
+            adherence = self._medication_adherence(person_id, window_days)
+        else:
+            adherence = []
+
+        if ShareCategory.DAILY_CARE in allowed:
+            timeline = self._timeline(person_id, since, caregivers)
+            observations = self._scales(person_id, since, caregivers)
+            vitals = self._flagged_vitals(person_id, since, caregivers)
+        else:
+            timeline, observations, vitals = [], [], []
+
+        if ShareCategory.OBSERVATIONS in allowed:
+            contradictions = self._contradictions(person_id)
+            gaps = self._information_gaps(person_id, window_days)
+        else:
+            contradictions, gaps = [], []
+
+        if ShareCategory.FOLLOW_UPS_AND_ACTIONS in allowed:
+            questions = self._follow_ups(person_id)
+        else:
+            questions = []
 
         return {
             "person": {
@@ -64,15 +103,39 @@ class CareSummaryBuilder:
             "window_days": window_days,
             "disclaimer": DISCLAIMER,
             "care_team": caregivers,
-            "timeline": self._timeline(person_id, since, caregivers),
+            "timeline": timeline,
             "medication_adherence": adherence,
-            "structured_observations": self._scales(person_id, since, caregivers),
-            "vitals_out_of_range": self._flagged_vitals(person_id, since, caregivers),
-            "open_contradictions": self._contradictions(person_id),
-            "information_gaps": self._information_gaps(person_id, window_days),
-            "open_questions": self._follow_ups(person_id),
+            "structured_observations": observations,
+            "vitals_out_of_range": vitals,
+            "open_contradictions": contradictions,
+            "information_gaps": gaps,
+            "open_questions": questions,
             "discussion_points": self._discussion_points(person_id, adherence),
+            "viewing_caregiver_id": viewer_caregiver_id,
+            "visible_categories": sorted(c.value for c in allowed),
+            "withheld_categories": sorted(
+                c.value for c in ShareCategory if c not in allowed
+            ),
         }
+
+    def _allowed_categories(
+        self, person_id: str, viewer_caregiver_id: Optional[str], surface: str
+    ) -> Set[ShareCategory]:
+        if viewer_caregiver_id is None:
+            return set(ShareCategory)
+        sharing = CareSharingService(self.db)
+        # Asked about explicitly rather than derived from the grant list, so the
+        # access log records a decision per category. A boundary that never logs
+        # cannot be audited after the fact.
+        for category in ShareCategory:
+            sharing.can_see(
+                person_id,
+                viewer_caregiver_id,
+                category.value,
+                surface=surface,
+                log=True,
+            )
+        return sharing.visible_categories(person_id, viewer_caregiver_id)
 
     # ------------------------------------------------------------------
 
