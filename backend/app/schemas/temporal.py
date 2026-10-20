@@ -1,6 +1,30 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
+from enum import Enum
+
+
+class RecurrenceFrequency(str, Enum):
+    """Conservative descriptive frequency inferred from event intervals."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    BIWEEKLY = "biweekly"
+    MONTHLY = "monthly"
+    IRREGULAR = "irregular"
+    UNKNOWN = "unknown"
+
+
+class TrendType(str, Enum):
+    """Direction of change in the intervals between repeated events."""
+
+    STABLE = "stable"
+    INCREASING = "increasing"
+    DECREASING = "decreasing"
+    VARIABLE = "variable"
+    UNKNOWN = "unknown"
+
+
 from app.core.temporal_enums import (
     TemporalPrecision,
     TemporalMode,
