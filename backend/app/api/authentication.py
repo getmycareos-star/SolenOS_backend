@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverInvitation
 from app.models.care import Person, Caregiver
-from app.core.authz import assert_person_access
 from app.services.auth_service import authenticate_account, create_account, create_session, resolve_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -176,6 +175,7 @@ def create_caregiver_invitation(
     db: Session = Depends(get_db),
 ):
     """Owner/admin creates a single-use token to link a real account to a caregiver profile."""
+    from app.core.authz import assert_person_access
     assert_person_access(db, account.id, payload.person_id, "admin")
     caregiver = db.query(Caregiver).filter(
         Caregiver.id == payload.caregiver_id,
