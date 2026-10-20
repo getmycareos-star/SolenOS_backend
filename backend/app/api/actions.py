@@ -3,6 +3,10 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
+from app.api.authentication import current_account
+from app.core.authz import assert_person_access, require_person_access
+from app.models.auth_identity import AuthAccount
+from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel
 from app.models.action import Action as ActionModel, ActionStatus
 from app.schemas.action import (
     ActionCreate,
@@ -17,7 +21,7 @@ from app.services.action_extraction import ActionExtractionEngine
 from app.services.action_normalization import ActionNormalizationService
 from app.services.action_lifecycle import ActionLifecycleService, ActionIdentityService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_account)])
 
 extraction_engine = ActionExtractionEngine()
 normalization_service = ActionNormalizationService()
@@ -41,7 +45,18 @@ def extract_actions_from_document(
     reference_date: Optional[str] = None,
     caregiver_id: str = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+    person_id: str = None,
 ):
+    if not person_id:
+        raise HTTPException(status_code=400, detail="person_id is required")
+    assert_person_access(db, account.id, person_id, "write")
+    source_document = db.query(EvidenceModel).filter(EvidenceModel.id == document_id, EvidenceModel.person_id == person_id).first()
+    if source_document is None:
+        raise HTTPException(status_code=404, detail="Source document not found for this care record")
+    caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id).first() if caregiver_id else None
+    if caregiver is None:
+        raise HTTPException(status_code=400, detail="A caregiver belonging to this care record is required")
     ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
 
     candidates = extraction_engine.extract(
@@ -61,7 +76,7 @@ def extract_actions_from_document(
             continue
 
         action_model = ActionModel(
-            person_id=None,
+            person_id=person_id,
             source_evidence_id=candidate.source_evidence_id,
             source_passage=candidate.source_passage,
             source_document_type=source_document_type,
@@ -97,9 +112,16 @@ def extract_actions_from_document(
 
 
 @router.post("/actions", response_model=ActionSchema)
-def create_action(action: ActionCreate, db: Session = Depends(get_db)):
+def create_action(action: ActionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     if not action.person_id:
         raise HTTPException(status_code=400, detail="person_id is required")
+    assert_person_access(db, account.id, action.person_id, "write")
+    source_evidence = db.query(EvidenceModel).filter(EvidenceModel.id == action.source_evidence_id, EvidenceModel.person_id == action.person_id).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=404, detail="Source evidence not found for this care record")
+    creator = db.query(CaregiverModel).filter(CaregiverModel.id == action.created_by_caregiver_id, CaregiverModel.person_id == action.person_id).first()
+    if creator is None:
+        raise HTTPException(status_code=400, detail="Creator must be a caregiver belonging to this care record")
 
     candidate = ActionCandidate(
         source_evidence_id=action.source_evidence_id,
@@ -175,7 +197,7 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db)):
     return db_action
 
 
-@router.get("/actions/{person_id}", response_model=List[ActionSchema])
+@router.get("/actions/{person_id}", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_actions(person_id: str, status: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(ActionModel).filter(ActionModel.person_id == person_id)
     if status:
@@ -184,13 +206,20 @@ def list_actions(person_id: str, status: Optional[str] = None, db: Session = Dep
 
 
 @router.get("/actions/detail/{action_id}", response_model=ActionSchema)
-def get_action(action_id: str, db: Session = Depends(get_db)):
-    return _get_action_or_404(db, action_id)
+def get_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    action = _get_action_or_404(db, action_id)
+    if not action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, action.person_id, "read")
+    return action
 
 
 @router.patch("/actions/{action_id}", response_model=ActionSchema)
-def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
+def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     update_data = update.model_dump(exclude_unset=True)
 
     for field, value in update_data.items():
@@ -204,44 +233,66 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
 
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
-def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
+def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.record_completion(db_action, evidence, db)
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
-def cancel_action(action_id: str, db: Session = Depends(get_db)):
+def cancel_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.cancel_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/supersede", response_model=ActionSchema)
-def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(get_db)):
+def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    new_action = _get_action_or_404(db, new_action_id)
+    if not db_action.person_id or db_action.person_id != new_action.person_id:
+        raise HTTPException(status_code=400, detail="Actions must belong to the same care record")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.supersede_action(db_action, new_action_id, db)
 
 
 @router.post("/actions/{action_id}/activate", response_model=ActionSchema)
-def activate_action(action_id: str, db: Session = Depends(get_db)):
+def activate_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.activate_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/block", response_model=ActionSchema)
-def block_action(action_id: str, db: Session = Depends(get_db)):
+def block_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.block_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/expire", response_model=ActionSchema)
-def expire_action(action_id: str, db: Session = Depends(get_db)):
+def expire_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "write")
     return lifecycle_service.expire_action(db_action, db)
 
 
 @router.get("/actions/{action_id}/duplicates", response_model=List[ActionDeduplicationResult])
-def find_duplicate_actions(action_id: str, db: Session = Depends(get_db)):
+def find_duplicate_actions(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
+    if not db_action.person_id:
+        raise HTTPException(status_code=403, detail="Action has no care-record scope")
+    assert_person_access(db, account.id, db_action.person_id, "read")
     existing = db.query(ActionModel).filter(ActionModel.person_id == db_action.person_id).all()
     duplicates = identity_service.find_duplicates(db_action, existing)
     return [ActionDeduplicationResult(**d) for d in duplicates]
@@ -252,7 +303,7 @@ def check_action_safety(candidate: ActionCandidate):
     return normalization_service.safety_check(candidate)
 
 
-@router.get("/actions/{person_id}/uncompleted", response_model=List[ActionSchema])
+@router.get("/actions/{person_id}/uncompleted", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_uncompleted_actions(person_id: str, db: Session = Depends(get_db)):
     active_statuses = ["active", "conditional", "pending_confirmation", "blocked"]
     return (
