@@ -5,7 +5,7 @@ Request/response models for all Care Graph operations.
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict, BaseModel, Field, field_validator
 from uuid import UUID
 
 from app.core.graph_enums import (
@@ -94,8 +94,7 @@ class CareGraphNodeResponse(CareGraphNodeBase, CareGraphTimestampMixin):
     version: int
     processing_timestamp: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareGraphNodeVersionResponse(BaseModel):
@@ -123,8 +122,7 @@ class CareGraphNodeVersionResponse(BaseModel):
     triggering_evidence_ids: Optional[List[str]] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -226,8 +224,7 @@ class CareGraphEdgeResponse(CareGraphEdgeBase, CareGraphTimestampMixin):
     id: str
     version: int
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareGraphEdgeVersionResponse(BaseModel):
@@ -279,8 +276,7 @@ class CareGraphEdgeVersionResponse(BaseModel):
     affected_downstream: Optional[List[str]] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -319,8 +315,7 @@ class CareGraphChangeLogResponse(CareGraphChangeLogBase):
     actor: Optional[Dict[str, Any]] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -361,8 +356,7 @@ class CareGraphEdgeCorrectionResponse(CareGraphEdgeCorrectionBase):
     application_details: Optional[str] = None
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareGraphEdgeInvalidationBase(BaseModel):
@@ -394,8 +388,7 @@ class CareGraphEdgeInvalidationResponse(CareGraphEdgeInvalidationBase):
     created_at: datetime
     completed_at: Optional[datetime] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareGraphEdgeSupersessionBase(BaseModel):
@@ -421,8 +414,7 @@ class CareGraphEdgeSupersessionResponse(CareGraphEdgeSupersessionBase):
     superseding_edge_id: str
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -459,8 +451,7 @@ class CareGraphContradictionResponse(CareGraphContradictionBase):
     edge_b_id: str
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
@@ -519,8 +510,7 @@ class CareGraphGroupResponse(CareGraphGroupBase, CareGraphTimestampMixin):
     representative_node: Optional[Dict[str, Any]] = None
     representative_edge: Optional[Dict[str, Any]] = None
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ============================================================
