@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime, date
 from app.core.database import get_db
 from app.api.authentication import current_account
-from app.core.authz import assert_person_access, require_person_access
+from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount
 from app.models.change import Situation as SituationModel
 from app.models.care import (
@@ -129,7 +129,7 @@ from app.api.actions import router as actions_router
 router = APIRouter(dependencies=[Depends(current_account)])
 
 
-def _require_caregiver_in_person(db: Session, caregiver_id: Optional[str], person_id: str, field_name: str = "caregiver_id"):
+def _require_caregiver_in_person(db: Session, caregiver_id: Optional[str], person_id: str, account_id: str, field_name: str = "caregiver_id"):
     if not caregiver_id:
         raise HTTPException(status_code=400, detail=f"{field_name} is required")
     caregiver = db.query(CaregiverModel).filter(
@@ -138,6 +138,7 @@ def _require_caregiver_in_person(db: Session, caregiver_id: Optional[str], perso
     ).first()
     if caregiver is None:
         raise HTTPException(status_code=400, detail=f"{field_name} must identify a caregiver in this care record")
+    assert_account_is_caregiver(db, account_id, caregiver.id, person_id)
     return caregiver
 
 
@@ -238,7 +239,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db), 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, evidence.person_id, "write")
-    _require_caregiver_in_person(db, evidence.uploaded_by_caregiver_id, evidence.person_id, "uploaded_by_caregiver_id")
+    _require_caregiver_in_person(db, evidence.uploaded_by_caregiver_id, evidence.person_id, account.id, "uploaded_by_caregiver_id")
 
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
@@ -264,7 +265,7 @@ def list_evidence(person_id: str, db: Session = Depends(get_db)):
 @router.post("/events", response_model=CareEventSchema)
 def create_event(event: CareEventCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, event.person_id, "write")
-    _require_caregiver_in_person(db, event.created_by_caregiver_id, event.person_id, "created_by_caregiver_id")
+    _require_caregiver_in_person(db, event.created_by_caregiver_id, event.person_id, account.id, "created_by_caregiver_id")
     _require_evidence_ids_in_person(db, event.evidence_ids, event.person_id)
     if event.situation_id:
         situation = db.query(SituationModel).filter(SituationModel.id == event.situation_id, SituationModel.person_id == event.person_id).first()
@@ -334,7 +335,7 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, correction.person_id, "write")
-    _require_caregiver_in_person(db, correction.caregiver_id, correction.person_id, "caregiver_id")
+    _require_caregiver_in_person(db, correction.caregiver_id, correction.person_id, account.id, "caregiver_id")
     if correction.target_type == "insight":
         target = db.query(InsightModel).filter(InsightModel.id == correction.target_id, InsightModel.person_id == correction.person_id).first()
         if target is None:
@@ -375,7 +376,7 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 @router.post("/observations", response_model=ObservationSchema)
 def create_observation(observation: ObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, observation.person_id, "write")
-    _require_caregiver_in_person(db, observation.caregiver_id, observation.person_id, "caregiver_id")
+    _require_caregiver_in_person(db, observation.caregiver_id, observation.person_id, account.id, "caregiver_id")
     _require_evidence_ids_in_person(db, observation.evidence_ids, observation.person_id)
 
     db_obs = ObservationModel(**observation.model_dump())
@@ -555,7 +556,7 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 @router.post("/appointments", response_model=AppointmentSchema)
 def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, appointment.person_id, "write")
-    _require_caregiver_in_person(db, appointment.created_by_caregiver_id, appointment.person_id, "created_by_caregiver_id")
+    _require_caregiver_in_person(db, appointment.created_by_caregiver_id, appointment.person_id, account.id, "created_by_caregiver_id")
     _require_evidence_ids_in_person(db, appointment.evidence_ids, appointment.person_id)
 
     db_appt = AppointmentModel(**appointment.model_dump())
@@ -618,7 +619,7 @@ def update_appointment_lifecycle_endpoint(
 def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, transition.person_id, "write")
     if transition.created_by_caregiver_id:
-        _require_caregiver_in_person(db, transition.created_by_caregiver_id, transition.person_id, "created_by_caregiver_id")
+        _require_caregiver_in_person(db, transition.created_by_caregiver_id, transition.person_id, account.id, "created_by_caregiver_id")
     _require_evidence_ids_in_person(db, transition.evidence_ids, transition.person_id)
     if transition.triggered_by_event_id:
         source_event = db.query(CareEventModel).filter(CareEventModel.id == transition.triggered_by_event_id, CareEventModel.person_id == transition.person_id).first()
@@ -904,7 +905,7 @@ def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depend
     assert_person_access(db, account.id, fact.person_id, "write")
     _require_evidence_ids_in_person(db, fact.evidence_ids, fact.person_id)
     if fact.created_by_caregiver_id:
-        _require_caregiver_in_person(db, fact.created_by_caregiver_id, fact.person_id, "created_by_caregiver_id")
+        _require_caregiver_in_person(db, fact.created_by_caregiver_id, fact.person_id, account.id, "created_by_caregiver_id")
     return create_temporal_fact(db, fact)
 
 
@@ -1016,7 +1017,7 @@ def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionC
             raise HTTPException(status_code=400, detail="Both contradiction facts must belong to this care record")
     _require_evidence_ids_in_person(db, contradiction.evidence_ids, contradiction.person_id)
     if contradiction.resolved_by_caregiver_id:
-        _require_caregiver_in_person(db, contradiction.resolved_by_caregiver_id, contradiction.person_id, "resolved_by_caregiver_id")
+        _require_caregiver_in_person(db, contradiction.resolved_by_caregiver_id, contradiction.person_id, account.id, "resolved_by_caregiver_id")
     return create_temporal_contradiction(db, contradiction)
 
 
@@ -1028,7 +1029,7 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
     assert_person_access(db, account.id, contradiction_record.person_id, "write")
     _require_evidence_ids_in_person(db, update.evidence_ids, contradiction_record.person_id)
     if update.resolved_by_caregiver_id:
-        _require_caregiver_in_person(db, update.resolved_by_caregiver_id, contradiction_record.person_id, "resolved_by_caregiver_id")
+        _require_caregiver_in_person(db, update.resolved_by_caregiver_id, contradiction_record.person_id, account.id, "resolved_by_caregiver_id")
     result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
