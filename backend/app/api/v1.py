@@ -32,6 +32,7 @@ from app.models.temporal import (
     TemporalFact as TemporalFactModel,
     TemporalRelation as TemporalRelationModel,
     TemporalReferenceFrame as TemporalReferenceFrameModel,
+    TemporalContradiction as TemporalContradictionModel,
 )
 from app.schemas.care import (
     PersonCreate,
@@ -407,8 +408,11 @@ def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
-    person_id: str, category: str, detail: str, caregiver_id: str, db: Session = Depends(get_db)
+    person_id: str, category: str, detail: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)
 ):
+    assert_person_access(db, account.id, person_id, "write")
+    # Do not accept actor attribution from the caller until a verified account-to-caregiver link exists.
+    caregiver_id = None
     engine = LearningEngine(db)
     engine.record_feedback(person_id, category, detail, caregiver_id)
     engine.after_save(person_id)
@@ -471,8 +475,9 @@ def time_until(reference_datetime: str, target_datetime: str):
 
 @router.post("/care-windows", response_model=List[CareWindowSchema])
 def create_care_windows_from_event(
-    person_id: str, event_type: str, occurred_at: str, db: Session = Depends(get_db)
+    person_id: str, event_type: str, occurred_at: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)
 ):
+    assert_person_access(db, account.id, person_id, "write")
     event_dt = datetime.fromisoformat(occurred_at)
     windows = calculate_care_windows(event_type, event_dt)
     db_windows = []
@@ -533,13 +538,14 @@ def list_appointments(person_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/appointments/{appointment_id}/lifecycle")
 def update_appointment_lifecycle_endpoint(
-    appointment_id: str, db: Session = Depends(get_db)
+    appointment_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)
 ):
     appointment = (
         db.query(AppointmentModel).filter(AppointmentModel.id == appointment_id).first()
     )
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
+    assert_person_access(db, account.id, appointment.person_id, "write")
 
     appt_dict = {
         "id": appointment.id,
@@ -733,8 +739,13 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/timezones", response_model=TimezoneContextSchema)
 def create_timezone_context(
-    person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, db: Session = Depends(get_db)
+    person_id: str, caregiver_id: Optional[str] = None, timezone_id: str = "UTC", is_primary: bool = False, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)
 ):
+    assert_person_access(db, account.id, person_id, "write")
+    if caregiver_id:
+        caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id).first()
+        if not caregiver:
+            raise HTTPException(status_code=404, detail="Caregiver not found for this care record")
     if not validate_timezone(timezone_id):
         raise HTTPException(status_code=400, detail="Invalid or unsupported timezone")
 
@@ -761,8 +772,9 @@ def list_timezone_contexts(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/temporal-relationships", response_model=TemporalRelationshipSchema)
 def create_temporal_relationship(
-    person_id: str, event_a_id: str, event_b_id: str, db: Session = Depends(get_db)
+    person_id: str, event_a_id: str, event_b_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)
 ):
+    assert_person_access(db, account.id, person_id, "write")
     event_a = (
         db.query(CareEventModel)
         .filter(CareEventModel.id == event_a_id, CareEventModel.person_id == person_id)
@@ -840,7 +852,11 @@ def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depend
 
 
 @router.patch("/temporal/facts/{fact_id}", response_model=TemporalFactSchema)
-def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: Session = Depends(get_db)):
+def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    fact_record = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    if not fact_record:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    assert_person_access(db, account.id, fact_record.person_id, "write")
     result = update_temporal_fact(db, fact_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -848,7 +864,14 @@ def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: 
 
 
 @router.post("/temporal/facts/{fact_id}/supersede")
-def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session = Depends(get_db)):
+def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    old_fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    new_fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == new_fact_id).first()
+    if not old_fact or not new_fact:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    if old_fact.person_id != new_fact.person_id:
+        raise HTTPException(status_code=400, detail="Temporal facts must belong to the same care record")
+    assert_person_access(db, account.id, old_fact.person_id, "write")
     result = supersede_temporal_fact(db, fact_id, new_fact_id)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -890,12 +913,20 @@ def list_reference_frames(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/temporal/relative-time", response_model=RelativeTimeResolution)
-def resolve_relative_time_endpoint(person_id: str, expression: str, reference_frame_id: Optional[str] = None, db: Session = Depends(get_db)):
+def resolve_relative_time_endpoint(person_id: str, expression: str, reference_frame_id: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, person_id, "read")
     return resolve_relative_time(db, person_id, expression, reference_frame_id)
 
 
 @router.post("/temporal/infer-relation")
-def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    fact_a = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_a_id).first()
+    fact_b = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_b_id).first()
+    if not fact_a or not fact_b:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    if fact_a.person_id != fact_b.person_id:
+        raise HTTPException(status_code=400, detail="Temporal facts must belong to the same care record")
+    assert_person_access(db, account.id, fact_a.person_id, "read")
     result = infer_temporal_relation(db, fact_a_id, fact_b_id)
     if not result:
         raise HTTPException(status_code=404, detail="Unable to infer relation")
@@ -915,7 +946,11 @@ def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionC
 
 
 @router.patch("/temporal/contradictions/{contradiction_id}", response_model=TemporalContradictionSchema)
-def update_temporal_contradiction_endpoint(contradiction_id: str, update: TemporalContradictionUpdate, db: Session = Depends(get_db)):
+def update_temporal_contradiction_endpoint(contradiction_id: str, update: TemporalContradictionUpdate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    contradiction_record = db.query(TemporalContradictionModel).filter(TemporalContradictionModel.id == contradiction_id).first()
+    if not contradiction_record:
+        raise HTTPException(status_code=404, detail="Temporal contradiction not found")
+    assert_person_access(db, account.id, contradiction_record.person_id, "write")
     result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
@@ -923,7 +958,14 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
 
 
 @router.get("/temporal/check-conflict")
-def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db)):
+def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    fact_a = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_a_id).first()
+    fact_b = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_b_id).first()
+    if not fact_a or not fact_b:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    if fact_a.person_id != fact_b.person_id:
+        raise HTTPException(status_code=400, detail="Temporal facts must belong to the same care record")
+    assert_person_access(db, account.id, fact_a.person_id, "read")
     result = check_temporal_conflict(db, fact_a_id, fact_b_id)
     if not result:
         return {"has_conflict": False}
@@ -942,7 +984,11 @@ def get_subject_temporal_view_endpoint(person_id: str, subject_type: str, subjec
 
 
 @router.get("/temporal/duration/{fact_id}")
-def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db)):
+def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
+    if not fact:
+        raise HTTPException(status_code=404, detail="Temporal fact not found")
+    assert_person_access(db, account.id, fact.person_id, "read")
     result = calculate_duration(db, fact_id)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -950,10 +996,11 @@ def get_duration_endpoint(fact_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/temporal/status/{fact_id}")
-def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = None, db: Session = Depends(get_db)):
+def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id).first()
     if not fact:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
+    assert_person_access(db, account.id, fact.person_id, "read")
     ref = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
     status = classify_temporal_status(fact, ref)
     return {"fact_id": fact_id, "temporal_status": status}
