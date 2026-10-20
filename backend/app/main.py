@@ -9,7 +9,7 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.authentication import router as authentication_router, current_account
 from app.api.capture import router as capture_router
-from app.core.authz import assert_person_access
+from app.core.authz import assert_person_access, assert_account_is_caregiver
 from app.models.auth_identity import AuthAccount
 from app.models.care import Person as PersonModel, Caregiver as CaregiverModel
 from app.core.config import get_settings
@@ -52,6 +52,7 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db), accou
         raise HTTPException(status_code=400, detail="Caregiver not found")
     if caregiver.person_id != payload.person_id:
         raise HTTPException(status_code=403, detail="Caregiver does not belong to this care record")
+    assert_account_is_caregiver(db, account.id, caregiver.id, payload.person_id)
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
