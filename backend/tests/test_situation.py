@@ -255,9 +255,30 @@ def test_post_situation_rejects_caregiver_linked_to_another_person():
     finally:
         teardown_db()
 
-def test_readiness_checks_database_connectivity():
+def test_readiness_checks_database_connectivity(monkeypatch):
+    from unittest.mock import MagicMock
+    from app.core.database import engine
+
+    connection = MagicMock()
+    monkeypatch.setattr(engine, "connect", lambda: connection)
     client = TestClient(app)
     response = client.get("/ready")
+
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
     assert response.json()["database"] == "reachable"
+    connection.__enter__.return_value.execute.assert_called_once()
+
+
+def test_readiness_returns_503_when_database_is_unavailable(monkeypatch):
+    from app.core.database import engine
+
+    def unavailable_connection():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(engine, "connect", unavailable_connection)
+    client = TestClient(app)
+    response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Database is not ready"
