@@ -33,6 +33,7 @@ from app.services.backup import backup_service
 from app.api.daily_care import router as daily_care_router
 from app.api.activation import router as activation_router
 from app.api.job import router as job_router  # Job management endpoints
+from app.api.reasoning import router as reasoning_router
 from app.core.cache import cache_service  # Redis cache service
 from app.core.security import add_security_headers
 from app.services.alerting import send_security_alert
@@ -629,6 +630,7 @@ app.include_router(daily_capture_router, prefix="/api/v1")
 app.include_router(daily_care_router, prefix="/api/v1")
 app.include_router(activation_router, prefix="/api/v1")
 app.include_router(job_router, prefix="/api/v1")  # Job management endpoints
+app.include_router(reasoning_router, prefix="/reasoning")
 
 # Root endpoints
 @app.get("/", tags=["root"])
