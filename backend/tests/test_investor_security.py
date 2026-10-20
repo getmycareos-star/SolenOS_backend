@@ -1,6 +1,8 @@
 import pytest
 from unittest.mock import patch, MagicMock
 import jwt
+
+TEST_SIGNING_KEY = "test-only-investor-magic-link-signing-key-32-bytes-minimum"
 import datetime
 
 # Assuming we have these modules; adjust imports as per actual project structure
@@ -37,12 +39,12 @@ def generate_magic_link_token(investor_id):
         'investor_id': investor_id,
         'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
     }
-    return jwt.encode(payload, 'secret', algorithm='HS256')
+    return jwt.encode(payload, TEST_SIGNING_KEY, algorithm='HS256')
 
 def verify_magic_link_token(token):
     # Simulate token verification
     try:
-        payload = jwt.decode(token, 'secret', algorithms=['HS256'])
+        payload = jwt.decode(token, TEST_SIGNING_KEY, algorithms=['HS256'])
         return payload['investor_id']
     except jwt.ExpiredSignatureError:
         return None
