@@ -773,5 +773,40 @@ if settings.debug:
                 })
         return {"routes": routes}
 
+# Route registration is a release-critical contract. Verify the three core
+# care-continuity routers after the app's normal registration pass. If a router
+# was empty at its first include due to an import-order/circular-import issue,
+# mount it now; never duplicate a router that already has any of its expected
+# paths registered.
+def _ensure_critical_router_mounted(router, prefix: str) -> None:
+    expected_paths = {
+        prefix.rstrip("/") + route.path
+        for route in router.routes
+        if isinstance(route, APIRoute) and getattr(route, "path", None)
+    }
+    if not expected_paths:
+        logger.error("Critical router has no routes at initialization", extra={"prefix": prefix})
+        return
+    registered_paths = {
+        route.path for route in app.routes
+        if isinstance(route, APIRoute)
+    }
+    if expected_paths.isdisjoint(registered_paths):
+        logger.warning(
+            "Critical router was not present after initial registration; mounting it",
+            extra={"prefix": prefix, "route_count": len(expected_paths)},
+        )
+        app.include_router(router, prefix=prefix)
+    elif not expected_paths.issubset(registered_paths):
+        logger.error(
+            "Critical router is only partially mounted",
+            extra={"prefix": prefix, "missing_paths": sorted(expected_paths - registered_paths)},
+        )
+
+
+_ensure_critical_router_mounted(care_graph_router, "/api/v1")
+_ensure_critical_router_mounted(daily_care_router, "/api/v1")
+_ensure_critical_router_mounted(causal_router, "/api/v1")
+
 logger.info("SolenOS backend application initialized successfully.")
 
