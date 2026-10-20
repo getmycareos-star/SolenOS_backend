@@ -41,7 +41,7 @@ def start_post_appointment_workflow(
     # Derive caregiver ID from the caregiver-person relationship
     # Check if the user is a caregiver for the person in the workflow request
     person_id = workflow_request.person_id
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -84,7 +84,7 @@ def capture_appointment_data(
         raise HTTPException(status_code=404, detail="Workflow not found")
     
     person_id = workflow_info.get("person_id")
-    if not person_id or not current_user.can_access_person(person_id):
+    if not person_id or not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -162,7 +162,7 @@ def update_open_loops(
     # In a full implementation, we would check access here
     
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -202,7 +202,7 @@ def update_responsibilities(
     # In a full implementation, we would check access here
     
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -241,7 +241,7 @@ def update_upcoming_events(
     # In a full implementation, we would check access here
     
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -297,7 +297,7 @@ def generate_family_summary(
     # In a full implementation, we would check access here
     
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -431,7 +431,7 @@ def process_completed_appointment(
         )
     
     # Check if the current user is authorized to access this person's data
-    if not current_user.can_access_person(appointment.person_id):
+    if not current_user.has_access_to_person(appointment.person_id):
         raise HTTPException(status_code=403, detail="Not authorized to access this person's data")
     
     # Determine caregiver ID - this should come from the caregiver relationship between the user and the person
