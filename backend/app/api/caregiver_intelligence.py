@@ -61,6 +61,18 @@ from app.core.caregiver_enums import (
 router = APIRouter(dependencies=[Depends(current_account)])
 
 
+def _assert_profile_in_person(db: Session, caregiver_id: Optional[str], person_id: str):
+    if caregiver_id is None:
+        return None
+    profile = db.query(CaregiverProfileModel).filter(
+        CaregiverProfileModel.id == caregiver_id,
+        CaregiverProfileModel.person_id == person_id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Caregiver profile does not belong to this care record")
+    return profile
+
+
 def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, source_type: str, source_id: str = None, caregiver_id: str = None):
     from app.services.learning import LearningEngine, SavePipelineEvent
     engine = LearningEngine(db)
@@ -121,6 +133,7 @@ def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = D
 @router.post("/caregiver-roles", response_model=CaregiverRole)
 def create_caregiver_role(role: CaregiverRoleCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, role.person_id, "write")
+    _assert_profile_in_person(db, role.caregiver_id, role.person_id)
     service = CaregiverIntelligenceService(db)
     db_role = service.create_caregiver_role(role)
     return db_role
@@ -170,6 +183,9 @@ def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = 
 @router.post("/caregiver-observations", response_model=CaregiverObservation)
 def create_observation(observation: CaregiverObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, observation.person_id, "write")
+    _assert_profile_in_person(db, observation.caregiver_id, observation.person_id)
+    _assert_profile_in_person(db, observation.promoted_by_caregiver_id, observation.person_id)
+    observation = observation.model_copy(update={"is_promoted_to_shared": False, "promoted_at": None, "promoted_by_caregiver_id": None})
     service = CaregiverIntelligenceService(db)
     db_obs = service.record_observation(observation)
     _log_and_learn(
@@ -210,6 +226,9 @@ def promote_observation(observation_id: str, caregiver_id: str, db: Session = De
 @router.post("/caregiver-perspectives", response_model=CaregiverPerspective)
 def create_perspective(perspective: CaregiverPerspectiveCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, perspective.person_id, "write")
+    _assert_profile_in_person(db, perspective.caregiver_id, perspective.person_id)
+    _assert_profile_in_person(db, perspective.promoted_by_caregiver_id, perspective.person_id)
+    perspective = perspective.model_copy(update={"is_promoted_to_shared": False, "promoted_at": None, "promoted_by_caregiver_id": None})
     service = CaregiverIntelligenceService(db)
     db_persp = service.record_perspective(perspective)
     return db_persp
@@ -240,6 +259,8 @@ def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = De
 @router.post("/caregiver-handoffs", response_model=CaregiverHandoff)
 def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, handoff.person_id, "write")
+    _assert_profile_in_person(db, handoff.from_caregiver_id, handoff.person_id)
+    _assert_profile_in_person(db, handoff.to_caregiver_id, handoff.person_id)
     service = CaregiverIntelligenceService(db)
     db_handoff = service.record_handoff(handoff)
     _log_and_learn(
@@ -279,6 +300,8 @@ def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Op
 @router.post("/caregiver-activities", response_model=CaregiverActivity)
 def create_activity(activity: CaregiverActivityCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, activity.person_id, "write")
+    _assert_profile_in_person(db, activity.caregiver_id, activity.person_id)
+    _assert_profile_in_person(db, activity.shared_account_id, activity.person_id)
     service = CaregiverIntelligenceService(db)
     db_activity = service.record_activity(activity)
     return db_activity
@@ -337,6 +360,7 @@ def list_network_relationships(person_id: str, db: Session = Depends(get_db)):
 @router.post("/caregiver-contexts", response_model=CaregiverContext)
 def create_context(context: CaregiverContextCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, context.person_id, "write")
+    _assert_profile_in_person(db, context.caregiver_id, context.person_id)
     service = CaregiverIntelligenceService(db)
     db_context = service.create_context(context)
     return db_context
@@ -351,6 +375,7 @@ def list_contexts(person_id: str, db: Session = Depends(get_db)):
 @router.post("/responsibility-gaps", response_model=ResponsibilityGap)
 def create_responsibility_gap(gap: ResponsibilityGapCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, gap.person_id, "write")
+    _assert_profile_in_person(db, gap.last_known_caregiver_id, gap.person_id)
     service = CaregiverIntelligenceService(db)
     db_gap = service.create_responsibility_gap(gap)
     return db_gap
@@ -365,6 +390,8 @@ def list_responsibility_gaps(person_id: str, db: Session = Depends(get_db)):
 @router.post("/perspective-conflicts", response_model=PerspectiveConflict)
 def create_perspective_conflict(conflict: PerspectiveConflictCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, conflict.person_id, "write")
+    _assert_profile_in_person(db, conflict.caregiver_a_id, conflict.person_id)
+    _assert_profile_in_person(db, conflict.caregiver_b_id, conflict.person_id)
     service = CaregiverIntelligenceService(db)
     db_conflict = service.create_perspective_conflict(conflict)
     return db_conflict
