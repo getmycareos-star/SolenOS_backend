@@ -55,7 +55,7 @@ def setup_db():
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     from app.main import app
     app.dependency_overrides.clear()
 

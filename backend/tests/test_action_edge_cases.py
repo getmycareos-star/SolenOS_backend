@@ -36,7 +36,7 @@ def setup_db():
 
 def teardown_db():
     app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 def test_action_supersession():

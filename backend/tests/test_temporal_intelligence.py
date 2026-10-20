@@ -54,7 +54,7 @@ def setup_db():
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
 
 
 def get_db():
