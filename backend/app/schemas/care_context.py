@@ -205,6 +205,17 @@ class PersonProfileResponse(BaseModel):
         from_attributes = True
 
 
+class ContinuityInsightResponse(BaseModel):
+    """A sourced, non-diagnostic insight derived from continuity data."""
+
+    id: str
+    title: str
+    description: str
+    evidence_ids: List[str] = Field(default_factory=list)
+    possible_context: Optional[str] = None
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
 # ----------------------------------------------------------------------
 # Continuity
 # ----------------------------------------------------------------------
