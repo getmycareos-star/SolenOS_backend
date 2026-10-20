@@ -9,7 +9,7 @@ from app.models.care_event import CareEvent
 from app.models.evidence import Evidence
 from app.models.identity import Person
 from app.models.continuity import ContinuityHandoff
-from app.models.care import CarePlan
+from app.models.care_planning import CarePlan
 from app.models.follow_up import FollowUp
 
 class DataPortabilityService:
