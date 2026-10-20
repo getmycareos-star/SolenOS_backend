@@ -24,11 +24,6 @@ from app.models.caregiver_intelligence import (
     DuplicateAction as DuplicateActionModel,
     CaregiverContext as CaregiverContextModel,
 )
-from app.models.caregiver_intelligence import (
-    CaregiverRole as CaregiverRoleModel,
-    CaregiverPerspective as CaregiverPerspectiveModel,
-    CaregiverCommunication as CaregiverCommunicationModel,
-)
 from app.schemas.caregiver_intelligence import (
     CaregiverProfileCreate,
     CaregiverProfile,
