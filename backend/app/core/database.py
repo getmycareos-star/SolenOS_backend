@@ -85,6 +85,7 @@ def init_db():
         import app.models.time_location  # noqa: F401
         import app.models.safety  # noqa: F401
         import app.models.auth_identity  # noqa: F401
+        import app.models.capture  # noqa: F401
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
         _initialized = True
