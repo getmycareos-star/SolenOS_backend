@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount
+from app.models.change import Situation as SituationModel
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -265,6 +266,10 @@ def create_event(event: CareEventCreate, db: Session = Depends(get_db), account:
     assert_person_access(db, account.id, event.person_id, "write")
     _require_caregiver_in_person(db, event.created_by_caregiver_id, event.person_id, "created_by_caregiver_id")
     _require_evidence_ids_in_person(db, event.evidence_ids, event.person_id)
+    if event.situation_id:
+        situation = db.query(SituationModel).filter(SituationModel.id == event.situation_id, SituationModel.person_id == event.person_id).first()
+        if situation is None:
+            raise HTTPException(status_code=400, detail="situation_id must belong to this care record")
 
     db_event = CareEventModel(**event.model_dump())
     db.add(db_event)
@@ -330,6 +335,12 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, correction.person_id, "write")
     _require_caregiver_in_person(db, correction.caregiver_id, correction.person_id, "caregiver_id")
+    if correction.target_type == "insight":
+        target = db.query(InsightModel).filter(InsightModel.id == correction.target_id, InsightModel.person_id == correction.person_id).first()
+        if target is None:
+            raise HTTPException(status_code=400, detail="Insight target must belong to this care record")
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported correction target_type; only insight corrections are currently supported")
 
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
