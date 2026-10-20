@@ -152,6 +152,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 foreign_caregiver_id = foreign_caregiver.id
                 foreign_insight_id = foreign_insight.id
                 caregiver_profile_id = caregiver_profile.id
+            unlinked_profile_write = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Must not impersonate unlinked profile", "observation_type": "direct"})
+            assert unlinked_profile_write.status_code == 403, unlinked_profile_write.text
             profile_invitation_response = client.post("/api/v1/auth/caregiver-profile-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_profile_id": caregiver_profile_id, "permissions": ["read", "write"]})
             assert profile_invitation_response.status_code == 201, profile_invitation_response.text
             profile_invitation_token = profile_invitation_response.json()["invitation_token"]
