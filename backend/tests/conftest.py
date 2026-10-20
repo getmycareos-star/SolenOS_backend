@@ -4,7 +4,7 @@ os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 from app.core.config import get_settings
 get_settings.cache_clear()
 
-from app.main import app
+from app.main import app, api_limiter, auth_limiter, strict_limiter
 
 import pytest
 
@@ -24,9 +24,15 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
+    # Dependency overrides and in-memory rate counters are process-global. Reset
+    # them per test so one test cannot make unrelated endpoints return 429.
     app.dependency_overrides = {}
+    for limiter in (api_limiter, auth_limiter, strict_limiter):
+        limiter.requests.clear()
     yield
     app.dependency_overrides = {}
+    for limiter in (api_limiter, auth_limiter, strict_limiter):
+        limiter.requests.clear()
 
 
 @pytest.fixture(autouse=True)
