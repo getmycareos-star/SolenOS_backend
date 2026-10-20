@@ -523,7 +523,12 @@ class TestDailyCareMerge:
             },
         )
         assert response.status_code == 200
-        vitals = {v.vital_type.value: v for v in db.query(VitalSign).all()}
+        rows = db.query(VitalSign).all()
+        vitals = {v.vital_type.value: v for v in rows}
+        assert set(vitals) == {"heart_rate", "systolic_bp"}, (
+            "Expected both typed vital rows to persist; "
+            f"observed={[(v.vital_type.value, v.value) for v in rows]!r}"
+        )
         assert vitals["heart_rate"].value == 72.0
         assert vitals["heart_rate"].is_out_of_range is False
         assert vitals["systolic_bp"].is_out_of_range is True
