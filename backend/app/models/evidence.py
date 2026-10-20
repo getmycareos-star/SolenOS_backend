@@ -3,7 +3,7 @@ from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
 from app.core.types import JSONList, JSONDict
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym
 
 from app.core.evidence_enums import (
     EvidenceType,
@@ -80,6 +80,8 @@ class Evidence(Base):
     location = Column(String, nullable=True)
     confidence = Column(Float, nullable=True)  # single confidence for backward compatibility
     evidence_status = Column(String, nullable=False, default="active")  # EvidenceStatus
+    # Backward-compatible mapped alias used by the evidence service and schemas.
+    status = synonym("evidence_status")
     source_type = Column(String, nullable=True)  # SourceType
     source_span_start = Column(Integer, nullable=True)
     source_span_end = Column(Integer, nullable=True)
