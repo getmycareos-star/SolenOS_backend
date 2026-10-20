@@ -6,7 +6,7 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_person_access, require_staff
 from app.models.auth_identity import AuthAccount
-from app.models.care import Caregiver as CaregiverModel
+from app.models.care import Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.schemas.safety import (
     SafetyContractInput,
     SafetyContractOutput,
@@ -63,8 +63,15 @@ def validate_response(
     claims: List[str],
     evidence_ids: List[str],
     risk_class: RiskClass,
+    person_id: str,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "read")
+    if evidence_ids:
+        found_ids = {row[0] for row in db.query(EvidenceModel.id).filter(EvidenceModel.id.in_(set(evidence_ids)), EvidenceModel.person_id == person_id).all()}
+        if found_ids != set(evidence_ids):
+            raise HTTPException(status_code=400, detail="All evidence IDs must belong to this care record")
     engine = SafetyEngine()
     decision = engine.validate_response(candidate_response, claims, evidence_ids, risk_class)
     return decision
