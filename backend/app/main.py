@@ -10,7 +10,7 @@ from app.api.causal import router as causal_router
 from app.api.authentication import router as authentication_router, current_account
 from app.core.authz import assert_person_access
 from app.models.auth_identity import AuthAccount
-from app.models.care import Caregiver as CaregiverModel
+from app.models.care import Person as PersonModel, Caregiver as CaregiverModel
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.schemas.situation import SituationInput, SituationResponse
@@ -42,7 +42,7 @@ situation_router = APIRouter()
 @situation_router.post("/situation", response_model=SituationResponse)
 def post_situation(payload: SituationInput, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, payload.person_id, "write")
-    person = db.query(CaregiverModel.__table__.metadata.tables["persons"]).filter_by(id=payload.person_id).first()
+    person = db.query(PersonModel).filter(PersonModel.id == payload.person_id).first()
     if person is None:
         raise HTTPException(status_code=400, detail="Person not found")
     caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == payload.caregiver_id).first()
