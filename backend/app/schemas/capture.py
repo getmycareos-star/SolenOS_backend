@@ -38,6 +38,13 @@ class ScaleCapture(BaseModel):
     note: Optional[str] = Field(default=None, max_length=4000)
 
 
+class LocationCapture(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    accuracy: Optional[float] = Field(default=None, ge=0)
+    timestamp: Optional[float] = None
+
+
 class DailyCaptureInput(BaseModel):
     person_id: str = Field(min_length=1, max_length=100)
     caregiver_id: str = Field(min_length=1, max_length=100)
@@ -45,6 +52,8 @@ class DailyCaptureInput(BaseModel):
     vitals: list[VitalCapture] = Field(default_factory=list, max_length=100)
     scales: list[ScaleCapture] = Field(default_factory=list, max_length=100)
     notes: str = Field(default="", max_length=20000)
+    location: Optional[LocationCapture] = None
+    location_provenance: Optional[Literal["user_provided"]] = None
 
 
 class DailyCaptureOutput(BaseModel):
