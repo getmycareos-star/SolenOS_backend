@@ -233,8 +233,18 @@ def _utc_now() -> datetime:
 
 
 def _request_fingerprint(payload: SituationInput) -> str:
+    """Fingerprint the logical capture, not retry-volatile transport metadata."""
+    stable = payload.model_dump(mode="json")
+    # Clients may regenerate these timestamps/session IDs when retrying after a
+    # lost response. They must not turn one logical capture into a key conflict.
+    stable.pop("timestamp", None)
+    stable.pop("captured_at", None)
+    stable.pop("care_session_id", None)
+    provenance = stable.get("provenance")
+    if isinstance(provenance, dict):
+        provenance.pop("captured_at", None)
     canonical = json.dumps(
-        payload.model_dump(mode="json"),
+        stable,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
