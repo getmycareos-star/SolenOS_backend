@@ -11,16 +11,18 @@ Implements secure authentication with:
 
 import secrets
 import hashlib
+import base64
+import binascii
+import hmac
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple, Dict, Any, List
 from uuid import uuid4
 
 import jwt
-from passlib.hash import pbkdf2_sha256
-from passlib.context import CryptContext
+from argon2 import PasswordHasher
 from sqlalchemy.orm import Session
 
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+password_hasher = PasswordHasher()
 
 from app.core.config import get_settings
 from app.core.identity_enums import AccountType, SessionType, DeviceTrustLevel, AuthProvider
@@ -79,27 +81,69 @@ class SessionRevokedError(AuthenticationError):
     pass
 
 
+def _decode_passlib_ab64(value: str) -> bytes:
+    """Decode Passlib's unpadded adapted-base64 representation."""
+    normalized = value.replace(".", "+")
+    normalized += "=" * (-len(normalized) % 4)
+    return base64.b64decode(normalized, validate=True)
+
+
+def _verify_legacy_pbkdf2_sha256(password: str, encoded_hash: str) -> bool:
+    """Verify existing Passlib PBKDF2 hashes without importing deprecated Passlib code.
+
+    Existing account and session-token hashes remain valid during migration.
+    New hashes use Argon2id; successful legacy password logins are upgraded.
+    """
+    try:
+        parts = encoded_hash.split("$")
+        if len(parts) != 5 or parts[1] != "pbkdf2-sha256":
+            return False
+        rounds = int(parts[2])
+        if rounds < 1000 or rounds > 1_000_000:
+            return False
+        salt = _decode_passlib_ab64(parts[3])
+        expected = _decode_passlib_ab64(parts[4])
+        if not salt or len(expected) != 32:
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            salt,
+            rounds,
+            dklen=len(expected),
+        )
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError, binascii.Error):
+        return False
+
+
 def hash_password(password: str) -> str:
-    """Hash password using PBKDF2-SHA256."""
-    return pbkdf2_sha256.hash(password)
+    """Hash a password with Argon2id."""
+    return password_hasher.hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    """Verify password against PBKDF2-SHA256 hash."""
-    return pbkdf2_sha256.verify(password, password_hash)
+    """Verify Argon2id hashes and safely support legacy PBKDF2-SHA256 hashes."""
+    if not isinstance(password_hash, str) or not password_hash:
+        return False
+    if password_hash.startswith("$pbkdf2-sha256$"):
+        return _verify_legacy_pbkdf2_sha256(password, password_hash)
+    if password_hash.startswith("$argon2"):
+        try:
+            return password_hasher.verify(password_hash, password)
+        except Exception:
+            return False
+    return False
 
 
 def hash_token(token: str) -> str:
-    """Hash a session or refresh token for secure storage."""
-    return pwd_context.hash(token)
+    """Hash a session or refresh token with Argon2id."""
+    return password_hasher.hash(token)
 
 
 def verify_token(token: str, token_hash: str) -> bool:
-    """Verify a token against its hash."""
-    try:
-        return pwd_context.verify(token, token_hash)
-    except Exception:
-        return False
+    """Verify new Argon2id or existing legacy PBKDF2 token hashes."""
+    return verify_password(token, token_hash)
 
 
 def generate_token(length: int = 32) -> str:
@@ -329,6 +373,12 @@ def authenticate_account(
 
     if account.auth_provider != AuthProvider.EMAIL_PASSWORD:
         raise AuthenticationError("This account uses a different sign-in method")
+
+    # Upgrade a legacy PBKDF2 password hash after a successful password login.
+    # The session commit below persists this change alongside the new session.
+    if not (account.password_hash or "").startswith("$argon2id$"):
+        account.password_hash = hash_password(password)
+        db.add(account)
 
     # Reset failed attempts
     reset_failed_logins(db, account)
