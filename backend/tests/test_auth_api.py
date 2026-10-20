@@ -13,12 +13,13 @@ from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
 from app.models.safety import SafetyAuditRecordModel
+from app.models.action import Action as ActionModel
 from app.models.uncertainty import InformationGap
 
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -80,6 +81,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unauthenticated_caregiver_read.status_code == 401
             unauthenticated_safety_read = client.get("/api/v1/safety/audit/not-authorized")
             assert unauthenticated_safety_read.status_code == 401
+            unauthenticated_action_read = client.get("/api/v1/actions/actions/not-authorized")
+            assert unauthenticated_action_read.status_code == 401
+            unauthenticated_situation_write = client.post("/api/situation", json={"person_id": "not-authorized", "caregiver_id": "not-authorized", "raw_input": "test"})
+            assert unauthenticated_situation_write.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -105,6 +110,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             own_safety_audits = client.get("/api/v1/safety/audit/" + context["person_id"], headers=headers)
             assert own_safety_audits.status_code == 200, own_safety_audits.text
             assert own_safety_audits.json() == []
+            own_actions = client.get("/api/v1/actions/actions/" + context["person_id"], headers=headers)
+            assert own_actions.status_code == 200, own_actions.text
+            assert own_actions.json() == []
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
@@ -142,6 +150,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                     assert exc.status_code == 403
             unrelated_legacy_person = client.get("/api/v1/persons/" + unrelated.id, headers=headers)
             assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
+            unrelated_action_read = client.get("/api/v1/actions/actions/" + unrelated.id, headers=headers)
+            assert unrelated_action_read.status_code == 403, unrelated_action_read.text
+            unrelated_situation_write = client.post("/api/situation", headers=headers, json={"person_id": unrelated.id, "caregiver_id": "not-a-real-caregiver", "raw_input": "test"})
+            assert unrelated_situation_write.status_code == 403, unrelated_situation_write.text
             unrelated_caregiver_read = client.get("/api/v1/caregiver-profiles/" + unrelated.id, headers=headers)
             assert unrelated_caregiver_read.status_code == 403, unrelated_caregiver_read.text
             unrelated_safety_read = client.get("/api/v1/safety/audit/" + unrelated.id, headers=headers)
@@ -163,5 +175,5 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
