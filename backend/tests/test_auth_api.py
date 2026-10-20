@@ -160,6 +160,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_insight_correction.status_code == 400, foreign_insight_correction.text
             foreign_evidence_observation = client.post("/api/v1/observations", headers=headers, json={"person_id": context["person_id"], "observed_at": "2026-10-20T09:00:00Z", "original_text": "Cross-record observation", "caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_observation.status_code == 400, foreign_evidence_observation.text
+            foreign_intelligence_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": foreign_caregiver_id, "observation_content": "Forged caregiver observation", "observation_type": "direct"})
+            assert foreign_intelligence_observation.status_code == 400, foreign_intelligence_observation.text
+            foreign_promoter_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver.id, "promoted_by_caregiver_id": foreign_caregiver_id, "observation_content": "Forged promotion attribution", "observation_type": "direct"})
+            assert foreign_promoter_observation.status_code == 400, foreign_promoter_observation.text
             foreign_evidence_memory = client.post("/api/v1/reasoning-memory", headers=headers, json={"person_id": context["person_id"], "memory_type": "fact", "key": "test", "value": ["cross-record"], "confidence": 0.5, "source_evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_memory.status_code == 400, foreign_evidence_memory.text
             foreign_evidence_appointment = client.post("/api/v1/appointments", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record appointment", "scheduled_at": "2026-10-21T09:00:00Z", "created_by_caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
