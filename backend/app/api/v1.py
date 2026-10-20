@@ -128,6 +128,33 @@ from app.api.actions import router as actions_router
 router = APIRouter(dependencies=[Depends(current_account)])
 
 
+def _require_caregiver_in_person(db: Session, caregiver_id: Optional[str], person_id: str, field_name: str = "caregiver_id"):
+    if not caregiver_id:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id,
+        CaregiverModel.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=400, detail=f"{field_name} must identify a caregiver in this care record")
+    return caregiver
+
+
+def _require_evidence_ids_in_person(db: Session, evidence_ids: Optional[List[str]], person_id: str):
+    requested = set(evidence_ids or [])
+    if not requested:
+        return
+    found = {
+        row[0] for row in db.query(EvidenceModel.id).filter(
+            EvidenceModel.id.in_(requested),
+            EvidenceModel.person_id == person_id,
+        ).all()
+    }
+    if found != requested:
+        raise HTTPException(status_code=400, detail="All evidence IDs must belong to this care record")
+
+
+
 def _log_and_learn(
     db: Session,
     person_id: str,
@@ -210,6 +237,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db), 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, evidence.person_id, "write")
+    _require_caregiver_in_person(db, evidence.uploaded_by_caregiver_id, evidence.person_id, "uploaded_by_caregiver_id")
 
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
@@ -235,6 +263,8 @@ def list_evidence(person_id: str, db: Session = Depends(get_db)):
 @router.post("/events", response_model=CareEventSchema)
 def create_event(event: CareEventCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, event.person_id, "write")
+    _require_caregiver_in_person(db, event.created_by_caregiver_id, event.person_id, "created_by_caregiver_id")
+    _require_evidence_ids_in_person(db, event.evidence_ids, event.person_id)
 
     db_event = CareEventModel(**event.model_dump())
     db.add(db_event)
@@ -270,6 +300,7 @@ def create_insight(insight: InsightCreate, db: Session = Depends(get_db), accoun
         raise HTTPException(
             status_code=400, detail="Insight must link to at least one evidence item"
         )
+    _require_evidence_ids_in_person(db, insight.evidence_ids, insight.person_id)
     db_insight = InsightModel(**insight.model_dump())
     db.add(db_insight)
     db.commit()
@@ -298,6 +329,7 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, correction.person_id, "write")
+    _require_caregiver_in_person(db, correction.caregiver_id, correction.person_id, "caregiver_id")
 
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
@@ -332,6 +364,7 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 @router.post("/observations", response_model=ObservationSchema)
 def create_observation(observation: ObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, observation.person_id, "write")
+    _require_caregiver_in_person(db, observation.caregiver_id, observation.person_id, "caregiver_id")
 
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
