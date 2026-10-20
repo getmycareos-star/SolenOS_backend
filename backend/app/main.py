@@ -45,7 +45,7 @@ from app.core.security import add_security_headers
 from app.services.alerting import send_security_alert
 from app.core.metrics import init_app_info
 from app.api.auth import ErrorResponse, router as auth_router
-from app.core.database import engine
+from app.core.database import engine, init_db
 from sqlalchemy import text
 
 settings = get_settings()
@@ -191,6 +191,16 @@ async def lifespan(app: FastAPI):
             "before starting with DEBUG=false."
         )
     
+    # Initialize the schema only after all API routers and their models have
+    # been imported. A successful SELECT 1 alone does not prove required
+    # application tables exist.
+    try:
+        init_db()
+        logger.info("Database schema initialization completed.")
+    except Exception as e:
+        logger.exception("Database schema initialization failed.")
+        raise RuntimeError("Cannot start application without initialized database schema.") from e
+
     # Validate database connection
     try:
         with engine.connect() as conn:
