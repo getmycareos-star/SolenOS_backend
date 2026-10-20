@@ -55,7 +55,7 @@ def get_longitudinal_event_counts(
         CareEvent.event_type == event_type,
     )
     if subject_id:
-        query = query.filter(CareEvent.id == subject_id)
+        query = query.filter(CareEvent.subject_id == subject_id)
     events = query.order_by(CareEvent.occurred_at.asc()).all()
     timed_events = [e for e in events if e.occurred_at is not None]
     six_weeks_ago = now - timedelta(days=42)
