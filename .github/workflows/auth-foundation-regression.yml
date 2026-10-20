@@ -42,7 +42,7 @@ jobs:
       - name: Run complete backend test suite
         run: python -m pytest -q tests
       - name: Verify application imports and routes register
-        run: python -c "from app.main import app; assert '/api/v1/auth/me' in app.openapi()['paths']"
+        run: python -c "from app.main import app; paths=app.openapi()['paths']; assert '/api/v1/auth/me' in paths; assert '/api/v1/situation' in paths; assert '/api/v1/daily/log' in paths; assert '/api/v1/upload' in paths"
       - name: Compile changed Python modules
         run: |
           python -m py_compile app/models/auth_identity.py app/models/capture.py app/schemas/capture.py app/api/capture.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/api/uncertainty.py app/api/change.py app/api/causal.py app/api/v1.py app/api/caregiver_intelligence.py app/api/safety.py app/api/actions.py app/main.py app/core/database.py app/main.py
