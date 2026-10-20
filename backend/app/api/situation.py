@@ -361,7 +361,13 @@ def get_situation_context(
         else None
     )
 
-    display_name = (person.preferred_name or person.name or "").strip()
+    preferred_name = (person.preferred_name or "").strip()
+    legal_display_name = (person.name or "").strip()
+    display_name = preferred_name or (
+        legal_display_name
+        if legal_display_name.casefold() not in {"care recipient", "unnamed care recipient"}
+        else ""
+    )
     return {
         "has_context_root": bool(care_events),
         "care_key": caregiver.id,
