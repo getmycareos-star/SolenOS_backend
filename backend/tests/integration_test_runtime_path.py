@@ -12,6 +12,10 @@ from app.models.care_event import CareEvent
 from app.models.evidence import Evidence
 from app.models.identity import Person
 from app.schemas.situation import SituationInput
+from app.main import app
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 
 
 def setup_person_and_caregiver(db: Session, email_suffix: str = ""):
@@ -30,6 +34,17 @@ def setup_person_and_caregiver(db: Session, email_suffix: str = ""):
     db.commit()
     db.refresh(person)
     db.refresh(caregiver)
+
+    # The capture API requires the authenticated identity to match the
+    # caregiver whose ID is recorded in the request.
+    account = Account(
+        id=f"capture-test-account-{caregiver.id}",
+        email=caregiver.email,
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(account, [person.id])
+    app.dependency_overrides[get_current_principal] = lambda: principal
     return person, caregiver
 
 
