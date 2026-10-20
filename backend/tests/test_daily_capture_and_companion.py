@@ -40,11 +40,20 @@ def client(db):
     def override_get_db():
         yield db
 
+    test_account = Account(
+        id="daily-capture-test-account",
+        email="jo@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(test_account, ["p1"])
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_principal] = lambda: principal
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_principal, None)
 
 
 class TestMedication:
