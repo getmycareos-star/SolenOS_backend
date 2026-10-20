@@ -260,8 +260,9 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             scale_service.record_scale({
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
-                "scale_axis": axis,
+                "axis": axis,
                 "score": score,
+                "observed_at": measured_at,
             })
 
      # Map SituationResponse to DailyCareResponse
