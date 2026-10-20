@@ -9,12 +9,13 @@ from app.main import app
 from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
 from app.models.care import Person
+from app.models.change import Baseline
 from app.models.uncertainty import InformationGap
 
 
 def test_signup_login_current_account_and_logout():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -64,6 +65,8 @@ def test_signup_login_current_account_and_logout():
             assert no_token.status_code == 401
             unauthenticated_care_read = client.get("/api/v1/uncertainty/gaps/not-authorized")
             assert unauthenticated_care_read.status_code == 401
+            unauthenticated_change_read = client.get("/api/v1/change/baselines/not-authorized")
+            assert unauthenticated_change_read.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -86,6 +89,9 @@ def test_signup_login_current_account_and_logout():
             own_gaps = client.get("/api/v1/uncertainty/gaps/" + context["person_id"], headers=headers)
             assert own_gaps.status_code == 200, own_gaps.text
             assert own_gaps.json() == []
+            own_baselines = client.get("/api/v1/change/baselines/" + context["person_id"], headers=headers)
+            assert own_baselines.status_code == 200, own_baselines.text
+            assert own_baselines.json() == []
 
             guard = require_person_access("read")
             with TestingSession() as db:
@@ -103,6 +109,8 @@ def test_signup_login_current_account_and_logout():
                     assert exc.status_code == 403
             unrelated_read = client.get("/api/v1/uncertainty/gaps/" + unrelated.id, headers=headers)
             assert unrelated_read.status_code == 403, unrelated_read.text
+            unrelated_baselines = client.get("/api/v1/change/baselines/" + unrelated.id, headers=headers)
+            assert unrelated_baselines.status_code == 403, unrelated_baselines.text
 
             logout = client.post("/api/v1/auth/logout", headers=headers)
             assert logout.status_code == 204
@@ -110,5 +118,5 @@ def test_signup_login_current_account_and_logout():
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
