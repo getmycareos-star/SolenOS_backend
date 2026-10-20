@@ -4,7 +4,7 @@ from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
 from app.api.authentication import current_account
-from app.core.authz import assert_person_access, require_person_access
+from app.core.authz import assert_person_access, assert_account_is_caregiver_profile, require_person_access
 from app.models.auth_identity import AuthAccount
 from app.models.care import Caregiver as CaregiverModel
 from app.models.caregiver_intelligence import (
@@ -83,6 +83,16 @@ def _assert_profile_in_person(db: Session, caregiver_id: Optional[str], person_i
     return caregiver
 
 
+def _assert_profile_account(db: Session, caregiver_profile_id: str, person_id: str, account_id: str):
+    profile = db.query(CaregiverProfileModel).filter(
+        CaregiverProfileModel.id == caregiver_profile_id,
+        CaregiverProfileModel.person_id == person_id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Acting caregiver must be a caregiver profile in this care record")
+    return assert_account_is_caregiver_profile(db, account_id, profile.id, person_id)
+
+
 def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, source_type: str, source_id: str = None, caregiver_id: str = None):
     from app.services.learning import LearningEngine, SavePipelineEvent
     engine = LearningEngine(db)
@@ -133,6 +143,7 @@ def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = D
     if profile_before is None:
         raise HTTPException(status_code=404, detail="Caregiver profile not found")
     assert_person_access(db, account.id, profile_before.person_id, "write")
+    _assert_profile_account(db, caregiver_id, profile_before.person_id, account.id)
     service = CaregiverIntelligenceService(db)
     try:
         involvement_status = CaregiverInvolvementStatus(status)
@@ -202,6 +213,7 @@ def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = 
 def create_observation(observation: CaregiverObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, observation.person_id, "write")
     _assert_profile_in_person(db, observation.caregiver_id, observation.person_id)
+    _assert_profile_account(db, observation.caregiver_id, observation.person_id, account.id)
     _assert_profile_in_person(db, observation.promoted_by_caregiver_id, observation.person_id)
     observation = observation.model_copy(update={"is_promoted_to_shared": False, "promoted_at": None, "promoted_by_caregiver_id": None})
     service = CaregiverIntelligenceService(db)
@@ -239,6 +251,7 @@ def promote_observation(observation_id: str, caregiver_id: str, db: Session = De
         raise HTTPException(status_code=404, detail="Observation not found")
     assert_person_access(db, account.id, observation_record.person_id, "write")
     _assert_profile_in_person(db, caregiver_id, observation_record.person_id)
+    _assert_profile_account(db, caregiver_id, observation_record.person_id, account.id)
     service = CaregiverIntelligenceService(db)
     observation = service.promote_observation_to_shared(observation_id, caregiver_id)
     if not observation:
@@ -250,6 +263,7 @@ def promote_observation(observation_id: str, caregiver_id: str, db: Session = De
 def create_perspective(perspective: CaregiverPerspectiveCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, perspective.person_id, "write")
     _assert_profile_in_person(db, perspective.caregiver_id, perspective.person_id)
+    _assert_profile_account(db, perspective.caregiver_id, perspective.person_id, account.id)
     _assert_profile_in_person(db, perspective.promoted_by_caregiver_id, perspective.person_id)
     perspective = perspective.model_copy(update={"is_promoted_to_shared": False, "promoted_at": None, "promoted_by_caregiver_id": None})
     service = CaregiverIntelligenceService(db)
@@ -277,6 +291,7 @@ def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = De
         raise HTTPException(status_code=404, detail="Perspective not found")
     assert_person_access(db, account.id, perspective_record.person_id, "write")
     _assert_profile_in_person(db, caregiver_id, perspective_record.person_id)
+    _assert_profile_account(db, caregiver_id, perspective_record.person_id, account.id)
     service = CaregiverIntelligenceService(db)
     perspective = service.promote_perspective_to_shared(perspective_id, caregiver_id)
     if not perspective:
@@ -288,6 +303,7 @@ def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = De
 def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, handoff.person_id, "write")
     _assert_profile_in_person(db, handoff.from_caregiver_id, handoff.person_id)
+    _assert_profile_account(db, handoff.from_caregiver_id, handoff.person_id, account.id)
     _assert_profile_in_person(db, handoff.to_caregiver_id, handoff.person_id)
     service = CaregiverIntelligenceService(db)
     db_handoff = service.record_handoff(handoff)
@@ -309,6 +325,7 @@ def accept_handoff(handoff_id: str, acceptance_evidence: Optional[str] = None, d
     if handoff_record is None:
         raise HTTPException(status_code=404, detail="Handoff not found")
     assert_person_access(db, account.id, handoff_record.person_id, "write")
+    _assert_profile_account(db, handoff_record.to_caregiver_id, handoff_record.person_id, account.id)
     service = CaregiverIntelligenceService(db)
     handoff = service.accept_handoff(handoff_id, acceptance_evidence)
     if not handoff:
@@ -333,6 +350,7 @@ def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Op
 def create_activity(activity: CaregiverActivityCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, activity.person_id, "write")
     _assert_profile_in_person(db, activity.caregiver_id, activity.person_id)
+    _assert_profile_account(db, activity.caregiver_id, activity.person_id, account.id)
     _assert_profile_in_person(db, activity.shared_account_id, activity.person_id)
     service = CaregiverIntelligenceService(db)
     db_activity = service.record_activity(activity)
@@ -349,6 +367,7 @@ def list_activities(person_id: str, caregiver_id: Optional[str] = None, limit: i
 def create_communication(communication: CaregiverCommunicationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, communication.person_id, "write")
     _assert_profile_in_person(db, communication.from_caregiver_id, communication.person_id)
+    _assert_profile_account(db, communication.from_caregiver_id, communication.person_id, account.id)
     _assert_profile_in_person(db, communication.to_caregiver_id, communication.person_id)
     for recipient_id in communication.recipient_caregiver_ids or []:
         _assert_profile_in_person(db, recipient_id, communication.person_id)
