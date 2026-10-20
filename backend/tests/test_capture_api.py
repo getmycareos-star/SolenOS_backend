@@ -198,7 +198,7 @@ def test_daily_capture_rejects_foreign_record_photo_evidence(capture_client):
 
 def test_image_upload_stores_bytes_and_scoped_download(capture_client):
     client, context, session_factory = capture_client
-    png_bytes = b"\x89PNG\r\n\x1a\n" + b"test-png-payload"
+    png_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC")
     response = client.post(
         "/api/v1/upload",
         headers={"Authorization": f"Bearer {context['token']}"},
