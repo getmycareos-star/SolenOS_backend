@@ -21,9 +21,6 @@ from app.models.prioritization import PrioritizationDimension, PrioritizationRan
 from app.models.significance import SignificanceAssessment
 from app.models.uncertainty import Contradiction
 from app.schemas.situation import SituationInput
-from app.core.security import AuthenticatedPrincipal, get_current_principal
-from app.core.identity_enums import AccountType
-from app.models.identity import Account
 from app.services.prioritization import PrioritizationEngine
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -384,18 +381,10 @@ def test_situation_pipeline_surfaces_top_priority():
         caregiver_email = caregiver.email
         db.close()
 
-        account = Account(
-            id="prioritization-api-test-account",
-            email=caregiver_email,
-            account_type=AccountType.CAREGIVER,
-            is_active=True,
-        )
-        principal = AuthenticatedPrincipal(account, [person_id])
-        app.dependency_overrides[get_current_principal] = lambda: principal
-
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": f"Bearer {caregiver_id}"},
             json=SituationInput(
                 caregiver_id=caregiver_id,
                 person_id=person_id,
