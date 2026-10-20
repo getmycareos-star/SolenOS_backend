@@ -5,10 +5,19 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# SQLite requires check_same_thread=False for FastAPI's request-scoped sessions.
+# PostgreSQL and other production drivers must not receive SQLite-only arguments.
+connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Import every model module before create_all so the complete metadata registry
+# is populated. Importing only a subset silently omitted core care tables on a
+# fresh database because create_all ran before app.api.v1 imported them.
+import app.models.care  # noqa: E402, F401
+import app.models.memory  # noqa: E402, F401
+import app.models.time_location  # noqa: E402, F401
 import app.models.uncertainty  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
