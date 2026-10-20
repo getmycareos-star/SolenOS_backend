@@ -192,8 +192,8 @@ def test_post_situation_rejects_person_id_outside_care_key():
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 404
-        assert "Person not found" in response.json().get("detail", response.json().get("error", ""))
+        assert response.status_code == 403
+        assert "not authorized for this person" in response.text
     finally:
         teardown_db()
 
