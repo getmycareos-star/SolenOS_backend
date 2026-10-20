@@ -90,6 +90,8 @@ def save_daily_capture(
         f"Daily capture recorded: {len(payload.medications)} medication entries, "
         f"{len(payload.vitals)} vital measurements, and {len(payload.scales)} wellbeing scores."
     )
+    if payload.location is not None:
+        summary += " A user-provided location was attached."
     description = f"{summary}\nCaregiver notes: {payload.notes}" if payload.notes.strip() else summary
     event = CareEventModel(
         person_id=payload.person_id,
