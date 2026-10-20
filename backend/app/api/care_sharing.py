@@ -140,6 +140,26 @@ class OnboardRequest(BaseModel):
     granted_by_caregiver_id: Optional[str] = None
 
 
+def authenticated_caregiver_id(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    person_id: str,
+) -> str:
+    """Resolve the acting caregiver from the authenticated account, never request data."""
+    require_authenticated(principal)
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.person_id == person_id,
+        CaregiverModel.email == principal.account.email,
+        CaregiverModel.is_active.is_(True),
+    ).first()
+    if caregiver is None:
+        raise HTTPException(
+            status_code=403,
+            detail="The authenticated account is not an active caregiver in this care context.",
+        )
+    return caregiver.id
+
+
 def get_service(db: Session = Depends(get_db)) -> CareSharingService:
     return CareSharingService(db)
 
@@ -202,7 +222,11 @@ def categories():
 
 
 @router.post("/grant", response_model=GrantResponse)
-def grant(payload: GrantCreate, service: CareSharingService = Depends(get_service)):
+def grant(
+    payload: GrantCreate,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
     """Share one category with one caregiver.
 
     Returns 400 when the request itself does not make sense, such as granting a
@@ -214,7 +238,7 @@ def grant(payload: GrantCreate, service: CareSharingService = Depends(get_servic
             person_id=payload.person_id,
             caregiver_id=payload.caregiver_id,
             category=payload.category,
-            granted_by_caregiver_id=payload.granted_by_caregiver_id,
+            granted_by_caregiver_id=authenticated_caregiver_id(service.db, principal, payload.person_id),
             relationship=payload.relationship,
             scope=payload.scope,
             reason=payload.reason,
@@ -227,7 +251,11 @@ def grant(payload: GrantCreate, service: CareSharingService = Depends(get_servic
 
 
 @router.post("/onboard", response_model=List[GrantResponse])
-def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_service)):
+def onboard(
+    payload: OnboardRequest,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
     """Set up a caregiver's starting access.
 
     A starting point rather than a decision: family get what they need to
@@ -244,7 +272,7 @@ def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_s
                     person_id=payload.person_id,
                     caregiver_id=payload.caregiver_id,
                     category=category.value,
-                    granted_by_caregiver_id=payload.granted_by_caregiver_id,
+                    granted_by_caregiver_id=authenticated_caregiver_id(service.db, principal, payload.person_id),
                     relationship=payload.relationship,
                     scope=ShareScope.NAMED.value,
                     reason="starting access when added to the care circle",
@@ -257,12 +285,23 @@ def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_s
 
 
 @router.post("/revoke/{grant_id}", response_model=GrantResponse)
-def revoke(grant_id: str, payload: RevokeRequest, service: CareSharingService = Depends(get_service)):
-    """Withdraw a grant. Immediate, total, and recorded rather than deleted."""
+def revoke(
+    grant_id: str,
+    payload: RevokeRequest,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Withdraw a grant. The revoking identity comes from the signed-in account."""
+    grant_row = service.db.query(CareShareGrantModel).filter(
+        CareShareGrantModel.id == grant_id
+    ).first()
+    if grant_row is None:
+        raise HTTPException(status_code=404, detail="no such grant")
+    actor_id = authenticated_caregiver_id(service.db, principal, grant_row.person_id)
     try:
         row = service.revoke(
             grant_id,
-            revoked_by_caregiver_id=payload.revoked_by_caregiver_id,
+            revoked_by_caregiver_id=actor_id,
             reason=payload.reason,
         )
     except ValueError as exc:
@@ -302,13 +341,37 @@ def can_access(
 
 
 @router.get("/disclosure/{caregiver_id}")
-def disclosure(caregiver_id: str, service: CareSharingService = Depends(get_service)):
-    """What this caregiver can see, in words rather than enum values."""
+def disclosure(
+    caregiver_id: str,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Show the signed-in caregiver their own disclosure, not another person's."""
+    caregiver = service.db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="caregiver not found")
+    if caregiver.email != principal.account.email:
+        raise HTTPException(status_code=403, detail="A caregiver may view only their own disclosure")
     return service.disclosure_for(caregiver_id)
 
 
 @router.post("/disclosure/{caregiver_id}/acknowledge")
-def acknowledge(caregiver_id: str, person_id: str, service: CareSharingService = Depends(get_service)):
+def acknowledge(
+    caregiver_id: str,
+    person_id: str,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    authenticated_caregiver_id(service.db, principal, person_id)
+    caregiver = service.db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id,
+        CaregiverModel.person_id == person_id,
+        CaregiverModel.email == principal.account.email,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="A caregiver may acknowledge only their own disclosure")
     row = service.acknowledge_disclosure(caregiver_id, person_id)
     service.db.commit()
     return {"id": row.id, "acknowledged_at": _iso(row.acknowledged_at)}
