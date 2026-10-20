@@ -175,7 +175,7 @@ def test_daily_intelligence_uses_persisted_records_and_open_care_state(reasoning
     assert "1 overdue follow-up(s)" in payload["daily_summary"]
     assert "1 unresolved contradiction(s)" in payload["daily_summary"]
     assert "does not choose a side" in payload["daily_summary"]
-    assert "no clinical conclusion was inferred" in payload["daily_summary"]
+    assert "no schedule or clinical conclusion was inferred" in payload["daily_summary"]
 
 
 def test_daily_intelligence_denies_an_unlinked_person(reasoning_client, db):
