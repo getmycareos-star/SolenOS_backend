@@ -672,7 +672,7 @@ def get_daily_intelligence(
         daily_summary += " Open questions remain unanswered in the record."
     if not active_windows and not expired_windows:
         daily_summary += " No persisted care window is active or expired in the current record."
-    daily_summary += " Only recorded follow-ups and care windows are listed; no schedule or clinical conclusion was inferred."
+    daily_summary += " Only recorded follow-ups and care windows are listed; no schedule was invented, and no clinical conclusion was inferred."
 
     return {
         "id": str(uuid.uuid4()),
