@@ -156,7 +156,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
-            foreign_safety_event = client.post("/api/v1/safety/events", headers=headers, params={"event_type": "invariant_violation", "person_id": context["person_id"], "subject_type": "evidence", "subject_id": own_evidence_id, "description": "cross-record evidence regression"}, json=[foreign_evidence_id])
+            foreign_safety_event = client.post("/api/v1/safety/events", headers=headers, params={"event_type": "invariant_violation", "person_id": context["person_id"], "subject_type": "evidence", "subject_id": own_evidence_id, "description": "cross-record evidence regression"}, json={"violations": [], "policy_references": [], "input_claims": [], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_event.status_code == 400, foreign_safety_event.text
             foreign_safety_escalation = client.post("/api/v1/safety/escalations", headers=headers, params={"person_id": context["person_id"], "affected_person_id": context["person_id"], "trigger": "cross-record evidence regression", "risk_category": "low_risk", "recommended_reviewer": "caregiver"}, json=[foreign_evidence_id])
             assert foreign_safety_escalation.status_code == 400, foreign_safety_escalation.text
