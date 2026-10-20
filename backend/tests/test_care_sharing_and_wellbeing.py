@@ -15,6 +15,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.identity_enums import AccountType
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.models.identity import Account
 from app.core.sharing_enums import ShareCategory
 from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence, Person
@@ -458,7 +461,34 @@ class TestSharingEndpoints:
     @pytest.fixture()
     def client(self, db):
         app.dependency_overrides[get_db] = lambda: db
+        account = Account(
+            id="care-sharing-test-account",
+            email="care-sharing-test@example.com",
+            account_type=AccountType.CAREGIVER,
+            is_active=True,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            account, ["p1"]
+        )
         return TestClient(app)
+
+    def test_sharing_endpoint_requires_authentication(self, client, circle):
+        app.dependency_overrides.pop(get_current_principal, None)
+        response = client.get("/api/v1/care-sharing/grants/p1")
+        assert response.status_code in (401, 403), response.text
+
+    def test_sharing_endpoint_denies_another_care_context(self, client, circle):
+        account = Account(
+            id="care-sharing-other-account",
+            email="care-sharing-other@example.com",
+            account_type=AccountType.CAREGIVER,
+            is_active=True,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            account, ["different-person"]
+        )
+        response = client.get("/api/v1/care-sharing/grants/p1")
+        assert response.status_code == 403, response.text
 
     def test_a_refused_grant_is_a_400_not_a_silent_success(self, client, circle):
         person, _, carer = circle
