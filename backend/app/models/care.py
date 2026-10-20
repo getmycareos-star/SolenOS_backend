@@ -37,3 +37,31 @@ class Correction(Base):
     reason = Column(Text, nullable=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+def __getattr__(name):
+    """Resolve legacy model names after the model split.
+
+    Older tests and integrations imported core models from this module. Keep
+    those imports working while maintaining one canonical mapped class per
+    table and avoiding eager circular imports.
+    """
+    from importlib import import_module
+
+    aliases = {
+        "Person": ("app.models.identity", "Person"),
+        "Caregiver": ("app.models.caregiver", "Caregiver"),
+        "CaregiverModel": ("app.models.caregiver", "Caregiver"),
+        "CareEvent": ("app.models.care_event", "CareEvent"),
+        "CareEventModel": ("app.models.care_event", "CareEvent"),
+        "Evidence": ("app.models.evidence", "Evidence"),
+        "EvidenceModel": ("app.models.evidence", "Evidence"),
+        "Appointment": ("app.models.time_location", "Appointment"),
+        "AppointmentModel": ("app.models.time_location", "Appointment"),
+        "CarePlan": ("app.models.care_planning", "CarePlan"),
+    }
+    target = aliases.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(target[0])
+    return getattr(module, target[1])
