@@ -11,6 +11,7 @@ class AuthAccount(Base):
     password_hash = Column(Text, nullable=False)
     display_name = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
+    is_staff = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
