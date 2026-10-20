@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
@@ -8,7 +9,7 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
 
@@ -54,4 +55,17 @@ app.include_router(situation_router, prefix="/api/v1")
 
 @app.get("/health")
 def health_check():
+    # Liveness only: the process is serving HTTP.
     return {"status": "healthy", "app": settings.app_name}
+
+
+@app.get("/ready")
+def readiness_check():
+    # Readiness includes a real database round-trip; /health alone must not
+    # imply that care records can be persisted.
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return {"status": "ready", "app": settings.app_name, "database": "reachable"}
