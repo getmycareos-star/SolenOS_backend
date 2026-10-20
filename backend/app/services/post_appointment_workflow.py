@@ -35,6 +35,14 @@ class PostAppointmentWorkflowService:
     def __init__(self, db: Session):
         self.db = db
 
+    def _get_workflow_info(self, workflow_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+        """Return the workflow record used by legacy API handlers."""
+        try:
+            normalized_id = workflow_id if isinstance(workflow_id, uuid.UUID) else uuid.UUID(str(workflow_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return _WORKFLOW_STORAGE.get(normalized_id)
+
     def initiate_workflow(
         self, 
         workflow_request: PostAppointmentWorkflowRequest,
@@ -408,7 +416,7 @@ class PostAppointmentWorkflowService:
             updated_fields=updated_fields,
             previous_state_summary=previous_state_summary,
             new_state_summary=new_state_summary,
-            evidence_ids=[uuid.UUID(eid) for eid in evidence_ids] if evidence_ids else []
+            evidence_ids=[str(eid) for eid in evidence_ids] if evidence_ids else []
         )
     
     def update_open_loops(
