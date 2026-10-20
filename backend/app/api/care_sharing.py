@@ -13,11 +13,19 @@ will ask in six months.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+)
+from app.models.care_sharing import CareShareGrant as CareShareGrantModel
+from app.models.caregiver import Caregiver as CaregiverModel
 from app.core.sharing_enums import (
     SHAREABLE_CATEGORIES,
     ShareCategory,
@@ -26,7 +34,73 @@ from app.core.sharing_enums import (
 )
 from app.services.care_sharing import CareSharingService, default_categories_for
 
-router = APIRouter(prefix="/care-sharing", tags=["care-sharing"])
+async def authorize_care_sharing_request(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    """Require authentication and care-context access before sharing operations."""
+    require_authenticated(principal)
+    # Category descriptions contain no family data or grant state.
+    if request.url.path.rstrip("/").endswith("/care-sharing/categories"):
+        return
+
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    def find_context(value):
+        if isinstance(value, dict):
+            if value.get("person_id"):
+                return str(value["person_id"])
+            for nested in value.values():
+                found = find_context(nested)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = find_context(nested)
+                if found:
+                    return found
+        return None
+
+    person_id = (
+        request.path_params.get("person_id")
+        or request.query_params.get("person_id")
+        or find_context(payload)
+    )
+    grant_id = request.path_params.get("grant_id")
+    if not person_id and grant_id:
+        grant = db.query(CareShareGrantModel).filter(
+            CareShareGrantModel.id == grant_id
+        ).first()
+        person_id = getattr(grant, "person_id", None) if grant else None
+
+    caregiver_id = request.path_params.get("caregiver_id")
+    if not person_id and caregiver_id:
+        caregiver = db.query(CaregiverModel).filter(
+            CaregiverModel.id == caregiver_id
+        ).first()
+        person_id = getattr(caregiver, "person_id", None) if caregiver else None
+
+    if not person_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A care context is required for care-sharing access.",
+        )
+    require_care_context_access(principal, str(person_id), "care sharing")
+
+
+router = APIRouter(
+    prefix="/care-sharing",
+    tags=["care-sharing"],
+    dependencies=[Depends(authorize_care_sharing_request)],
+)
 
 
 class GrantCreate(BaseModel):
