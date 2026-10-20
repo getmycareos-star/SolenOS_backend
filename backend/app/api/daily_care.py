@@ -8,7 +8,7 @@ import math
 from app.core.database import get_db
 from app.models.identity import Person as PersonModel
 from app.core.evidence_enums import EvidenceSubjectRole
-from app.core.daily_capture_enums import MedicationStatus, VitalType
+from app.core.daily_capture_enums import MedicationStatus, ScaleAxis, VitalType
 from app.models.caregiver import Caregiver as CaregiverModel
 from app.models.evidence import Evidence as EvidenceModel
 from app.models.care_event import CareEvent as CareEventModel
@@ -239,44 +239,30 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             })
         # Flush the complete structured write set before returning success.
         db.flush()
-    # Record scales via the daily capture service
+    # Record each validated five-point scale as a typed observation.
     if entry.mood_scale is not None or entry.agitation_scale is not None:
         scale_service = DailyCaptureService(db)
-        if entry.mood_scale is not None:
+        scale_inputs = (
+            (ScaleAxis.MOOD, entry.mood_scale),
+            (ScaleAxis.AGITATION, entry.agitation_scale),
+        )
+        for axis, raw_score in scale_inputs:
+            if raw_score is None:
+                continue
             try:
-                mood_score = float(entry.mood_scale)
+                score = int(raw_score)
             except (ValueError, TypeError):
-                mood_score = None
-            if mood_score is not None:
-                    scale_axis_enum = ScaleAxis["MOOD"]
-                    scale_axis_enum = None
-            if scale_axis_enum is not None:
-                    payload = {
-                        "person_id": entry.person_id,
-                        "caregiver_id": entry.caregiver_id,
-                        "scale_axis": scale_axis_enum,
-                        "score": mood_score,
-                    }
-                    payload = {k: v for k, v in payload.items() if v is not None}
-                    scale_service.record_scale(payload)
-        if entry.agitation_scale is not None:
-            try:
-                agitation_score = float(entry.agitation_scale)
-            except (ValueError, TypeError):
-                agitation_score = None
-            if agitation_score is not None:
-                    scale_axis_enum = ScaleAxis["AGITATION"]
-                    scale_axis_enum = None
-            if scale_axis_enum is not None:
-                    payload = {
-                        "person_id": entry.person_id,
-                        "caregiver_id": entry.caregiver_id,
-                        "scale_axis": scale_axis_enum,
-                        "score": agitation_score,
-                    }
-                    payload = {k: v for k, v in payload.items() if v is not None}
-                    scale_service.record_scale(payload)
-
+                continue
+            # DailyCareEntry constrains these values to 1..5. Keep this guard
+            # here too so internal callers cannot create an invalid scale row.
+            if score < 1 or score > 5:
+                continue
+            scale_service.record_scale({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "scale_axis": axis,
+                "score": score,
+            })
 
      # Map SituationResponse to DailyCareResponse
     return DailyCareResponse(
