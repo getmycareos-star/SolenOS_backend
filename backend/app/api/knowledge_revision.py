@@ -42,7 +42,7 @@ def create_claim(
                 detail=f"An active claim already exists for {claim.subject_type}/{claim.subject_id}/{claim.field}. "
                 "Use the evaluate or supersede endpoints to revise it.",
             )
-    return engine.create_claim(
+    created = engine.create_claim(
         person_id=claim.person_id,
         subject_type=claim.subject_type,
         subject_id=claim.subject_id,
@@ -54,6 +54,11 @@ def create_claim(
         valid_from=claim.valid_from,
         caregiver_id=None,
     )
+    # A request-scoped SQLAlchemy session is closed after the response. Flush is
+    # not durability: commit the claim before reporting successful creation.
+    engine.db.commit()
+    engine.db.refresh(created)
+    return created
 
 
 @router.get("/claims/{person_id}", response_model=List[KnowledgeClaimSchema])

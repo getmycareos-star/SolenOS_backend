@@ -149,7 +149,7 @@ def test_post_situation_missing_caregiver():
             },
         )
         assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["detail"]
+        assert "Caregiver not found" in response.json()["error"]
     finally:
         teardown_db()
 
@@ -182,7 +182,7 @@ def test_post_situation_missing_person():
             },
         )
         assert response.status_code == 400
-        assert "Person not found" in response.json()["detail"]
+        assert "Person not found" in response.json()["error"]
     finally:
         teardown_db()
 
@@ -217,7 +217,7 @@ def test_post_situation_empty_input_and_no_documents():
             },
         )
         assert response.status_code == 400
-        assert "No valid evidence provided" in response.json()["detail"]
+        assert "No valid evidence provided" in response.json()["error"]
     finally:
         teardown_db()
 

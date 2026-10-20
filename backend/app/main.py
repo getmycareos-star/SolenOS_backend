@@ -655,6 +655,7 @@ async def root():
         "status": "running",
         "docs": "/docs",
         "api": "/api/v1",
+        "interface": settings.frontend_url,
         "role": "api",
         "environment": "development" if settings.debug else "production",
     }

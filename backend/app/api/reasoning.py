@@ -66,16 +66,21 @@ def get_care_continuity_service(db: Session = Depends(get_db)) -> CareContinuity
 )
 def run_counterfactual(
     person_id: uuid.UUID = Path(..., description="Person uuid.UUID"),
-    intervention: Dict[str, Any] = Body(..., description="Intervention specification"),
+    payload: Dict[str, Any] = Body(..., description="Intervention specification"),
     service: CausalInferenceService = Depends(get_causal_inference_service),
     principal: AuthenticatedPrincipal = Depends(get_current_active_user),
 ):
-    """Run a counterfactual simulation on the Care Graph."""
+    """Run a counterfactual simulation on the Care Graph.
+
+    Accept both the wrapped client shape {"intervention": {...}} and the raw
+    intervention object. The normalized intervention is echoed in the response.
+    """
     if not principal.has_access_to_person(str(person_id)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this person",
         )
+    intervention = payload.get("intervention") if isinstance(payload.get("intervention"), dict) else payload
     return service.counterfactual_simulation(str(person_id), intervention)
 
 

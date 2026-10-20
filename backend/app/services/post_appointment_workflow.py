@@ -133,6 +133,7 @@ class PostAppointmentWorkflowService:
         if capture_data.capture_source in ["professional_response", "professional_document", "caregiver_report"]:
             evidence_entry = EvidenceModel(
                 person_id=person_id,
+                type="post_appointment_capture",
                 source_text=capture_data.model_dump_json(),  # Store the captured data as JSON
                 uploaded_at=capture_data.capture_timestamp,
                 uploaded_by_caregiver_id=str(capture_data.captured_by_caregiver_id),
