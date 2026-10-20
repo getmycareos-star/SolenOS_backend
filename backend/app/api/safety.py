@@ -116,7 +116,13 @@ def create_escalation(
     account: AuthAccount = Depends(current_account),
 ):
     assert_person_access(db, account.id, person_id, "write")
-    assert_person_access(db, account.id, affected_person_id, "write")
+    if affected_person_id != person_id:
+        raise HTTPException(status_code=400, detail="affected_person_id must match the escalation care record")
+    requested_evidence_ids = set(evidence_ids or [])
+    if requested_evidence_ids:
+        found_evidence_ids = {row[0] for row in db.query(EvidenceModel.id).filter(EvidenceModel.id.in_(requested_evidence_ids), EvidenceModel.person_id == person_id).all()}
+        if found_evidence_ids != requested_evidence_ids:
+            raise HTTPException(status_code=400, detail="All evidence IDs must belong to this care record")
     escalation_engine = EscalationEngine()
     escalation_data = escalation_engine.determine_escalation(risk_category, trigger, person_id)
 
@@ -204,6 +210,11 @@ def create_safety_event(
         linked_escalation = db.query(EscalationModel).filter(EscalationModel.id == escalation_id, EscalationModel.person_id == person_id).first()
         if linked_escalation is None:
             raise HTTPException(status_code=404, detail="Escalation not found for this care record")
+    requested_evidence_ids = set(evidence_ids or [])
+    if requested_evidence_ids:
+        found_evidence_ids = {row[0] for row in db.query(EvidenceModel.id).filter(EvidenceModel.id.in_(requested_evidence_ids), EvidenceModel.person_id == person_id).all()}
+        if found_evidence_ids != requested_evidence_ids:
+            raise HTTPException(status_code=400, detail="All evidence IDs must belong to this care record")
     db_event = SafetyEventModel(
         id=str(uuid.uuid4()),
         event_type=event_type,
@@ -268,7 +279,7 @@ def create_policy_rule(
         is_active=True,
         version="1.0",
         created_at=datetime.now(timezone.utc),
-        created_by_caregiver_id=created_by_caregiver_id,
+        created_by_caregiver_id=None,
     )
     db.add(db_rule)
     db.commit()
@@ -385,16 +396,14 @@ def create_safety_feedback(
     event = db.query(SafetyEventModel).filter(SafetyEventModel.id == safety_event_id, SafetyEventModel.person_id == person_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Safety event not found for this care record")
-    reviewer = db.query(CaregiverModel).filter(CaregiverModel.id == reviewer_id, CaregiverModel.person_id == person_id).first()
-    if reviewer is None:
-        raise HTTPException(status_code=400, detail="Reviewer must be a caregiver in this care record")
+    # Record the authenticated account as reviewer. Caller-supplied caregiver IDs are not identity proof.
     db_feedback = SafetyFeedbackModel(
         id=str(uuid.uuid4()),
         person_id=person_id,
         safety_event_id=safety_event_id,
         feedback_type=feedback_type,
         feedback_text=feedback_text,
-        reviewer_id=reviewer.id,
+        reviewer_id=account.id,
         original_decision=original_decision,
         override_decision=override_decision,
         is_correct=is_correct,
