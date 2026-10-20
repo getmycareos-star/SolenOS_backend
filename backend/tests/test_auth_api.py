@@ -143,6 +143,36 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
+            action_create = client.post("/api/v1/actions/actions", headers=headers, json={
+                "person_id": context["person_id"],
+                "source_evidence_id": own_evidence_id,
+                "source_passage": "Call the clinic tomorrow.",
+                "normalized_action": "call the clinic",
+                "original_text": "Call the clinic tomorrow.",
+                "created_by_caregiver_id": caregiver.id,
+                "actor_type": "caregiver",
+                "actor_id": caregiver.id,
+            })
+            assert action_create.status_code == 200, action_create.text
+            created_action_id = action_create.json()["id"]
+            outsider_signup = client.post("/api/v1/auth/signup", json={
+                "email": "outsider@example.com",
+                "password": "another-long-password-2026",
+                "display_name": "Outsider",
+            })
+            assert outsider_signup.status_code == 201, outsider_signup.text
+            outsider_login = client.post("/api/v1/auth/login", json={
+                "email": "outsider@example.com",
+                "password": "another-long-password-2026",
+            })
+            assert outsider_login.status_code == 200, outsider_login.text
+            outsider_headers = {"Authorization": f"Bearer {outsider_login.json()['access_token']}"}
+            outsider_action_read = client.get("/api/v1/actions/actions/detail/" + created_action_id, headers=outsider_headers)
+            assert outsider_action_read.status_code == 403, outsider_action_read.text
+            outsider_action_update = client.patch("/api/v1/actions/actions/" + created_action_id, headers=outsider_headers, json={"normalized_action": "forged change"})
+            assert outsider_action_update.status_code == 403, outsider_action_update.text
+            outsider_action_cancel = client.post("/api/v1/actions/actions/" + created_action_id + "/cancel", headers=outsider_headers)
+            assert outsider_action_cancel.status_code == 403, outsider_action_cancel.text
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
