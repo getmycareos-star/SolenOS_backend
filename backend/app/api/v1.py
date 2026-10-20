@@ -4,7 +4,8 @@ from typing import List, Optional
 from datetime import datetime, date
 from app.core.database import get_db
 from app.api.authentication import current_account
-from app.core.authz import require_person_access
+from app.core.authz import assert_person_access, require_person_access
+from app.models.auth_identity import AccountPersonAccess, AuthAccount
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -146,7 +147,7 @@ def _log_and_learn(
 
 
 @router.post("/persons", response_model=Person)
-def create_person(person: PersonCreate, db: Session = Depends(get_db)):
+def create_person(person: PersonCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     dob = person.date_of_birth
     if isinstance(dob, str) and dob:
         try:
@@ -163,6 +164,8 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
         dob = None
     db_person = PersonModel(name=person.name, date_of_birth=dob)
     db.add(db_person)
+    db.flush()
+    db.add(AccountPersonAccess(account_id=account.id, person_id=db_person.id, role="owner", permissions=["read", "write", "admin"], is_active=True, granted_by_account_id=account.id))
     db.commit()
     db.refresh(db_person)
     _log_and_learn(
@@ -185,7 +188,9 @@ def get_person(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/caregivers", response_model=CaregiverSchema)
-def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
+def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, caregiver.person_id, "write")
+
     db_caregiver = CaregiverModel(**caregiver.model_dump())
     db.add(db_caregiver)
     db.commit()
@@ -202,7 +207,9 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/evidence", response_model=EvidenceSchema)
-def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
+def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, evidence.person_id, "write")
+
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
     db.commit()
@@ -225,7 +232,9 @@ def list_evidence(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/events", response_model=CareEventSchema)
-def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
+def create_event(event: CareEventCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, event.person_id, "write")
+
     db_event = CareEventModel(**event.model_dump())
     db.add(db_event)
     db.commit()
@@ -253,7 +262,9 @@ def list_events(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/insights", response_model=InsightSchema)
-def create_insight(insight: InsightCreate, db: Session = Depends(get_db)):
+def create_insight(insight: InsightCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, insight.person_id, "write")
+
     if not insight.evidence_ids:
         raise HTTPException(
             status_code=400, detail="Insight must link to at least one evidence item"
@@ -284,7 +295,9 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/corrections", response_model=CorrectionSchema)
-def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db)):
+def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, correction.person_id, "write")
+
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
     db.commit()
@@ -316,7 +329,9 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/observations", response_model=ObservationSchema)
-def create_observation(observation: ObservationCreate, db: Session = Depends(get_db)):
+def create_observation(observation: ObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, observation.person_id, "write")
+
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
     db.commit()
@@ -350,7 +365,9 @@ def get_observation_trends(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/reasoning-memory", response_model=ReasoningMemorySchema)
-def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends(get_db)):
+def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, memory.person_id, "write")
+
     db_memory = ReasoningMemoryModel(**memory.model_dump())
     db.add(db_memory)
     db.commit()
@@ -485,7 +502,9 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 
 
 @router.post("/appointments", response_model=AppointmentSchema)
-def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
+def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, appointment.person_id, "write")
+
     db_appt = AppointmentModel(**appointment.model_dump())
     db.add(db_appt)
     db.commit()
@@ -542,7 +561,9 @@ def update_appointment_lifecycle_endpoint(
 
 
 @router.post("/transitions", response_model=CareTransitionSchema)
-def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db)):
+def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, transition.person_id, "write")
+
     if not transition.transition_type or transition.transition_type == "unknown":
         inferred = infer_transition_type(transition.from_location, transition.to_location)
         transition.transition_type = inferred
@@ -600,7 +621,9 @@ def get_care_transition_sequence(person_id: str, transition_type: str, db: Sessi
 
 
 @router.post("/locations", response_model=LocationSchema)
-def create_location(location: LocationCreate, db: Session = Depends(get_db)):
+def create_location(location: LocationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, location.person_id, "write")
+
     db_location = LocationModel(**location.model_dump())
     db.add(db_location)
     db.commit()
@@ -810,7 +833,9 @@ def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depen
 
 
 @router.post("/temporal/facts", response_model=TemporalFactSchema)
-def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depends(get_db)):
+def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, fact.person_id, "write")
+
     return create_temporal_fact(db, fact)
 
 
@@ -841,7 +866,9 @@ def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subj
 
 
 @router.post("/temporal/relations", response_model=TemporalRelationSchema)
-def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Session = Depends(get_db)):
+def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, relation.person_id, "write")
+
     return create_temporal_relation(db, relation)
 
 
@@ -851,7 +878,9 @@ def list_temporal_relations(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/temporal/reference-frames", response_model=TemporalReferenceFrameSchema)
-def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Session = Depends(get_db)):
+def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, frame.person_id, "write")
+
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
@@ -879,7 +908,9 @@ def list_temporal_conflicts(person_id: str, subject_type: Optional[str] = None, 
 
 
 @router.post("/temporal/contradictions", response_model=TemporalContradictionSchema)
-def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, db: Session = Depends(get_db)):
+def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, contradiction.person_id, "write")
+
     return create_temporal_contradiction(db, contradiction)
 
 
