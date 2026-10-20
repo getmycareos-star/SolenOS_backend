@@ -121,7 +121,19 @@ def test_identical_retry_does_not_duplicate_event_or_evidence(db, client):
 
     headers = {"Authorization": f"Bearer {caregiver.id}", "Idempotency-Key": "capture-retry-003"}
     first = client.post("/api/situation", json=body, headers=headers)
-    retry = client.post("/api/situation", json=body, headers=headers)
+
+    # A retry may be re-created by the UI with a new interaction session and
+    # client timestamp after a lost response; the logical capture is unchanged.
+    retry_body = dict(body)
+    retry_body["timestamp"] = datetime.now(timezone.utc).isoformat()
+    retry_body["captured_at"] = datetime.now(timezone.utc).isoformat()
+    retry_body["care_session_id"] = "sess_retry_00000002"
+    if isinstance(retry_body.get("provenance"), dict):
+        retry_body["provenance"] = {
+            **retry_body["provenance"],
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+    retry = client.post("/api/situation", json=retry_body, headers=headers)
     assert first.status_code == 200, first.text
     assert retry.status_code == 200, retry.text
 
