@@ -16,9 +16,6 @@ from app.models.evidence import Evidence
 from app.models.care_event import CareEvent
 from app.models.change import Change, Situation
 from app.schemas.situation import SituationInput
-from app.core.security import AuthenticatedPrincipal, get_current_principal
-from app.core.identity_enums import AccountType
-from app.models.identity import Account
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -36,17 +33,6 @@ def override_get_db():
         yield db
     finally:
         db.close()
-
-
-def override_principal(email: str, person_id: str):
-    account = Account(
-        id=f"runtime-test-account-{email}",
-        email=email,
-        account_type=AccountType.CAREGIVER,
-        is_active=True,
-    )
-    principal = AuthenticatedPrincipal(account, [person_id])
-    app.dependency_overrides[get_current_principal] = lambda: principal
 
 
 def setup_db():
@@ -77,7 +63,6 @@ def test_post_situation_persists_change_detection_and_situation_results():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
-        override_principal("int-test-1@example.com", "int-person-1")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
@@ -86,7 +71,7 @@ def test_post_situation_persists_change_detection_and_situation_results():
                 raw_input="The person fell while getting out of bed.",
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
-        response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
@@ -142,7 +127,6 @@ def test_multi_update_longitudinal_reasoning():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
-        override_principal("int-test-2@example.com", "int-person-2")
 
         client = TestClient(app, base_url="http://localhost")
         inputs = [
@@ -157,7 +141,7 @@ def test_multi_update_longitudinal_reasoning():
                 raw_input=text,
                 timestamp=(datetime.now(timezone.utc) - timedelta(days=2 - i)).isoformat(),
             )
-            response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+            response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
             assert response.status_code == 200, f"Turn {i+1} failed: {response.text}"
 
         db = TestingSessionLocal()
@@ -197,7 +181,6 @@ def test_identical_payload_without_idempotency_key_is_two_submissions():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
-        override_principal("int-test-3@example.com", "int-person-3")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
@@ -206,8 +189,8 @@ def test_identical_payload_without_idempotency_key_is_two_submissions():
             raw_input="Identical observation submitted twice.",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        r1 = client.post("/api/situation", json=payload.model_dump(mode="json"))
-        r2 = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        r1 = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
+        r2 = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert r1.status_code == 200
         assert r2.status_code == 200
 
@@ -242,7 +225,6 @@ def test_empty_input_returns_400():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
-        override_principal("int-test-4@example.com", "int-person-4")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
@@ -250,7 +232,7 @@ def test_empty_input_returns_400():
             person_id="int-person-4",
             raw_input="   ",
         )
-        response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert response.status_code == 400
     finally:
         teardown_db()
