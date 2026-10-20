@@ -617,16 +617,25 @@ class TestCaregiverListing:
         assert people[0]["relationship"] == "daughter"
 
     def test_caregivers_are_scoped_to_their_person(self, db, caregiver, client):
-        """One person's care circle must not leak another's."""
+        """An authenticated caregiver cannot query a different person's care circle."""
         from app.models.care import Person
 
         other = Person(id="p2", name="Someone else")
         db.add(other)
         db.commit()
 
+        principal_account = Account(
+            id="caregiver-scope-test-account",
+            is_active=True,
+            account_type=AccountType.CAREGIVER,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            principal_account, [caregiver.person_id]
+        )
+
         response = client.get("/api/v1/caregivers/p2")
-        assert response.status_code == 200
-        assert response.json() == []
+        assert response.status_code == 403
+        assert "authorized" in response.json()["detail"].lower()
 
 
 class TestCompanionEndpoint:
