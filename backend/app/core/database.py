@@ -9,6 +9,9 @@ engine = create_engine(settings.database_url, connect_args={"check_same_thread":
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Register the core person/caregiver tables before models with foreign keys
+# to caregivers. All model modules must be imported before create_all below.
+import app.models.care  # noqa: E402, F401
 import app.models.uncertainty  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
@@ -16,7 +19,6 @@ import app.models.significance  # noqa: E402, F401
 import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
-import app.models.care  # noqa: E402, F401
 
 # Register all foreign-key target models before creating the schema.
 Base.metadata.create_all(bind=engine)
