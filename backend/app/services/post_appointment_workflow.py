@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import structlog
 from sqlalchemy.orm import Session
 
-from app.models.care_event import AppointmentModel, CareEvent, Evidence
+from app.models.time_location import Appointment as AppointmentModel
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence
 from app.models.identity import Person
 from app.models.caregiver import Caregiver
 from app.core.care_context_enums import HandoffReason
