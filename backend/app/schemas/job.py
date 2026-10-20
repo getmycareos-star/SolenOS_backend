@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict, BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.job import JobStatus, JobType
@@ -67,8 +67,7 @@ class JobResponse(JobBase):
     next_retry_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JobListResponse(BaseModel):
