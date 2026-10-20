@@ -373,13 +373,11 @@ class PostAppointmentWorkflowService:
                     "unresolved_count": len(reconciliation_result.unresolved_items)
                 }
                 
-                # Update the care event's extra_metadata with reconciliation info
-                existing_metadata = json.loads(care_event.extra_metadata or "{}")
-                existing_metadata.update({
-                    "post_appointment_workflow": reconciliation_metadata
-                })
-                care_event.extra_metadata = json.dumps(existing_metadata)
-                updated_fields.append("extra_metadata")
+                # CareEvent has no extra_metadata column. Keep this workflow
+                # result under the workflow state instead of assigning a
+                # nonexistent ORM attribute and falsely reporting persistence.
+                workflow_info["reconciliation_metadata"] = reconciliation_metadata
+                updated_fields.append("workflow_reconciliation_metadata")
         
         # For superseded information, we would typically create new care events 
         # that supersede old ones, or update existing ones with supersession links
