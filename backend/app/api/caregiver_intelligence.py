@@ -9,6 +9,7 @@ from app.core.security import (
     require_authenticated,
     require_care_context_access,
 )
+from app.models.caregiver import Caregiver as CaregiverRecordModel
 from app.models.caregiver_intelligence import (
     CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
@@ -160,6 +161,29 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depe
     )
     return db_profile
 
+
+@router.get("/caregivers/{person_id}")
+def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
+    """List the care-circle members attached to a person record.
+
+    This is the caregiver-facing roster, distinct from the richer caregiver
+    intelligence profiles. The router-level dependency authorizes person_id.
+    """
+    caregivers = (
+        db.query(CaregiverRecordModel)
+        .filter(CaregiverRecordModel.person_id == person_id)
+        .order_by(CaregiverRecordModel.name.asc())
+        .all()
+    )
+    return [
+        {
+            "id": caregiver.id,
+            "name": caregiver.name,
+            "relationship": caregiver.relationship,
+            "person_id": caregiver.person_id,
+        }
+        for caregiver in caregivers
+    ]
 
 @router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
 def list_caregiver_profiles(person_id: str, db: Session = Depends(get_db)):
