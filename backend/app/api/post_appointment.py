@@ -39,33 +39,39 @@ def start_post_appointment_workflow(
     This endpoint is called when an appointment is marked as completed
     to begin the care continuity process.
     """
-    # Verify the user is authorized to start workflows for this appointment
-    # In a full implementation, we would check appointment access here
-    
-    # Derive caregiver ID from the caregiver-person relationship
-    # Check if the user is a caregiver for the person in the workflow request
-    person_id = workflow_request.person_id
+    # Resolve person context from the persisted appointment; never trust a
+    # client-supplied person ID for an appointment-linked workflow.
+    appointment = (
+        service.db.query(AppointmentModel)
+        .filter(AppointmentModel.id == str(workflow_request.appointment_id))
+        .first()
+    )
+    if appointment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
+
+    person_id = str(appointment.person_id)
     if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Not authorized to access person {person_id}"
+            detail=f"Not authorized to access person {person_id}",
         )
-    
-    # Look up the caregiver entity ID for this user-person relationship
-    caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
-                                              person_id=person_id)
-    
+
+    caregiver_id = _get_caregiver_id_for_person(
+        db=service.db,
+        account_id=current_user.account_id,
+        person_id=person_id,
+    )
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+            detail="No caregiver identity is linked to this account for the appointment's person",
         )
-    
-    # Override the caregiver_id with the actual caregiver ID for this person
-    workflow_request.caregiver_id = caregiver_id
-    
-    return service.start_workflow(workflow_request)
+
+    return service.initiate_workflow(
+        workflow_request=workflow_request,
+        person_id=person_id,
+        caregiver_id=str(caregiver_id),
+    )
 
 
 @router.post("/workflow/{workflow_id}/capture", response_model=Dict[str, Any])
@@ -472,42 +478,37 @@ def process_completed_appointment(
     }
 
 
-def _get_caregiver_id_for_person(db: Session, account_id: str, person_id: str) -> Optional[UUID]:
+def _get_caregiver_id_for_person(db: Session, account_id: str, person_id: str) -> Optional[str]:
+    """Resolve a caregiver profile through the authenticated identity model.
+
+    Caregiver rows do not contain an account_id column. AccountPersonLink is
+    the authorization bridge; the caregiver profile is then matched to that
+    account's email and the same person. Callers must check principal access
+    before invoking this helper.
     """
-    Helper function to derive caregiver ID from the caregiver-person relationship.
-    
-    In a real implementation, this would query the database to find the caregiver
-    entity ID associated with the given account ID and person ID.
-    """
-    try:
-        # Query to find caregiver relationship
-        # This assumes there's a relationship table or field linking accounts to caregivers
-        # and caregivers to persons
-        
-        # First, find the caregiver entity ID for this account
-        caregiver = db.query(CaregiverModel).filter(CaregiverModel.account_id == account_id).first()
-        
-        if not caregiver:
-            # No caregiver entity found for this account
-            return None
-        
-        # Verify that this caregiver is authorized for the person
-        # This would typically involve checking care sharing grants or similar
-        from app.models.care_sharing import CareShareGrant
-        
-        # Check if there's an active grant from this caregiver to the person
-        grant = db.query(CareShareGrant).filter(
-            CareShareGrant.person_id == person_id,
-            CareShareGrant.caregiver_id == caregiver.id,
-            CareShareGrant.status == "active"
-        ).first()
-        
-        if grant:
-            return caregiver.id
-        else:
-            # No active sharing relationship found
-            return None
-            
-    except Exception as e:
-        # Log the error in a real implementation
+    from app.models.identity import Account as AccountModel, AccountPersonLink
+    from app.core.identity_enums import IdentityLinkType
+
+    account = db.query(AccountModel).filter(
+        AccountModel.id == str(account_id),
+        AccountModel.is_active.is_(True),
+    ).first()
+    if account is None or not account.email:
         return None
+
+    link = db.query(AccountPersonLink).filter(
+        AccountPersonLink.account_id == account.id,
+        AccountPersonLink.person_id == str(person_id),
+        AccountPersonLink.is_active.is_(True),
+        AccountPersonLink.revoked_at.is_(None),
+        AccountPersonLink.link_type == IdentityLinkType.CAREGIVER_FOR,
+    ).first()
+    if link is None:
+        return None
+
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.person_id == str(person_id),
+        CaregiverModel.email == account.email,
+        CaregiverModel.is_active.is_(True),
+    ).first()
+    return str(caregiver.id) if caregiver is not None else None
