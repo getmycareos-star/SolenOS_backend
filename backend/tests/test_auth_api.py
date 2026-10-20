@@ -51,7 +51,10 @@ def test_signup_login_current_account_and_logout():
             assert login.status_code == 200, login.text
             token = login.json()["access_token"]
             assert token
-            assert token not in str(login.json())
+            with TestingSession() as db:
+                stored = db.query(AuthSession).filter(AuthSession.account_id == signup.json()["id"]).one()
+                assert stored.token_digest != token
+                assert len(stored.token_digest) == 64
 
             no_token = client.get("/api/v1/auth/me")
             assert no_token.status_code == 401
