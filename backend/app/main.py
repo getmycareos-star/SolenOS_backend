@@ -779,16 +779,14 @@ if settings.debug:
 # mount it now; never duplicate a router that already has any of its expected
 # paths registered.
 def _ensure_critical_router_mounted(router, prefix: str) -> None:
-    """Verify a critical router's *effective* paths, including its own prefix.
+    """Verify a critical router's effective paths and mount it if wholly absent.
 
-    APIRouter stores route paths separately from router.prefix. Omitting that
-    prefix can make an unrelated endpoint look like the router is mounted and
-    leave the real endpoints unreachable.
+    FastAPI's APIRouter route.path already contains the router's own prefix;
+    only the application-level prefix must be added here.
     """
     app_prefix = prefix.rstrip("/")
-    router_prefix = (getattr(router, "prefix", "") or "").rstrip("/")
     expected_paths = {
-        app_prefix + router_prefix + route.path
+        app_prefix + route.path
         for route in router.routes
         if isinstance(route, APIRoute) and getattr(route, "path", None)
     }
@@ -810,14 +808,13 @@ def _ensure_critical_router_mounted(router, prefix: str) -> None:
         # Do not re-include a partly mounted router: that would silently create
         # duplicate handlers for routes that already exist.
         raise RuntimeError(
-            f"Critical router {router_prefix or '<no-prefix>'} is only partially "
-            f"mounted; missing paths: {sorted(missing_paths)}"
+            f"Critical router is only partially mounted; missing paths: "
+            f"{sorted(missing_paths)}"
         )
 
     logger.warning(
         "Critical router was not mounted at its expected paths; mounting it",
-        extra={"prefix": prefix, "router_prefix": router_prefix,
-               "route_count": len(expected_paths)},
+        extra={"prefix": prefix, "route_count": len(expected_paths)},
     )
     app.include_router(router, prefix=prefix)
 
@@ -828,7 +825,7 @@ def _ensure_critical_router_mounted(router, prefix: str) -> None:
     still_missing = expected_paths - registered_paths
     if still_missing:
         raise RuntimeError(
-            f"Failed to mount critical router {router_prefix or '<no-prefix>'}: "
+            f"Failed to mount critical router at prefix {prefix}: "
             f"{sorted(still_missing)}"
         )
 
