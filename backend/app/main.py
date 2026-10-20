@@ -16,9 +16,7 @@ from app.core.config import get_settings
 from app.api.v1 import router as v1_router
 from app.api.notification import router as notification_router
 from app.api.situation import router as situation_router
-from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.change import router as change_router
-from app.api.care_summary import router as care_summary_router
 from app.api.care_graph import router as care_graph_router
 from app.api.companion import router as companion_router
 from app.api.user import router as user_router
@@ -618,9 +616,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(situation_router)  # situation router has prefix="/api", so it becomes "/api/situation"
 app.include_router(v1_router, prefix="/api/v1")
 app.include_router(notification_router, prefix="/api/v1")
-app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
-app.include_router(care_summary_router, prefix="/api/v1")
 app.include_router(care_graph_router, prefix="/api/v1")
 app.include_router(companion_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
