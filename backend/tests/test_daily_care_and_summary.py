@@ -11,6 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 from app.main import app
 from app.models.care_event import CareEvent
 from app.models.evidence import Evidence
@@ -20,11 +23,21 @@ from app.models.evidence import Evidence
 def client(db):
     def override_get_db():
         yield db
+
+    test_account = Account(
+        id="daily-care-test-account",
+        email="jo@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(test_account, ["p1", "ghost"])
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_principal] = lambda: principal
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_principal, None)
 
 
 def _payload(person_id="p1", caregiver_id="c1", **overrides):
@@ -131,6 +144,12 @@ class TestDailyCareEntry:
         """A person that does not exist must return 404, not silently create."""
         resp = client.post("/api/v1/daily-care/entries", json=_payload(person_id="ghost"))
         assert resp.status_code == 404
+
+    def test_daily_care_rejects_unauthenticated_writes(self, client, person, caregiver):
+        """Knowing a person and caregiver ID is not authentication."""
+        app.dependency_overrides.pop(get_current_principal, None)
+        resp = client.post("/api/v1/daily-care/entries", json=_payload())
+        assert resp.status_code == 401
 
     def test_caregiver_not_authorized(self, client, person, caregiver):
         """A caregiver not tied to this person must be rejected."""
