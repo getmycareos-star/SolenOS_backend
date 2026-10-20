@@ -1,21 +1,26 @@
 FROM python:3.11-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
+# Install the OCR executable used by the backend and the compiler needed by
+# dependencies that may ship native extensions.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc tesseract-ocr \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy dependency file
-COPY pyproject.toml .
+# Hatchling's configured wheel package is "app", so source must be present
+# when pip builds the project.
+COPY pyproject.toml ./
+COPY app ./app
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir hatchling && pip install --no-cache-dir .
-
-# Copy the rest of the application
+# Include migrations, static assets and runtime support files.
 COPY . .
 
-# Expose the port the app runs on
 EXPOSE 8000
 
-# Command to run the application
-CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

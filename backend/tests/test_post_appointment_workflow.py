@@ -9,6 +9,15 @@ from sqlalchemy.orm import Session
 from app.models.care import AppointmentModel, CareEventModel, EvidenceModel, Person
 from app.models.caregiver import Caregiver
 from app.services.post_appointment_workflow import PostAppointmentWorkflowService
+
+
+@pytest.fixture(autouse=True)
+def clear_post_appointment_workflow_storage():
+    """Keep in-memory workflow state isolated between tests."""
+    from app.services.post_appointment_workflow import _WORKFLOW_STORAGE
+    _WORKFLOW_STORAGE.clear()
+    yield
+    _WORKFLOW_STORAGE.clear()
 from app.schemas.post_appointment.workflow import (
     PostAppointmentWorkflowRequest,
     PostAppointmentCaptureData,
@@ -21,7 +30,7 @@ from app.schemas.post_appointment.workflow import (
 def test_initiate_workflow(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -67,7 +76,7 @@ def test_initiate_workflow(db: Session):
 def test_capture_appointment_data(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -132,7 +141,7 @@ def test_capture_appointment_data(db: Session):
 def test_reconcile_information(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -198,7 +207,7 @@ def test_reconcile_information(db: Session):
 def test_update_care_state(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -266,7 +275,7 @@ def test_update_care_state(db: Session):
 def test_update_open_loops(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -328,7 +337,7 @@ def test_update_open_loops(db: Session):
 def test_update_responsibilities(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -388,7 +397,7 @@ def test_update_responsibilities(db: Session):
 def test_update_upcoming_events(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -449,7 +458,7 @@ def test_update_upcoming_events(db: Session):
 def test_update_handoff_context(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -506,7 +515,7 @@ def test_update_handoff_context(db: Session):
 def test_generate_family_summary(db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 

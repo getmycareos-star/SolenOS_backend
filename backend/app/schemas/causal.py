@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 from app.core.causal_enums import (
@@ -72,8 +72,7 @@ class CausalHypothesis(CausalHypothesisBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CausalEvidenceBase(BaseModel):
@@ -101,8 +100,7 @@ class CausalEvidence(CausalEvidenceBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlternativeExplanationBase(BaseModel):
@@ -132,8 +130,7 @@ class AlternativeExplanation(AlternativeExplanationBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConfounderBase(BaseModel):
@@ -155,8 +152,7 @@ class Confounder(ConfounderBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemporalAssociation(BaseModel):

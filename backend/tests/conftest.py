@@ -4,7 +4,13 @@ os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
 from app.core.config import get_settings
 get_settings.cache_clear()
 
-from app.main import app
+from app.main import app, api_limiter, auth_limiter, strict_limiter
+
+# Capture the production route table immediately after importing the app,
+# before test modules are imported during collection. Capturing at collection
+# finish is unsafe: module-level test setup can already have mutated the global
+# app by then, turning a damaged route table into the supposed baseline.
+APP_ROUTES_BASELINE = list(app.router.routes)
 
 import pytest
 
@@ -24,9 +30,21 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
+    # Restore only from the snapshot captured before test-module imports.
+    # Never replace a known-good baseline with the already-mutated live table.
+
+    # Dependency overrides, route registration and rate counters are
+    # process-global. Restore the complete route table so one test cannot
+    # contaminate another.
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
+    for limiter in (api_limiter, auth_limiter, strict_limiter):
+        limiter.requests.clear()
     yield
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
+    for limiter in (api_limiter, auth_limiter, strict_limiter):
+        limiter.requests.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +84,25 @@ def db():
         yield session
     finally:
         session.close()
-        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+@pytest.fixture()
+def client(db):
+    """Test client wired to the per-test in-memory database.
+
+    The app's production engine must not be used by API tests: otherwise test
+    cases leak state into a local SQLite file and results depend on execution
+    order.
+    """
+    from fastapi.testclient import TestClient
+    from app.core.database import get_db
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)
 
 
 @pytest.fixture()
@@ -99,6 +135,13 @@ def evidence(db, caregiver):
             person_id=person_id,
             type="caregiver_report",
             source_text=text,
+            subject_role="care_recipient",
+            subject_id=person_id,
+            entity_resolution_status="resolved",
+            observer_role="caregiver",
+            observer_id=caregiver.id,
+            author_role="caregiver",
+            author_id=caregiver.id,
             uploaded_by_caregiver_id=caregiver.id,
             source_type="caregiver",
             evidence_status="reported",

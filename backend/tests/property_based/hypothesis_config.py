@@ -4,7 +4,7 @@ Provides strategies for generating valid care domain objects.
 """
 
 from hypothesis import HealthCheck, settings, Phase
-from hypothesis.strategies import text, integers, booleans, floats, sampled_from, lists, dates, times
+from hypothesis.strategies import text, integers, booleans, floats, sampled_from, lists, dates, times, datetimes, fixed_dictionaries, one_of, none
 import datetime
 from uuid import uuid4
 
@@ -98,16 +98,16 @@ def confidence_score_strategy():
 # Composite strategies for domain objects
 def person_dict_strategy():
     """Generate valid person dictionaries."""
-    return {
+    return fixed_dictionaries({
         "id": person_id_strategy(),
         "name": text(min_size=1, max_size=100),
         "created_at": timestamp_strategy(),
-    }
+    })
 
 
 def evidence_dict_strategy():
     """Generate valid evidence dictionaries."""
-    return {
+    return fixed_dictionaries({
         "id": evidence_id_strategy(),
         "subject_id": person_id_strategy(),
         "type": sampled_from(["OBSERVATION", "MEDICATION", "SYMPTOM", "ACTIVITY"]),
@@ -117,16 +117,16 @@ def evidence_dict_strategy():
         "status": sampled_from(["RECORDED", "PROCESSED", "VALIDATED"]),
         "created_at": timestamp_strategy(),
         "confidence_overall": confidence_score_strategy(),
-    }
+    })
 
 
 def care_event_dict_strategy():
     """Generate valid care event dictionaries."""
-    return {
+    return fixed_dictionaries({
         "id": care_event_id_strategy(),
         "person_id": person_id_strategy(),
         "event_type": care_event_type_strategy(),
-        "event_subtype": text(min_size=0, max_size=50).optional(),
+        "event_subtype": one_of(text(min_size=0, max_size=50), none()),
         "title": text(min_size=1, max_size=200),
         "original_expression": observation_text_strategy(),
         "event_time": timestamp_strategy(),
@@ -134,7 +134,7 @@ def care_event_dict_strategy():
         "status": care_event_status_strategy(),
         "severity": care_event_severity_strategy(),
         "confidence_overall": confidence_score_strategy(),
-    }
+    })
 
 
 # Helper functions for property-based testing

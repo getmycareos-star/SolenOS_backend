@@ -45,7 +45,7 @@ def setup_db():
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     app.dependency_overrides.clear()
 
 
@@ -378,11 +378,13 @@ def test_situation_pipeline_surfaces_top_priority():
         person, caregiver = seed_people(db)
         person_id = person.id
         caregiver_id = caregiver.id
+        caregiver_email = caregiver.email
         db.close()
 
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": f"Bearer {caregiver_id}"},
             json=SituationInput(
                 caregiver_id=caregiver_id,
                 person_id=person_id,

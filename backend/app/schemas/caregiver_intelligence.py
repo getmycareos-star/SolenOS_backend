@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 from datetime import datetime
 from typing import Optional, List, Any
 from app.core.caregiver_enums import (
@@ -49,8 +49,7 @@ class CaregiverProfile(CaregiverProfileBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverRoleBase(BaseModel):
@@ -73,8 +72,7 @@ class CaregiverRole(CaregiverRoleBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverResponsibilityBase(BaseModel):
@@ -102,8 +100,7 @@ class CaregiverResponsibility(CaregiverResponsibilityBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverObservationBase(BaseModel):
@@ -133,8 +130,7 @@ class CaregiverObservation(CaregiverObservationBase):
     report_time: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverPerspectiveBase(BaseModel):
@@ -160,8 +156,7 @@ class CaregiverPerspective(CaregiverPerspectiveBase):
     timestamp: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverHandoffBase(BaseModel):
@@ -188,8 +183,7 @@ class CaregiverHandoff(CaregiverHandoffBase):
     timestamp: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverActivityBase(BaseModel):
@@ -214,8 +208,7 @@ class CaregiverActivity(CaregiverActivityBase):
     recorded_at: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverCommunicationBase(BaseModel):
@@ -242,8 +235,7 @@ class CaregiverCommunication(CaregiverCommunicationBase):
     communication_time: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareNetworkRelationshipBase(BaseModel):
@@ -266,8 +258,7 @@ class CareNetworkRelationship(CareNetworkRelationshipBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ResponsibilityGapBase(BaseModel):
@@ -291,8 +282,7 @@ class ResponsibilityGap(ResponsibilityGapBase):
     detected_at: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PerspectiveConflictBase(BaseModel):
@@ -318,8 +308,7 @@ class PerspectiveConflict(PerspectiveConflictBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DuplicateActionBase(BaseModel):
@@ -343,8 +332,7 @@ class DuplicateAction(DuplicateActionBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverContextBase(BaseModel):
@@ -367,8 +355,7 @@ class CaregiverContext(CaregiverContextBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareNetworkStateBase(BaseModel):
@@ -392,8 +379,7 @@ class CareNetworkState(CareNetworkStateBase):
     snapshot_time: datetime
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CaregiverSummary(BaseModel):

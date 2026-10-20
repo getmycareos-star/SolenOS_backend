@@ -1,0 +1,93 @@
+name: SolenOS backend verification
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solenos-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEBUG: "true"
+      DATABASE_URL: "sqlite:///./solenos-ci.db"
+      PYTHONPATH: "backend:."
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install package and test dependencies
+        run: python -m pip install -e "backend/.[test]"
+
+      - name: Compile application and tests
+        run: python -m compileall -q backend/app backend/tests
+
+      - name: Verify Alembic baseline on a clean database
+        env:
+          DATABASE_URL: "sqlite:///./solenos-migration-ci.db"
+        run: |
+          rm -f solenos-migration-ci.db
+          python -m alembic -c backend/alembic.ini upgrade head
+          python -m alembic -c backend/alembic.ini upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect, text
+          from app.core.database import Base
+          import app.main  # register every model used by the runtime router tree
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          tables = set(inspector.get_table_names())
+          expected = set(Base.metadata.tables)
+          missing = expected - tables
+          assert not missing, f"Migration omitted model tables: {sorted(missing)}"
+          assert "alembic_version" in tables, "Alembic version table is missing"
+          with engine.connect() as connection:
+              version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+          assert version == "0002_capture_idempotency", f"Unexpected migration version: {version}"
+          print(f"Fresh migration created all {len(expected)} model tables; revision={version}.")
+          engine.dispose()
+          PY
+          set +e
+          python -m alembic -c backend/alembic.ini downgrade base > /tmp/alembic-downgrade.log 2>&1
+          downgrade_status=$?
+          set -e
+          if [ "$downgrade_status" -eq 0 ]; then
+            echo "Unsafe baseline downgrade unexpectedly succeeded."
+            exit 1
+          fi
+          grep -F "intentionally irreversible" /tmp/alembic-downgrade.log
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tables = set(inspect(engine).get_table_names())
+          required = {"persons", "vital_signs", "evidence", "alembic_version"}
+          missing = required - tables
+          assert not missing, f"Rejected downgrade removed tables: {sorted(missing)}"
+          print("Rejected downgrade left required care tables and Alembic revision intact.")
+          engine.dispose()
+          PY
+
+      - name: Run automated tests
+        run: python -m pytest -q --timeout=60 backend/tests
+
+      - name: Build production container
+        run: docker build --file backend/Dockerfile --tag solenos-backend-ci backend

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
@@ -19,8 +19,90 @@ from app.schemas.uncertainty import (
 )
 from app.services.uncertainty import UncertaintyEngine
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+)
+from app.models.uncertainty import (
+    InformationGap as InformationGapModel,
+    OpenQuestion as OpenQuestionModel,
+    Contradiction as ContradictionModel,
+    UncertaintyAssessment as UncertaintyAssessmentModel,
+)
 
-router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
+async def authorize_uncertainty_context(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    """Authenticate and authorize the database-owned care context for this request."""
+    require_authenticated(principal)
+
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    supplied_contexts = [
+        value for value in (
+            request.path_params.get("person_id"),
+            request.query_params.get("person_id"),
+            payload.get("person_id"),
+        )
+        if value not in (None, "")
+    ]
+
+    resource_models = (
+        ("gap_id", InformationGapModel),
+        ("question_id", OpenQuestionModel),
+        ("contradiction_id", ContradictionModel),
+        ("assessment_id", UncertaintyAssessmentModel),
+    )
+    owner_person_id = None
+    for parameter, model in resource_models:
+        resource_id = (
+            request.path_params.get(parameter)
+            or request.query_params.get(parameter)
+            or payload.get(parameter)
+        )
+        if not resource_id:
+            continue
+        resource = db.query(model).filter(model.id == resource_id).first()
+        if resource is None:
+            raise HTTPException(status_code=404, detail="Uncertainty resource not found")
+        owner_person_id = getattr(resource, "person_id", None)
+        if not owner_person_id:
+            raise HTTPException(status_code=404, detail="Uncertainty resource has no care context")
+        break
+
+    if owner_person_id:
+        # Never trust a caller-supplied person_id over the resource's stored owner.
+        if any(str(value) != str(owner_person_id) for value in supplied_contexts):
+            raise HTTPException(status_code=403, detail="Care context does not match resource ownership")
+        person_id = str(owner_person_id)
+    else:
+        person_id = str(supplied_contexts[0]) if supplied_contexts else ""
+
+        # Conflicting path/query/body person IDs are ambiguous and must not be
+        # resolved by choosing whichever value happens to be checked first.
+        if any(str(value) != person_id for value in supplied_contexts):
+            raise HTTPException(status_code=403, detail="Conflicting care contexts are not allowed")
+
+    if not person_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A care context is required for uncertainty access.",
+        )
+    require_care_context_access(principal, person_id, "uncertainty access")
+
+
+router = APIRouter(prefix="/uncertainty", tags=["uncertainty"], dependencies=[Depends(authorize_uncertainty_context)])
 
 
 def get_engine(db: Session = Depends(get_db)) -> UncertaintyEngine:

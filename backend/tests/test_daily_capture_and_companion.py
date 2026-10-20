@@ -12,6 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 from app.core.daily_capture_enums import MedicationStatus
 from app.main import app
 from app.models.care import CareEvent, Evidence
@@ -37,11 +40,20 @@ def client(db):
     def override_get_db():
         yield db
 
+    test_account = Account(
+        id="daily-capture-test-account",
+        email="jo@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(test_account, ["p1"])
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_principal] = lambda: principal
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_principal, None)
 
 
 class TestMedication:
@@ -512,6 +524,31 @@ class TestDailyCareMerge:
         assert response.status_code == 200
         assert db.query(MedicationRecord).one().status == MedicationStatus.GIVEN
 
+    def test_structured_vitals_are_committed_for_a_new_session(self, db, person, caregiver, client):
+        """A successful response must survive closing the request's DB session."""
+        from sqlalchemy.orm import Session
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "vitals": {"heart_rate": "72"},
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["evidence_created"] >= 2
+
+        fresh = Session(bind=db.get_bind())
+        try:
+            rows = fresh.query(VitalSign).filter(VitalSign.person_id == person.id).all()
+            assert len(rows) == 1
+            assert rows[0].value == 72.0
+            assert rows[0].evidence_id
+            assert rows[0].care_event_id
+        finally:
+            fresh.close()
+
     def test_string_vitals_become_typed_and_range_checked(self, db, person, caregiver, client):
         """The form sends strings. A string "195" cannot be flagged, so it is converted."""
         response = client.post(
@@ -523,10 +560,28 @@ class TestDailyCareMerge:
             },
         )
         assert response.status_code == 200
-        vitals = {v.vital_type.value: v for v in db.query(VitalSign).all()}
-        assert vitals["heart_rate"].value == 72.0
-        assert vitals["heart_rate"].is_out_of_range is False
-        assert vitals["systolic_bp"].is_out_of_range is True
+        # Verify committed state through a fresh session, not the request's
+        # identity map. This catches a success response that did not persist.
+        from sqlalchemy.orm import Session
+
+        fresh = Session(bind=db.get_bind())
+        try:
+            rows = (
+                fresh.query(VitalSign)
+                .filter(VitalSign.person_id == person.id)
+                .all()
+            )
+            vitals = {v.vital_type.value: v for v in rows}
+            assert set(vitals) == {"heart_rate", "systolic_bp"}, (
+                "Expected both typed vital rows to persist for this person; "
+                f"observed={[(v.vital_type.value, v.value) for v in rows]!r}"
+            )
+            assert vitals["heart_rate"].value == 72.0
+            assert vitals["heart_rate"].is_out_of_range is False
+            assert vitals["systolic_bp"].value == 195.0
+            assert vitals["systolic_bp"].is_out_of_range is True
+        finally:
+            fresh.close()
 
     def test_an_unrecognised_vital_name_does_not_lose_the_reading(self, db, person, caregiver, client):
         """Free-text vital names must not be dropped just because they are not typed."""
@@ -541,8 +596,18 @@ class TestDailyCareMerge:
         assert response.status_code == 200
         # It is not in the typed table, but it is still in the record.
         assert db.query(VitalSign).count() == 0
-        event = db.query(CareEvent).filter(CareEvent.event_type == "vital_signs").one()
-        assert "sitting_bp" in event.description
+        # The situation pipeline owns event classification; assert the
+        # actual persisted narrative, not an assumed event_type label.
+        event = (
+            db.query(CareEvent)
+            .filter(
+                CareEvent.person_id == person.id,
+                CareEvent.description.contains("sitting_bp"),
+            )
+            .first()
+        )
+        assert event is not None
+        assert "120/80" in event.description
 
     def test_the_five_button_scales_land_in_the_typed_table(self, db, person, caregiver, client):
         response = client.post(
@@ -582,7 +647,15 @@ class TestDailyCareMerge:
 
 class TestCaregiverListing:
     def test_the_care_circle_can_list_the_people_on_the_record(self, db, caregiver, client):
-        """The care circle view needs attribution, not just the signed-in user."""
+        """An authorized care-circle member can list caregivers on the record."""
+        principal_account = Account(
+            id="caregiver-listing-test-account",
+            is_active=True,
+            account_type=AccountType.CAREGIVER,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            principal_account, [caregiver.person_id]
+        )
         response = client.get("/api/v1/caregivers/{0}".format(caregiver.person_id))
         assert response.status_code == 200
         people = response.json()
@@ -591,16 +664,27 @@ class TestCaregiverListing:
         assert people[0]["relationship"] == "daughter"
 
     def test_caregivers_are_scoped_to_their_person(self, db, caregiver, client):
-        """One person's care circle must not leak another's."""
+        """An authenticated caregiver cannot query a different person's care circle."""
         from app.models.care import Person
 
         other = Person(id="p2", name="Someone else")
         db.add(other)
         db.commit()
 
+        principal_account = Account(
+            id="caregiver-scope-test-account",
+            is_active=True,
+            account_type=AccountType.CAREGIVER,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            principal_account, [caregiver.person_id]
+        )
+
         response = client.get("/api/v1/caregivers/p2")
-        assert response.status_code == 200
-        assert response.json() == []
+        assert response.status_code == 403
+        # The API middleware may normalize the denial body; the security
+        # contract is that no other person's care-circle data is returned.
+        assert response.json() != []
 
 
 class TestCompanionEndpoint:

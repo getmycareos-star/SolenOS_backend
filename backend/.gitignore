@@ -1,5 +1,43 @@
+# Python bytecode and test/lint output
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage*
+htmlcov/
+
+# Virtual environments and packaging
+.venv/
+venv/
+env/
+ENV/
+build/
+dist/
+*.egg-info/
+
+# Secrets and local environment files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local data and uploads
 uploads/
 *.db
-__pycache__/
-*.pyc
-.pytest_cache/
+*.sqlite
+*.sqlite3
+
+# Logs and runtime artifacts
+*.log
+*.err
+*.out
+logs/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

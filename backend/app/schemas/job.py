@@ -1,12 +1,25 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from app.models.job import JobStatus, JobType
 
 
 class JobBase(BaseModel):
-    job_type: JobType
+    # The database column is deliberately a String for compatibility with
+    # existing rows. Keep the serialized enum value (e.g. "document_processing")
+    # instead of binding a Python Enum object to SQLite's String column.
+    job_type: str
     owner_id: str
+
+    @field_validator("job_type", mode="before")
+    @classmethod
+    def normalize_job_type(cls, value):
+        if isinstance(value, JobType):
+            value = value.value
+        allowed = {item.value for item in JobType}
+        if value not in allowed:
+            raise ValueError(f"Unsupported job type: {value}")
+        return value
     person_id: Optional[str] = None
     document_id: Optional[str] = None
     evidence_id: Optional[str] = None
@@ -54,8 +67,7 @@ class JobResponse(JobBase):
     next_retry_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class JobListResponse(BaseModel):

@@ -514,7 +514,7 @@ def _get_care_team_and_contacts(db: Session, person_id: str, authorized_categori
         caregivers = []
         for grant in grants:
             # Get caregiver information
-            caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == grant caregiver_id).first()
+            caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == grant.caregiver_id).first()
             if caregiver:
                 caregivers.append({
                     "id": str(caregiver.id),

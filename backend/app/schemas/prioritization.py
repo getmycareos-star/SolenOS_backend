@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from app.core.prioritization_enums import (
@@ -26,8 +26,7 @@ class PrioritizationDimension(PrioritizationDimensionBase):
     prioritization_id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrioritizationBase(BaseModel):
@@ -72,8 +71,7 @@ class Prioritization(PrioritizationBase):
     superseded_by_prioritization_id: Optional[str] = None
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrioritizationRankingBase(BaseModel):
@@ -87,8 +85,7 @@ class PrioritizationRanking(PrioritizationRankingBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrioritizationResponse(BaseModel):

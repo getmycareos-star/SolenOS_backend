@@ -1,8 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.database import get_db
+from app.core.security import get_current_principal
+from app.core.security import AuthenticatedPrincipal, require_authenticated, require_care_context_access
+from app.models.causal import (
+    CausalHypothesis as CausalHypothesisModel,
+    CausalEvidence as CausalEvidenceModel,
+    AlternativeExplanation as AlternativeExplanationModel,
+    Confounder as ConfounderModel,
+)
 from app.core.causal_enums import (
     CausalRelationshipStatus,
     EvidenceStrength,
@@ -24,7 +32,55 @@ from app.schemas.causal import (
 )
 from app.services.causal_reasoning import CausalReasoningEngine
 
-router = APIRouter(prefix="/causal", tags=["causal"])
+async def authorize_causal_request(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> None:
+    """Resolve the owning person and enforce authorization for every causal route."""
+    require_authenticated(principal)
+    person_id = request.path_params.get("person_id") or request.query_params.get("person_id")
+    payload = {}
+    try:
+        body = await request.json()
+        if isinstance(body, dict):
+            payload = body
+    except Exception:
+        pass
+    if not person_id:
+        person_id = payload.get("person_id")
+
+    hypothesis_id = request.path_params.get("hypothesis_id") or payload.get("hypothesis_id")
+    if not person_id and hypothesis_id:
+        row = db.query(CausalHypothesisModel).filter(CausalHypothesisModel.id == hypothesis_id).first()
+        if row:
+            person_id = row.person_id
+
+    explanation_id = request.path_params.get("explanation_id")
+    if not person_id and explanation_id:
+        row = db.query(AlternativeExplanationModel).filter(AlternativeExplanationModel.id == explanation_id).first()
+        if row:
+            person_id = row.person_id
+
+    confounder_id = request.path_params.get("confounder_id")
+    if not person_id and confounder_id:
+        row = db.query(ConfounderModel).filter(ConfounderModel.id == confounder_id).first()
+        if row:
+            person_id = row.person_id
+
+    if not person_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Person context is required for causal reasoning",
+        )
+    require_care_context_access(principal, str(person_id), "causal reasoning")
+
+
+router = APIRouter(
+    prefix="/causal",
+    tags=["causal"],
+    dependencies=[Depends(authorize_causal_request)],
+)
 
 
 def get_engine(db: Session = Depends(get_db)) -> CausalReasoningEngine:

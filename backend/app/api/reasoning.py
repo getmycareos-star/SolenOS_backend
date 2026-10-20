@@ -11,6 +11,7 @@ from app.services.care_continuity import CareContinuityEngine
 from app.services.causal_inference import CausalInferenceService
 from app.services.belief_updater import BeliefUpdaterService
 from app.services.explainability import ExplainabilityService
+from app.models.care_recommendations import CareRecommendation
 from app.schemas.memory import ReasoningMemory, LearningEvent
 from app.schemas.dementia import DementiaObservationResponse, DementiaReasoningSummary
 from app.schemas.longitudinal_evidence import LongitudinalEvidenceEvent, LongitudinalEvidenceTrend
@@ -65,16 +66,21 @@ def get_care_continuity_service(db: Session = Depends(get_db)) -> CareContinuity
 )
 def run_counterfactual(
     person_id: uuid.UUID = Path(..., description="Person uuid.UUID"),
-    intervention: Dict[str, Any] = Body(..., description="Intervention specification"),
+    payload: Dict[str, Any] = Body(..., description="Intervention specification"),
     service: CausalInferenceService = Depends(get_causal_inference_service),
     principal: AuthenticatedPrincipal = Depends(get_current_active_user),
 ):
-    """Run a counterfactual simulation on the Care Graph."""
+    """Run a counterfactual simulation on the Care Graph.
+
+    Accept both the wrapped client shape {"intervention": {...}} and the raw
+    intervention object. The normalized intervention is echoed in the response.
+    """
     if not principal.has_access_to_person(str(person_id)):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this person",
         )
+    intervention = payload.get("intervention") if isinstance(payload.get("intervention"), dict) else payload
     return service.counterfactual_simulation(str(person_id), intervention)
 
 
@@ -115,10 +121,23 @@ def explain_decision(
     principal: AuthenticatedPrincipal = Depends(get_current_active_user),
 ):
     """Get an explanation for a decision."""
-    # In a real system, we would check that the decision belongs to a person the user can access.
-    # For now, we skip authorization.
-    explanation = service.get_provenance_chain(str(decision_id))
-    return explanation
+    # Resolve the owning person before returning provenance. A decision ID is
+    # not an authorization credential, and provenance may expose sensitive care
+    # evidence from multiple sources.
+    decision = service.db.query(CareRecommendation).filter(
+        CareRecommendation.id == str(decision_id)
+    ).first()
+    if decision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Decision not found",
+        )
+    if not principal.has_access_to_person(str(decision.person_id)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this decision",
+        )
+    return service.get_provenance_chain(str(decision_id))
 
 
 @cached_response(ttl=300, key_prefix="reasoning_summary")
@@ -392,108 +411,281 @@ def get_reasoning_summary(
     status_code=status.HTTP_200_OK,
 )
 def get_daily_intelligence(
-    person_id: str = Path(..., description="Person uuid.UUID"),
+    person_id: str = Path(..., description="Person ID"),
     principal: AuthenticatedPrincipal = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """Get daily intelligence for a person."""
+    """Return a persisted, source-grounded daily view for an authorized care context.
+
+    This endpoint reports recorded events, evidence, administered-dose records,
+    typed vital observations, persisted follow-ups/questions/contradictions, and
+    explicitly persisted care windows. It does not infer a medication schedule,
+    predict a clinical event, or turn an unusual vital into a diagnosis.
+    """
     if not principal.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this person",
         )
-    # TODO: Implement daily intelligence logic
-    # For now, return a basic structure
-    # In a real implementation, this would generate actual daily intelligence
-    # based on recent data, patterns, and care context
-    try:
-        # Attempt to get daily intelligence from services
-        # This would integrate with various services to generate real intelligence
-        
-        # Get recent events and observations
-        from app.models.care_event import CareEvent as CareEventModel
-        from app.models.evidence import Evidence as EvidenceModel
-        from app.models.medication import Medication as MedicationRecord
-        from datetime import timedelta
-        
-        # Get data from the last 24 hours
-        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
-        
-        recent_events = (
-            db.query(CareEventModel)
-            .filter(
-                CareEventModel.person_id == person_id,
-                CareEventModel.occurred_at >= yesterday
-            )
-            .order_by(CareEventModel.occurred_at.desc())
-            .limit(10)
-            .all()
-        )
-        
-        recent_evidence = (
-            db.query(EvidenceModel)
-            .filter(
-                EvidenceModel.person_id == person_id,
-                EvidenceModel.uploaded_at >= yesterday
-            )
-            .order_by(EvidenceModel.uploaded_at.desc())
-            .limit(10)
-            .all()
-        )
-        
-        recent_medications = (
-            db.query(MedicationRecord)
-            .filter(
-                MedicationRecord.person_id == person_id,
-                MedicationRecord.recorded_at >= yesterday
-            )
-            .order_by(MedicationRecord.recorded_at.desc())
-            .limit(10)
-            .all()
-        )
-        
-        # Build intelligence based on actual data
-        intelligence_date = datetime.now(timezone.utc)
-        
-        # Extract overdue items (simplified)
-        overdue_items = []
-        # In reality, this would check scheduled items that are past due
-        
-        # Extract upcoming items (simplified)
-        upcoming_items = []
-        # In reality, this would check scheduled items in the near future
-        
-        # Extract active windows (simplified)
-        active_windows = []
-        # In reality, this would check time-sensitive care windows
-        
-        # Extract expired windows (simplified)
-        expired_windows = []
-        # In reality, this would check expired time-sensitive windows
-        
-        # Generate daily summary based on actual data
-        if recent_events or recent_evidence or recent_medications:
-            daily_summary = f"Daily intelligence for {person_id} based on {len(recent_events)} recent events, {len(recent_evidence)} recent observations, and {len(recent_medications)} recent medication records."
-        else:
-            daily_summary = f"No significant activity recorded in the last 24 hours for person {person_id}."
-        
-        return {
-            "id": str(uuid.uuid4()),
-            "intelligence_date": intelligence_date.isoformat(),
-            "overdue_items": overdue_items,
-            "upcoming_items": upcoming_items,
-            "active_windows": active_windows,
-            "expired_windows": expired_windows,
-            "daily_summary": daily_summary
+
+    from datetime import timedelta
+    from app.models.care_event import CareEvent as CareEventModel
+    from app.models.evidence import Evidence as EvidenceModel
+    from app.models.daily_capture import MedicationRecord, VitalSign
+    from app.models.follow_up import FollowUp
+    from app.models.uncertainty import OpenQuestion, Contradiction
+    from app.models.time_location import CareWindow
+
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=24)
+    upcoming_until = now + timedelta(days=7)
+
+    def enum_value(value):
+        return getattr(value, "value", value)
+
+    def as_iso(value):
+        return value.isoformat() if value is not None else None
+
+    def in_window(value, start, end):
+        if value is None:
+            return False
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return start <= value <= end
+
+    recent_events = (
+        db.query(CareEventModel)
+        .filter(CareEventModel.person_id == person_id)
+        .order_by(CareEventModel.occurred_at.desc().nullslast())
+        .limit(100)
+        .all()
+    )
+    recent_events = [
+        event for event in recent_events
+        if in_window(event.occurred_at, since, now)
+    ][:20]
+
+    recent_evidence = (
+        db.query(EvidenceModel)
+        .filter(EvidenceModel.person_id == person_id)
+        .order_by(EvidenceModel.uploaded_at.desc().nullslast())
+        .limit(100)
+        .all()
+    )
+    recent_evidence = [
+        item for item in recent_evidence
+        if in_window(item.uploaded_at, since, now)
+    ][:20]
+
+    medication_records = (
+        db.query(MedicationRecord)
+        .filter(MedicationRecord.person_id == person_id)
+        .order_by(MedicationRecord.recorded_at.desc().nullslast())
+        .limit(100)
+        .all()
+    )
+    medication_records = [
+        item for item in medication_records
+        if in_window(item.recorded_at, since, now)
+    ][:20]
+
+    vital_records = (
+        db.query(VitalSign)
+        .filter(VitalSign.person_id == person_id)
+        .order_by(VitalSign.measured_at.desc())
+        .limit(100)
+        .all()
+    )
+    vital_records = [
+        item for item in vital_records
+        if in_window(item.measured_at, since, now)
+    ][:20]
+
+    follow_ups = (
+        db.query(FollowUp)
+        .filter(FollowUp.person_id == person_id, FollowUp.is_active.is_(True))
+        .order_by(FollowUp.due_at.asc())
+        .all()
+    )
+    overdue_items = []
+    upcoming_items = []
+    terminal_follow_up_statuses = {"completed", "cancelled", "canceled", "resolved", "closed"}
+    for item in follow_ups:
+        status_value = str(enum_value(item.status) or "").lower()
+        if status_value in terminal_follow_up_statuses:
+            continue
+        due_at = item.due_at
+        if due_at is None:
+            continue
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        view = {
+            "id": item.id,
+            "what_to_recheck": item.what_to_recheck,
+            "why_open": item.why_open,
+            "due_at": due_at.isoformat(),
+            "priority": enum_value(item.priority_hint),
+            "evidence_ids": item.evidence_ids or [],
+            "status": status_value or "unspecified",
         }
-    except Exception as e:
-        # Fallback to basic structure if there's an error
-        return {
-            "id": str(uuid.uuid4()),
-            "intelligence_date": datetime.now(timezone.utc).isoformat(),
-            "overdue_items": [],
-            "upcoming_items": [],
-            "active_windows": [],
-            "expired_windows": [],
-            "daily_summary": f"Daily intelligence for {person_id} - basic implementation (error retrieving detailed data: {str(e)})"
+        if due_at <= now:
+            overdue_items.append(view)
+        elif due_at <= upcoming_until:
+            upcoming_items.append(view)
+
+    questions = (
+        db.query(OpenQuestion)
+        .filter(OpenQuestion.person_id == person_id)
+        .order_by(OpenQuestion.asked_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    open_questions = [
+        {
+            "id": item.id,
+            "question": item.question,
+            "priority": enum_value(item.priority),
+            "asked_at": as_iso(item.asked_at),
+            "evidence_ids": item.evidence_ids or [],
         }
+        for item in questions
+        if str(item.status or "").lower() in {"open", "unresolved", "pending"}
+    ]
+
+    contradiction_rows = (
+        db.query(Contradiction)
+        .filter(Contradiction.person_id == person_id)
+        .order_by(Contradiction.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    unresolved_contradictions = [
+        {
+            "id": item.id,
+            "field": item.field,
+            "description": item.description,
+            "evidence_ids": item.evidence_ids or [],
+            "created_at": as_iso(item.created_at),
+        }
+        for item in contradiction_rows
+        if str(item.resolution_status or "").lower() not in {"resolved", "closed", "accepted"}
+    ]
+
+    windows = (
+        db.query(CareWindow)
+        .filter(CareWindow.person_id == person_id)
+        .order_by(CareWindow.started_at.desc())
+        .limit(100)
+        .all()
+    )
+    active_windows = []
+    expired_windows = []
+    for item in windows:
+        status_value = str(item.status or "").lower()
+        end_at = item.ends_at
+        if end_at is not None and end_at.tzinfo is None:
+            end_at = end_at.replace(tzinfo=timezone.utc)
+        view = {
+            "id": item.id,
+            "window_type": item.window_type,
+            "started_at": as_iso(item.started_at),
+            "ends_at": as_iso(item.ends_at),
+            "status": status_value,
+            "time_provenance": item.time_provenance,
+            "source_event_id": item.source_event_id,
+        }
+        if status_value == "active" and end_at is not None and end_at >= now:
+            active_windows.append(view)
+        elif status_value == "active" and end_at is not None and end_at < now:
+            expired_windows.append(view)
+
+    recent_activity = {
+        "events": [
+            {
+                "id": item.id,
+                "event_type": enum_value(item.event_type),
+                "title": item.title,
+                "description": item.description,
+                "occurred_at": as_iso(item.occurred_at),
+                "evidence_ids": item.evidence_ids or [],
+            }
+            for item in recent_events
+        ],
+        "evidence": [
+            {
+                "id": item.id,
+                "type": enum_value(item.type),
+                "source_text": item.source_text,
+                "uploaded_at": as_iso(item.uploaded_at),
+                "evidence_status": enum_value(getattr(item, "evidence_status", None)),
+            }
+            for item in recent_evidence
+        ],
+        "medication_records": [
+            {
+                "id": item.id,
+                "medication_name": item.medication_name,
+                "status": enum_value(item.status),
+                "scheduled_for": as_iso(item.scheduled_for),
+                "administered_at": as_iso(item.administered_at),
+                "recorded_at": as_iso(item.recorded_at),
+                "note": item.note,
+                "evidence_id": item.evidence_id,
+                "care_event_id": item.care_event_id,
+            }
+            for item in medication_records
+        ],
+        "vitals": [
+            {
+                "id": item.id,
+                "vital_type": enum_value(item.vital_type),
+                "value": item.value,
+                "unit": item.unit,
+                "measured_at": as_iso(item.measured_at),
+                "is_out_of_range": item.is_out_of_range,
+                "range_note": item.range_note,
+                "evidence_id": item.evidence_id,
+                "care_event_id": item.care_event_id,
+            }
+            for item in vital_records
+        ],
+    }
+
+    activity_count = sum(len(values) for values in recent_activity.values())
+    summary_parts = [
+        f"{len(recent_events)} recorded event(s)",
+        f"{len(recent_evidence)} evidence item(s)",
+        f"{len(medication_records)} medication administration record(s)",
+        f"{len(vital_records)} vital observation(s)",
+        f"{len(overdue_items)} overdue follow-up(s)",
+        f"{len(open_questions)} open question(s)",
+        f"{len(unresolved_contradictions)} unresolved contradiction(s)",
+    ]
+    daily_summary = "Last 24 hours: " + ", ".join(summary_parts) + "."
+    if activity_count == 0:
+        daily_summary += " No event, evidence, medication, or vital record was found in this window."
+    if overdue_items:
+        daily_summary += " One or more persisted follow-ups are overdue and need caregiver review."
+    if unresolved_contradictions:
+        daily_summary += " Conflicting information remains unresolved; this summary does not choose a side."
+    if open_questions:
+        daily_summary += " Open questions remain unanswered in the record."
+    if not active_windows and not expired_windows:
+        daily_summary += " No persisted care window is active or expired in the current record."
+    daily_summary += " Only recorded follow-ups and care windows are listed; no schedule was invented, and no clinical conclusion was inferred."
+
+    return {
+        "id": str(uuid.uuid4()),
+        "person_id": person_id,
+        "intelligence_date": now.isoformat(),
+        "window_start": since.isoformat(),
+        "window_end": now.isoformat(),
+        "recent_activity": recent_activity,
+        "overdue_items": overdue_items,
+        "upcoming_items": upcoming_items,
+        "open_questions": open_questions,
+        "unresolved_contradictions": unresolved_contradictions,
+        "active_windows": active_windows,
+        "expired_windows": expired_windows,
+        "daily_summary": daily_summary,
+    }

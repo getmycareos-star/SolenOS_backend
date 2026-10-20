@@ -22,10 +22,14 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.care import Person, Caregiver
+from app.core.security import get_current_principal, AuthenticatedPrincipal
+from app.models.identity import Account
+from app.core.identity_enums import AccountType
 from app.models.knowledge_revision import KnowledgeClaim
 from app.models.uncertainty import Contradiction
 from app.core.revision_enums import RevisionType, KnowledgeState
 from app.services.knowledge_revision import KnowledgeRevisionEngine
+from app.main import app
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -39,10 +43,19 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+    account = Account(
+        id="knowledge-revision-test-account",
+        email="knowledge-revision-test@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+        account, ["test-person"]
+    )
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     from app.main import app
     app.dependency_overrides.clear()
 
@@ -956,5 +969,33 @@ def test_api_explicit_supersede():
         assert history["current_value"] == "discontinued"
 
         db.close()
+    finally:
+        teardown_db()
+
+def test_knowledge_revision_api_rejects_unauthenticated_requests():
+    from fastapi.testclient import TestClient
+    from app.core.database import get_db
+    from app.main import app
+
+    setup_db()
+    try:
+        app.dependency_overrides[get_db] = lambda: TestingSessionLocal()
+        app.dependency_overrides.pop(get_current_principal, None)
+        response = TestClient(app).get("/api/v1/knowledge-revision/current/test-person")
+        assert response.status_code == 401, response.text
+    finally:
+        teardown_db()
+
+
+def test_knowledge_revision_api_denies_unlinked_person():
+    from fastapi.testclient import TestClient
+    from app.core.database import get_db
+    from app.main import app
+
+    setup_db()
+    try:
+        app.dependency_overrides[get_db] = lambda: TestingSessionLocal()
+        response = TestClient(app).get("/api/v1/knowledge-revision/current/unlinked-person")
+        assert response.status_code == 403, response.text
     finally:
         teardown_db()

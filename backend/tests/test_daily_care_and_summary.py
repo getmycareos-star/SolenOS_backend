@@ -1,8 +1,8 @@
 """Tests for the daily care structured entry endpoint.
 
-A daily care entry must land in the tables the whole engine reads — not just a
-private notes table. Medication, mood, vitals, wellbeing, and general notes
-must each produce an evidence record + a CareEvent.
+A daily capture preserves the full original wording as canonical evidence and
+creates typed, queryable records for supported observations. Event/evidence
+references must remain resolvable; a successful response alone is not proof.
 """
 
 from datetime import datetime, timezone
@@ -11,6 +11,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 from app.main import app
 from app.models.care_event import CareEvent
 from app.models.evidence import Evidence
@@ -20,11 +23,21 @@ from app.models.evidence import Evidence
 def client(db):
     def override_get_db():
         yield db
+
+    test_account = Account(
+        id="daily-care-test-account",
+        email="jo@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(test_account, ["p1", "ghost"])
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_principal] = lambda: principal
     try:
         yield TestClient(app)
     finally:
         app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_current_principal, None)
 
 
 def _payload(person_id="p1", caregiver_id="c1", **overrides):
@@ -55,7 +68,7 @@ class TestDailyCareEntry:
         body = resp.json()
         assert body["ok"] is True
         assert body["events_created"] > 0
-        assert body["evidence_created"] == 1
+        assert body["evidence_created"] >= 1
         assert body["person_id"] == "p1"
 
     def test_events_are_linked_to_evidence(self, client, db, person, caregiver):
@@ -79,14 +92,43 @@ class TestDailyCareEntry:
             for cited in evt.evidence_ids:
                 assert cited in known, "event cites evidence that does not exist"
 
-    def test_event_titles_reflect_content(self, client, db, person, caregiver):
-        resp = client.post("/api/v1/daily-care/entries", json=_payload())
+    def test_event_titles_and_canonical_evidence_preserve_submitted_content(
+        self, client, db, person, caregiver
+    ):
+        """The original form is one auditable capture; typed observations are separate events."""
+        payload = _payload()
+        resp = client.post("/api/v1/daily-care/entries", json=payload)
         assert resp.status_code == 200
+
         events = db.query(CareEvent).filter(CareEvent.person_id == "p1").all()
-        titles = [e.title for e in events]
-        assert "Daily mood check" in titles
-        assert "Vital signs" in titles
-        assert "Behavior observation" in titles
+        titles = [event.title or "" for event in events]
+        descriptions = [event.description or "" for event in events]
+
+        # The canonical capture keeps all caregiver wording, including fields
+        # that do not have a dedicated typed table (e.g. sleep and wellbeing).
+        assert any("Mood: Content" in text for text in titles + descriptions)
+        assert any("Behavior: Engaged in conversation." in text for text in titles + descriptions)
+        assert any("Sleep: Slept 6 hours, restless." in text for text in titles + descriptions)
+        assert any("Wellbeing: stress level 2/5" in text for text in titles + descriptions)
+        assert any("General: Medication taken on time." in text for text in titles + descriptions)
+
+        # Numeric/scale values also become separately queryable typed events;
+        # their names must describe the actual measurement, not a generic label.
+        assert any("heart rate: 72.0 bpm" in title.lower() for title in titles)
+        assert any("mood: 4/5 (Bright)" in title for title in titles)
+        assert any("agitation: 1/5 (Settled)" in title for title in titles)
+
+        evidence_ids = {
+            evidence.id
+            for evidence in db.query(Evidence).filter(Evidence.person_id == "p1").all()
+        }
+        assert evidence_ids
+        assert all(event.evidence_ids for event in events)
+        assert all(
+            evidence_id in evidence_ids
+            for event in events
+            for evidence_id in (event.evidence_ids or [])
+        )
 
     def test_mood_scale_two_triggers_follow_up(self, client, db, person, caregiver):
         resp = client.post("/api/v1/daily-care/entries", json=_payload(mood_scale=2, mood="Low"))
@@ -102,6 +144,12 @@ class TestDailyCareEntry:
         """A person that does not exist must return 404, not silently create."""
         resp = client.post("/api/v1/daily-care/entries", json=_payload(person_id="ghost"))
         assert resp.status_code == 404
+
+    def test_daily_care_rejects_unauthenticated_writes(self, client, person, caregiver):
+        """Knowing a person and caregiver ID is not authentication."""
+        app.dependency_overrides.pop(get_current_principal, None)
+        resp = client.post("/api/v1/daily-care/entries", json=_payload())
+        assert resp.status_code == 401
 
     def test_caregiver_not_authorized(self, client, person, caregiver):
         """A caregiver not tied to this person must be rejected."""

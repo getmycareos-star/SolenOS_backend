@@ -9,7 +9,14 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# SQLite's thread option is not accepted by PostgreSQL/MySQL drivers. Keep
+# engine options dialect-specific so DATABASE_URL can select a production DB.
+_connect_args = (
+    {"check_same_thread": False}
+    if settings.database_url.startswith("sqlite:")
+    else {}
+)
+engine = create_engine(settings.database_url, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -76,6 +83,7 @@ import app.models.care_sharing
 import app.models.community
 import app.models.care_circle
 import app.models.identity
+import app.models.flexible_document
 import app.models.care
 import app.models.care_event
 import app.models.evidence
@@ -87,11 +95,12 @@ _initialized = False
 
 
 def init_db():
-    """Create tables and backfill missing columns. Safe to call repeatedly.
+    """Create missing tables from the registered ORM metadata.
 
-    Called from the FastAPI startup event so importing this module (which
-    happens at app-construction time) no longer triggers a synchronous
-    SQLite round-trip.
+    This is a bootstrap helper, not a schema migration: create_all does not add
+    columns to existing tables or safely transform existing data. Use Alembic
+    revisions for all schema evolution and review existing databases before
+    stamping them with a baseline.
     """
     global _initialized
     if _initialized:
@@ -107,72 +116,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def _sqlite_column_type(col, dialect):
-    try:
-        return str(col.type.compile(dialect=dialect))
-    except Exception:
-        return "TEXT"
-
-
-def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
-
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
-    """
-    from sqlalchemy import inspect, text
-
-    target = bind or engine
-    try:
-        insp = inspect(target)
-        dialect = target.dialect
-    except Exception:
-        return
-
-    from sqlalchemy import text as _text
-    new_tables = [
-        (name, table) for name, table in Base.metadata.tables.items()
-        if not insp.has_table(name)
-    ]
-    if new_tables:
-        try:
-            Base.metadata.create_all(bind=target)
-        except Exception:
-            pass
-
-    for table_name, table in Base.metadata.tables.items():
-        if not insp.has_table(table_name):
-            continue  # create_all already handles table creation; this guard adds columns only
-        existing = {c["name"] for c in (insp.get_columns(table_name) or [])}
-        for col in table.columns:
-            if col.name in existing:
-                continue
-            col_type = _sqlite_column_type(col, dialect) or "TEXT"
-            nullable = "" if col.nullable else " NOT NULL"
-            default = ""
-            if col.server_default is not None:
-                default = f" DEFAULT {col.server_default.arg}"
-            elif col.default is not None and not callable(col.default):
-                v = col.default
-                if isinstance(v, bool):
-                    default = f" DEFAULT {1 if v else 0}"
-                elif isinstance(v, (int, float)):
-                    default = f" DEFAULT {v}"
-                elif isinstance(v, str):
-                    default = f" DEFAULT '{v}'"
-            stmt = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}{default}{nullable}')
-            try:
-                with target.begin() as conn:
-                    conn.execute(stmt)
-            except Exception:
-                pass
-
-
-ensure_database_schema()
-

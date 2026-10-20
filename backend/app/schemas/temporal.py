@@ -1,6 +1,30 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List
+from enum import Enum
+
+
+class RecurrenceFrequency(str, Enum):
+    """Conservative descriptive frequency inferred from event intervals."""
+
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    BIWEEKLY = "biweekly"
+    MONTHLY = "monthly"
+    IRREGULAR = "irregular"
+    UNKNOWN = "unknown"
+
+
+class TrendType(str, Enum):
+    """Direction of change in the intervals between repeated events."""
+
+    STABLE = "stable"
+    INCREASING = "increasing"
+    DECREASING = "decreasing"
+    VARIABLE = "variable"
+    UNKNOWN = "unknown"
+
+
 from app.core.temporal_enums import (
     TemporalPrecision,
     TemporalMode,
@@ -59,8 +83,7 @@ class TemporalFact(TemporalFactBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemporalReferenceFrameBase(BaseModel):
@@ -80,8 +103,7 @@ class TemporalReferenceFrame(TemporalReferenceFrameBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemporalRelationBase(BaseModel):
@@ -103,8 +125,7 @@ class TemporalRelation(TemporalRelationBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemporalContradictionBase(BaseModel):
@@ -136,8 +157,7 @@ class TemporalContradiction(TemporalContradictionBase):
     resolved_at: Optional[datetime] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RelativeTimeResolution(BaseModel):

@@ -85,7 +85,7 @@ async def upload_document(
     # Create a job for asynchronous processing instead of processing synchronously
     job_id = str(uuid.uuid4())
     job_create = JobCreate(
-        job_type=JobType.DOCUMENT_PROCESSING,
+        job_type=JobType.DOCUMENT_PROCESSING.value,
         owner_id=caregiver_id,
         person_id=person_id,
         document_id=doc.id,
@@ -180,7 +180,7 @@ def reprocess_document(
     # Create a job for reprocessing instead of processing synchronously
     job_id = str(uuid.uuid4())
     job_create = JobCreate(
-        job_type=JobType.DOCUMENT_PROCESSING,
+        job_type=JobType.DOCUMENT_PROCESSING.value,
         owner_id=caregiver_id or doc.uploaded_by_caregiver_id,
         person_id=person_id,
         document_id=document_id,

@@ -16,9 +16,7 @@ from app.core.config import get_settings
 from app.api.v1 import router as v1_router
 from app.api.notification import router as notification_router
 from app.api.situation import router as situation_router
-from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.change import router as change_router
-from app.api.care_summary import router as care_summary_router
 from app.api.care_graph import router as care_graph_router
 from app.api.companion import router as companion_router
 from app.api.user import router as user_router
@@ -33,12 +31,22 @@ from app.services.backup import backup_service
 from app.api.daily_care import router as daily_care_router
 from app.api.activation import router as activation_router
 from app.api.job import router as job_router  # Job management endpoints
+from app.api.reasoning import router as reasoning_router
+from app.api.causal import router as causal_router
+from app.api.uncertainty import router as uncertainty_router
+from app.api.knowledge_revision import router as knowledge_revision_router
+from app.api.longitudinal_evidence import router as longitudinal_evidence_router
+from app.api.safety import router as safety_router
+from app.api.care_sharing import router as care_sharing_router
+from app.api.emergency_context import router as emergency_context_router
+from app.api.post_appointment import router as post_appointment_router
+from app.api.prioritization import router as prioritization_router
 from app.core.cache import cache_service  # Redis cache service
 from app.core.security import add_security_headers
 from app.services.alerting import send_security_alert
 from app.core.metrics import init_app_info
 from app.api.auth import ErrorResponse, router as auth_router
-from app.core.database import engine
+from app.core.database import engine, init_db
 from sqlalchemy import text
 
 settings = get_settings()
@@ -174,10 +182,26 @@ async def lifespan(app: FastAPI):
     # Configuration validation
     logger.info("Validating configuration...")
     
-    # Validate secret key in production
-    if not settings.debug and settings.secret_key == "change-me-in-production":
-        logger.warning("SECRET_KEY is using default value in production! This is insecure.")
+    # Fail closed: production must never run with a placeholder or weak signing key.
+    if not settings.debug and (
+        settings.secret_key == "change-me-in-production"
+        or len(settings.secret_key.encode("utf-8")) < 32
+    ):
+        raise RuntimeError(
+            "Unsafe SECRET_KEY: configure a unique random secret of at least 32 bytes "
+            "before starting with DEBUG=false."
+        )
     
+    # Initialize the schema only after all API routers and their models have
+    # been imported. A successful SELECT 1 alone does not prove required
+    # application tables exist.
+    try:
+        init_db()
+        logger.info("Database schema initialization completed.")
+    except Exception as e:
+        logger.exception("Database schema initialization failed.")
+        raise RuntimeError("Cannot start application without initialized database schema.") from e
+
     # Validate database connection
     try:
         with engine.connect() as conn:
@@ -213,7 +237,7 @@ async def lifespan(app: FastAPI):
         try:
             import sentry_sdk
             from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
-            try_sdk.init(
+            sentry_sdk.init(
                 dsn=sentry_dsn,
                 traces_sample_rate=0.1,
                 _experiments={"enable_logs": True},
@@ -262,7 +286,7 @@ async def lifespan(app: FastAPI):
     
     # Start automatic data deletion scheduler
     data_deletion_interval_hours = getattr(settings, 'data_deletion_interval_hours', 24)
-    data_deletion_enabled = getattr(settings, 'data_deletion_enabled', True)
+    data_deletion_enabled = getattr(settings, 'data_deletion_enabled', False)
     if data_deletion_enabled and data_deletion_interval_hours > 0:
         logger.info(f"Starting automatic data deletion scheduler (interval: {data_deletion_interval_hours} hours)")
         async def data_deletion_scheduler():
@@ -606,9 +630,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(situation_router)  # situation router has prefix="/api", so it becomes "/api/situation"
 app.include_router(v1_router, prefix="/api/v1")
 app.include_router(notification_router, prefix="/api/v1")
-app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
-app.include_router(care_summary_router, prefix="/api/v1")
 app.include_router(care_graph_router, prefix="/api/v1")
 app.include_router(companion_router, prefix="/api/v1")
 app.include_router(user_router, prefix="/api/v1")
@@ -623,6 +645,18 @@ app.include_router(daily_capture_router, prefix="/api/v1")
 app.include_router(daily_care_router, prefix="/api/v1")
 app.include_router(activation_router, prefix="/api/v1")
 app.include_router(job_router, prefix="/api/v1")  # Job management endpoints
+app.include_router(reasoning_router, prefix="/reasoning")
+app.include_router(causal_router, prefix="/api/v1")
+app.include_router(uncertainty_router, prefix="/api/v1")
+app.include_router(knowledge_revision_router, prefix="/api/v1")
+app.include_router(longitudinal_evidence_router, prefix="/api/v1")
+app.include_router(safety_router, prefix="/api/v1")
+app.include_router(care_sharing_router, prefix="/api/v1")
+app.include_router(emergency_context_router, prefix="/api/v1")
+app.include_router(post_appointment_router, prefix="/api/v1")
+app.include_router(prioritization_router, prefix="/api/v1")
+# Backward-compatible upload path still used by existing clients.
+app.include_router(files_router, prefix="/api/files")
 
 # Root endpoints
 @app.get("/", tags=["root"])
@@ -633,6 +667,7 @@ async def root():
         "status": "running",
         "docs": "/docs",
         "api": "/api/v1",
+        "interface": settings.frontend_url,
         "role": "api",
         "environment": "development" if settings.debug else "production",
     }
@@ -750,5 +785,10 @@ if settings.debug:
                 })
         return {"routes": routes}
 
+# Route registration is a release-critical contract. Verify the three core
+# care-continuity routers after the app's normal registration pass. If a router
+# was empty at its first include due to an import-order/circular-import issue,
+# mount it now; never duplicate a router that already has any of its expected
+# paths registered.
 logger.info("SolenOS backend application initialized successfully.")
 

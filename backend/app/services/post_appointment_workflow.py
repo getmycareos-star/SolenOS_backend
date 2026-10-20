@@ -7,7 +7,9 @@ from unittest.mock import MagicMock
 import structlog
 from sqlalchemy.orm import Session
 
-from app.models.care_event import AppointmentModel, CareEvent, Evidence
+from app.models.time_location import Appointment as AppointmentModel
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence as EvidenceModel
 from app.models.identity import Person
 from app.models.caregiver import Caregiver
 from app.core.care_context_enums import HandoffReason
@@ -32,6 +34,14 @@ logger = structlog.get_logger()
 class PostAppointmentWorkflowService:
     def __init__(self, db: Session):
         self.db = db
+
+    def _get_workflow_info(self, workflow_id: uuid.UUID) -> Optional[Dict[str, Any]]:
+        """Return the workflow record used by legacy API handlers."""
+        try:
+            normalized_id = workflow_id if isinstance(workflow_id, uuid.UUID) else uuid.UUID(str(workflow_id))
+        except (TypeError, ValueError, AttributeError):
+            return None
+        return _WORKFLOW_STORAGE.get(normalized_id)
 
     def initiate_workflow(
         self, 
@@ -131,6 +141,7 @@ class PostAppointmentWorkflowService:
         if capture_data.capture_source in ["professional_response", "professional_document", "caregiver_report"]:
             evidence_entry = EvidenceModel(
                 person_id=person_id,
+                type="post_appointment_capture",
                 source_text=capture_data.model_dump_json(),  # Store the captured data as JSON
                 uploaded_at=capture_data.capture_timestamp,
                 uploaded_by_caregiver_id=str(capture_data.captured_by_caregiver_id),
@@ -151,7 +162,7 @@ class PostAppointmentWorkflowService:
         # Create a care event for the appointment completion/update
         care_event = CareEvent(
             person_id=person_id,
-            event_type="appointment_update",
+            event_type="APPOINTMENT_EVENT",
             status="recorded",
             occurred_at=capture_data.capture_timestamp,
             title=f"Appointment Update: {appointment_id}",
@@ -303,7 +314,7 @@ class PostAppointmentWorkflowService:
         self.db.commit()
         
         return PostAppointmentReconciliationResult(
-            reconciliation_id=uuid.uuid4(),
+            reconciliation_id=str(uuid.uuid4()),
             unchanged_items=unchanged_items,
             updated_items=updated_items,
             superseded_items=superseded_items,
@@ -370,13 +381,11 @@ class PostAppointmentWorkflowService:
                     "unresolved_count": len(reconciliation_result.unresolved_items)
                 }
                 
-                # Update the care event's extra_metadata with reconciliation info
-                existing_metadata = json.loads(care_event.extra_metadata or "{}")
-                existing_metadata.update({
-                    "post_appointment_workflow": reconciliation_metadata
-                })
-                care_event.extra_metadata = json.dumps(existing_metadata)
-                updated_fields.append("extra_metadata")
+                # CareEvent has no extra_metadata column. Keep this workflow
+                # result under the workflow state instead of assigning a
+                # nonexistent ORM attribute and falsely reporting persistence.
+                workflow_info["reconciliation_metadata"] = reconciliation_metadata
+                updated_fields.append("workflow_reconciliation_metadata")
         
         # For superseded information, we would typically create new care events 
         # that supersede old ones, or update existing ones with supersession links
@@ -407,7 +416,7 @@ class PostAppointmentWorkflowService:
             updated_fields=updated_fields,
             previous_state_summary=previous_state_summary,
             new_state_summary=new_state_summary,
-            evidence_ids=[uuid.UUID(eid) for eid in evidence_ids] if evidence_ids else []
+            evidence_ids=[str(eid) for eid in evidence_ids] if evidence_ids else []
         )
     
     def update_open_loops(
@@ -930,7 +939,6 @@ class PostAppointmentWorkflowService:
         
         # Import handoff-related models and services
         from app.models.handoff import Handoff, HandoffResponsibility
-        from app.core.handoff_enums import HandoffStatus
         
         handoff_context_updated = False
         handoff_version = 1

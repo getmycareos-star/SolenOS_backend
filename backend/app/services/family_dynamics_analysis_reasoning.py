@@ -5,16 +5,16 @@ that must pass through the TrustGuard and always falls back to deterministic log
 from __future__ import annotations
 
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm = Session
+from sqlalchemy.orm import Session
 
-from app.core.llm_enums = LLMTask, LLMReasoningMode
-from app.models.identity = Person
-from app.models.caregiver = Caregiver as CaregiverModel
-from app.models.evidence = Evidence as EvidenceModel
-from app.models.care_event = CareEvent as CareEventModel
-from app.models.outcome = Outcome as OutcomeModel
-from app.models.care_planning = CarePlan as CarePlanModel
-from app.services.llm = LocalReasoningEngine, LLMReasoningResult
+from app.core.llm_enums import LLMTask, LLMReasoningMode
+from app.models.identity import Person
+from app.models.caregiver import Caregiver as CaregiverModel
+from app.models.evidence import Evidence as EvidenceModel
+from app.models.care_event import CareEvent as CareEventModel
+from app.models.outcome import Outcome as OutcomeModel
+from app.models.care_planning import CarePlan as CarePlanModel
+from app.services.llm.engine import LocalReasoningEngine, LLMReasoningResult
 
 
 class FamilyDynamicsAnalysisReasoning:

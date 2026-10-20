@@ -1,11 +1,13 @@
 ﻿from typing import Optional, List
-from pydantic_settings import BaseSettings
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
     app_name: str = "SolenOS"
-    debug: bool = True
+    frontend_url: str = "http://localhost:5173"
+    debug: bool = False
     database_url: str = "sqlite:///./solenos.db"
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
@@ -70,7 +72,7 @@ class Settings(BaseSettings):
     alert_email_username: Optional[str] = None
     alert_email_password: Optional[str] = None
     alert_email_from: Optional[str] = None
-    alert_email_to: List[str] = []  # List of recipient email addresses
+    alert_email_to: List[str] = Field(default_factory=list)  # List of recipient email addresses
     
     # JWT settings
     jwt_algorithm: str = "HS256"
@@ -88,11 +90,20 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     
     # Data deletion settings
-    data_deletion_enabled: bool = True
+    data_deletion_enabled: bool = False
     data_deletion_interval_hours: int = 24  # Run daily by default
 
-    class Config:
-        env_file = ".env"
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Refuse to boot in production with the development signing key."""
+        if not self.debug:
+            if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be configured with at least 32 characters when DEBUG=false"
+                )
+        return self
+
+    model_config = SettingsConfigDict(env_file=".env")
 
 
 @lru_cache

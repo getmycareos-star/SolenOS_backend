@@ -40,11 +40,11 @@ def setup_db():
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     app.dependency_overrides.clear()
 
 
-def test_post_situation_triggers_change_detection_and_situations():
+def test_post_situation_persists_change_detection_and_situation_results():
     setup_db()
     try:
         from app.core.database import get_db
@@ -71,7 +71,7 @@ def test_post_situation_triggers_change_detection_and_situations():
                 raw_input="The person fell while getting out of bed.",
                 timestamp=datetime.now(timezone.utc).isoformat(),
             )
-        response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
@@ -91,10 +91,18 @@ def test_post_situation_triggers_change_detection_and_situations():
         assert event.event_type == "observation"
 
         changes = db.query(Change).filter(Change.person_id == "int-person-1").all()
-        assert len(changes) >= 0
+        assert changes, "The capture pipeline must persist a change-detection result"
+        assert max(change.current_count or 0 for change in changes) >= 1
 
         situations = db.query(Situation).filter(Situation.person_id == "int-person-1").all()
-        assert len(situations) >= 0
+        # Situation formation is conditional on meaningful evidence. The API
+        # must return exactly the situations that were actually persisted; an
+        # empty list is valid, but an unconditional >= 0 assertion is not.
+        response_situations = data.get("situations") or []
+        assert len(response_situations) == len(situations), (
+            f"Response/persistence mismatch: response={response_situations!r}, "
+            f"persisted={len(situations)}"
+        )
         db.close()
     finally:
         teardown_db()
@@ -133,7 +141,7 @@ def test_multi_update_longitudinal_reasoning():
                 raw_input=text,
                 timestamp=(datetime.now(timezone.utc) - timedelta(days=2 - i)).isoformat(),
             )
-            response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+            response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
             assert response.status_code == 200, f"Turn {i+1} failed: {response.text}"
 
         db = TestingSessionLocal()
@@ -142,12 +150,19 @@ def test_multi_update_longitudinal_reasoning():
 
         evidence_items = db.query(Evidence).filter(Evidence.person_id == "int-person-2").count()
         assert evidence_items == 3
+
+        changes = db.query(Change).filter(Change.person_id == "int-person-2").all()
+        assert changes, "Repeated observations must reach persisted change detection"
+        assert max(change.current_count or 0 for change in changes) == 3, (
+            "The later result must reflect all three observations, not only the "
+            f"latest request; observed counts={[change.current_count for change in changes]!r}"
+        )
         db.close()
     finally:
         teardown_db()
 
 
-def test_idempotent_identical_input():
+def test_identical_payload_without_idempotency_key_is_two_submissions():
     setup_db()
     try:
         from app.core.database import get_db
@@ -174,14 +189,18 @@ def test_idempotent_identical_input():
             raw_input="Identical observation submitted twice.",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        r1 = client.post("/api/situation", json=payload.model_dump(mode="json"))
-        r2 = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        r1 = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
+        r2 = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert r1.status_code == 200
         assert r2.status_code == 200
 
         db = TestingSessionLocal()
         events = db.query(CareEvent).filter(CareEvent.person_id == "int-person-3").count()
+        evidence_items = db.query(Evidence).filter(Evidence.person_id == "int-person-3").count()
+        # Without an Idempotency-Key the server cannot distinguish a retry
+        # from a second intentional capture; the client contract must supply it.
         assert events == 2
+        assert evidence_items == 2
         db.close()
     finally:
         teardown_db()
@@ -213,7 +232,7 @@ def test_empty_input_returns_400():
             person_id="int-person-4",
             raw_input="   ",
         )
-        response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {payload.caregiver_id}"})
         assert response.status_code == 400
     finally:
         teardown_db()

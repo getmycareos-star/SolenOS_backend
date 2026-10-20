@@ -6,6 +6,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver
+from app.core.security import get_current_principal, AuthenticatedPrincipal
+from app.models.identity import Account
+from app.core.identity_enums import AccountType
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -27,10 +30,25 @@ def override_get_db():
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+    account = Account(
+        id="uncertainty-test-account",
+        email="uncertainty-test@example.com",
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(
+        account,
+        [
+            "person-1", "person-2", "person-3", "person-4", "person-5",
+            "person-6", "person-7", "person-b", "person-f", "person-g",
+            "person-h", "person-i",
+        ],
+    )
+    app.dependency_overrides[get_current_principal] = lambda: principal
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     app.dependency_overrides.clear()
 
 
@@ -616,5 +634,27 @@ def test_case_i_incomplete_record():
         data = response.json()
         assert data["epistemic_state"] == "unknown"
         assert data["gap_reason"] == "insufficient_evidence"
+    finally:
+        teardown_db()
+
+def test_uncertainty_api_rejects_unauthenticated_requests():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        app.dependency_overrides.pop(get_current_principal, None)
+        response = TestClient(app).get("/api/v1/uncertainty/gaps/person-1")
+        assert response.status_code == 401, response.text
+    finally:
+        teardown_db()
+
+
+def test_uncertainty_api_denies_an_unlinked_person():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        response = TestClient(app).get("/api/v1/uncertainty/gaps/person-unlinked")
+        assert response.status_code == 403, response.text
     finally:
         teardown_db()

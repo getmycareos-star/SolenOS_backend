@@ -132,6 +132,7 @@ class CareEvent(Base):
     confidence_status = Column(Float, nullable=True)
     confidence_outcome = Column(Float, nullable=True)
     confidence_overall = Column(Float, nullable=True)  # Composite
+    confidence = synonym("confidence_overall")  # Backward-compatible scalar alias
 
     # Knowledge Time vs Event Time (Requirement 68)
     knowledge_time = Column(DateTime(timezone=True), nullable=True)  # When SolenOS learned of this event
@@ -223,6 +224,7 @@ class CareEvent(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    recorded_at = synonym("created_at")  # Backward-compatible knowledge-time alias
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
 
@@ -721,3 +723,35 @@ class CareEventStateImpact(Base):
 # Update Person model to add back-reference
 # In app/models/care.py, Person class should have:
 # care_events = relationship("CareEvent", foreign_keys="CareEvent.person_id", back_populates="person")
+
+
+class CaptureIdempotency(Base):
+    """Persisted idempotency state for retried situation-capture requests.
+
+    A key is scoped to the authenticated person/caregiver pair. The request
+    fingerprint prevents accidental reuse of a key for different content, and
+    the stored response makes retries return the original persisted record IDs.
+    Incomplete rows also prevent concurrent retries from processing twice.
+    """
+
+    __tablename__ = "capture_idempotency"
+    __table_args__ = (
+        UniqueConstraint(
+            "person_id",
+            "caregiver_id",
+            "idempotency_key",
+            name="uq_capture_idempotency_scope_key",
+        ),
+        Index("ix_capture_idempotency_expires_at", "expires_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    idempotency_key = Column(String(255), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    response_status = Column(Integer, nullable=True)
+    response_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+

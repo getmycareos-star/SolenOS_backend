@@ -1,13 +1,20 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
+import math
 
 from app.core.database import get_db
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+)
 from app.models.identity import Person as PersonModel
 from app.core.evidence_enums import EvidenceSubjectRole
-from app.core.daily_capture_enums import MedicationStatus, VitalType
+from app.core.daily_capture_enums import MedicationStatus, ScaleAxis, VitalType
 from app.models.caregiver import Caregiver as CaregiverModel
 from app.models.evidence import Evidence as EvidenceModel
 from app.models.care_event import CareEvent as CareEventModel
@@ -17,7 +24,65 @@ from app.services.situation import process_situation_input
 from app.schemas.situation import SituationInput, SituationDocument, SituationProvenance
 
 
-router = APIRouter(prefix="/daily-care", tags=["daily-care"])
+async def authorize_daily_care_context(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> None:
+    """Authenticate daily-care requests and bind writes to an authorized caregiver.
+
+    The client-supplied person and caregiver IDs are identifiers, not proof of
+    authorization. Resolve them against the authenticated principal and the
+    persisted caregiver profile before any daily-care route runs.
+    """
+    require_authenticated(principal)
+
+    person_id = request.path_params.get("person_id") or request.query_params.get("person_id")
+    caregiver_id = request.query_params.get("caregiver_id")
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+        person_id = person_id or payload.get("person_id")
+        caregiver_id = caregiver_id or payload.get("caregiver_id")
+
+    if not person_id:
+        raise HTTPException(status_code=400, detail="Person context is required")
+
+    person = db.query(PersonModel).filter(PersonModel.id == str(person_id)).first()
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    require_care_context_access(principal, str(person_id), "daily-care access")
+
+    # Write routes must attribute observations to the authenticated account's
+    # caregiver profile, not to an arbitrary caregiver ID supplied by a client.
+    if request.method in {"POST", "PUT", "PATCH"}:
+        if not caregiver_id:
+            raise HTTPException(status_code=400, detail="Caregiver context is required")
+        from sqlalchemy import func
+        caregiver = db.query(CaregiverModel).filter(
+            CaregiverModel.id == str(caregiver_id),
+            CaregiverModel.person_id == str(person_id),
+            func.lower(CaregiverModel.email) == str(principal.account.email or "").lower(),
+            CaregiverModel.is_active.is_(True),
+        ).first()
+        if caregiver is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Caregiver profile is not linked to the authenticated account and person",
+            )
+
+
+router = APIRouter(
+    prefix="/daily-care",
+    tags=["daily-care"],
+    dependencies=[Depends(authorize_daily_care_context)],
+)
 
 
 class MedicationEntry(BaseModel):
@@ -92,6 +157,27 @@ def _ts(entry: DailyCareEntry) -> str:
     if entry.occurred_at:
         return entry.occurred_at
     return _now_iso()
+
+
+def _parse_optional_datetime(value: Optional[str], reference_at: datetime) -> Optional[datetime]:
+    """Parse an ISO datetime or a time-of-day without inventing a different date."""
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed_time = time.fromisoformat(value.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid date/time value: {value!r}",
+            ) from exc
+        parsed = datetime.combine(reference_at.date(), parsed_time)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=reference_at.tzinfo or timezone.utc)
+    return parsed
 
 
 @router.post("/entries", response_model=DailyCareResponse)
@@ -173,6 +259,13 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Situation processing failed: {str(e)}")
 
+    # Normalize one timestamp for this submission. Time-only medication values
+    # are anchored to this date, not parsed as invalid datetimes.
+    now = datetime.now(timezone.utc)
+    measured_at = _parse_optional_datetime(entry.occurred_at, now) or now
+    created_evidence_ids = [situation_result.evidence_id]
+    created_event_ids = [situation_result.care_event_id]
+
     # Record medication entries via the daily capture service
     if entry.medication:
         medication_service = DailyCaptureService(db)
@@ -183,12 +276,8 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             # We'll leave dose as None to let the service default to "the prescribed dose".
             # For the note, we'll use dose_or_notes.
             # Convert string times to datetime if provided.
-            administered_at_dt = None
-            if med.administered_at:
-                administered_at_dt = datetime.fromisoformat(med.administered_at)
-            scheduled_for_dt = None
-            if med.scheduled_time:
-                scheduled_for_dt = datetime.fromisoformat(med.scheduled_time)
+            administered_at_dt = _parse_optional_datetime(med.administered_at, measured_at)
+            scheduled_for_dt = _parse_optional_datetime(med.scheduled_time, measured_at)
             payload = {
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
@@ -198,61 +287,112 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
                 "note": med.dose_or_notes,
                 "administered_at": administered_at_dt,
                 "scheduled_for": scheduled_for_dt,
+                "source": "daily_care",
             }
-            # Remove None values
-            medication_service.record_medication(payload)
-        # Record vitals via the daily capture service
-        if entry.vitals:
-            payload = {k: v for k, v in payload.items() if v is not None}
-            vital_service.record_vital(payload)
-    # Record scales via the daily capture service
+            record = medication_service.record_medication(payload)
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
+    # Record recognized numeric vitals separately from medication entries.
+    if entry.vitals:
+        vital_service = DailyCaptureService(db)
+        for vital_name, raw_value in entry.vitals.items():
+            # Form clients have historically sent both enum values ("heart_rate")
+            # and enum names ("HEART_RATE"). Normalize both explicitly; preserve
+            # unrecognized/free-text readings in the narrative evidence above.
+            normalized_name = str(vital_name).strip()
+            vital_type = VitalType.__members__.get(normalized_name.upper())
+            if vital_type is None:
+                try:
+                    vital_type = VitalType(normalized_name.lower())
+                except ValueError:
+                    continue
+            try:
+                value = float(raw_value)
+            except (ValueError, TypeError):
+                # Non-numeric values remain in the narrative evidence and are
+                # intentionally not coerced into a fabricated numeric reading.
+                continue
+            record = vital_service.record_vital({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "vital_type": vital_type,
+                "value": value,
+                "unit": None,
+                "measured_at": measured_at,
+                "source": "daily_care",
+            })
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
+        # Flush the complete structured write set before returning success.
+        db.flush()
+    # Record each validated five-point scale as a typed observation.
     if entry.mood_scale is not None or entry.agitation_scale is not None:
         scale_service = DailyCaptureService(db)
-        if entry.mood_scale is not None:
+        scale_inputs = (
+            (ScaleAxis.MOOD, entry.mood_scale),
+            (ScaleAxis.AGITATION, entry.agitation_scale),
+        )
+        for axis, raw_score in scale_inputs:
+            if raw_score is None:
+                continue
             try:
-                mood_score = float(entry.mood_scale)
+                score = int(raw_score)
             except (ValueError, TypeError):
-                mood_score = None
-            if mood_score is not None:
-                    scale_axis_enum = ScaleAxis["MOOD"]
-                    scale_axis_enum = None
-            if scale_axis_enum is not None:
-                    payload = {
-                        "person_id": entry.person_id,
-                        "caregiver_id": entry.caregiver_id,
-                        "scale_axis": scale_axis_enum,
-                        "score": mood_score,
-                    }
-                    payload = {k: v for k, v in payload.items() if v is not None}
-                    scale_service.record_scale(payload)
-        if entry.agitation_scale is not None:
-            try:
-                agitation_score = float(entry.agitation_scale)
-            except (ValueError, TypeError):
-                agitation_score = None
-            if agitation_score is not None:
-                    scale_axis_enum = ScaleAxis["AGITATION"]
-                    scale_axis_enum = None
-            if scale_axis_enum is not None:
-                    payload = {
-                        "person_id": entry.person_id,
-                        "caregiver_id": entry.caregiver_id,
-                        "scale_axis": scale_axis_enum,
-                        "score": agitation_score,
-                    }
-                    payload = {k: v for k, v in payload.items() if v is not None}
-                    scale_service.record_scale(payload)
+                continue
+            # DailyCareEntry constrains these values to 1..5. Keep this guard
+            # here too so internal callers cannot create an invalid scale row.
+            if score < 1 or score > 5:
+                continue
+            record = scale_service.record_scale({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "axis": axis,
+                "score": score,
+                "observed_at": measured_at,
+                "source": "daily_care",
+            })
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
 
+    # Workflow signals only; these are not diagnoses or clinical conclusions.
+    attention_candidate = bool(situation_result.attention_candidate)
+    follow_up_candidate = bool(situation_result.follow_up_candidate)
+    if entry.wellbeing_stress is not None and entry.wellbeing_stress >= 4:
+        attention_candidate = True
+    if entry.mood_scale is not None and entry.mood_scale <= 2:
+        follow_up_candidate = True
 
-     # Map SituationResponse to DailyCareResponse
+    parent_event = (
+        db.query(CareEventModel)
+        .filter(CareEventModel.id == situation_result.care_event_id)
+        .first()
+    )
+    if parent_event is not None:
+        parent_event.attention_candidate = attention_candidate
+        parent_event.follow_up_candidate = follow_up_candidate
+        parent_tags = list(parent_event.tags or [])
+        if "daily_care" not in parent_tags:
+            parent_tags.append("daily_care")
+        parent_event.tags = parent_tags
+
+    # The request dependency closes its session after the response. Commit the
+    # structured records here so success means they survive a new session.
+    db.commit()
+
     return DailyCareResponse(
         ok=situation_result.ok,
         entry_id=situation_result.evidence_id,
         person_id=situation_result.person_id,
-        events_created=len(situation_result.events) if situation_result.events else 0,
-        evidence_created=1,  # One evidence created
-        attention_candidate=situation_result.attention_candidate,
-        follow_up_candidate=situation_result.follow_up_candidate,
+        events_created=len(set(created_event_ids)),
+        evidence_created=len(set(created_evidence_ids)),
+        attention_candidate=attention_candidate,
+        follow_up_candidate=follow_up_candidate,
         message=situation_result.message,
     )
 
@@ -264,16 +404,15 @@ def list_daily_care_entries(person_id: str, limit: int = 30, db: Session = Depen
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
-    events = (
+    # JSON-list containment differs by dialect. Filter normalized tags in Python
+    # so SQLite and PostgreSQL expose the same daily-care event set.
+    candidates = (
         db.query(CareEventModel)
-        .filter(
-            CareEventModel.person_id == person_id,
-            CareEventModel.tags.contains("daily_care") if hasattr(CareEventModel.tags, "contains") else True,
-        )
+        .filter(CareEventModel.person_id == person_id)
         .order_by(CareEventModel.occurred_at.desc().nullslast())
-        .limit(limit)
         .all()
     )
+    events = [event for event in candidates if "daily_care" in (event.tags or [])][:limit]
 
     return [
         {

@@ -68,12 +68,12 @@ class CausalReasoningEngine:
         cause_types: Optional[List[str]] = None,
         outcome_types: Optional[List[str]] = None,
     ) -> List[TemporalAssociation]:
-          events = (
-              self.db.query(CareEvent)
-              .filter(CareEvent.person_id == person_id)
-              .order_by(CareEvent.occurred_at.asc())
-              .all()
-          )
+        events = (
+            self.db.query(CareEvent)
+            .filter(CareEvent.person_id == person_id)
+            .order_by(CareEvent.occurred_at.asc())
+            .all()
+        )
 
         reference = None
         if reference_event_id:

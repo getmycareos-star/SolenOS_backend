@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from typing import Optional, List, Any
 from datetime import datetime
 
@@ -29,8 +29,7 @@ class DocumentResponse(BaseModel):
     content_hash: Optional[str] = None
     provenance: Optional[List[Any]] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DocumentUploadResponse(BaseModel):

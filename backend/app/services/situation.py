@@ -45,7 +45,7 @@ def _infer_source_type(raw_input: str, doc: Optional[SituationDocument]) -> str:
     if doc and doc.mime_type and "ocr" in (doc.mime_type or "").lower():
         return "document_ocr"
     if doc and doc.name:
-        return "document"
+        return "uploaded_document"
     report_markers = [
         "said", "reported", "mentioned", "told", "stated",
         "according to", "noticed", "observed", "says", "reports",
@@ -63,7 +63,7 @@ def _derive_evidence_status(source_type: str) -> str:
     """
     if source_type in ("caregiver_observation", "reported_observation"):
         return "reported"
-    if source_type in ("document", "document_ocr"):
+    if source_type in ("document", "uploaded_document", "document_ocr"):
         return "reported"
     return "reported"
 
@@ -311,9 +311,16 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 "mime_type": doc.mime_type,
             }
         source_type = _infer_source_type(source_text, doc)
+        # Preserve the structured form identity in the canonical evidence row
+        # without creating a second duplicate row just to label the form.
+        evidence_type = (
+            "daily_care_entry"
+            if not doc and payload.provenance and payload.provenance.input_type == "daily_care_entry"
+            else ("note" if not doc else "document")
+        )
         evidence = Evidence(
             person_id=payload.person_id,
-            type="note" if not doc else "document",
+            type=evidence_type,
             source_text=source_text,
             original_file_path=doc.name if doc else None,
             extra_metadata=json.dumps(metadata) if metadata else None,
@@ -323,6 +330,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             evidence_status="reported",
             source_type=source_type,
             subject_role="care_recipient",
+            subject_id=payload.person_id,
             entity_resolution_status="not_applicable",
         )
         db.add(evidence)
@@ -353,6 +361,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         title=payload.raw_input.strip()[:200] if payload.raw_input and payload.raw_input.strip() else "Document observation",
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        tags=(
+            ["daily_care"]
+            if payload.provenance and payload.provenance.input_type == "daily_care_entry"
+            else []
+        ),
         created_by_caregiver_id=payload.caregiver_id,
         reporter_ids=[payload.caregiver_id],
         time_provenance=time_provenance_note,

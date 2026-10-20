@@ -13,11 +13,19 @@ will ask in six months.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+)
+from app.models.care_sharing import CareShareGrant as CareShareGrantModel
+from app.models.caregiver import Caregiver as CaregiverModel
 from app.core.sharing_enums import (
     SHAREABLE_CATEGORIES,
     ShareCategory,
@@ -26,7 +34,73 @@ from app.core.sharing_enums import (
 )
 from app.services.care_sharing import CareSharingService, default_categories_for
 
-router = APIRouter(prefix="/care-sharing", tags=["care-sharing"])
+async def authorize_care_sharing_request(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    """Require authentication and care-context access before sharing operations."""
+    require_authenticated(principal)
+    # Category descriptions contain no family data or grant state.
+    if request.url.path.rstrip("/").endswith("/care-sharing/categories"):
+        return
+
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    def find_context(value):
+        if isinstance(value, dict):
+            if value.get("person_id"):
+                return str(value["person_id"])
+            for nested in value.values():
+                found = find_context(nested)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = find_context(nested)
+                if found:
+                    return found
+        return None
+
+    person_id = (
+        request.path_params.get("person_id")
+        or request.query_params.get("person_id")
+        or find_context(payload)
+    )
+    grant_id = request.path_params.get("grant_id")
+    if not person_id and grant_id:
+        grant = db.query(CareShareGrantModel).filter(
+            CareShareGrantModel.id == grant_id
+        ).first()
+        person_id = getattr(grant, "person_id", None) if grant else None
+
+    caregiver_id = request.path_params.get("caregiver_id")
+    if not person_id and caregiver_id:
+        caregiver = db.query(CaregiverModel).filter(
+            CaregiverModel.id == caregiver_id
+        ).first()
+        person_id = getattr(caregiver, "person_id", None) if caregiver else None
+
+    if not person_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A care context is required for care-sharing access.",
+        )
+    require_care_context_access(principal, str(person_id), "care sharing")
+
+
+router = APIRouter(
+    prefix="/care-sharing",
+    tags=["care-sharing"],
+    dependencies=[Depends(authorize_care_sharing_request)],
+)
 
 
 class GrantCreate(BaseModel):
@@ -64,6 +138,26 @@ class OnboardRequest(BaseModel):
     caregiver_id: str
     relationship: str
     granted_by_caregiver_id: Optional[str] = None
+
+
+def authenticated_caregiver_id(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    person_id: str,
+) -> str:
+    """Resolve the acting caregiver from the authenticated account, never request data."""
+    require_authenticated(principal)
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.person_id == person_id,
+        CaregiverModel.email == principal.account.email,
+        CaregiverModel.is_active.is_(True),
+    ).first()
+    if caregiver is None:
+        raise HTTPException(
+            status_code=403,
+            detail="The authenticated account is not an active caregiver in this care context.",
+        )
+    return caregiver.id
 
 
 def get_service(db: Session = Depends(get_db)) -> CareSharingService:
@@ -128,7 +222,11 @@ def categories():
 
 
 @router.post("/grant", response_model=GrantResponse)
-def grant(payload: GrantCreate, service: CareSharingService = Depends(get_service)):
+def grant(
+    payload: GrantCreate,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
     """Share one category with one caregiver.
 
     Returns 400 when the request itself does not make sense, such as granting a
@@ -140,7 +238,7 @@ def grant(payload: GrantCreate, service: CareSharingService = Depends(get_servic
             person_id=payload.person_id,
             caregiver_id=payload.caregiver_id,
             category=payload.category,
-            granted_by_caregiver_id=payload.granted_by_caregiver_id,
+            granted_by_caregiver_id=authenticated_caregiver_id(service.db, principal, payload.person_id),
             relationship=payload.relationship,
             scope=payload.scope,
             reason=payload.reason,
@@ -153,7 +251,11 @@ def grant(payload: GrantCreate, service: CareSharingService = Depends(get_servic
 
 
 @router.post("/onboard", response_model=List[GrantResponse])
-def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_service)):
+def onboard(
+    payload: OnboardRequest,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
     """Set up a caregiver's starting access.
 
     A starting point rather than a decision: family get what they need to
@@ -170,7 +272,7 @@ def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_s
                     person_id=payload.person_id,
                     caregiver_id=payload.caregiver_id,
                     category=category.value,
-                    granted_by_caregiver_id=payload.granted_by_caregiver_id,
+                    granted_by_caregiver_id=authenticated_caregiver_id(service.db, principal, payload.person_id),
                     relationship=payload.relationship,
                     scope=ShareScope.NAMED.value,
                     reason="starting access when added to the care circle",
@@ -183,12 +285,23 @@ def onboard(payload: OnboardRequest, service: CareSharingService = Depends(get_s
 
 
 @router.post("/revoke/{grant_id}", response_model=GrantResponse)
-def revoke(grant_id: str, payload: RevokeRequest, service: CareSharingService = Depends(get_service)):
-    """Withdraw a grant. Immediate, total, and recorded rather than deleted."""
+def revoke(
+    grant_id: str,
+    payload: RevokeRequest,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Withdraw a grant. The revoking identity comes from the signed-in account."""
+    grant_row = service.db.query(CareShareGrantModel).filter(
+        CareShareGrantModel.id == grant_id
+    ).first()
+    if grant_row is None:
+        raise HTTPException(status_code=404, detail="no such grant")
+    actor_id = authenticated_caregiver_id(service.db, principal, grant_row.person_id)
     try:
         row = service.revoke(
             grant_id,
-            revoked_by_caregiver_id=payload.revoked_by_caregiver_id,
+            revoked_by_caregiver_id=actor_id,
             reason=payload.reason,
         )
     except ValueError as exc:
@@ -228,13 +341,37 @@ def can_access(
 
 
 @router.get("/disclosure/{caregiver_id}")
-def disclosure(caregiver_id: str, service: CareSharingService = Depends(get_service)):
-    """What this caregiver can see, in words rather than enum values."""
+def disclosure(
+    caregiver_id: str,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    """Show the signed-in caregiver their own disclosure, not another person's."""
+    caregiver = service.db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="caregiver not found")
+    if caregiver.email != principal.account.email:
+        raise HTTPException(status_code=403, detail="A caregiver may view only their own disclosure")
     return service.disclosure_for(caregiver_id)
 
 
 @router.post("/disclosure/{caregiver_id}/acknowledge")
-def acknowledge(caregiver_id: str, person_id: str, service: CareSharingService = Depends(get_service)):
+def acknowledge(
+    caregiver_id: str,
+    person_id: str,
+    service: CareSharingService = Depends(get_service),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+):
+    authenticated_caregiver_id(service.db, principal, person_id)
+    caregiver = service.db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id,
+        CaregiverModel.person_id == person_id,
+        CaregiverModel.email == principal.account.email,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="A caregiver may acknowledge only their own disclosure")
     row = service.acknowledge_disclosure(caregiver_id, person_id)
     service.db.commit()
     return {"id": row.id, "acknowledged_at": _iso(row.acknowledged_at)}

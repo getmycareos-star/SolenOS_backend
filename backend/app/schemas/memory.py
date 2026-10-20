@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Any, Dict
 
@@ -23,8 +23,7 @@ class ReasoningMemory(ReasoningMemoryBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ObservationBase(BaseModel):
@@ -50,8 +49,7 @@ class Observation(ObservationBase):
     recorded_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LearningEventBase(BaseModel):
@@ -71,8 +69,7 @@ class LearningEvent(LearningEventBase):
     id: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReasoningSummary(BaseModel):

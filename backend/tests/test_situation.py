@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
+from app.models.evidence import Evidence
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -34,7 +35,7 @@ def setup_db():
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     app.dependency_overrides.clear()
 
 
@@ -47,7 +48,7 @@ def test_post_situation_creates_evidence_and_event():
         db = TestingSessionLocal()
         person = Person(id="person-1", name="Test Person")
         caregiver = Caregiver(
-            id="caregiver-1",
+            id="care_test_key_00000001",
             name="Test Caregiver",
             email="test@example.com",
             relationship="Family",
@@ -60,8 +61,9 @@ def test_post_situation_creates_evidence_and_event():
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000001"},
             json={
-                "caregiver_id": "caregiver-1",
+                "caregiver_id": "care_test_key_00000001",
                 "person_id": "person-1",
                 "raw_input": "Patient seemed more confused than usual today.",
             },
@@ -69,7 +71,7 @@ def test_post_situation_creates_evidence_and_event():
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
-        assert data["care_key"] == "caregiver-1"
+        assert data["care_key"] == "care_test_key_00000001"
         assert data["person_id"] == "person-1"
         assert data["message"] == "Care input recorded successfully."
         assert len(data["events"]) == 1
@@ -89,7 +91,7 @@ def test_post_situation_with_documents():
         db = TestingSessionLocal()
         person = Person(id="person-2", name="Test Person 2")
         caregiver = Caregiver(
-            id="caregiver-2",
+            id="care_test_key_00000002",
             name="Test Caregiver 2",
             email="test2@example.com",
             relationship="Family",
@@ -102,8 +104,9 @@ def test_post_situation_with_documents():
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000002"},
             json={
-                "caregiver_id": "caregiver-2",
+                "caregiver_id": "care_test_key_00000002",
                 "person_id": "person-2",
                 "raw_input": "",
                 "documents": [
@@ -139,22 +142,29 @@ def test_post_situation_missing_caregiver():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
+        db = TestingSessionLocal()
+        person = Person(id="person-1", name="Test Person")
+        db.add(person)
+        db.commit()
+        db.close()
+
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_missing_key_00000001"},
             json={
-                "caregiver_id": "nonexistent",
+                "caregiver_id": "care_missing_key_00000001",
                 "person_id": "person-1",
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["detail"]
+        assert response.status_code == 403
+        assert "not authorized for this person" in response.text
     finally:
         teardown_db()
 
 
-def test_post_situation_missing_person():
+def test_post_situation_rejects_person_id_outside_care_key():
     setup_db()
     try:
         from app.core.database import get_db
@@ -162,7 +172,7 @@ def test_post_situation_missing_person():
 
         db = TestingSessionLocal()
         caregiver = Caregiver(
-            id="caregiver-3",
+            id="care_test_key_00000003",
             name="Test Caregiver 3",
             email="test3@example.com",
             relationship="Family",
@@ -175,14 +185,15 @@ def test_post_situation_missing_person():
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000003"},
             json={
-                "caregiver_id": "caregiver-3",
+                "caregiver_id": "care_test_key_00000003",
                 "person_id": "nonexistent",
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Person not found" in response.json()["detail"]
+        assert response.status_code == 403
+        assert "not authorized for this person" in response.text
     finally:
         teardown_db()
 
@@ -196,7 +207,7 @@ def test_post_situation_empty_input_and_no_documents():
         db = TestingSessionLocal()
         person = Person(id="person-4", name="Test Person 4")
         caregiver = Caregiver(
-            id="caregiver-4",
+            id="care_test_key_00000004",
             name="Test Caregiver 4",
             email="test4@example.com",
             relationship="Family",
@@ -209,15 +220,16 @@ def test_post_situation_empty_input_and_no_documents():
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000004"},
             json={
-                "caregiver_id": "caregiver-4",
+                "caregiver_id": "care_test_key_00000004",
                 "person_id": "person-4",
                 "raw_input": "   ",
                 "documents": [],
             },
         )
         assert response.status_code == 400
-        assert "No valid evidence provided" in response.json()["detail"]
+        assert "No valid evidence provided" in response.json()["error"]
     finally:
         teardown_db()
 
@@ -231,7 +243,7 @@ def test_post_situation_temporal_uncertainty():
         db = TestingSessionLocal()
         person = Person(id="person-5", name="Test Person 5")
         caregiver = Caregiver(
-            id="caregiver-5",
+            id="care_test_key_00000005",
             name="Test Caregiver 5",
             email="test5@example.com",
             relationship="Family",
@@ -245,8 +257,9 @@ def test_post_situation_temporal_uncertainty():
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000005"},
             json={
-                "caregiver_id": "caregiver-5",
+                "caregiver_id": "care_test_key_00000005",
                 "person_id": "person-5",
                 "raw_input": "The person seemed confused in the evening.",
                 "timestamp": "maybe Tuesday evening",
@@ -264,3 +277,195 @@ def test_post_situation_temporal_uncertainty():
         db.close()
     finally:
         teardown_db()
+
+
+
+def test_situation_rejects_unauthenticated_capture():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-unauthenticated",
+                "person_id": "person-unauthenticated",
+                "raw_input": "This must not be stored.",
+            },
+        )
+        assert response.status_code == 401
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).count() == 0
+            assert db.query(CareEvent).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_situation_rejects_a_person_outside_the_callers_care_context():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-owned-by-someone-else", name="Private Person")
+        caregiver = Caregiver(
+            id="care_test_key_00000006",
+            name="Authorized Email",
+            email="authorized@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        person_id = person.id
+        caregiver_id = caregiver.id
+        db.close()
+
+        response = TestClient(app).post(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {caregiver_id}"},
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": "different-person-id",
+                "raw_input": "This must not be stored.",
+            },
+        )
+        assert response.status_code == 403
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter(Evidence.person_id == person_id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_situation_rejects_spoofed_caregiver_attribution():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-shared-context", name="Shared Person")
+        actual_caregiver = Caregiver(
+            id="care_test_key_00000007",
+            name="Authenticated Caregiver",
+            email="actual@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        spoofed_caregiver = Caregiver(
+            id="care_test_key_00000008",
+            name="Other Caregiver",
+            email="other@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, actual_caregiver, spoofed_caregiver])
+        db.commit()
+        person_id = person.id
+        spoofed_caregiver_id = spoofed_caregiver.id
+        db.close()
+
+        response = TestClient(app).post(
+            "/api/situation",
+            headers={"Authorization": "Bearer care_test_key_00000007"},
+            json={
+                "caregiver_id": spoofed_caregiver_id,
+                "person_id": person_id,
+                "raw_input": "This must not be attributed to another caregiver.",
+            },
+        )
+        assert response.status_code == 403
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter(Evidence.person_id == person_id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_guest_care_key_bootstrap_capture_and_reload_preserve_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        care_key = "care_test_bootstrap_key_0001"
+        headers = {"Authorization": f"Bearer {care_key}"}
+
+        first_load = client.get(
+            "/api/situation?care_session_id=sess_test_00000001&offer_return_invite=0",
+            headers=headers,
+        )
+        assert first_load.status_code == 200, first_load.text
+        initial = first_load.json()
+        person_id = initial["care_recipient_id"]
+        assert initial["care_key"] == care_key
+        assert person_id
+        assert initial["has_context_root"] is False
+
+        capture_text = "The person seemed more confused after dinner."
+        saved = client.post(
+            "/api/situation",
+            headers={**headers, "Idempotency-Key": "guest-capture-0001"},
+            json={
+                "caregiver_id": care_key,
+                "person_id": person_id,
+                "raw_input": capture_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["person_id"] == person_id
+
+        reloaded = client.get(
+            "/api/situation?care_session_id=sess_test_00000002&offer_return_invite=0",
+            headers=headers,
+        )
+        assert reloaded.status_code == 200, reloaded.text
+        restored = reloaded.json()
+        assert restored["care_key"] == care_key
+        assert restored["care_recipient_id"] == person_id
+        assert restored["has_context_root"] is True
+        assert restored["total_events"] == 1
+        assert restored["context"]["events"][0]["raw_input"] == capture_text
+        assert restored["active_care_situation"]["observations"][0]["raw_text"] == capture_text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Person).filter(Person.id == person_id).count() == 1
+            assert db.query(Caregiver).filter(Caregiver.id == care_key).count() == 1
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_guest_care_context_does_not_accept_shared_default_key():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        response = TestClient(app).get(
+            "/api/situation?caregiver_id=default_caregiver",
+            headers={"Authorization": "Bearer default_caregiver"},
+        )
+        assert response.status_code == 401
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Person).count() == 0
+            assert db.query(Caregiver).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+

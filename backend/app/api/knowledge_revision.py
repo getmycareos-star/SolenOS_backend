@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.knowledge_revision import (
     KnowledgeClaim as KnowledgeClaimModel,
+    KnowledgeRevision as KnowledgeRevisionModel,
 )
 from app.services.knowledge_revision import KnowledgeRevisionEngine
 from app.schemas.knowledge_revision import (
@@ -16,9 +17,33 @@ from app.schemas.knowledge_revision import (
     KnowledgeHistoryView,
 )
 from app.core.revision_enums import RevisionType, KnowledgeState
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    authorize_person_context_request,
+)
 
 
-router = APIRouter(prefix="/knowledge-revision", tags=["knowledge-revision"])
+async def authorize_knowledge_revision_context(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    await authorize_person_context_request(
+        request,
+        principal,
+        db,
+        [
+            ("claim_id", KnowledgeClaimModel),
+            ("old_claim_id", KnowledgeClaimModel),
+            ("new_claim_id", KnowledgeClaimModel),
+            ("revision_id", KnowledgeRevisionModel),
+        ],
+        "knowledge revision access",
+    )
+
+
+router = APIRouter(prefix="/knowledge-revision", tags=["knowledge-revision"], dependencies=[Depends(authorize_knowledge_revision_context)])
 
 
 def get_engine(db: Session = Depends(get_db)) -> KnowledgeRevisionEngine:
@@ -42,7 +67,7 @@ def create_claim(
                 detail=f"An active claim already exists for {claim.subject_type}/{claim.subject_id}/{claim.field}. "
                 "Use the evaluate or supersede endpoints to revise it.",
             )
-    return engine.create_claim(
+    created = engine.create_claim(
         person_id=claim.person_id,
         subject_type=claim.subject_type,
         subject_id=claim.subject_id,
@@ -54,6 +79,11 @@ def create_claim(
         valid_from=claim.valid_from,
         caregiver_id=None,
     )
+    # A request-scoped SQLAlchemy session is closed after the response. Flush is
+    # not durability: commit the claim before reporting successful creation.
+    engine.db.commit()
+    engine.db.refresh(created)
+    return created
 
 
 @router.get("/claims/{person_id}", response_model=List[KnowledgeClaimSchema])

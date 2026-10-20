@@ -6,6 +6,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.core.security import get_current_principal, AuthenticatedPrincipal
+from app.models.identity import Account
+from app.core.identity_enums import AccountType
 from app.models.care import Person, Caregiver, CareEvent
 from app.core.causal_enums import (
     EvidenceStrength,
@@ -42,10 +45,19 @@ def override_get_db():
 def setup_db():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
+    # This suite exercises causal reasoning behavior; authorize its explicitly
+    # seeded test people while separate security tests cover denied access.
+    account = Account(
+        id="causal-test-account",
+        is_active=True,
+        account_type=AccountType.CAREGIVER,
+    )
+    principal = AuthenticatedPrincipal(account, ["person-1","person-2","person-3","person-4","person-5","person-6","person-7","person-8","person-9","person-10","person-11","person-12","person-13","person-20","person-21","person-22"])
+    app.dependency_overrides[get_current_principal] = lambda: principal
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
+    engine.dispose()
     app.dependency_overrides.clear()
 
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 
 from app.core.care_context_enums import (
     ConversationStage,
@@ -55,8 +55,7 @@ class LLMCallResponse(BaseModel):
     error_detail: Optional[str] = None
     called_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LLMReasoningResultResponse(BaseModel):
@@ -74,8 +73,7 @@ class LLMReasoningResultResponse(BaseModel):
     qualifications: Optional[List[str]] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LLMReasonRequest(BaseModel):
@@ -128,8 +126,7 @@ class PersonAttributeResponse(BaseModel):
     is_active: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PersonTriggerCreate(BaseModel):
@@ -158,8 +155,7 @@ class PersonTriggerResponse(BaseModel):
     possible_context: Optional[str] = None
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PersonCalmerCreate(BaseModel):
@@ -179,8 +175,7 @@ class PersonCalmerResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PersonProfileResponse(BaseModel):
@@ -201,8 +196,18 @@ class PersonProfileResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ContinuityInsightResponse(BaseModel):
+    """A sourced, non-diagnostic insight derived from continuity data."""
+
+    id: str
+    title: str
+    description: str
+    evidence_ids: List[str] = Field(default_factory=list)
+    possible_context: Optional[str] = None
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
 # ----------------------------------------------------------------------
@@ -223,8 +228,7 @@ class ContinuityThreadResponse(BaseModel):
     stale_since: Optional[datetime] = None
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContinuitySnapshotResponse(BaseModel):
@@ -241,8 +245,7 @@ class ContinuitySnapshotResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContinuityHandoffCreate(BaseModel):
@@ -273,8 +276,7 @@ class ContinuityHandoffResponse(BaseModel):
     is_acknowledged: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ----------------------------------------------------------------------
@@ -313,8 +315,7 @@ class WhatMattersResponse(BaseModel):
     possible_context: Optional[str] = None
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AlignmentRequest(BaseModel):
@@ -364,8 +365,7 @@ class TrajectoryResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TrajectoryTrackRequest(BaseModel):
@@ -413,8 +413,7 @@ class BehaviorInterpretationResponse(BaseModel):
     requires_human_review: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class BehaviorHypothesisReject(BaseModel):
@@ -444,8 +443,7 @@ class ContradictionAnalysisResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContradictionResolutionCreate(BaseModel):
@@ -500,8 +498,7 @@ class CareDecisionResponse(BaseModel):
     decision_note: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CareDecisionOutcome(BaseModel):
@@ -535,8 +532,7 @@ class CarePlanResponse(BaseModel):
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ----------------------------------------------------------------------
@@ -580,8 +576,7 @@ class FollowUpResponse(BaseModel):
     completed_at: Optional[datetime] = None
     outcome: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FollowUpComplete(BaseModel):
@@ -621,8 +616,7 @@ class EngagementOpportunityResponse(BaseModel):
     acted_at: Optional[datetime] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ----------------------------------------------------------------------
