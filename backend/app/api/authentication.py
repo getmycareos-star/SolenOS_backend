@@ -8,8 +8,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverInvitation
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverInvitation, CaregiverProfileAccountLink, CaregiverProfileInvitation
 from app.models.care import Person, Caregiver
+from app.models.caregiver_intelligence import CaregiverProfile
 from app.services.auth_service import authenticate_account, create_account, create_session, resolve_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -62,6 +63,36 @@ class CaregiverInvitationOutput(BaseModel):
     caregiver_id: str
     permissions: list[str]
     expires_at: str
+
+
+class CaregiverProfileInvitationInput(BaseModel):
+    person_id: str
+    caregiver_profile_id: str
+    permissions: list[str] = Field(default_factory=lambda: ["read", "write"])
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, value: list[str]) -> list[str]:
+        normalized = sorted(set(value))
+        if not normalized or any(item not in {"read", "write"} for item in normalized):
+            raise ValueError("Invitation permissions may contain read and/or write only")
+        return normalized
+
+class AcceptCaregiverProfileInvitationInput(BaseModel):
+    token: str = Field(min_length=20, max_length=256)
+
+class CaregiverProfileInvitationOutput(BaseModel):
+    invitation_token: str
+    person_id: str
+    caregiver_profile_id: str
+    permissions: list[str]
+    expires_at: str
+
+class CaregiverProfileLinkOutput(BaseModel):
+    person_id: str
+    caregiver_profile_id: str
+    account_id: str
+    permissions: list[str]
 
 class CaregiverLinkOutput(BaseModel):
     person_id: str
@@ -280,6 +311,122 @@ def accept_caregiver_invitation(
     return CaregiverLinkOutput(
         person_id=invitation.person_id,
         caregiver_id=caregiver.id,
+        account_id=account.id,
+        permissions=grant.permissions or [],
+    )
+
+
+@router.post("/caregiver-profile-invitations", response_model=CaregiverProfileInvitationOutput, status_code=status.HTTP_201_CREATED)
+def create_caregiver_profile_invitation(
+    payload: CaregiverProfileInvitationInput,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    """Owner/admin invites an account to act under a caregiver-intelligence profile."""
+    from app.core.authz import assert_person_access
+    assert_person_access(db, account.id, payload.person_id, "admin")
+    profile = db.query(CaregiverProfile).filter(
+        CaregiverProfile.id == payload.caregiver_profile_id,
+        CaregiverProfile.person_id == payload.person_id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Caregiver profile not found in this care record")
+    existing_link = db.query(CaregiverProfileAccountLink).filter(
+        CaregiverProfileAccountLink.caregiver_profile_id == profile.id,
+        CaregiverProfileAccountLink.is_active.is_(True),
+        CaregiverProfileAccountLink.revoked_at.is_(None),
+    ).first()
+    if existing_link is not None:
+        raise HTTPException(status_code=409, detail="Caregiver profile already has an active account link")
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    invitation = CaregiverProfileInvitation(
+        token_digest=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        person_id=payload.person_id,
+        caregiver_profile_id=profile.id,
+        invited_by_account_id=account.id,
+        permissions=payload.permissions,
+        expires_at=expires_at,
+    )
+    db.add(invitation)
+    db.commit()
+    return CaregiverProfileInvitationOutput(
+        invitation_token=raw_token,
+        person_id=payload.person_id,
+        caregiver_profile_id=profile.id,
+        permissions=payload.permissions,
+        expires_at=expires_at.isoformat(),
+    )
+
+
+@router.post("/caregiver-profile-invitations/accept", response_model=CaregiverProfileLinkOutput)
+def accept_caregiver_profile_invitation(
+    payload: AcceptCaregiverProfileInvitationInput,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    digest = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    invitation = db.query(CaregiverProfileInvitation).filter(
+        CaregiverProfileInvitation.token_digest == digest,
+        CaregiverProfileInvitation.accepted_at.is_(None),
+        CaregiverProfileInvitation.revoked_at.is_(None),
+    ).first()
+    if invitation is None:
+        raise HTTPException(status_code=400, detail="Invitation is invalid, expired, or already used")
+    expires_at = invitation.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Invitation is invalid, expired, or already used")
+    profile = db.query(CaregiverProfile).filter(
+        CaregiverProfile.id == invitation.caregiver_profile_id,
+        CaregiverProfile.person_id == invitation.person_id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=400, detail="Invitation no longer refers to a valid caregiver profile")
+    existing_link = db.query(CaregiverProfileAccountLink).filter(
+        CaregiverProfileAccountLink.caregiver_profile_id == profile.id,
+        CaregiverProfileAccountLink.is_active.is_(True),
+        CaregiverProfileAccountLink.revoked_at.is_(None),
+    ).first()
+    if existing_link is not None:
+        raise HTTPException(status_code=409, detail="Caregiver profile already has an active account link")
+    grant = db.query(AccountPersonAccess).filter(
+        AccountPersonAccess.account_id == account.id,
+        AccountPersonAccess.person_id == invitation.person_id,
+    ).first()
+    if grant is None:
+        grant = AccountPersonAccess(
+            account_id=account.id,
+            person_id=invitation.person_id,
+            role="caregiver",
+            permissions=invitation.permissions,
+            is_active=True,
+            granted_by_account_id=invitation.invited_by_account_id,
+        )
+        db.add(grant)
+    elif grant.is_active and grant.revoked_at is None:
+        grant.permissions = sorted(set((grant.permissions or []) + invitation.permissions))
+    else:
+        grant.role = "caregiver"
+        grant.permissions = invitation.permissions
+        grant.is_active = True
+        grant.revoked_at = None
+        grant.granted_by_account_id = invitation.invited_by_account_id
+    link = CaregiverProfileAccountLink(
+        account_id=account.id,
+        caregiver_profile_id=profile.id,
+        person_id=invitation.person_id,
+        linked_by_account_id=invitation.invited_by_account_id,
+        is_active=True,
+    )
+    db.add(link)
+    invitation.accepted_by_account_id = account.id
+    invitation.accepted_at = datetime.now(timezone.utc)
+    db.commit()
+    return CaregiverProfileLinkOutput(
+        person_id=invitation.person_id,
+        caregiver_profile_id=profile.id,
         account_id=account.id,
         permissions=grant.permissions or [],
     )
