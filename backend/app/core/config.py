@@ -1,4 +1,5 @@
 ﻿from typing import Optional, List
+from pydantic import Field
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -70,7 +71,7 @@ class Settings(BaseSettings):
     alert_email_username: Optional[str] = None
     alert_email_password: Optional[str] = None
     alert_email_from: Optional[str] = None
-    alert_email_to: List[str] = []  # List of recipient email addresses
+    alert_email_to: List[str] = Field(default_factory=list)  # List of recipient email addresses
     
     # JWT settings
     jwt_algorithm: str = "HS256"
