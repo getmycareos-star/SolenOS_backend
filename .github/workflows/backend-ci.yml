@@ -39,7 +39,7 @@ jobs:
         run: python -m compileall -q backend/app backend/tests
 
       - name: Run automated tests
-        run: python -m pytest -q --timeout=120 backend/tests
+        run: python -m pytest -q --timeout=60 --maxfail=1 backend/tests
 
       - name: Build production container
         run: docker build --file backend/Dockerfile --tag solenos-backend-ci backend
