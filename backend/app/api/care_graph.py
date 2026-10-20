@@ -47,16 +47,6 @@ def get_care_graph_integration_service(db: Session = Depends(get_db)) -> CareGra
     return CareGraphIntegrationService(db)
 
 @cached_response(ttl=60, key_prefix="care_graph")
-@router.get("/{person_id}/test")
-def test_endpoint(
-    person_id: str = Path(..., description="Person ID"),
-    service: CareGraphService = Depends(get_care_graph_service),
-    current_user: AuthenticatedPrincipal = Depends(get_current_active_user)
-):
-    # Return a simple test response
-    verify_person_access(person_id, current_user)
-    return {"status": "ok", "person_id": person_id}
-
 # ============================================================
 # NODE ENDPOINTS
 # ============================================================
