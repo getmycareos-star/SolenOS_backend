@@ -72,5 +72,14 @@ class FlexibleDocument(Base):
     person = relationship("Person", foreign_keys=[person_id])
     caregiver = relationship("Caregiver", foreign_keys=[caregiver_id])
     creator = relationship("Account", foreign_keys=[created_by])
-    parent = relationship("FlexibleDocument", remote_side=[id], foreign_keys=[parent_id])
-    children = relationship("FlexibleDocument", remote_side=[parent_id], foreign_keys=[id])
+    parent = relationship(
+        "FlexibleDocument",
+        remote_side=[id],
+        foreign_keys=[parent_id],
+        back_populates="children",
+    )
+    children = relationship(
+        "FlexibleDocument",
+        foreign_keys=[parent_id],
+        back_populates="parent",
+    )
