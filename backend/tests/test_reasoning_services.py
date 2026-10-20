@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.identity import Person, Account
 from app.core.identity_enums import AccountType
-from app.core.security import AuthenticatedPrincipal
+from app.core.security import AuthenticatedPrincipal, get_current_active_user
 from unittest.mock import patch
 
 # Create a shared in-memory database
@@ -34,7 +34,7 @@ def override_get_current_active_user():
     return MockPrincipal(mock_account, [])
 
 app.dependency_overrides[get_db] = override_get_db
-app.dependency_overrides[app.core.security.get_current_active_user] = override_get_current_active_user
+app.dependency_overrides[get_current_active_user] = override_get_current_active_user
 
 client = TestClient(app)
 
