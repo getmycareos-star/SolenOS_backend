@@ -21,6 +21,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     if not person:
         raise ValueError("Person not found")
 
+    # A caregiver record is scoped to its linked care recipient. Reject mismatched
+    # IDs before writing evidence or events, rather than trusting caller-supplied IDs.
+    if caregiver.person_id != person.id:
+        raise ValueError("Caregiver is not linked to this person")
+
     timestamp = payload.timestamp
     if timestamp:
         try:
