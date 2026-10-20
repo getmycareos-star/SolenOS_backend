@@ -316,3 +316,120 @@ class EvidenceVersion(Base):
     changed_by = Column(String, nullable=True)
     changed_by_system = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EvidenceCorrection(Base):
+    """Auditable correction proposal and its downstream propagation state."""
+
+    __tablename__ = "evidence_corrections"
+    __table_args__ = (
+        Index("ix_evidence_corrections_evidence", "evidence_id", "created_at"),
+        Index("ix_evidence_corrections_applied", "applied"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    correction_type = Column(String, nullable=False)
+    field_name = Column(String, nullable=False)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    correction_reason = Column(Text, nullable=True)
+    is_source_correction = Column(Boolean, nullable=False, default=False)
+    source_correction_details = Column(Text, nullable=True)
+    affected_claims = Column(JSONList, nullable=False, default=list)
+    affected_events = Column(JSONList, nullable=False, default=list)
+    affected_care_states = Column(JSONList, nullable=False, default=list)
+    affected_situations = Column(JSONList, nullable=False, default=list)
+    affected_watches = Column(JSONList, nullable=False, default=list)
+    affected_summaries = Column(JSONList, nullable=False, default=list)
+    applied = Column(Boolean, nullable=False, default=False)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    application_details = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    corrected_by = Column(String, ForeignKey("caregivers.id"), nullable=False)
+
+
+class EvidenceInvalidation(Base):
+    """Invalidation record that preserves why evidence is no longer current."""
+
+    __tablename__ = "evidence_invalidations"
+    __table_args__ = (
+        Index("ix_evidence_invalidations_evidence", "evidence_id", "created_at"),
+        Index("ix_evidence_invalidations_status", "propagation_status"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    reason = Column(String, nullable=False)
+    reason_details = Column(Text, nullable=True)
+    propagation_status = Column(String, nullable=False, default="pending")
+    affected_claims = Column(JSONList, nullable=False, default=list)
+    affected_events = Column(JSONList, nullable=False, default=list)
+    affected_care_states = Column(JSONList, nullable=False, default=list)
+    affected_situations = Column(JSONList, nullable=False, default=list)
+    affected_watches = Column(JSONList, nullable=False, default=list)
+    affected_summaries = Column(JSONList, nullable=False, default=list)
+    affected_next_actions = Column(JSONList, nullable=False, default=list)
+    propagation_log = Column(JSONList, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    invalidated_by = Column(String, ForeignKey("caregivers.id"), nullable=False)
+
+
+class EvidenceSupersession(Base):
+    """Explicit lineage from an older evidence item to its replacement."""
+
+    __tablename__ = "evidence_supersessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "superseded_evidence_id",
+            "superseding_evidence_id",
+            name="uq_evidence_supersession_pair",
+        ),
+        Index("ix_evidence_supersessions_old", "superseded_evidence_id"),
+        Index("ix_evidence_supersessions_new", "superseding_evidence_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    superseded_evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    superseding_evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    reason = Column(String, nullable=False)
+    reason_details = Column(Text, nullable=True)
+    effective_from = Column(DateTime(timezone=True), nullable=False)
+    is_explicit = Column(Boolean, nullable=False, default=True)
+    established_by = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    established_by_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EvidenceDeduplication(Base):
+    """Reviewable duplicate candidate; evidence records remain distinct."""
+
+    __tablename__ = "evidence_deduplications"
+    __table_args__ = (
+        UniqueConstraint("evidence_id_a", "evidence_id_b", name="uq_evidence_dedup_pair"),
+        Index("ix_evidence_dedup_status", "status"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    evidence_id_a = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_id_b = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    similarity_score = Column(Float, nullable=True)
+    match_type = Column(String, nullable=False)
+    matched_fields = Column(JSONList, nullable=False, default=list)
+    status = Column(String, nullable=False, default="pending")
+    confirmed_by = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    confirmed_at = Column(DateTime(timezone=True), nullable=True)
