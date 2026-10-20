@@ -16,7 +16,7 @@ from app.api.causal import router as causal_router
 
 def test_no_duplicate_http_method_and_path_registrations():
     registrations = defaultdict(list)
-    for route in app.routes:
+    for route in app.router.routes:
         if not isinstance(route, APIRoute):
             continue
         for method in route.methods or set():
@@ -35,7 +35,7 @@ def test_no_duplicate_http_method_and_path_registrations():
 def test_critical_care_continuity_routes_are_mounted():
     registrations = {
         (method, route.path)
-        for route in app.routes
+        for route in app.router.routes
         if isinstance(route, APIRoute)
         for method in (route.methods or set())
     }
@@ -59,7 +59,7 @@ def test_critical_care_continuity_routes_are_mounted():
         )
         raw_related_current = sorted(
             (type(route).__module__ + "." + type(route).__name__, getattr(route, "path", None))
-            for route in app.routes
+            for route in app.router.routes
             if any(token in str(getattr(route, "path", "")) for token in ("graph", "daily-care", "causal"))
         )
         router_counts = {
