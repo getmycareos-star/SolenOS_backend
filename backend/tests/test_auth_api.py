@@ -8,7 +8,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
-from app.models.care import Person, Caregiver as CaregiverModel, Evidence as EvidenceModel
+from app.models.care import Person, Caregiver as CaregiverModel, Evidence as EvidenceModel, Insight as InsightModel
 from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
@@ -19,7 +19,7 @@ from app.models.uncertainty import InformationGap
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__, InsightModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -131,11 +131,15 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 db.flush()
                 foreign_evidence = EvidenceModel(person_id=foreign_person.id, type="note", source_text="Private unrelated note.", uploaded_by_caregiver_id=foreign_caregiver.id, confidence=1.0)
                 db.add_all([own_evidence, foreign_evidence])
+                db.flush()
+                foreign_insight = InsightModel(person_id=foreign_person.id, title="Private insight", description="Private", insight_type="observation", confidence=0.8, evidence_ids=[foreign_evidence.id])
+                db.add(foreign_insight)
                 db.commit()
                 own_evidence_id = own_evidence.id
                 foreign_evidence_id = foreign_evidence.id
                 foreign_person_id = foreign_person.id
                 foreign_caregiver_id = foreign_caregiver.id
+                foreign_insight_id = foreign_insight.id
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
             own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
             assert own_safety_check.status_code == 200, own_safety_check.text
@@ -150,8 +154,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_evidence_event.status_code == 400, foreign_evidence_event.text
             foreign_evidence_insight = client.post("/api/v1/insights", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record insight attempt", "description": "test", "insight_type": "observation", "confidence": 0.5, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_insight.status_code == 400, foreign_evidence_insight.text
-            foreign_caregiver_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "evidence", "target_id": own_evidence_id, "original_text": "old", "corrected_text": "new", "caregiver_id": foreign_caregiver_id})
+            foreign_caregiver_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": foreign_caregiver_id})
             assert foreign_caregiver_correction.status_code == 400, foreign_caregiver_correction.text
+            foreign_insight_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": caregiver.id})
+            assert foreign_insight_correction.status_code == 400, foreign_insight_correction.text
             action_create = client.post("/api/v1/actions/actions", headers=headers, json={
                 "person_id": context["person_id"],
                 "source_evidence_id": own_evidence_id,
@@ -244,5 +250,5 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, AuthAccount.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, AuthAccount.__table__, InsightModel.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
         engine.dispose()
