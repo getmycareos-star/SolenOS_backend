@@ -41,6 +41,21 @@ jobs:
         run: |
           rm -f backend/alembic-preview.db
           python -m alembic -c backend/alembic.ini revision --autogenerate --rev-id 0001_initial_schema -m "initial schema baseline"
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          from app.core.database import Base
+          import app.main  # register all runtime API model modules
+
+          migration_files = list(Path("backend/alembic/versions").glob("*.py"))
+          assert len(migration_files) == 1, f"Expected one generated baseline, got {len(migration_files)}"
+          migration_text = migration_files[0].read_text(encoding="utf-8")
+          created_tables = set(re.findall(r"op\\.create_table\\(\\s*['\\\"]([^'\\\"]+)", migration_text))
+          expected_tables = set(Base.metadata.tables)
+          missing = expected_tables - created_tables
+          assert not missing, f"Baseline omits metadata tables: {sorted(missing)}"
+          print(f"Baseline includes create operations for all {len(expected_tables)} registered tables.")
+          PY
           python -m alembic -c backend/alembic.ini upgrade head
           python - <<'PY'
           import os
