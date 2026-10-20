@@ -130,6 +130,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 caregiver = CaregiverModel(name="Authorized caregiver", email="owner-caregiver@example.com", relationship="family", person_id=context["person_id"], timezone="UTC")
                 db.add(caregiver)
                 db.flush()
+                unlinked_caregiver = CaregiverModel(name="Unlinked caregiver", email="unlinked-caregiver@example.com", relationship="family", person_id=context["person_id"], timezone="UTC")
+                db.add(unlinked_caregiver)
+                db.flush()
                 caregiver_profile = CaregiverProfileModel(person_id=context["person_id"], name="Authorized caregiver profile", email="owner-profile@example.com", relationship="family")
                 db.add(caregiver_profile)
                 db.flush()
@@ -152,6 +155,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 foreign_caregiver_id = foreign_caregiver.id
                 foreign_insight_id = foreign_insight.id
                 caregiver_profile_id = caregiver_profile.id
+                unlinked_caregiver_id = unlinked_caregiver.id
             unlinked_profile_write = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Must not impersonate unlinked profile", "observation_type": "direct"})
             assert unlinked_profile_write.status_code == 403, unlinked_profile_write.text
             profile_invitation_response = client.post("/api/v1/auth/caregiver-profile-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_profile_id": caregiver_profile_id, "permissions": ["read", "write"]})
@@ -170,6 +174,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             linked = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
             assert linked.status_code == 200, linked.text
             assert linked.json()["caregiver_id"] == caregiver.id
+            unlinked_situation_write = client.post("/api/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
+            assert unlinked_situation_write.status_code == 403, unlinked_situation_write.text
+            unlinked_versioned_situation_write = client.post("/api/v1/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
+            assert unlinked_versioned_situation_write.status_code == 403, unlinked_versioned_situation_write.text
             my_caregiver_links = client.get("/api/v1/auth/my-caregiver-links", headers=headers, params={"person_id": context["person_id"]})
             assert my_caregiver_links.status_code == 200, my_caregiver_links.text
             assert [item["caregiver_id"] for item in my_caregiver_links.json()] == [caregiver.id]
