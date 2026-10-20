@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
+import math
 
 from app.core.database import get_db
 from app.models.identity import Person as PersonModel
@@ -201,10 +202,30 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             }
             # Remove None values
             medication_service.record_medication(payload)
-        # Record vitals via the daily capture service
-        if entry.vitals:
-            payload = {k: v for k, v in payload.items() if v is not None}
-            vital_service.record_vital(payload)
+    # Record recognized numeric vitals separately from medication entries.
+    if entry.vitals:
+        vital_service = DailyCaptureService(db)
+        measured_at = (
+            datetime.fromisoformat(entry.occurred_at.replace("Z", "+00:00"))
+            if entry.occurred_at
+            else datetime.now(timezone.utc)
+        )
+        if measured_at.tzinfo is None:
+            measured_at = measured_at.replace(tzinfo=timezone.utc)
+        for vital_name, raw_value in entry.vitals.items():
+            try:
+                vital_type = VitalType(vital_name)
+                value = float(raw_value)
+            except (ValueError, TypeError):
+                continue
+            vital_service.record_vital({
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "vital_type": vital_type,
+                "value": value,
+                "unit": "mmHg" if vital_type in (VitalType.SYSTOLIC_BP, VitalType.DIASTOLIC_BP) else None,
+                "measured_at": measured_at,
+            })
     # Record scales via the daily capture service
     if entry.mood_scale is not None or entry.agitation_scale is not None:
         scale_service = DailyCaptureService(db)
