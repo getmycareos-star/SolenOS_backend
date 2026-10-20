@@ -9,6 +9,7 @@ on:
       - "backend/app/core/authz.py"
       - "backend/app/core/database.py"
       - "backend/app/main.py"
+      - "backend/pyproject.toml"
       - "backend/tests/test_auth_service_primitives.py"
       - "backend/tests/test_auth_service_sessions.py"
       - "backend/tests/test_auth_api.py"
