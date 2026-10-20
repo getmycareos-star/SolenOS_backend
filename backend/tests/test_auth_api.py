@@ -141,7 +141,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             foreign_candidate = dict(safety_candidate, source_evidence_id=foreign_evidence_id)
             foreign_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=foreign_candidate)
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
-            foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "claims": "claim", "evidence_ids": foreign_evidence_id, "risk_class": "low", "person_id": foreign_person_id})
+            foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
