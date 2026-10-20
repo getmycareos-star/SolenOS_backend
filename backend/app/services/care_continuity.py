@@ -268,36 +268,10 @@ class CareContinuityEngine:
         )
         self.db.add(snapshot)
         self.db.flush()
-        # Send notification for significant thread updates (only for certain observation counts)
-        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_data = NotificationCreate(
-                recipient_person_id=person_id,
-                type='care_update',
-                category='clinical',
-                title='Care Activity Recorded',
-                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
-                related_entity_type='continuity_thread',
-                related_entity_id=thread.id,
-                priority='low'
-            )
-            create_notification_service(self.db, notification_data)
         if existing is not None:
             existing.is_active = False
             existing.superseded_by_snapshot_id = snapshot.id
         self.db.flush()
-        # Send notification for significant thread updates (only for certain observation counts)
-        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_data = NotificationCreate(
-                recipient_person_id=person_id,
-                type='care_update',
-                category='clinical',
-                title='Care Activity Recorded',
-                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
-                related_entity_type='continuity_thread',
-                related_entity_id=thread.id,
-                priority='low'
-            )
-            create_notification_service(self.db, notification_data)
         return snapshot
 
     def _events_for(
