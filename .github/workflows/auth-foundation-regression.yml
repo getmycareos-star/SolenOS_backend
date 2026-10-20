@@ -11,6 +11,7 @@ on:
       - "backend/app/api/change.py"
       - "backend/app/api/causal.py"
       - "backend/app/api/v1.py"
+      - "backend/app/api/caregiver_intelligence.py"
       - "backend/app/core/database.py"
       - "backend/app/main.py"
       - "backend/pyproject.toml"
@@ -54,4 +55,4 @@ jobs:
         run: python -c "from app.main import app; assert '/api/v1/auth/me' in app.openapi()['paths']"
       - name: Compile changed Python modules
         run: |
-          python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/api/uncertainty.py app/api/change.py app/api/causal.py app/api/v1.py app/core/database.py app/main.py
+          python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/api/uncertainty.py app/api/change.py app/api/causal.py app/api/v1.py app/api/caregiver_intelligence.py app/core/database.py app/main.py
