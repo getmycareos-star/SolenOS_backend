@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 from app.main import app
 from app.core.database import Base
 from app.models.care import AppointmentModel, Person
+from app.models.identity import Account, AccountPersonLink
+from app.core.identity_enums import AccountType, IdentityLinkType
+from app.core.security import AuthenticatedPrincipal, get_current_active_user
 from app.models.caregiver import Caregiver
 from app.services.post_appointment_workflow import PostAppointmentWorkflowService
 from app.schemas.post_appointment.workflow import PostAppointmentWorkflowRequest, PostAppointmentCaptureData
@@ -26,18 +29,41 @@ def client(db: Session):
 
     from app.core.database import get_db
     app.dependency_overrides[get_db] = get_test_db
+    test_account = Account(
+        id="post-appointment-test-account",
+        account_type=AccountType.CAREGIVER,
+        email="caregiver@example.com",
+        is_active=True,
+    )
+    test_principal = AuthenticatedPrincipal(test_account, ["p1"])
+    app.dependency_overrides[get_current_active_user] = lambda: test_principal
 
     # Do not enter the lifespan context in unit tests: production startup starts
     # schedulers and backup tasks that must not touch the test database.
     yield TestClient(app)
     app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_current_active_user, None)
 
 
 def test_initiate_post_appointment_workflow(client: TestClient, db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
     caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
-    db.add_all([person, caregiver])
+    test_account = Account(
+        id="post-appointment-test-account",
+        account_type=AccountType.CAREGIVER,
+        email="caregiver@example.com",
+        is_active=True,
+    )
+    account_link = AccountPersonLink(
+        account_id=test_account.id,
+        person_id=person.id,
+        link_type=IdentityLinkType.CAREGIVER_FOR,
+        is_active=True,
+    )
+    db.add_all([person, caregiver, test_account])
+    db.commit()
+    db.add(account_link)
     db.commit()
 
     appointment = AppointmentModel(
@@ -73,7 +99,7 @@ def test_initiate_post_appointment_workflow(client: TestClient, db: Session):
 
         # Act
         response = client.post(
-            f"/post_appointment/{person.id}/workflow",
+            "/api/v1/post-appointment/workflow/start",
             json={
                 "appointment_id": appointment.id,
                 "capture_immediately": False
@@ -99,7 +125,21 @@ def test_capture_appointment_data(client: TestClient, db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
     caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
-    db.add_all([person, caregiver])
+    test_account = Account(
+        id="post-appointment-test-account",
+        account_type=AccountType.CAREGIVER,
+        email="caregiver@example.com",
+        is_active=True,
+    )
+    account_link = AccountPersonLink(
+        account_id=test_account.id,
+        person_id=person.id,
+        link_type=IdentityLinkType.CAREGIVER_FOR,
+        is_active=True,
+    )
+    db.add_all([person, caregiver, test_account])
+    db.commit()
+    db.add(account_link)
     db.commit()
 
     appointment = AppointmentModel(
@@ -129,7 +169,7 @@ def test_capture_appointment_data(client: TestClient, db: Session):
 
         # Initiate workflow
         init_response = client.post(
-            f"/post_appointment/{person.id}/workflow",
+            "/api/v1/post-appointment/workflow/start",
             json={
                 "appointment_id": appointment.id,
                 "capture_immediately": False
@@ -151,7 +191,7 @@ def test_capture_appointment_data(client: TestClient, db: Session):
 
         # Act
         response = client.post(
-            f"/post_appointment/workflow/{workflow_id}/capture",
+            f"/api/v1/post-appointment/workflow/{workflow_id}/capture",
             json=capture_data
         )
 
