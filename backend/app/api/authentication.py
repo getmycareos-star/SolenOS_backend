@@ -5,7 +5,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.models.auth_identity import AuthAccount
+from app.models.auth_identity import AccountPersonAccess, AuthAccount
+from app.models.care import Person
 from app.services.auth_service import authenticate_account, create_account, create_session, resolve_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -26,6 +27,15 @@ class SignupInput(BaseModel):
 class LoginInput(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=1024)
+
+class CareContextInput(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+
+class CareContextOutput(BaseModel):
+    person_id: str
+    name: str
+    role: str
+    permissions: list[str]
 
 class AccountOutput(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -67,3 +77,60 @@ def logout(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer)
     if credentials is not None and credentials.scheme.lower() == "bearer":
         revoke_session(db, credentials.credentials)
     return None
+
+
+@router.post("/care-contexts", response_model=CareContextOutput, status_code=status.HTTP_201_CREATED)
+def create_care_context(
+    payload: CareContextInput,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    """Create a care record and explicitly grant its creator owner permissions."""
+    person = Person(name=payload.name.strip())
+    if not person.name:
+        raise HTTPException(status_code=422, detail="Name is required")
+    db.add(person)
+    db.flush()
+    grant = AccountPersonAccess(
+        account_id=account.id,
+        person_id=person.id,
+        role="owner",
+        permissions=["read", "write", "admin"],
+        is_active=True,
+        granted_by_account_id=account.id,
+    )
+    db.add(grant)
+    db.commit()
+    db.refresh(person)
+    return CareContextOutput(
+        person_id=person.id,
+        name=person.name,
+        role=grant.role,
+        permissions=grant.permissions,
+    )
+
+
+@router.get("/care-contexts", response_model=list[CareContextOutput])
+def list_care_contexts(
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(AccountPersonAccess, Person)
+        .join(Person, AccountPersonAccess.person_id == Person.id)
+        .filter(
+            AccountPersonAccess.account_id == account.id,
+            AccountPersonAccess.is_active.is_(True),
+            AccountPersonAccess.revoked_at.is_(None),
+        )
+        .all()
+    )
+    return [
+        CareContextOutput(
+            person_id=person.id,
+            name=person.name,
+            role=grant.role,
+            permissions=grant.permissions or [],
+        )
+        for grant, person in rows
+    ]
