@@ -7,6 +7,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -27,6 +30,17 @@ def override_get_db():
 
 
 app.dependency_overrides = {}
+
+
+def override_principal(email: str, person_ids: list[str]):
+    account = Account(
+        id=f"test-account-{email}",
+        email=email,
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(account, person_ids)
+    app.dependency_overrides[get_current_principal] = lambda: principal
 
 
 def setup_db():
@@ -56,6 +70,7 @@ def test_post_situation_creates_evidence_and_event():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("test@example.com", ["person-1"])
 
         client = TestClient(app)
         response = client.post(
@@ -98,6 +113,7 @@ def test_post_situation_with_documents():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("test2@example.com", ["person-2"])
 
         client = TestClient(app)
         response = client.post(
@@ -139,6 +155,13 @@ def test_post_situation_missing_caregiver():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
+        db = TestingSessionLocal()
+        person = Person(id="person-1", name="Test Person")
+        db.add(person)
+        db.commit()
+        db.close()
+        override_principal("test@example.com", ["person-1"])
+
         client = TestClient(app)
         response = client.post(
             "/api/situation",
@@ -148,8 +171,8 @@ def test_post_situation_missing_caregiver():
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["error"]
+        assert response.status_code == 403
+        assert "Caregiver profile is not linked" in response.json().get("detail", response.json().get("error", ""))
     finally:
         teardown_db()
 
@@ -171,6 +194,7 @@ def test_post_situation_missing_person():
         db.add(caregiver)
         db.commit()
         db.close()
+        override_principal("test3@example.com", ["nonexistent"])
 
         client = TestClient(app)
         response = client.post(
@@ -181,8 +205,8 @@ def test_post_situation_missing_person():
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Person not found" in response.json()["error"]
+        assert response.status_code == 404
+        assert "Person not found" in response.json().get("detail", response.json().get("error", ""))
     finally:
         teardown_db()
 
@@ -205,6 +229,7 @@ def test_post_situation_empty_input_and_no_documents():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("test4@example.com", ["person-4"])
 
         client = TestClient(app)
         response = client.post(
@@ -241,6 +266,7 @@ def test_post_situation_temporal_uncertainty():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("test5@example.com", ["person-5"])
 
         client = TestClient(app)
         response = client.post(
