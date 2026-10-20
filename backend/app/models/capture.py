@@ -18,6 +18,8 @@ class DailyCapture(Base):
     vitals = Column(JSON, nullable=False, default=list)
     scales = Column(JSON, nullable=False, default=list)
     notes = Column(Text, nullable=False, default="")
+    location = Column(JSON, nullable=True)
+    location_provenance = Column(String(40), nullable=True)
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
