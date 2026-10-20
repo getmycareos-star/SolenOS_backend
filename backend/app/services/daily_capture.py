@@ -194,7 +194,8 @@ class DailyCaptureService:
             description=" ".join(parts),
             occurred_at=occurred,
             evidence_ids=[evidence.id],
-            tags=["medication", status.value, payload["medication_name"].lower()],
+            tags=["medication", status.value, payload["medication_name"].lower()]
+            + (["daily_care"] if payload.get("source") == "daily_care" else []),
         )
 
         record = MedicationRecord(
@@ -259,6 +260,8 @@ class DailyCaptureService:
         )
 
         tags = ["vital_sign", vital_type.value]
+        if payload.get("source") == "daily_care":
+            tags.append("daily_care")
         if out_of_range:
             tags.append("out_of_range")
 
@@ -367,7 +370,8 @@ class DailyCaptureService:
             description=description,
             occurred_at=observed_at,
             evidence_ids=[evidence.id],
-            tags=["scale", axis.value, "level_{}".format(score)],
+            tags=["scale", axis.value, "level_{}".format(score)]
+            + (["daily_care"] if payload.get("source") == "daily_care" else []),
         )
 
         record = ScaleObservation(

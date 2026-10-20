@@ -2,7 +2,7 @@
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 import math
 
 from app.core.database import get_db
@@ -95,6 +95,27 @@ def _ts(entry: DailyCareEntry) -> str:
     return _now_iso()
 
 
+def _parse_optional_datetime(value: Optional[str], reference_at: datetime) -> Optional[datetime]:
+    """Parse an ISO datetime or a time-of-day without inventing a different date."""
+    if value is None or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        try:
+            parsed_time = time.fromisoformat(value.strip())
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid date/time value: {value!r}",
+            ) from exc
+        parsed = datetime.combine(reference_at.date(), parsed_time)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=reference_at.tzinfo or timezone.utc)
+    return parsed
+
+
 @router.post("/entries", response_model=DailyCareResponse)
 def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)):
     person = db.query(PersonModel).filter(PersonModel.id == entry.person_id).first()
@@ -174,6 +195,13 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Situation processing failed: {str(e)}")
 
+    # Normalize one timestamp for this submission. Time-only medication values
+    # are anchored to this date, not parsed as invalid datetimes.
+    now = datetime.now(timezone.utc)
+    measured_at = _parse_optional_datetime(entry.occurred_at, now) or now
+    created_evidence_ids = [situation_result.evidence_id]
+    created_event_ids = [situation_result.care_event_id]
+
     # Record medication entries via the daily capture service
     if entry.medication:
         medication_service = DailyCaptureService(db)
@@ -184,12 +212,8 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             # We'll leave dose as None to let the service default to "the prescribed dose".
             # For the note, we'll use dose_or_notes.
             # Convert string times to datetime if provided.
-            administered_at_dt = None
-            if med.administered_at:
-                administered_at_dt = datetime.fromisoformat(med.administered_at)
-            scheduled_for_dt = None
-            if med.scheduled_time:
-                scheduled_for_dt = datetime.fromisoformat(med.scheduled_time)
+            administered_at_dt = _parse_optional_datetime(med.administered_at, measured_at)
+            scheduled_for_dt = _parse_optional_datetime(med.scheduled_time, measured_at)
             payload = {
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
@@ -199,18 +223,13 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
                 "note": med.dose_or_notes,
                 "administered_at": administered_at_dt,
                 "scheduled_for": scheduled_for_dt,
+                "source": "daily_care",
             }
-            # Remove None values
-            medication_service.record_medication(payload)
-    # Use one normalized timestamp for every structured item in this entry.
-    measured_at = (
-        datetime.fromisoformat(entry.occurred_at.replace("Z", "+00:00"))
-        if entry.occurred_at
-        else datetime.now(timezone.utc)
-    )
-    if measured_at.tzinfo is None:
-        measured_at = measured_at.replace(tzinfo=timezone.utc)
-
+            record = medication_service.record_medication(payload)
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
     # Record recognized numeric vitals separately from medication entries.
     if entry.vitals:
         vital_service = DailyCaptureService(db)
@@ -231,14 +250,19 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
                 # Non-numeric values remain in the narrative evidence and are
                 # intentionally not coerced into a fabricated numeric reading.
                 continue
-            vital_service.record_vital({
+            record = vital_service.record_vital({
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
                 "vital_type": vital_type,
                 "value": value,
                 "unit": None,
                 "measured_at": measured_at,
+                "source": "daily_care",
             })
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
         # Flush the complete structured write set before returning success.
         db.flush()
     # Record each validated five-point scale as a typed observation.
@@ -259,23 +283,52 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             # here too so internal callers cannot create an invalid scale row.
             if score < 1 or score > 5:
                 continue
-            scale_service.record_scale({
+            record = scale_service.record_scale({
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
                 "axis": axis,
                 "score": score,
                 "observed_at": measured_at,
+                "source": "daily_care",
             })
+            if record.evidence_id:
+                created_evidence_ids.append(record.evidence_id)
+            if record.care_event_id:
+                created_event_ids.append(record.care_event_id)
 
-     # Map SituationResponse to DailyCareResponse
+    # Workflow signals only; these are not diagnoses or clinical conclusions.
+    attention_candidate = bool(situation_result.attention_candidate)
+    follow_up_candidate = bool(situation_result.follow_up_candidate)
+    if entry.wellbeing_stress is not None and entry.wellbeing_stress >= 4:
+        attention_candidate = True
+    if entry.mood_scale is not None and entry.mood_scale <= 2:
+        follow_up_candidate = True
+
+    parent_event = (
+        db.query(CareEventModel)
+        .filter(CareEventModel.id == situation_result.care_event_id)
+        .first()
+    )
+    if parent_event is not None:
+        parent_event.attention_candidate = attention_candidate
+        parent_event.follow_up_candidate = follow_up_candidate
+        parent_tags = list(parent_event.tags or [])
+        if "daily_care" not in parent_tags:
+            parent_tags.append("daily_care")
+        parent_event.tags = parent_tags
+
+    # The request dependency closes its session after the response. Commit the
+    # structured records here so success means they survive a new session.
+    db.commit()
+
     return DailyCareResponse(
         ok=situation_result.ok,
         entry_id=situation_result.evidence_id,
         person_id=situation_result.person_id,
-        events_created=len(situation_result.events) if situation_result.events else 0,
-        evidence_created=1,  # One evidence created
-        attention_candidate=situation_result.attention_candidate,
-        follow_up_candidate=situation_result.follow_up_candidate,
+        events_created=len(set(created_event_ids)),
+        evidence_created=len(set(created_evidence_ids)),
+        attention_candidate=attention_candidate,
+        follow_up_candidate=follow_up_candidate,
         message=situation_result.message,
     )
 
@@ -287,16 +340,15 @@ def list_daily_care_entries(person_id: str, limit: int = 30, db: Session = Depen
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
 
-    events = (
+    # JSON-list containment differs by dialect. Filter normalized tags in Python
+    # so SQLite and PostgreSQL expose the same daily-care event set.
+    candidates = (
         db.query(CareEventModel)
-        .filter(
-            CareEventModel.person_id == person_id,
-            CareEventModel.tags.contains("daily_care") if hasattr(CareEventModel.tags, "contains") else True,
-        )
+        .filter(CareEventModel.person_id == person_id)
         .order_by(CareEventModel.occurred_at.desc().nullslast())
-        .limit(limit)
         .all()
     )
+    events = [event for event in candidates if "daily_care" in (event.tags or [])][:limit]
 
     return [
         {

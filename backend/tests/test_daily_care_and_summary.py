@@ -55,7 +55,7 @@ class TestDailyCareEntry:
         body = resp.json()
         assert body["ok"] is True
         assert body["events_created"] > 0
-        assert body["evidence_created"] == 1
+        assert body["evidence_created"] >= 1
         assert body["person_id"] == "p1"
 
     def test_events_are_linked_to_evidence(self, client, db, person, caregiver):

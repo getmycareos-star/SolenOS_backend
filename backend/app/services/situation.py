@@ -361,6 +361,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         title=payload.raw_input.strip()[:200] if payload.raw_input and payload.raw_input.strip() else "Document observation",
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        tags=(
+            ["daily_care"]
+            if payload.provenance and payload.provenance.input_type == "daily_care_entry"
+            else []
+        ),
         created_by_caregiver_id=payload.caregiver_id,
         reporter_ids=[payload.caregiver_id],
         time_provenance=time_provenance_note,

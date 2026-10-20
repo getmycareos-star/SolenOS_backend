@@ -515,6 +515,31 @@ class TestDailyCareMerge:
         assert response.status_code == 200
         assert db.query(MedicationRecord).one().status == MedicationStatus.GIVEN
 
+    def test_structured_vitals_are_committed_for_a_new_session(self, db, person, caregiver, client):
+        """A successful response must survive closing the request's DB session."""
+        from sqlalchemy.orm import Session
+
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": person.id,
+                "caregiver_id": caregiver.id,
+                "vitals": {"heart_rate": "72"},
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["evidence_created"] >= 2
+
+        fresh = Session(bind=db.get_bind())
+        try:
+            rows = fresh.query(VitalSign).filter(VitalSign.person_id == person.id).all()
+            assert len(rows) == 1
+            assert rows[0].value == 72.0
+            assert rows[0].evidence_id
+            assert rows[0].care_event_id
+        finally:
+            fresh.close()
+
     def test_string_vitals_become_typed_and_range_checked(self, db, person, caregiver, client):
         """The form sends strings. A string "195" cannot be flagged, so it is converted."""
         response = client.post(
