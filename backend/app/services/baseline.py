@@ -157,7 +157,11 @@ def build_baseline(
         is_stable=True,
         observation_density=observation_density,
         documentation_bias_flag=False,
-        evidence_ids=[e.id for e in baseline_events],
+        evidence_ids=sorted({
+            evidence_id
+            for event in baseline_events
+            for evidence_id in (event.evidence_ids or [])
+        }),
     )
     db.add(baseline)
     db.flush()
