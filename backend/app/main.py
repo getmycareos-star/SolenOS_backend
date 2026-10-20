@@ -7,6 +7,7 @@ from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
+from app.api.authentication import router as authentication_router
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.schemas.situation import SituationInput, SituationResponse
@@ -14,6 +15,8 @@ from app.services.situation import process_situation_input
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
+
+app.include_router(authentication_router, prefix="/api/v1")
 
 app.add_middleware(
     CORSMiddleware,
