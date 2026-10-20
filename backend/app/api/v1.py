@@ -542,6 +542,8 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 @router.post("/appointments", response_model=AppointmentSchema)
 def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, appointment.person_id, "write")
+    _require_caregiver_in_person(db, appointment.created_by_caregiver_id, appointment.person_id, "created_by_caregiver_id")
+    _require_evidence_ids_in_person(db, appointment.evidence_ids, appointment.person_id)
 
     db_appt = AppointmentModel(**appointment.model_dump())
     db.add(db_appt)
@@ -602,6 +604,13 @@ def update_appointment_lifecycle_endpoint(
 @router.post("/transitions", response_model=CareTransitionSchema)
 def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, transition.person_id, "write")
+    if transition.created_by_caregiver_id:
+        _require_caregiver_in_person(db, transition.created_by_caregiver_id, transition.person_id, "created_by_caregiver_id")
+    _require_evidence_ids_in_person(db, transition.evidence_ids, transition.person_id)
+    if transition.triggered_by_event_id:
+        source_event = db.query(CareEventModel).filter(CareEventModel.id == transition.triggered_by_event_id, CareEventModel.person_id == transition.person_id).first()
+        if source_event is None:
+            raise HTTPException(status_code=400, detail="triggered_by_event_id must belong to this care record")
 
     if not transition.transition_type or transition.transition_type == "unknown":
         inferred = infer_transition_type(transition.from_location, transition.to_location)
