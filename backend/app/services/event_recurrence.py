@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.event_enums import CareEventType, RecurrenceDetectionMethod
 from app.models.care_event import CareEvent, CareEventRecurrenceGroup
+from app.schemas.temporal import RecurrenceFrequency, TrendType
 
 
 _STOP_WORDS = {
@@ -63,6 +64,45 @@ class EventRecurrenceService:
     """Detect conservative recurrence candidates and persist their grouping."""
 
     SIMILARITY_THRESHOLD = 0.5
+
+    def _determine_frequency(
+        self,
+        average_interval_days: Optional[float],
+        interval_std_dev_days: Optional[float],
+        occurrence_count: int,
+    ) -> RecurrenceFrequency:
+        """Classify frequency from intervals; insufficient history stays unknown."""
+        if occurrence_count < 2 or average_interval_days is None or average_interval_days < 0:
+            return RecurrenceFrequency.UNKNOWN
+        interval = average_interval_days
+        deviation = interval_std_dev_days or 0.0
+        if interval <= 1.5:
+            return RecurrenceFrequency.DAILY
+        if 5.5 <= interval <= 8.5 and deviation <= 1.5:
+            return RecurrenceFrequency.WEEKLY
+        if 12.0 <= interval <= 16.0 and deviation <= 3.0:
+            return RecurrenceFrequency.BIWEEKLY
+        if 25.0 <= interval <= 35.0 and deviation <= 7.0:
+            return RecurrenceFrequency.MONTHLY
+        if interval <= 45.0:
+            return RecurrenceFrequency.IRREGULAR
+        return RecurrenceFrequency.IRREGULAR
+
+    def _determine_trend(self, intervals: list[float]) -> TrendType:
+        """Infer interval trend without overstating small or noisy samples."""
+        if len(intervals) < 3:
+            return TrendType.UNKNOWN
+        midpoint = len(intervals) // 2
+        earlier = statistics.mean(intervals[:midpoint])
+        later = statistics.mean(intervals[midpoint:])
+        threshold = max(0.5, abs(earlier) * 0.2)
+        delta = later - earlier
+        if abs(delta) <= threshold:
+            # Large scatter with no directional shift is variable, not stable.
+            if len(intervals) >= 4 and statistics.pstdev(intervals) > max(2.0, abs(earlier) * 0.5):
+                return TrendType.VARIABLE
+            return TrendType.STABLE
+        return TrendType.INCREASING if delta > 0 else TrendType.DECREASING
 
     def detect_recurrence_patterns(
         self,
@@ -141,7 +181,7 @@ class EventRecurrenceService:
                     interval_std_dev_days=interval_std_dev,
                     frequency_per_month=frequency_per_month,
                     # No trend is inferred from a simple count of occurrences.
-                    trend="unknown",
+                    trend=self._determine_trend(intervals).value,
                     confidence=confidence,
                     detection_method=RecurrenceDetectionMethod.SEMANTIC_SIMILARITY,
                     evidence_ids=evidence_ids,
