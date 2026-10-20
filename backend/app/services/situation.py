@@ -45,7 +45,7 @@ def _infer_source_type(raw_input: str, doc: Optional[SituationDocument]) -> str:
     if doc and doc.mime_type and "ocr" in (doc.mime_type or "").lower():
         return "document_ocr"
     if doc and doc.name:
-        return "document"
+        return "uploaded_document"
     report_markers = [
         "said", "reported", "mentioned", "told", "stated",
         "according to", "noticed", "observed", "says", "reports",
@@ -63,7 +63,7 @@ def _derive_evidence_status(source_type: str) -> str:
     """
     if source_type in ("caregiver_observation", "reported_observation"):
         return "reported"
-    if source_type in ("document", "document_ocr"):
+    if source_type in ("document", "uploaded_document", "document_ocr"):
         return "reported"
     return "reported"
 
