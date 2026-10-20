@@ -37,6 +37,7 @@ from app.api.reasoning import router as reasoning_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.knowledge_revision import router as knowledge_revision_router
 from app.api.safety import router as safety_router
+from app.api.care_sharing import router as care_sharing_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.knowledge_revision import router as knowledge_revision_router
 from app.api.safety import router as safety_router
@@ -640,6 +641,7 @@ app.include_router(reasoning_router, prefix="/reasoning")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(knowledge_revision_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
+app.include_router(care_sharing_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(knowledge_revision_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
