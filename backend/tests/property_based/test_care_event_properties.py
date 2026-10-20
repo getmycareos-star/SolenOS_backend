@@ -5,6 +5,7 @@ Tests invariants and properties that should always hold for Care Event objects.
 
 import pytest
 from hypothesis import given, assume
+from hypothesis.strategies import text
 from datetime import datetime
 
 from backend.tests.property_based.hypothesis_config import (
