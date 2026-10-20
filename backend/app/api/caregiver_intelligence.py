@@ -3,10 +3,23 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
+from app.api.authentication import current_account
+from app.core.authz import assert_person_access, require_person_access
+from app.models.auth_identity import AuthAccount
 from app.models.caregiver_intelligence import (
+    CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
+    CaregiverResponsibility as CaregiverResponsibilityModel,
+    CaregiverObservation as CaregiverObservationModel,
     CaregiverPerspective as CaregiverPerspectiveModel,
+    CaregiverHandoff as CaregiverHandoffModel,
+    CaregiverActivity as CaregiverActivityModel,
     CaregiverCommunication as CaregiverCommunicationModel,
+    CareNetworkRelationship as CareNetworkRelationshipModel,
+    ResponsibilityGap as ResponsibilityGapModel,
+    PerspectiveConflict as PerspectiveConflictModel,
+    DuplicateAction as DuplicateActionModel,
+    CaregiverContext as CaregiverContextModel,
 )
 from app.schemas.caregiver_intelligence import (
     CaregiverProfileCreate,
@@ -45,7 +58,7 @@ from app.core.caregiver_enums import (
     CaregiverActivityType,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_account)])
 
 
 def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, source_type: str, source_id: str = None, caregiver_id: str = None):
@@ -61,7 +74,8 @@ def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, so
 
 
 @router.post("/caregiver-profiles", response_model=CaregiverProfile)
-def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depends(get_db)):
+def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, profile.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_profile = service.create_caregiver_profile(profile)
     _log_and_learn(
@@ -76,7 +90,7 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depe
     return db_profile
 
 
-@router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
+@router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile], dependencies=[Depends(require_person_access("read"))])
 def list_caregiver_profiles(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.list_caregiver_profiles(person_id)
@@ -105,13 +119,14 @@ def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = D
 
 
 @router.post("/caregiver-roles", response_model=CaregiverRole)
-def create_caregiver_role(role: CaregiverRoleCreate, db: Session = Depends(get_db)):
+def create_caregiver_role(role: CaregiverRoleCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, role.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_role = service.create_caregiver_role(role)
     return db_role
 
 
-@router.get("/caregiver-roles/{person_id}", response_model=List[CaregiverRole])
+@router.get("/caregiver-roles/{person_id}", response_model=List[CaregiverRole], dependencies=[Depends(require_person_access("read"))])
 def list_caregiver_roles(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     if caregiver_id:
@@ -124,7 +139,8 @@ def list_caregiver_roles(person_id: str, caregiver_id: Optional[str] = None, db:
 
 
 @router.post("/caregiver-responsibilities", response_model=CaregiverResponsibility)
-def create_responsibility(responsibility: CaregiverResponsibilityCreate, db: Session = Depends(get_db)):
+def create_responsibility(responsibility: CaregiverResponsibilityCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, responsibility.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_resp = service.assign_responsibility(responsibility)
     _log_and_learn(
@@ -139,7 +155,7 @@ def create_responsibility(responsibility: CaregiverResponsibilityCreate, db: Ses
     return db_resp
 
 
-@router.get("/caregiver-responsibilities/{person_id}", response_model=List[CaregiverResponsibility])
+@router.get("/caregiver-responsibilities/{person_id}", response_model=List[CaregiverResponsibility], dependencies=[Depends(require_person_access("read"))])
 def list_responsibilities(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_active_responsibilities(person_id, caregiver_id)
@@ -152,7 +168,8 @@ def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = 
 
 
 @router.post("/caregiver-observations", response_model=CaregiverObservation)
-def create_observation(observation: CaregiverObservationCreate, db: Session = Depends(get_db)):
+def create_observation(observation: CaregiverObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, observation.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_obs = service.record_observation(observation)
     _log_and_learn(
@@ -167,7 +184,7 @@ def create_observation(observation: CaregiverObservationCreate, db: Session = De
     return db_obs
 
 
-@router.get("/caregiver-observations/{person_id}", response_model=List[CaregiverObservation])
+@router.get("/caregiver-observations/{person_id}", response_model=List[CaregiverObservation], dependencies=[Depends(require_person_access("read"))])
 def list_observations(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     if caregiver_id:
@@ -175,7 +192,7 @@ def list_observations(person_id: str, caregiver_id: Optional[str] = None, db: Se
     return service.get_shared_observations(person_id)
 
 
-@router.get("/caregiver-observations/{person_id}/caregiver/{caregiver_id}", response_model=List[CaregiverObservation])
+@router.get("/caregiver-observations/{person_id}/caregiver/{caregiver_id}", response_model=List[CaregiverObservation], dependencies=[Depends(require_person_access("read"))])
 def list_caregiver_observations(person_id: str, caregiver_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_observations_for_caregiver(person_id, caregiver_id)
@@ -191,13 +208,14 @@ def promote_observation(observation_id: str, caregiver_id: str, db: Session = De
 
 
 @router.post("/caregiver-perspectives", response_model=CaregiverPerspective)
-def create_perspective(perspective: CaregiverPerspectiveCreate, db: Session = Depends(get_db)):
+def create_perspective(perspective: CaregiverPerspectiveCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, perspective.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_persp = service.record_perspective(perspective)
     return db_persp
 
 
-@router.get("/caregiver-perspectives/{person_id}", response_model=List[CaregiverPerspective])
+@router.get("/caregiver-perspectives/{person_id}", response_model=List[CaregiverPerspective], dependencies=[Depends(require_person_access("read"))])
 def list_perspectives(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     if caregiver_id:
@@ -220,7 +238,8 @@ def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = De
 
 
 @router.post("/caregiver-handoffs", response_model=CaregiverHandoff)
-def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db)):
+def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, handoff.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_handoff = service.record_handoff(handoff)
     _log_and_learn(
@@ -244,7 +263,7 @@ def accept_handoff(handoff_id: str, acceptance_evidence: Optional[str] = None, d
     return {"id": handoff.id, "acceptance_status": handoff.acceptance_status.value, "is_completed": handoff.is_completed}
 
 
-@router.get("/caregiver-handoffs/{person_id}", response_model=List[CaregiverHandoff])
+@router.get("/caregiver-handoffs/{person_id}", response_model=List[CaregiverHandoff], dependencies=[Depends(require_person_access("read"))])
 def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     handoffs = service.get_pending_handoffs(person_id, caregiver_id)
@@ -258,20 +277,22 @@ def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Op
 
 
 @router.post("/caregiver-activities", response_model=CaregiverActivity)
-def create_activity(activity: CaregiverActivityCreate, db: Session = Depends(get_db)):
+def create_activity(activity: CaregiverActivityCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, activity.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_activity = service.record_activity(activity)
     return db_activity
 
 
-@router.get("/caregiver-activities/{person_id}", response_model=List[CaregiverActivity])
+@router.get("/caregiver-activities/{person_id}", response_model=List[CaregiverActivity], dependencies=[Depends(require_person_access("read"))])
 def list_activities(person_id: str, caregiver_id: Optional[str] = None, limit: int = 100, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_activity_history(person_id, caregiver_id, limit)
 
 
 @router.post("/caregiver-communications", response_model=CaregiverCommunication)
-def create_communication(communication: CaregiverCommunicationCreate, db: Session = Depends(get_db)):
+def create_communication(communication: CaregiverCommunicationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, communication.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_comm = service.record_communication(communication)
     _log_and_learn(
@@ -286,7 +307,7 @@ def create_communication(communication: CaregiverCommunicationCreate, db: Sessio
     return db_comm
 
 
-@router.get("/caregiver-communications/{person_id}", response_model=List[CaregiverCommunication])
+@router.get("/caregiver-communications/{person_id}", response_model=List[CaregiverCommunication], dependencies=[Depends(require_person_access("read"))])
 def list_communications(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     if caregiver_id:
@@ -300,59 +321,64 @@ def list_communications(person_id: str, caregiver_id: Optional[str] = None, db: 
 
 
 @router.post("/care-network-relationships", response_model=CareNetworkRelationship)
-def create_network_relationship(relationship: CareNetworkRelationshipCreate, db: Session = Depends(get_db)):
+def create_network_relationship(relationship: CareNetworkRelationshipCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, relationship.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_rel = service.create_care_network_relationship(relationship)
     return db_rel
 
 
-@router.get("/care-network-relationships/{person_id}", response_model=List[CareNetworkRelationship])
+@router.get("/care-network-relationships/{person_id}", response_model=List[CareNetworkRelationship], dependencies=[Depends(require_person_access("read"))])
 def list_network_relationships(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_care_network(person_id)
 
 
 @router.post("/caregiver-contexts", response_model=CaregiverContext)
-def create_context(context: CaregiverContextCreate, db: Session = Depends(get_db)):
+def create_context(context: CaregiverContextCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, context.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_context = service.create_context(context)
     return db_context
 
 
-@router.get("/caregiver-contexts/{person_id}", response_model=List[CaregiverContext])
+@router.get("/caregiver-contexts/{person_id}", response_model=List[CaregiverContext], dependencies=[Depends(require_person_access("read"))])
 def list_contexts(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_contexts(person_id)
 
 
 @router.post("/responsibility-gaps", response_model=ResponsibilityGap)
-def create_responsibility_gap(gap: ResponsibilityGapCreate, db: Session = Depends(get_db)):
+def create_responsibility_gap(gap: ResponsibilityGapCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, gap.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_gap = service.create_responsibility_gap(gap)
     return db_gap
 
 
-@router.get("/responsibility-gaps/{person_id}", response_model=List[ResponsibilityGap])
+@router.get("/responsibility-gaps/{person_id}", response_model=List[ResponsibilityGap], dependencies=[Depends(require_person_access("read"))])
 def list_responsibility_gaps(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_open_gaps(person_id)
 
 
 @router.post("/perspective-conflicts", response_model=PerspectiveConflict)
-def create_perspective_conflict(conflict: PerspectiveConflictCreate, db: Session = Depends(get_db)):
+def create_perspective_conflict(conflict: PerspectiveConflictCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, conflict.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_conflict = service.create_perspective_conflict(conflict)
     return db_conflict
 
 
-@router.get("/perspective-conflicts/{person_id}", response_model=List[PerspectiveConflict])
+@router.get("/perspective-conflicts/{person_id}", response_model=List[PerspectiveConflict], dependencies=[Depends(require_person_access("read"))])
 def list_perspective_conflicts(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_conflicts(person_id)
 
 
 @router.post("/duplicate-actions", response_model=DuplicateAction)
-def create_duplicate_action(duplicate: DuplicateActionCreate, db: Session = Depends(get_db)):
+def create_duplicate_action(duplicate: DuplicateActionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, duplicate.person_id, "write")
     service = CaregiverIntelligenceService(db)
     db_dup = service.detect_duplicate_actions(
         duplicate.person_id,
@@ -365,25 +391,25 @@ def create_duplicate_action(duplicate: DuplicateActionCreate, db: Session = Depe
     return db_dup
 
 
-@router.get("/duplicate-actions/{person_id}", response_model=List[DuplicateAction])
+@router.get("/duplicate-actions/{person_id}", response_model=List[DuplicateAction], dependencies=[Depends(require_person_access("read"))])
 def list_duplicate_actions(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_duplicate_actions(person_id)
 
 
-@router.get("/caregiver-summary/{person_id}/{caregiver_id}", response_model=CaregiverSummary)
+@router.get("/caregiver-summary/{person_id}/{caregiver_id}", response_model=CaregiverSummary, dependencies=[Depends(require_person_access("read"))])
 def get_caregiver_summary(person_id: str, caregiver_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_caregiver_summary(person_id, caregiver_id)
 
 
-@router.get("/multi-caregiver-summary/{person_id}", response_model=MultiCaregiverSummary)
+@router.get("/multi-caregiver-summary/{person_id}", response_model=MultiCaregiverSummary, dependencies=[Depends(require_person_access("read"))])
 def get_multi_caregiver_summary(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_multi_caregiver_summary(person_id)
 
 
-@router.get("/care-network-state/{person_id}")
+@router.get("/care-network-state/{person_id}", dependencies=[Depends(require_person_access("read"))])
 def get_care_network_state(person_id: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     return service.get_care_network_state(person_id)
@@ -410,7 +436,7 @@ def get_caregiver_by_email(email: str, db: Session = Depends(get_db)):
     return {"id": profile.id, "name": profile.name, "person_id": profile.person_id}
 
 
-@router.get("/caregivers/by-name/{person_id}")
+@router.get("/caregivers/by-name/{person_id}", dependencies=[Depends(require_person_access("read"))])
 def get_caregivers_by_name(person_id: str, name: str, db: Session = Depends(get_db)):
     service = CaregiverIntelligenceService(db)
     profiles = service.get_caregiver_by_name(person_id, name)
