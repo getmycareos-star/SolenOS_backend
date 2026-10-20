@@ -176,7 +176,7 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
     return db_person
 
 
-@router.get("/persons/{person_id}", response_model=Person)
+@router.get("/persons/{person_id}", response_model=Person, dependencies=[Depends(require_person_access("read"))])
 def get_person(person_id: str, db: Session = Depends(get_db)):
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
@@ -219,7 +219,7 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
     return db_evidence
 
 
-@router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
+@router.get("/evidence/{person_id}", response_model=List[EvidenceSchema], dependencies=[Depends(require_person_access("read"))])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
 
@@ -242,7 +242,7 @@ def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
     return db_event
 
 
-@router.get("/events/{person_id}", response_model=List[CareEventSchema])
+@router.get("/events/{person_id}", response_model=List[CareEventSchema], dependencies=[Depends(require_person_access("read"))])
 def list_events(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(CareEventModel)
@@ -273,7 +273,7 @@ def create_insight(insight: InsightCreate, db: Session = Depends(get_db)):
     return db_insight
 
 
-@router.get("/insights/{person_id}", response_model=List[InsightSchema])
+@router.get("/insights/{person_id}", response_model=List[InsightSchema], dependencies=[Depends(require_person_access("read"))])
 def list_insights(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(InsightModel)
@@ -305,7 +305,7 @@ def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db
     return db_correction
 
 
-@router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
+@router.get("/corrections/{person_id}", response_model=List[CorrectionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_corrections(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(CorrectionModel)
@@ -333,7 +333,7 @@ def create_observation(observation: ObservationCreate, db: Session = Depends(get
     return db_obs
 
 
-@router.get("/observations/{person_id}", response_model=List[ObservationSchema])
+@router.get("/observations/{person_id}", response_model=List[ObservationSchema], dependencies=[Depends(require_person_access("read"))])
 def list_observations(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(ObservationModel)
@@ -343,7 +343,7 @@ def list_observations(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/observations/{person_id}/trends", response_model=List[ObservationTrend])
+@router.get("/observations/{person_id}/trends", response_model=List[ObservationTrend], dependencies=[Depends(require_person_access("read"))])
 def get_observation_trends(person_id: str, db: Session = Depends(get_db)):
     engine = LearningEngine(db)
     return engine.get_observation_trends(person_id)
@@ -358,7 +358,7 @@ def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends
     return db_memory
 
 
-@router.get("/reasoning-memory/{person_id}", response_model=List[ReasoningMemorySchema])
+@router.get("/reasoning-memory/{person_id}", response_model=List[ReasoningMemorySchema], dependencies=[Depends(require_person_access("read"))])
 def list_reasoning_memory(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(ReasoningMemoryModel)
@@ -371,13 +371,13 @@ def list_reasoning_memory(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/reasoning/{person_id}/summary", response_model=ReasoningSummary)
+@router.get("/reasoning/{person_id}/summary", response_model=ReasoningSummary, dependencies=[Depends(require_person_access("read"))])
 def get_reasoning_summary(person_id: str, db: Session = Depends(get_db)):
     engine = LearningEngine(db)
     return engine.get_reasoning_summary(person_id)
 
 
-@router.get("/learning-events/{person_id}", response_model=List[LearningEventSchema])
+@router.get("/learning-events/{person_id}", response_model=List[LearningEventSchema], dependencies=[Depends(require_person_access("read"))])
 def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
     return (
         db.query(LearningEventModel)
@@ -476,7 +476,7 @@ def create_care_windows_from_event(
     return db_windows
 
 
-@router.get("/care-windows/{person_id}", response_model=List[CareWindowSchema])
+@router.get("/care-windows/{person_id}", response_model=List[CareWindowSchema], dependencies=[Depends(require_person_access("read"))])
 def list_care_windows(person_id: str, status: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(CareWindowModel).filter(CareWindowModel.person_id == person_id)
     if status:
@@ -502,7 +502,7 @@ def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get
     return db_appt
 
 
-@router.get("/appointments/{person_id}", response_model=List[AppointmentSchema])
+@router.get("/appointments/{person_id}", response_model=List[AppointmentSchema], dependencies=[Depends(require_person_access("read"))])
 def list_appointments(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(AppointmentModel)
@@ -562,7 +562,7 @@ def create_care_transition(transition: CareTransitionCreate, db: Session = Depen
     return db_transition
 
 
-@router.get("/transitions/{person_id}", response_model=List[CareTransitionSchema])
+@router.get("/transitions/{person_id}", response_model=List[CareTransitionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_care_transitions(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(CareTransitionModel)
@@ -608,7 +608,7 @@ def create_location(location: LocationCreate, db: Session = Depends(get_db)):
     return db_location
 
 
-@router.get("/locations/{person_id}", response_model=List[LocationSchema])
+@router.get("/locations/{person_id}", response_model=List[LocationSchema], dependencies=[Depends(require_person_access("read"))])
 def list_locations(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(LocationModel)
@@ -642,7 +642,7 @@ def get_enriched_locations(person_id: str, timezone: Optional[str] = None, db: S
     return result
 
 
-@router.get("/daily-intelligence/{person_id}", response_model=DailyIntelligenceSchema)
+@router.get("/daily-intelligence/{person_id}", response_model=DailyIntelligenceSchema, dependencies=[Depends(require_person_access("read"))])
 def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
     events = (
         db.query(CareEventModel)
@@ -727,7 +727,7 @@ def create_timezone_context(
     return tz_context
 
 
-@router.get("/timezones/{person_id}", response_model=List[TimezoneContextSchema])
+@router.get("/timezones/{person_id}", response_model=List[TimezoneContextSchema], dependencies=[Depends(require_person_access("read"))])
 def list_timezone_contexts(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(TimezoneContextModel)
@@ -777,7 +777,7 @@ def create_temporal_relationship(
     return db_rel
 
 
-@router.get("/temporal-relationships/{person_id}", response_model=List[TemporalRelationshipSchema])
+@router.get("/temporal-relationships/{person_id}", response_model=List[TemporalRelationshipSchema], dependencies=[Depends(require_person_access("read"))])
 def list_temporal_relationships(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(TemporalRelationshipModel)
@@ -830,7 +830,7 @@ def supersede_temporal_fact_endpoint(fact_id: str, new_fact_id: str, db: Session
     return {"id": result.id, "status": result.status.value, "superseded_by_fact_id": result.superseded_by_fact_id}
 
 
-@router.get("/temporal/facts/{person_id}", response_model=List[TemporalFactSchema])
+@router.get("/temporal/facts/{person_id}", response_model=List[TemporalFactSchema], dependencies=[Depends(require_person_access("read"))])
 def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(TemporalFactModel).filter(TemporalFactModel.person_id == person_id)
     if subject_type:
@@ -845,7 +845,7 @@ def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Sess
     return create_temporal_relation(db, relation)
 
 
-@router.get("/temporal/relations/{person_id}", response_model=List[TemporalRelationSchema])
+@router.get("/temporal/relations/{person_id}", response_model=List[TemporalRelationSchema], dependencies=[Depends(require_person_access("read"))])
 def list_temporal_relations(person_id: str, db: Session = Depends(get_db)):
     return db.query(TemporalRelationModel).filter(TemporalRelationModel.person_id == person_id).order_by(TemporalRelationModel.created_at.desc()).all()
 
@@ -855,7 +855,7 @@ def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Ses
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
-@router.get("/temporal/reference-frames/{person_id}", response_model=List[TemporalReferenceFrameSchema])
+@router.get("/temporal/reference-frames/{person_id}", response_model=List[TemporalReferenceFrameSchema], dependencies=[Depends(require_person_access("read"))])
 def list_reference_frames(person_id: str, db: Session = Depends(get_db)):
     return db.query(TemporalReferenceFrameModel).filter(TemporalReferenceFrameModel.person_id == person_id).order_by(TemporalReferenceFrameModel.created_at.desc()).all()
 
@@ -899,13 +899,13 @@ def check_temporal_conflict_endpoint(fact_a_id: str, fact_b_id: str, db: Session
     return {"has_conflict": True, **result}
 
 
-@router.get("/temporal/view/{person_id}", response_model=TemporalViewAtPoint)
+@router.get("/temporal/view/{person_id}", response_model=TemporalViewAtPoint, dependencies=[Depends(require_person_access("read"))])
 def get_temporal_view_endpoint(person_id: str, point_in_time: str, db: Session = Depends(get_db)):
     point = datetime.fromisoformat(point_in_time.replace("Z", "+00:00"))
     return get_temporal_view_at_point(db, person_id, point)
 
 
-@router.get("/temporal/subject/{person_id}/{subject_type}/{subject_id}", response_model=SubjectTemporalView)
+@router.get("/temporal/subject/{person_id}/{subject_type}/{subject_id}", response_model=SubjectTemporalView, dependencies=[Depends(require_person_access("read"))])
 def get_subject_temporal_view_endpoint(person_id: str, subject_type: str, subject_id: str, db: Session = Depends(get_db)):
     return get_subject_temporal_view(db, person_id, subject_type, subject_id)
 
