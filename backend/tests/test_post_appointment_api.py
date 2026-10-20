@@ -24,14 +24,13 @@ def client(db: Session):
         finally:
             pass
 
-    app.dependency_overrides[app.dependency_overrides.get('get_db', None)] = get_test_db
-    # Also override the get_db dependency if it's defined differently
     from app.core.database import get_db
     app.dependency_overrides[get_db] = get_test_db
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    # Do not enter the lifespan context in unit tests: production startup starts
+    # schedulers and backup tasks that must not touch the test database.
+    yield TestClient(app)
+    app.dependency_overrides.pop(get_db, None)
 
 
 def test_initiate_post_appointment_workflow(client: TestClient, db: Session):
