@@ -135,6 +135,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 own_evidence_id = own_evidence.id
                 foreign_evidence_id = foreign_evidence.id
                 foreign_person_id = foreign_person.id
+                foreign_caregiver_id = foreign_caregiver.id
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
             own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
             assert own_safety_check.status_code == 200, own_safety_check.text
@@ -143,6 +144,14 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
+            foreign_uploader_write = client.post("/api/v1/evidence", headers=headers, json={"person_id": context["person_id"], "type": "note", "source_text": "forged uploader", "uploaded_by_caregiver_id": foreign_caregiver_id})
+            assert foreign_uploader_write.status_code == 400, foreign_uploader_write.text
+            foreign_evidence_event = client.post("/api/v1/events", headers=headers, json={"person_id": context["person_id"], "event_type": "observation", "occurred_at": "2026-10-20T09:00:00Z", "title": "Cross-record evidence attempt", "evidence_ids": [foreign_evidence_id], "created_by_caregiver_id": caregiver.id})
+            assert foreign_evidence_event.status_code == 400, foreign_evidence_event.text
+            foreign_evidence_insight = client.post("/api/v1/insights", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record insight attempt", "description": "test", "insight_type": "observation", "confidence": 0.5, "evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_insight.status_code == 400, foreign_evidence_insight.text
+            foreign_caregiver_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "evidence", "target_id": own_evidence_id, "original_text": "old", "corrected_text": "new", "caregiver_id": foreign_caregiver_id})
+            assert foreign_caregiver_correction.status_code == 400, foreign_caregiver_correction.text
             action_create = client.post("/api/v1/actions/actions", headers=headers, json={
                 "person_id": context["person_id"],
                 "source_evidence_id": own_evidence_id,
