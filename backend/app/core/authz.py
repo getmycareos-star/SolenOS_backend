@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.authentication import current_account
 from app.core.database import get_db
-from app.models.auth_identity import AccountPersonAccess, AuthAccount
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
 
 
 def assert_person_access(db: Session, account_id: str, person_id: str, permission: str = "read") -> AccountPersonAccess:
@@ -48,3 +48,17 @@ def require_staff(account: AuthAccount = Depends(current_account)) -> AuthAccoun
     if not account.is_staff:
         raise HTTPException(status_code=403, detail="Staff access required")
     return account
+
+
+def assert_account_is_caregiver(db: Session, account_id: str, caregiver_id: str, person_id: str) -> CaregiverAccountLink:
+    """Require verified account ownership of the caregiver identity used for attribution."""
+    link = db.query(CaregiverAccountLink).filter(
+        CaregiverAccountLink.account_id == account_id,
+        CaregiverAccountLink.caregiver_id == caregiver_id,
+        CaregiverAccountLink.person_id == person_id,
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=403, detail="Authenticated account is not linked to this caregiver identity")
+    return link
