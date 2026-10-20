@@ -4,7 +4,7 @@ Implements the API for generating weekly care reviews to help caregivers
 maintain Care Memory through structured review, verification, and reconciliation.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
@@ -43,6 +43,12 @@ def get_weekly_review(
     Open Loop system, decision/outcome tracking, medication management,
     appointments, and caregiver responsibilities.
     """
+    if not current_user.has_access_to_person(person_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to access person {person_id}",
+        )
+
     try:
         # Verify the person exists and user has access (basic check)
         # In a full implementation, you would add more sophisticated authorization
@@ -72,7 +78,7 @@ def get_weekly_review_history(
     has been maintained over time.
     """
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
@@ -136,7 +142,7 @@ def complete_weekly_review(
     4. Generate care memory update summary
     """
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
