@@ -154,7 +154,7 @@ class PostAppointmentWorkflowService:
         # Create a care event for the appointment completion/update
         care_event = CareEvent(
             person_id=person_id,
-            event_type="appointment_update",
+            event_type="APPOINTMENT_EVENT",
             status="recorded",
             occurred_at=capture_data.capture_timestamp,
             title=f"Appointment Update: {appointment_id}",
