@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from app.core.dementia_enums import (
@@ -63,8 +63,7 @@ class DementiaBaselineResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaObservationCreate(BaseModel):
@@ -115,8 +114,7 @@ class DementiaObservationResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaChangeAssessmentCreate(BaseModel):
@@ -151,8 +149,7 @@ class DementiaChangeAssessmentResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaCaregiverDisagreementCreate(BaseModel):
@@ -181,8 +178,7 @@ class DementiaCaregiverDisagreementResponse(BaseModel):
     created_at: datetime
     resolved_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaReasoningRequest(BaseModel):
@@ -243,8 +239,7 @@ class DementiaCarePlanResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaCaregiverOnboardingCreate(BaseModel):
@@ -269,8 +264,7 @@ class DementiaCaregiverOnboardingResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaBaselineComparisonRequest(BaseModel):
@@ -330,8 +324,7 @@ class DementiaSafetyEventResponse(BaseModel):
     driving_safety_risk: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaReasoningSummary(BaseModel):
@@ -369,8 +362,7 @@ class DementiaTimelineEventResponse(BaseModel):
     metadata_: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DementiaTimelineAnalysisResponse(BaseModel):
