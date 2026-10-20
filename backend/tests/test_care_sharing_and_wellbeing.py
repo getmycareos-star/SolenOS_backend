@@ -463,7 +463,7 @@ class TestSharingEndpoints:
         app.dependency_overrides[get_db] = lambda: db
         account = Account(
             id="care-sharing-test-account",
-            email="care-sharing-test@example.com",
+            email="jo@example.com",
             account_type=AccountType.CAREGIVER,
             is_active=True,
         )
