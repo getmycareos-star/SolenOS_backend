@@ -10,12 +10,13 @@ from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
 from app.models.care import Person
 from app.models.change import Baseline
+from app.models.causal import CausalHypothesis
 from app.models.uncertainty import InformationGap
 
 
 def test_signup_login_current_account_and_logout():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -67,6 +68,8 @@ def test_signup_login_current_account_and_logout():
             assert unauthenticated_care_read.status_code == 401
             unauthenticated_change_read = client.get("/api/v1/change/baselines/not-authorized")
             assert unauthenticated_change_read.status_code == 401
+            unauthenticated_causal_read = client.get("/api/v1/causal/hypotheses/not-authorized")
+            assert unauthenticated_causal_read.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -92,6 +95,9 @@ def test_signup_login_current_account_and_logout():
             own_baselines = client.get("/api/v1/change/baselines/" + context["person_id"], headers=headers)
             assert own_baselines.status_code == 200, own_baselines.text
             assert own_baselines.json() == []
+            own_hypotheses = client.get("/api/v1/causal/hypotheses/" + context["person_id"], headers=headers)
+            assert own_hypotheses.status_code == 200, own_hypotheses.text
+            assert own_hypotheses.json() == []
 
             guard = require_person_access("read")
             with TestingSession() as db:
@@ -111,6 +117,8 @@ def test_signup_login_current_account_and_logout():
             assert unrelated_read.status_code == 403, unrelated_read.text
             unrelated_baselines = client.get("/api/v1/change/baselines/" + unrelated.id, headers=headers)
             assert unrelated_baselines.status_code == 403, unrelated_baselines.text
+            unrelated_hypotheses = client.get("/api/v1/causal/hypotheses/" + unrelated.id, headers=headers)
+            assert unrelated_hypotheses.status_code == 403, unrelated_hypotheses.text
 
             logout = client.post("/api/v1/auth/logout", headers=headers)
             assert logout.status_code == 204
@@ -118,5 +126,5 @@ def test_signup_login_current_account_and_logout():
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
