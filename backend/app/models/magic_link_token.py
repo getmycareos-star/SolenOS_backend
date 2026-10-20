@@ -1,4 +1,4 @@
-'from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Integer, Enum as SQLEnum, Index, UniqueConstraint, JSON
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Integer, Enum as SQLEnum, Index, UniqueConstraint, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import uuid
@@ -32,4 +32,4 @@ class MagicLinkToken(Base):
         Index("ix_magic_link_tokens_token", "token"),
         Index("ix_magic_link_tokens_expires_used", "expires_at", "used"),
     )
-'
+
