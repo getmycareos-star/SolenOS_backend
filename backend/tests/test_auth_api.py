@@ -94,7 +94,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert set(context["permissions"]) == {"read", "write", "admin"}
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
-            assert [item["person_id"] for item in listed.json()] == [context["person_id"]]
+            assert {item["person_id"] for item in listed.json()} == {context["person_id"], legacy_created.json()["id"]}
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
             assert own_legacy_person.status_code == 200, own_legacy_person.text
             own_gaps = client.get("/api/v1/uncertainty/gaps/" + context["person_id"], headers=headers)
