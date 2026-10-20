@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional, List
 
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 
 from app.core.daily_capture_enums import (
     MedicationStatus,
@@ -41,8 +41,7 @@ class MedicationRecordResponse(BaseModel):
     care_event_id: Optional[str] = None
     note: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class VitalSignCreate(BaseModel):
@@ -66,8 +65,7 @@ class VitalSignResponse(BaseModel):
     range_note: Optional[str] = None
     care_event_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ScaleObservationCreate(BaseModel):
@@ -90,8 +88,7 @@ class ScaleObservationResponse(BaseModel):
     observed_at: datetime
     care_event_id: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailyLogCreate(BaseModel):
