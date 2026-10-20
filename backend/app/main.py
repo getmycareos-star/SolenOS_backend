@@ -9,7 +9,6 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.authentication import router as authentication_router, current_account
 from app.api.capture import router as capture_router
-from app.api.actions import router as actions_router
 from app.core.authz import assert_person_access
 from app.models.auth_identity import AuthAccount
 from app.models.care import Person as PersonModel, Caregiver as CaregiverModel
@@ -23,7 +22,6 @@ app = FastAPI(title=settings.app_name, version="0.1.0")
 
 app.include_router(authentication_router, prefix="/api/v1")
 app.include_router(capture_router, prefix="/api/v1")
-app.include_router(actions_router, prefix="/api/v1")
 
 app.add_middleware(
     CORSMiddleware,
