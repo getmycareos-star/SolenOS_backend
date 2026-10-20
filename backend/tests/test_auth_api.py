@@ -156,7 +156,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
-            foreign_safety_event = client.post("/api/v1/safety/events", headers=headers, params={"event_type": "invariant_violation", "person_id": context["person_id"], "subject_type": "evidence", "subject_id": own_evidence_id, "description": "cross-record evidence regression", "evidence_ids": [foreign_evidence_id]})
+            foreign_safety_event = client.post("/api/v1/safety/events", headers=headers, params={"event_type": "invariant_violation", "person_id": context["person_id"], "subject_type": "evidence", "subject_id": own_evidence_id, "description": "cross-record evidence regression"}, json={"evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_event.status_code == 400, foreign_safety_event.text
             foreign_uploader_write = client.post("/api/v1/evidence", headers=headers, json={"person_id": context["person_id"], "type": "note", "source_text": "forged uploader", "uploaded_by_caregiver_id": foreign_caregiver_id})
             assert foreign_uploader_write.status_code == 400, foreign_uploader_write.text
