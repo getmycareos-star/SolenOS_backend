@@ -174,9 +174,15 @@ async def lifespan(app: FastAPI):
     # Configuration validation
     logger.info("Validating configuration...")
     
-    # Validate secret key in production
-    if not settings.debug and settings.secret_key == "change-me-in-production":
-        logger.warning("SECRET_KEY is using default value in production! This is insecure.")
+    # Fail closed: production must never run with a placeholder or weak signing key.
+    if not settings.debug and (
+        settings.secret_key == "change-me-in-production"
+        or len(settings.secret_key.encode("utf-8")) < 32
+    ):
+        raise RuntimeError(
+            "Unsafe SECRET_KEY: configure a unique random secret of at least 32 bytes "
+            "before starting with DEBUG=false."
+        )
     
     # Validate database connection
     try:
@@ -213,7 +219,7 @@ async def lifespan(app: FastAPI):
         try:
             import sentry_sdk
             from sentry_sdk.integrations.asgi import SentryAsgiMiddleware
-            try_sdk.init(
+            sentry_sdk.init(
                 dsn=sentry_dsn,
                 traces_sample_rate=0.1,
                 _experiments={"enable_logs": True},
