@@ -286,7 +286,7 @@ async def lifespan(app: FastAPI):
     
     # Start automatic data deletion scheduler
     data_deletion_interval_hours = getattr(settings, 'data_deletion_interval_hours', 24)
-    data_deletion_enabled = getattr(settings, 'data_deletion_enabled', True)
+    data_deletion_enabled = getattr(settings, 'data_deletion_enabled', False)
     if data_deletion_enabled and data_deletion_interval_hours > 0:
         logger.info(f"Starting automatic data deletion scheduler (interval: {data_deletion_interval_hours} hours)")
         async def data_deletion_scheduler():
