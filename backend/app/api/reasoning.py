@@ -11,6 +11,7 @@ from app.services.care_continuity import CareContinuityEngine
 from app.services.causal_inference import CausalInferenceService
 from app.services.belief_updater import BeliefUpdaterService
 from app.services.explainability import ExplainabilityService
+from app.models.care_recommendations import CareRecommendation
 from app.schemas.memory import ReasoningMemory, LearningEvent
 from app.schemas.dementia import DementiaObservationResponse, DementiaReasoningSummary
 from app.schemas.longitudinal_evidence import LongitudinalEvidenceEvent, LongitudinalEvidenceTrend
@@ -115,10 +116,23 @@ def explain_decision(
     principal: AuthenticatedPrincipal = Depends(get_current_active_user),
 ):
     """Get an explanation for a decision."""
-    # In a real system, we would check that the decision belongs to a person the user can access.
-    # For now, we skip authorization.
-    explanation = service.get_provenance_chain(str(decision_id))
-    return explanation
+    # Resolve the owning person before returning provenance. A decision ID is
+    # not an authorization credential, and provenance may expose sensitive care
+    # evidence from multiple sources.
+    decision = service.db.query(CareRecommendation).filter(
+        CareRecommendation.id == str(decision_id)
+    ).first()
+    if decision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Decision not found",
+        )
+    if not principal.has_access_to_person(str(decision.person_id)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this decision",
+        )
+    return service.get_provenance_chain(str(decision_id))
 
 
 @cached_response(ttl=300, key_prefix="reasoning_summary")
