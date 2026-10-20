@@ -132,6 +132,7 @@ class CareEvent(Base):
     confidence_status = Column(Float, nullable=True)
     confidence_outcome = Column(Float, nullable=True)
     confidence_overall = Column(Float, nullable=True)  # Composite
+    confidence = synonym("confidence_overall")  # Backward-compatible scalar alias
 
     # Knowledge Time vs Event Time (Requirement 68)
     knowledge_time = Column(DateTime(timezone=True), nullable=True)  # When SolenOS learned of this event
@@ -223,6 +224,7 @@ class CareEvent(Base):
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    recorded_at = synonym("created_at")  # Backward-compatible knowledge-time alias
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
 
