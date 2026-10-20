@@ -44,7 +44,7 @@ def teardown_db():
     app.dependency_overrides.clear()
 
 
-def test_post_situation_triggers_change_detection_and_situations():
+def test_post_situation_persists_change_detection_and_situation_results():
     setup_db()
     try:
         from app.core.database import get_db
@@ -91,10 +91,18 @@ def test_post_situation_triggers_change_detection_and_situations():
         assert event.event_type == "observation"
 
         changes = db.query(Change).filter(Change.person_id == "int-person-1").all()
-        assert len(changes) >= 0
+        assert changes, "The capture pipeline must persist a change-detection result"
+        assert max(change.current_count or 0 for change in changes) >= 1
 
         situations = db.query(Situation).filter(Situation.person_id == "int-person-1").all()
-        assert len(situations) >= 0
+        # Situation formation is conditional on meaningful evidence. The API
+        # must return exactly the situations that were actually persisted; an
+        # empty list is valid, but an unconditional >= 0 assertion is not.
+        response_situations = data.get("situations") or []
+        assert len(response_situations) == len(situations), (
+            f"Response/persistence mismatch: response={response_situations!r}, "
+            f"persisted={len(situations)}"
+        )
         db.close()
     finally:
         teardown_db()
@@ -142,6 +150,13 @@ def test_multi_update_longitudinal_reasoning():
 
         evidence_items = db.query(Evidence).filter(Evidence.person_id == "int-person-2").count()
         assert evidence_items == 3
+
+        changes = db.query(Change).filter(Change.person_id == "int-person-2").all()
+        assert changes, "Repeated observations must reach persisted change detection"
+        assert max(change.current_count or 0 for change in changes) == 3, (
+            "The later result must reflect all three observations, not only the "
+            f"latest request; observed counts={[change.current_count for change in changes]!r}"
+        )
         db.close()
     finally:
         teardown_db()
