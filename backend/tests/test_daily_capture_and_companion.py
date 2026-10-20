@@ -560,15 +560,28 @@ class TestDailyCareMerge:
             },
         )
         assert response.status_code == 200
-        rows = db.query(VitalSign).all()
-        vitals = {v.vital_type.value: v for v in rows}
-        assert set(vitals) == {"heart_rate", "systolic_bp"}, (
-            "Expected both typed vital rows to persist; "
-            f"observed={[(v.vital_type.value, v.value) for v in rows]!r}"
-        )
-        assert vitals["heart_rate"].value == 72.0
-        assert vitals["heart_rate"].is_out_of_range is False
-        assert vitals["systolic_bp"].is_out_of_range is True
+        # Verify committed state through a fresh session, not the request's
+        # identity map. This catches a success response that did not persist.
+        from sqlalchemy.orm import Session
+
+        fresh = Session(bind=db.get_bind())
+        try:
+            rows = (
+                fresh.query(VitalSign)
+                .filter(VitalSign.person_id == person.id)
+                .all()
+            )
+            vitals = {v.vital_type.value: v for v in rows}
+            assert set(vitals) == {"heart_rate", "systolic_bp"}, (
+                "Expected both typed vital rows to persist for this person; "
+                f"observed={[(v.vital_type.value, v.value) for v in rows]!r}"
+            )
+            assert vitals["heart_rate"].value == 72.0
+            assert vitals["heart_rate"].is_out_of_range is False
+            assert vitals["systolic_bp"].value == 195.0
+            assert vitals["systolic_bp"].is_out_of_range is True
+        finally:
+            fresh.close()
 
     def test_an_unrecognised_vital_name_does_not_lose_the_reading(self, db, person, caregiver, client):
         """Free-text vital names must not be dropped just because they are not typed."""
