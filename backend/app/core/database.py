@@ -95,11 +95,12 @@ _initialized = False
 
 
 def init_db():
-    """Create tables and backfill missing columns. Safe to call repeatedly.
+    """Create missing tables from the registered ORM metadata.
 
-    Called from the FastAPI startup event so importing this module (which
-    happens at app-construction time) no longer triggers a synchronous
-    SQLite round-trip.
+    This is a bootstrap helper, not a schema migration: create_all does not add
+    columns to existing tables or safely transform existing data. Use Alembic
+    revisions for all schema evolution and review existing databases before
+    stamping them with a baseline.
     """
     global _initialized
     if _initialized:
