@@ -70,6 +70,24 @@ def db():
 
 
 @pytest.fixture()
+def client(db):
+    """Test client wired to the per-test in-memory database.
+
+    The app's production engine must not be used by API tests: otherwise test
+    cases leak state into a local SQLite file and results depend on execution
+    order.
+    """
+    from fastapi.testclient import TestClient
+    from app.core.database import get_db
+
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    return TestClient(app)
+
+
+@pytest.fixture()
 def person(db):
     record = Person(id="p1", name="Margaret")
     db.add(record)
