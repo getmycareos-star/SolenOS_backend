@@ -6,6 +6,7 @@ import os
 import io
 import tempfile
 from datetime import datetime, timezone
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -15,6 +16,7 @@ from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.document import Document
+from app.models.job import Job, JobStatus
 from app.models.change import Change, Situation
 from app.core.config import get_settings
 
@@ -88,90 +90,106 @@ PDF_CONTENT = (
 
 
 def test_upload_txt_document_full_pipeline():
+    """The HTTP contract queues work; the worker must persist extraction and canonical records."""
     setup_db()
     try:
         from app.core.database import get_db
+        from app.celery import _process_document_job
+
         app.dependency_overrides[get_db] = override_get_db
         client = TestClient(app)
-
         person_id, caregiver_id = _create_person_caregiver()
 
-        response = client.post(
-            "/api/files/upload",
-            files={"file": ("discharge.txt", io.BytesIO(TXT_CONTENT.encode()), "text/plain")},
-            data={"caregiver_id": caregiver_id, "person_id": person_id},
-        )
+        with patch("app.celery.process_document_job.delay", return_value=None):
+            response = client.post(
+                "/api/files/upload",
+                files={"file": ("discharge.txt", io.BytesIO(TXT_CONTENT.encode()), "text/plain")},
+                data={"caregiver_id": caregiver_id, "person_id": person_id},
+            )
+
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
         assert data["filename"] == "discharge.txt"
-        assert data["processing_status"] == "completed"
-        assert data["extraction_method"] == "direct_text"
-        assert data["extraction_confidence"] == 1.0
-        assert data["evidence_id"] is not None
-        assert data["care_event_id"] is not None
-        assert "fall" in (data.get("extracted_text") or "").lower()
+        assert data["processing_status"] == "queued"
+        assert data["document_id"]
 
         db = TestingSessionLocal()
-        doc = db.query(Document).filter(Document.person_id == person_id).first()
-        assert doc is not None
+        job = db.query(Job).filter(Job.document_id == data["document_id"]).one()
+        assert job.status == JobStatus.QUEUED.value
+        result = _process_document_job(db, job.id)
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+
+        db.expire_all()
+        doc = db.query(Document).filter(Document.id == data["document_id"]).one()
         assert doc.processing_status == "completed"
         assert doc.document_type == "text"
-        assert doc.evidence_id is not None
-        assert doc.care_event_id is not None
+        assert doc.extraction_method == "direct_text"
+        assert doc.extraction_confidence == 1.0
         assert "fall" in (doc.extracted_text or "").lower()
+        assert doc.evidence_id and doc.care_event_id
+        assert job.status == JobStatus.COMPLETED.value
+        assert job.evidence_id == doc.evidence_id
+        assert job.care_event_id == doc.care_event_id
 
-        evidence = db.query(Evidence).filter(Evidence.id == doc.evidence_id).first()
-        assert evidence is not None
+        evidence = db.query(Evidence).filter(Evidence.id == doc.evidence_id).one()
         assert evidence.source_type == "uploaded_document"
-        assert evidence.evidence_status == "processed"
+        assert evidence.evidence_status == "reported"
         assert evidence.uploaded_by_caregiver_id == caregiver_id
+        assert "fall" in evidence.source_text.lower()
 
-        event = db.query(CareEvent).filter(CareEvent.id == doc.care_event_id).first()
-        assert event is not None
-        assert event.event_type == "observation"
-
-        changes = db.query(Change).filter(Change.person_id == person_id).all()
-        for c in changes:
-            print(f"  {c.id[:12]}... | type={c.change_type}")
-
+        event = db.query(CareEvent).filter(CareEvent.id == doc.care_event_id).one()
+        assert event.title
+        assert doc.id in (event.source_ids or []) or evidence.id in (event.evidence_ids or [])
         db.close()
     finally:
         teardown_db()
 
-
 def test_upload_pdf_document_full_pipeline():
+    """PDF extraction and evidence persistence run through the same worker path."""
     setup_db()
     try:
         from app.core.database import get_db
+        from app.celery import _process_document_job
+
         app.dependency_overrides[get_db] = override_get_db
         client = TestClient(app)
-
         person_id, caregiver_id = _create_person_caregiver()
 
-        response = client.post(
-            "/api/files/upload",
-            files={"file": ("report.pdf", io.BytesIO(PDF_CONTENT), "application/pdf")},
-            data={"caregiver_id": caregiver_id, "person_id": person_id},
-        )
+        with patch("app.celery.process_document_job.delay", return_value=None):
+            response = client.post(
+                "/api/files/upload",
+                files={"file": ("report.pdf", io.BytesIO(PDF_CONTENT), "application/pdf")},
+                data={"caregiver_id": caregiver_id, "person_id": person_id},
+            )
+
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
         assert data["document_type"] == "pdf"
-        assert data["extraction_method"] == "pdf_text"
-        assert data["evidence_id"] is not None
-        assert data["care_event_id"] is not None
+        assert data["processing_status"] == "queued"
 
         db = TestingSessionLocal()
-        doc = db.query(Document).filter(Document.person_id == person_id).first()
-        assert doc is not None
+        job = db.query(Job).filter(Job.document_id == data["document_id"]).one()
+        result = _process_document_job(db, job.id)
+        assert result["ok"] is True
+        db.expire_all()
+
+        doc = db.query(Document).filter(Document.id == data["document_id"]).one()
         assert doc.processing_status == "completed"
         assert doc.document_type == "pdf"
+        assert doc.extraction_method == "pdf_text"
         assert "Patient discharged" in (doc.extracted_text or "")
+        assert doc.evidence_id and doc.care_event_id
+        evidence = db.query(Evidence).filter(Evidence.id == doc.evidence_id).one()
+        assert evidence.source_type == "uploaded_document"
+        assert "Patient discharged" in evidence.source_text
+        event = db.query(CareEvent).filter(CareEvent.id == doc.care_event_id).one()
+        assert event is not None
         db.close()
     finally:
         teardown_db()
-
 
 def test_upload_empty_file_returns_400():
     setup_db()
@@ -245,32 +263,41 @@ def test_upload_creates_care_record_entry():
     setup_db()
     try:
         from app.core.database import get_db
+        from app.celery import _process_document_job
+
         app.dependency_overrides[get_db] = override_get_db
         client = TestClient(app)
-
         person_id, caregiver_id = _create_person_caregiver()
 
-        response = client.post(
-            "/api/files/upload",
-            files={"file": ("notes.txt", io.BytesIO(b"Patient has diabetes and takes metformin."), "text/plain")},
-            data={"caregiver_id": caregiver_id, "person_id": person_id},
-        )
+        with patch("app.celery.process_document_job.delay", return_value=None):
+            response = client.post(
+                "/api/files/upload",
+                files={"file": ("notes.txt", io.BytesIO(b"Patient has diabetes and takes metformin."), "text/plain")},
+                data={"caregiver_id": caregiver_id, "person_id": person_id},
+            )
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
+        assert data["processing_status"] == "queued"
 
         db = TestingSessionLocal()
-        evidence = db.query(Evidence).filter(Evidence.person_id == person_id, Evidence.source_type == "uploaded_document").first()
-        assert evidence is not None
+        job = db.query(Job).filter(Job.document_id == data["document_id"]).one()
+        result = _process_document_job(db, job.id)
+        assert result["ok"] is True
+
+        db.expire_all()
+        doc = db.query(Document).filter(Document.id == data["document_id"]).one()
+        evidence = db.query(Evidence).filter(Evidence.id == doc.evidence_id).one()
+        assert evidence.source_type == "uploaded_document"
         assert "diabetes" in evidence.source_text
 
         events = db.query(CareEvent).filter(CareEvent.person_id == person_id).all()
         assert len(events) == 1
-        assert events[0].title is not None
+        assert events[0].id == doc.care_event_id
+        assert events[0].title
         db.close()
     finally:
         teardown_db()
-
 
 def test_root_identifies_the_api_and_points_at_the_frontend():
     """The backend is API-only.
