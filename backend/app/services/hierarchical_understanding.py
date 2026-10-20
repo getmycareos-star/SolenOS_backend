@@ -52,7 +52,7 @@ class HierarchicalUnderstandingService:
             (ScaleLevel.EPISODE, ScaleLevel.CONDITION): "pattern_recognition",
             (ScaleLevel.CONDITION, ScaleLevel.POPULATION): "statistical_summarization",
             (ScaleLevel.POPULATION, ScaleLevel.PRINCIPLE): "generalization_abstraction"
-        ]
+        }
         
         # Define example principles that emerge at the highest scale
         self.care_principles = {
