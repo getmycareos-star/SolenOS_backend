@@ -8,7 +8,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
-from app.models.care import Person
+from app.models.care import Person, Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
@@ -19,7 +19,7 @@ from app.models.uncertainty import InformationGap
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -118,6 +118,22 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             own_uncompleted_actions = client.get("/api/v1/actions/actions/" + context["person_id"] + "/uncompleted", headers=headers)
             assert own_uncompleted_actions.status_code == 200, own_uncompleted_actions.text
             assert own_uncompleted_actions.json() == []
+            with TestingSession() as db:
+                caregiver = CaregiverModel(name="Authorized caregiver", email="owner-caregiver@example.com", relationship="family", person_id=context["person_id"], timezone="UTC")
+                db.add(caregiver)
+                db.flush()
+                own_evidence = EvidenceModel(person_id=context["person_id"], type="note", source_text="Call the clinic tomorrow.", uploaded_by_caregiver_id=caregiver.id, confidence=1.0)
+                foreign_evidence = EvidenceModel(person_id=unrelated.id, type="note", source_text="Private unrelated note.", uploaded_by_caregiver_id=caregiver.id, confidence=1.0)
+                db.add_all([own_evidence, foreign_evidence])
+                db.commit()
+                own_evidence_id = own_evidence.id
+                foreign_evidence_id = foreign_evidence.id
+            safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
+            own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
+            assert own_safety_check.status_code == 200, own_safety_check.text
+            foreign_candidate = dict(safety_candidate, source_evidence_id=foreign_evidence_id)
+            foreign_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=foreign_candidate)
+            assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
@@ -180,5 +196,5 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, AuthAccount.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
         engine.dispose()
