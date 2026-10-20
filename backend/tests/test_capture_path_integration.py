@@ -12,10 +12,6 @@ from app.models.care_event import CareEvent
 from app.models.evidence import Evidence
 from app.models.identity import Person
 from app.schemas.situation import SituationInput
-from app.main import app
-from app.core.security import AuthenticatedPrincipal, get_current_principal
-from app.core.identity_enums import AccountType
-from app.models.identity import Account
 
 
 def setup_person_and_caregiver(db: Session, email_suffix: str = ""):
@@ -35,16 +31,6 @@ def setup_person_and_caregiver(db: Session, email_suffix: str = ""):
     db.refresh(person)
     db.refresh(caregiver)
 
-    # The capture API requires the authenticated identity to match the
-    # caregiver whose ID is recorded in the request.
-    account = Account(
-        id=f"capture-test-account-{caregiver.id}",
-        email=caregiver.email,
-        account_type=AccountType.CAREGIVER,
-        is_active=True,
-    )
-    principal = AuthenticatedPrincipal(account, [person.id])
-    app.dependency_overrides[get_current_principal] = lambda: principal
     return person, caregiver
 
 
@@ -62,7 +48,7 @@ def test_post_situation_persists_evidence_and_event_with_provenance(db, client):
     raw_input = "The person fell while getting out of bed."
     payload = make_payload(person, caregiver, raw_input)
 
-    response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+    response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {caregiver.id}"})
     assert response.status_code == 200, response.text
     data = response.json()
 
@@ -133,7 +119,7 @@ def test_identical_retry_does_not_duplicate_event_or_evidence(db, client):
     payload = make_payload(person, caregiver, raw_input, timestamp)
     body = payload.model_dump(mode="json")
 
-    headers = {"Idempotency-Key": "capture-retry-003"}
+    headers = {"Authorization": f"Bearer {caregiver.id}", "Idempotency-Key": "capture-retry-003"}
     first = client.post("/api/situation", json=body, headers=headers)
     retry = client.post("/api/situation", json=body, headers=headers)
     assert first.status_code == 200, first.text
@@ -164,7 +150,7 @@ def test_empty_input_returns_client_error(db, client):
 def test_reusing_idempotency_key_for_different_content_is_rejected(db, client):
     person, caregiver = setup_person_and_caregiver(db, "_005")
     timestamp = datetime.now(timezone.utc).isoformat()
-    headers = {"Idempotency-Key": "capture-key-reuse-005"}
+    headers = {"Authorization": f"Bearer {caregiver.id}", "Idempotency-Key": "capture-key-reuse-005"}
 
     first = client.post(
         "/api/situation",
