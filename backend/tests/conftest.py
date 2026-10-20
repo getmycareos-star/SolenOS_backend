@@ -6,15 +6,11 @@ get_settings.cache_clear()
 
 from app.main import app, api_limiter, auth_limiter, strict_limiter
 
-# Keep a mutable snapshot handle. Pytest imports conftest before it imports
-# all test modules; some test modules import/register application routers during
-# collection. Refresh this snapshot after collection, before tests can mutate
-# process-global app state.
-APP_ROUTES_BASELINE = []
-
-
-def pytest_collection_finish(session):
-    APP_ROUTES_BASELINE[:] = list(app.router.routes)
+# Capture the production route table immediately after importing the app,
+# before test modules are imported during collection. Capturing at collection
+# finish is unsafe: module-level test setup can already have mutated the global
+# app by then, turning a damaged route table into the supposed baseline.
+APP_ROUTES_BASELINE = list(app.router.routes)
 
 import pytest
 
@@ -34,19 +30,8 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
-    # The post-collection hook normally fills this snapshot. Some import orders
-    # can still leave it with only the early routes; detect that explicitly
-    # rather than treating any non-empty list as a complete snapshot.
-    critical_paths = {
-        "/api/v1/graph/{person_id}/snapshot",
-        "/api/v1/causal/hypotheses",
-        "/api/v1/daily-care/entries",
-    }
-    baseline_paths = {
-        getattr(route, "path", None) for route in APP_ROUTES_BASELINE
-    }
-    if not critical_paths.issubset(baseline_paths):
-        APP_ROUTES_BASELINE[:] = list(app.router.routes)
+    # Restore only from the snapshot captured before test-module imports.
+    # Never replace a known-good baseline with the already-mutated live table.
 
     # Dependency overrides, route registration and rate counters are
     # process-global. Restore the complete route table so one test cannot
