@@ -3,25 +3,7 @@ name: Authentication foundation regression
 on:
   pull_request:
     paths:
-      - "backend/app/models/auth_identity.py"
-      - "backend/app/services/auth_service.py"
-      - "backend/app/api/authentication.py"
-      - "backend/app/core/authz.py"
-      - "backend/app/api/uncertainty.py"
-      - "backend/app/api/change.py"
-      - "backend/app/api/causal.py"
-      - "backend/app/api/v1.py"
-      - "backend/app/api/caregiver_intelligence.py"
-      - "backend/app/api/safety.py"
-      - "backend/app/api/actions.py"
-      - "backend/app/main.py"
-      - "backend/app/models/auth_identity.py"
-      - "backend/app/core/database.py"
-      - "backend/app/main.py"
-      - "backend/pyproject.toml"
-      - "backend/tests/test_auth_service_primitives.py"
-      - "backend/tests/test_auth_service_sessions.py"
-      - "backend/tests/test_auth_api.py"
+      - "backend/**"
       - ".github/workflows/auth-foundation-regression.yml"
   push:
     branches:
@@ -55,6 +37,8 @@ jobs:
         run: python -m pytest -q tests/test_auth_service_sessions.py
       - name: Run HTTP authentication lifecycle regression
         run: python -m pytest -q tests/test_auth_api.py
+      - name: Run complete backend test suite
+        run: python -m pytest -q tests
       - name: Verify application imports and routes register
         run: python -c "from app.main import app; assert '/api/v1/auth/me' in app.openapi()['paths']"
       - name: Compile changed Python modules
