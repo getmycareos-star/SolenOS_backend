@@ -9,6 +9,15 @@ from sqlalchemy.orm import Session
 from app.models.care import AppointmentModel, CareEventModel, EvidenceModel, Person
 from app.models.caregiver import Caregiver
 from app.services.post_appointment_workflow import PostAppointmentWorkflowService
+
+
+@pytest.fixture(autouse=True)
+def clear_post_appointment_workflow_storage():
+    """Keep in-memory workflow state isolated between tests."""
+    from app.services.post_appointment_workflow import _WORKFLOW_STORAGE
+    _WORKFLOW_STORAGE.clear()
+    yield
+    _WORKFLOW_STORAGE.clear()
 from app.schemas.post_appointment.workflow import (
     PostAppointmentWorkflowRequest,
     PostAppointmentCaptureData,
