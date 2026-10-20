@@ -5,7 +5,7 @@ Creates inputs designed to test system boundaries, error handling, and security.
 
 import random
 import string
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 
 
