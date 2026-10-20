@@ -6,6 +6,9 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
+from app.core.security import AuthenticatedPrincipal, get_current_principal, get_current_user
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 from app.services.safety import SafetyEngine
 from app.services.claim_extraction import ClaimExtractionEngine, EvidenceMatcher, SourceQualityEvaluator
 from app.services.risk_escalation import RiskClassifier, EscalationEngine
@@ -485,6 +488,15 @@ class TestSafetyAPI:
     def setup_method(self):
         setup_db()
         app.dependency_overrides[override_get_db] = override_get_db
+        account = Account(
+            id="safety-grounding-test-account",
+            email="safety-grounding-test@example.com",
+            account_type=AccountType.CAREGIVER,
+            is_active=True,
+        )
+        principal = AuthenticatedPrincipal(account, ["test_person"])
+        app.dependency_overrides[get_current_principal] = lambda: principal
+        app.dependency_overrides[get_current_user] = lambda: principal
         self.client = TestClient(app)
 
     def teardown_method(self):
@@ -553,6 +565,15 @@ class TestSafetyAPI:
         assert result.score >= 0.0
 
     def test_adversarial_tests(self):
+        account = Account(
+            id="safety-grounding-staff-account",
+            email="safety-grounding-staff@example.com",
+            account_type=AccountType.SOLENOS_STAFF,
+            is_active=True,
+        )
+        principal = AuthenticatedPrincipal(account, [])
+        app.dependency_overrides[get_current_principal] = lambda: principal
+        app.dependency_overrides[get_current_user] = lambda: principal
         response = self.client.post("/api/v1/adversarial-tests")
         assert response.status_code == 200
         data = response.json()
