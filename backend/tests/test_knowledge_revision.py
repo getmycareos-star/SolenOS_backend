@@ -29,6 +29,7 @@ from app.models.knowledge_revision import KnowledgeClaim
 from app.models.uncertainty import Contradiction
 from app.core.revision_enums import RevisionType, KnowledgeState
 from app.services.knowledge_revision import KnowledgeRevisionEngine
+from app.main import app
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
