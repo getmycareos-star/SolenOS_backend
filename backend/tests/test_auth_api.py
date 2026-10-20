@@ -134,12 +134,15 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 db.commit()
                 own_evidence_id = own_evidence.id
                 foreign_evidence_id = foreign_evidence.id
+                foreign_person_id = foreign_person.id
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
             own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
             assert own_safety_check.status_code == 200, own_safety_check.text
             foreign_candidate = dict(safety_candidate, source_evidence_id=foreign_evidence_id)
             foreign_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=foreign_candidate)
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
+            foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "claims": "claim", "evidence_ids": foreign_evidence_id, "risk_class": "low", "person_id": foreign_person_id})
+            assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
