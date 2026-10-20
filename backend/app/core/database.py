@@ -9,7 +9,14 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# SQLite's thread option is not accepted by PostgreSQL/MySQL drivers. Keep
+# engine options dialect-specific so DATABASE_URL can select a production DB.
+_connect_args = (
+    {"check_same_thread": False}
+    if settings.database_url.startswith("sqlite:")
+    else {}
+)
+engine = create_engine(settings.database_url, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
