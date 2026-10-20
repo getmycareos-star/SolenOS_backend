@@ -37,6 +37,9 @@ from app.api.uncertainty import router as uncertainty_router
 from app.api.knowledge_revision import router as knowledge_revision_router
 from app.api.safety import router as safety_router
 from app.api.care_sharing import router as care_sharing_router
+from app.api.emergency_context import router as emergency_context_router
+from app.api.post_appointment import router as post_appointment_router
+from app.api.prioritization import router as prioritization_router
 from app.core.cache import cache_service  # Redis cache service
 from app.core.security import add_security_headers
 from app.services.alerting import send_security_alert
@@ -637,6 +640,11 @@ app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(knowledge_revision_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(care_sharing_router, prefix="/api/v1")
+app.include_router(emergency_context_router, prefix="/api/v1")
+app.include_router(post_appointment_router, prefix="/api/v1")
+app.include_router(prioritization_router, prefix="/api/v1")
+# Backward-compatible upload path still used by existing clients.
+app.include_router(files_router, prefix="/api/files")
 
 # Root endpoints
 @app.get("/", tags=["root"])
