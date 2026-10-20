@@ -60,6 +60,7 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db), accou
 
 
 app.include_router(situation_router, prefix="/api")
+app.include_router(situation_router, prefix="/api/v1")
 
 
 @app.get("/health")
