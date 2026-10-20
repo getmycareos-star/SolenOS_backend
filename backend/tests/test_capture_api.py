@@ -126,6 +126,8 @@ def test_daily_capture_persists_payload_and_lcr_event(capture_client):
                 "note": "Caregiver-reported score",
             }],
             "notes": "Caregiver's own daily note.",
+            "location": {"latitude": 40.7128, "longitude": -74.006, "accuracy": 10, "timestamp": 1792484100},
+            "location_provenance": "user_provided",
         },
     )
     assert response.status_code == 201, response.text
@@ -144,10 +146,13 @@ def test_daily_capture_persists_payload_and_lcr_event(capture_client):
         assert capture.vitals[0]["value"] == 72
         assert capture.scales[0]["score"] == 3
         assert capture.notes == "Caregiver's own daily note."
+        assert capture.location["latitude"] == 40.7128
+        assert capture.location_provenance == "user_provided"
         event = db.query(CareEventModel).filter(CareEventModel.id == result["care_event_id"]).one()
         assert event.person_id == context["person_id"]
         assert event.created_by_caregiver_id == context["caregiver_id"]
         assert f"daily_capture_id:{capture.id}" in event.tags
+        assert "user-provided location was attached" in event.description
     finally:
         db.close()
 
