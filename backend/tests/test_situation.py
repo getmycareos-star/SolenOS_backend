@@ -71,7 +71,7 @@ def test_post_situation_creates_evidence_and_event():
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
-        assert data["care_key"] == "caregiver-1"
+        assert data["care_key"] == "care_test_key_00000001"
         assert data["person_id"] == "person-1"
         assert data["message"] == "Care input recorded successfully."
         assert len(data["events"]) == 1
