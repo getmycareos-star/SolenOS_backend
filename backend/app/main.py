@@ -35,6 +35,7 @@ from app.api.reasoning import router as reasoning_router
 from app.api.causal import router as causal_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.knowledge_revision import router as knowledge_revision_router
+from app.api.longitudinal_evidence import router as longitudinal_evidence_router
 from app.api.safety import router as safety_router
 from app.api.care_sharing import router as care_sharing_router
 from app.api.emergency_context import router as emergency_context_router
@@ -648,6 +649,7 @@ app.include_router(reasoning_router, prefix="/reasoning")
 app.include_router(causal_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(knowledge_revision_router, prefix="/api/v1")
+app.include_router(longitudinal_evidence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(care_sharing_router, prefix="/api/v1")
 app.include_router(emergency_context_router, prefix="/api/v1")
