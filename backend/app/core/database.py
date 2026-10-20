@@ -76,6 +76,7 @@ import app.models.care_sharing
 import app.models.community
 import app.models.care_circle
 import app.models.identity
+import app.models.flexible_document
 import app.models.care
 import app.models.care_event
 import app.models.evidence
