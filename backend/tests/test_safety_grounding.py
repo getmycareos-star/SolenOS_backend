@@ -492,7 +492,7 @@ class TestSafetyAPI:
 
     def test_evaluate_endpoint(self):
         response = self.client.post(
-            "/api/v1/evaluate",
+            "/api/v1/safety/evaluate",
             json={
                 "user_intent": "The blood pressure was 145/90.",
                 "candidate_claims": [],
@@ -553,7 +553,7 @@ class TestSafetyAPI:
         assert result.score >= 0.0
 
     def test_adversarial_tests(self):
-        response = self.client.post("/api/v1/adversarial-tests")
+        response = self.client.post("/api/v1/safety/adversarial-tests")
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data
