@@ -202,16 +202,18 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
             }
             # Remove None values
             medication_service.record_medication(payload)
+    # Use one normalized timestamp for every structured item in this entry.
+    measured_at = (
+        datetime.fromisoformat(entry.occurred_at.replace("Z", "+00:00"))
+        if entry.occurred_at
+        else datetime.now(timezone.utc)
+    )
+    if measured_at.tzinfo is None:
+        measured_at = measured_at.replace(tzinfo=timezone.utc)
+
     # Record recognized numeric vitals separately from medication entries.
     if entry.vitals:
         vital_service = DailyCaptureService(db)
-        measured_at = (
-            datetime.fromisoformat(entry.occurred_at.replace("Z", "+00:00"))
-            if entry.occurred_at
-            else datetime.now(timezone.utc)
-        )
-        if measured_at.tzinfo is None:
-            measured_at = measured_at.replace(tzinfo=timezone.utc)
         for vital_name, raw_value in entry.vitals.items():
             # Form clients have historically sent both enum values ("heart_rate")
             # and enum names ("HEART_RATE"). Normalize both explicitly; preserve
