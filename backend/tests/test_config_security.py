@@ -24,3 +24,9 @@ def test_production_accepts_a_configured_strong_signing_key():
 def test_development_can_use_the_documented_local_default():
     settings = Settings(debug=True, secret_key="change-me-in-production")
     assert settings.debug is True
+
+
+def test_automated_data_deletion_is_opt_in():
+    """Do not run destructive retention jobs until policies are explicitly enabled."""
+    settings = Settings(debug=True, secret_key="local-test-key")
+    assert settings.data_deletion_enabled is False
