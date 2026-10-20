@@ -12,7 +12,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def authenticated_domain_test_client(request, monkeypatch):
-    if request.module.__name__.endswith("test_auth_api"):
+    if request.module.__name__.endswith(("test_auth_api", "test_capture_api")):
         yield
         return
 
