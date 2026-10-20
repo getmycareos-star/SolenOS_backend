@@ -235,6 +235,77 @@ def require_care_context_access(principal: AuthenticatedPrincipal, person_id: st
         )
 
 
+async def authorize_person_context_request(
+    request: Request,
+    principal: AuthenticatedPrincipal,
+    db: DbSession,
+    resource_models: List[tuple[str, Any]],
+    action: str = "care context access",
+) -> str:
+    """Authorize the persisted owner of a care resource, not a caller-selected ID.
+
+    If a request names a child resource, its database owner takes precedence over
+    path, query, or body person IDs. Any disagreement is denied. This prevents
+    a caller from attaching an authorized person_id to another person's resource.
+    """
+    require_authenticated(principal)
+
+    payload: Dict[str, Any] = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    nested_payloads = [
+        value for key in ("input_data", "claim", "request", "payload", "revision")
+        if isinstance((value := payload.get(key)), dict)
+    ]
+    supplied_contexts = [
+        str(value) for value in (
+            request.path_params.get("person_id"),
+            request.query_params.get("person_id"),
+            payload.get("person_id"),
+            *(nested.get("person_id") for nested in nested_payloads),
+        )
+        if value not in (None, "")
+    ]
+
+    resource_owners: List[str] = []
+    for parameter, model in resource_models:
+        candidates = [
+            source.get(parameter)
+            for source in (request.path_params, request.query_params, payload, *nested_payloads)
+            if source.get(parameter) not in (None, "")
+        ]
+        for resource_id in candidates:
+            resource = db.query(model).filter(model.id == str(resource_id)).first()
+            if resource is None:
+                raise HTTPException(status_code=404, detail="Care resource not found")
+            owner_id = getattr(resource, "person_id", None)
+            if owner_id in (None, ""):
+                raise HTTPException(status_code=404, detail="Care resource has no person context")
+            resource_owners.append(str(owner_id))
+
+    if resource_owners:
+        if len(set(resource_owners)) != 1:
+            raise HTTPException(status_code=403, detail="Resources belong to different care contexts")
+        person_id = resource_owners[0]
+        if any(value != person_id for value in supplied_contexts):
+            raise HTTPException(status_code=403, detail="Care context does not match resource ownership")
+    else:
+        if not supplied_contexts:
+            raise HTTPException(status_code=400, detail="A care context is required")
+        person_id = supplied_contexts[0]
+        if any(value != person_id for value in supplied_contexts):
+            raise HTTPException(status_code=403, detail="Conflicting care contexts are not allowed")
+
+    require_care_context_access(principal, person_id, action)
+    return person_id
+
+
 def require_team_access(principal: AuthenticatedPrincipal) -> AuthenticatedPrincipal:
     """Raise an exception if the principal is not authenticated or not a team member.
 

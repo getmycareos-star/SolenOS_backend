@@ -1,6 +1,6 @@
 """FastAPI routes for Longitudinal Evidence Analytics API."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import datetime
@@ -8,9 +8,32 @@ from datetime import datetime
 from app.core.database import get_db
 from app.services.longitudinal_evidence_service import LongitudinalEvidenceService
 from app.models.longitudinal_evidence import LongitudinalEvidenceSnapshot, LongitudinalEvidenceTrend, LongitudinalEvidenceEvent
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    authorize_person_context_request,
+)
 
 
-router = APIRouter(prefix="/longitudinal/evidence", tags=["longitudinal-evidence"])
+async def authorize_longitudinal_evidence_context(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    await authorize_person_context_request(
+        request,
+        principal,
+        db,
+        [
+            ("snapshot_id", LongitudinalEvidenceSnapshot),
+            ("trend_id", LongitudinalEvidenceTrend),
+            ("event_id", LongitudinalEvidenceEvent),
+        ],
+        "longitudinal evidence access",
+    )
+
+
+router = APIRouter(prefix="/longitudinal/evidence", tags=["longitudinal-evidence"], dependencies=[Depends(authorize_longitudinal_evidence_context)])
 
 
 def get_longitudinal_service(db: Session = Depends(get_db)) -> LongitudinalEvidenceService:
