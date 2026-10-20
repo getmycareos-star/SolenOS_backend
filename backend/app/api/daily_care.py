@@ -1,4 +1,4 @@
-﻿from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
@@ -6,6 +6,12 @@ from datetime import datetime, time, timezone
 import math
 
 from app.core.database import get_db
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+)
 from app.models.identity import Person as PersonModel
 from app.core.evidence_enums import EvidenceSubjectRole
 from app.core.daily_capture_enums import MedicationStatus, ScaleAxis, VitalType
@@ -18,7 +24,65 @@ from app.services.situation import process_situation_input
 from app.schemas.situation import SituationInput, SituationDocument, SituationProvenance
 
 
-router = APIRouter(prefix="/daily-care", tags=["daily-care"])
+async def authorize_daily_care_context(
+    request: Request,
+    db: Session = Depends(get_db),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> None:
+    """Authenticate daily-care requests and bind writes to an authorized caregiver.
+
+    The client-supplied person and caregiver IDs are identifiers, not proof of
+    authorization. Resolve them against the authenticated principal and the
+    persisted caregiver profile before any daily-care route runs.
+    """
+    require_authenticated(principal)
+
+    person_id = request.path_params.get("person_id") or request.query_params.get("person_id")
+    caregiver_id = request.query_params.get("caregiver_id")
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+        person_id = person_id or payload.get("person_id")
+        caregiver_id = caregiver_id or payload.get("caregiver_id")
+
+    if not person_id:
+        raise HTTPException(status_code=400, detail="Person context is required")
+
+    person = db.query(PersonModel).filter(PersonModel.id == str(person_id)).first()
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    require_care_context_access(principal, str(person_id), "daily-care access")
+
+    # Write routes must attribute observations to the authenticated account's
+    # caregiver profile, not to an arbitrary caregiver ID supplied by a client.
+    if request.method in {"POST", "PUT", "PATCH"}:
+        if not caregiver_id:
+            raise HTTPException(status_code=400, detail="Caregiver context is required")
+        from sqlalchemy import func
+        caregiver = db.query(CaregiverModel).filter(
+            CaregiverModel.id == str(caregiver_id),
+            CaregiverModel.person_id == str(person_id),
+            func.lower(CaregiverModel.email) == str(principal.account.email or "").lower(),
+            CaregiverModel.is_active.is_(True),
+        ).first()
+        if caregiver is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Caregiver profile is not linked to the authenticated account and person",
+            )
+
+
+router = APIRouter(
+    prefix="/daily-care",
+    tags=["daily-care"],
+    dependencies=[Depends(authorize_daily_care_context)],
+)
 
 
 class MedicationEntry(BaseModel):
