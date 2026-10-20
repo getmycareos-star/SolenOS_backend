@@ -15,9 +15,15 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
+# Explicit origins; production origin can be overridden with CORS_ORIGINS.
+allowed_origins = [
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,7 +48,8 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
     return result
 
 
-app.include_router(situation_router, prefix="/api")
+# Keep the situation route under the same versioned prefix as the rest of the API.
+app.include_router(situation_router, prefix="/api/v1")
 
 
 @app.get("/health")
