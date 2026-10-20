@@ -1,4 +1,5 @@
 """Integration tests for authenticated daily capture and uploaded image evidence."""
+import base64
 import hashlib
 
 import pytest
@@ -239,3 +240,57 @@ def test_image_upload_rejects_mismatched_file_signature(capture_client):
         files={"file": ("not-really.png", b"not a png", "image/png")},
     )
     assert response.status_code == 415, response.text
+
+
+def test_image_upload_rejects_unlinked_caregiver_identity(capture_client):
+    client, context, session_factory = capture_client
+    db = session_factory()
+    try:
+        unlinked = CaregiverModel(
+            name="Unlinked caregiver",
+            email="unlinked-caregiver@example.test",
+            relationship="family",
+            person_id=context["person_id"],
+            timezone="UTC",
+        )
+        db.add(unlinked)
+        db.commit()
+        unlinked_id = unlinked.id
+    finally:
+        db.close()
+
+    png_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC")
+    response = client.post(
+        "/api/v1/upload",
+        headers={"Authorization": f"Bearer {context['token']}"},
+        data={"person_id": context["person_id"], "caregiver_id": unlinked_id},
+        files={"file": ("care-photo.png", png_bytes, "image/png")},
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_uploaded_image_download_denies_account_without_care_access(capture_client):
+    client, context, session_factory = capture_client
+    png_bytes = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgYGAAAAAEAAH2FzhVAAAAAElFTkSuQmCC")
+    uploaded = client.post(
+        "/api/v1/upload",
+        headers={"Authorization": f"Bearer {context['token']}"},
+        data={"person_id": context["person_id"], "caregiver_id": context["caregiver_id"]},
+        files={"file": ("care-photo.png", png_bytes, "image/png")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    db = session_factory()
+    try:
+        unrelated = AuthAccount(email="unrelated-account@example.test", password_hash="test-only-hash")
+        db.add(unrelated)
+        db.commit()
+        unrelated_token, _session = create_session(db, unrelated)
+    finally:
+        db.close()
+
+    download = client.get(
+        f"/api/v1/upload/{uploaded.json()['evidence_id']}",
+        headers={"Authorization": f"Bearer {unrelated_token}"},
+    )
+    assert download.status_code == 403, download.text
