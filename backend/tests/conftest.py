@@ -34,10 +34,18 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
-    # The post-collection hook normally fills this snapshot. Keep a lazy fallback
-    # because some pytest/plugin invocation modes may not run that hook before
-    # the first fixture setup.
-    if not APP_ROUTES_BASELINE:
+    # The post-collection hook normally fills this snapshot. Some import orders
+    # can still leave it with only the early routes; detect that explicitly
+    # rather than treating any non-empty list as a complete snapshot.
+    critical_paths = {
+        "/api/v1/graph/{person_id}/snapshot",
+        "/api/v1/causal/hypotheses",
+        "/api/v1/daily-care/entries",
+    }
+    baseline_paths = {
+        getattr(route, "path", None) for route in APP_ROUTES_BASELINE
+    }
+    if not critical_paths.issubset(baseline_paths):
         APP_ROUTES_BASELINE[:] = list(app.router.routes)
 
     # Dependency overrides, route registration and rate counters are
