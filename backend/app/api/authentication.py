@@ -430,3 +430,35 @@ def accept_caregiver_profile_invitation(
         account_id=account.id,
         permissions=grant.permissions or [],
     )
+
+
+@router.get("/my-caregiver-links", response_model=list[CaregiverLinkOutput])
+def list_my_caregiver_links(
+    person_id: Optional[str] = None,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    """List only caregiver identities explicitly linked to the authenticated account."""
+    query = db.query(CaregiverAccountLink).filter(
+        CaregiverAccountLink.account_id == account.id,
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
+    )
+    if person_id:
+        query = query.filter(CaregiverAccountLink.person_id == person_id)
+    links = query.order_by(CaregiverAccountLink.created_at.asc()).all()
+    output = []
+    for link in links:
+        grant = db.query(AccountPersonAccess).filter(
+            AccountPersonAccess.account_id == account.id,
+            AccountPersonAccess.person_id == link.person_id,
+            AccountPersonAccess.is_active.is_(True),
+            AccountPersonAccess.revoked_at.is_(None),
+        ).first()
+        output.append(CaregiverLinkOutput(
+            person_id=link.person_id,
+            caregiver_id=link.caregiver_id,
+            account_id=link.account_id,
+            permissions=grant.permissions or [] if grant else [],
+        ))
+    return output
