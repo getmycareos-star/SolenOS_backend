@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.database import get_db
+from app.api.authentication import current_account
+from app.core.authz import assert_person_access, require_person_access, require_staff
+from app.models.auth_identity import AuthAccount
 from app.schemas.safety import (
     SafetyContractInput,
     SafetyContractOutput,
@@ -41,13 +44,15 @@ from app.services.risk_escalation import EscalationEngine
 from app.services.safety_evaluation import SafetyEvaluationSuite
 import uuid
 
-router = APIRouter()
+router = APIRouter(prefix="/safety", dependencies=[Depends(current_account)])
 
 
 @router.post("/evaluate", response_model=SafetyContractOutput)
-def evaluate_safety(input_data: SafetyContractInput, db: Session = Depends(get_db)):
+def evaluate_safety(input_data: SafetyContractInput, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, input_data.person_id, "read")
+    trusted_input = input_data.model_copy(update={"user_role": "caregiver"})
     engine = SafetyEngine()
-    output = engine.evaluate(input_data)
+    output = engine.evaluate(trusted_input)
     return output
 
 
@@ -65,9 +70,11 @@ def validate_response(
 
 
 @router.post("/audit", response_model=SafetyAuditRecord)
-def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, final_output: Optional[str] = None, db: Session = Depends(get_db)):
+def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, final_output: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, input_data.person_id, "write")
+    trusted_input = input_data.model_copy(update={"user_role": "caregiver"})
     engine = SafetyEngine()
-    audit_data = engine.create_safety_audit(input_data, output, final_output)
+    audit_data = engine.create_safety_audit(trusted_input, output, final_output)
     db_audit = SafetyAuditRecordModel(**audit_data)
     db.add(db_audit)
     db.commit()
@@ -75,7 +82,7 @@ def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractO
     return db_audit
 
 
-@router.get("/audit/{person_id}", response_model=List[SafetyAuditRecord])
+@router.get("/audit/{person_id}", response_model=List[SafetyAuditRecord], dependencies=[Depends(require_person_access("read"))])
 def list_safety_audits(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
     return (
         db.query(SafetyAuditRecordModel)
@@ -102,6 +109,8 @@ def create_escalation(
     escalation_engine = EscalationEngine()
     escalation_data = escalation_engine.determine_escalation(risk_category, trigger, person_id)
 
+    assert_person_access(db, account.id, person_id, "write")
+    assert_person_access(db, account.id, affected_person_id, "write")
     db_escalation = EscalationModel(
         id=str(uuid.uuid4()),
         person_id=person_id,
@@ -122,7 +131,7 @@ def create_escalation(
     return db_escalation
 
 
-@router.get("/escalations/{person_id}", response_model=List[EscalationObject])
+@router.get("/escalations/{person_id}", response_model=List[EscalationObject], dependencies=[Depends(require_person_access("read"))])
 def list_escalations(person_id: str, status: Optional[EscalationStatus] = None, db: Session = Depends(get_db)):
     query = db.query(EscalationModel).filter(EscalationModel.person_id == person_id)
     if status:
@@ -142,6 +151,7 @@ def update_escalation(
     db_escalation = db.query(EscalationModel).filter(EscalationModel.id == escalation_id).first()
     if not db_escalation:
         raise HTTPException(status_code=404, detail="Escalation not found")
+    assert_person_access(db, account.id, db_escalation.person_id, "write")
 
     db_escalation.status = status
     if decision:
@@ -191,10 +201,10 @@ def create_safety_event(
         input_claims=input_claims or [],
         evidence_ids=evidence_ids or [],
         final_output=final_output,
-        reviewer_id=reviewer_id,
+        reviewer_id=account.id,
         override_reason=override_reason,
         timestamp=datetime.now(timezone.utc),
-        created_by_caregiver_id=created_by_caregiver_id,
+        created_by_caregiver_id=None,
     )
     db.add(db_event)
     db.commit()
@@ -202,7 +212,7 @@ def create_safety_event(
     return db_event
 
 
-@router.get("/events/{person_id}", response_model=List[SafetyEvent])
+@router.get("/events/{person_id}", response_model=List[SafetyEvent], dependencies=[Depends(require_person_access("read"))])
 def list_safety_events(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
     return (
         db.query(SafetyEventModel)
@@ -213,7 +223,7 @@ def list_safety_events(person_id: str, limit: int = 50, db: Session = Depends(ge
     )
 
 
-@router.post("/policy-rules", response_model=SafetyPolicyRule)
+@router.post("/policy-rules", response_model=SafetyPolicyRule, dependencies=[Depends(require_staff)])
 def create_policy_rule(
     rule_id: str,
     rule_name: str,
@@ -249,12 +259,12 @@ def create_policy_rule(
     return db_rule
 
 
-@router.get("/policy-rules", response_model=List[SafetyPolicyRule])
+@router.get("/policy-rules", response_model=List[SafetyPolicyRule], dependencies=[Depends(require_staff)])
 def list_policy_rules(is_active: bool = True, db: Session = Depends(get_db)):
     return db.query(SafetyPolicyRuleModel).filter(SafetyPolicyRuleModel.is_active == is_active).all()
 
 
-@router.post("/benchmark-cases", response_model=SafetyBenchmarkCase)
+@router.post("/benchmark-cases", response_model=SafetyBenchmarkCase, dependencies=[Depends(require_staff)])
 def create_benchmark_case(
     benchmark_category: str,
     name: str,
@@ -288,7 +298,7 @@ def create_benchmark_case(
     return db_case
 
 
-@router.get("/benchmark-cases", response_model=List[SafetyBenchmarkCase])
+@router.get("/benchmark-cases", response_model=List[SafetyBenchmarkCase], dependencies=[Depends(require_staff)])
 def list_benchmark_cases(benchmark_category: Optional[str] = None, is_adversarial: Optional[bool] = None, db: Session = Depends(get_db)):
     query = db.query(SafetyBenchmarkCaseModel)
     if benchmark_category:
@@ -298,7 +308,7 @@ def list_benchmark_cases(benchmark_category: Optional[str] = None, is_adversaria
     return query.order_by(SafetyBenchmarkCaseModel.created_at.desc()).all()
 
 
-@router.post("/evaluate-benchmark", response_model=SafetyEvaluationResult)
+@router.post("/evaluate-benchmark", response_model=SafetyEvaluationResult, dependencies=[Depends(require_staff)])
 def evaluate_benchmark(benchmark_category: Optional[str] = None, db: Session = Depends(get_db)):
     suite = SafetyEvaluationSuite()
     query = db.query(SafetyBenchmarkCaseModel)
@@ -326,13 +336,13 @@ def evaluate_benchmark(benchmark_category: Optional[str] = None, db: Session = D
     return result
 
 
-@router.post("/adversarial-tests")
+@router.post("/adversarial-tests", dependencies=[Depends(require_staff)])
 def run_adversarial_tests(db: Session = Depends(get_db)):
     suite = SafetyEvaluationSuite()
     return suite.run_adversarial_tests()
 
 
-@router.get("/blind-spots", response_model=List[SafetyBlindSpot])
+@router.get("/blind-spots", response_model=List[SafetyBlindSpot], dependencies=[Depends(require_staff)])
 def list_blind_spots(is_mitigated: Optional[bool] = None, db: Session = Depends(get_db)):
     query = db.query(SafetyBlindSpotModel)
     if is_mitigated is not None:
@@ -353,13 +363,17 @@ def create_safety_feedback(
     lesson_learned: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    assert_person_access(db, account.id, person_id, "write")
+    event = db.query(SafetyEventModel).filter(SafetyEventModel.id == safety_event_id, SafetyEventModel.person_id == person_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Safety event not found for this care record")
     db_feedback = SafetyFeedbackModel(
         id=str(uuid.uuid4()),
         person_id=person_id,
         safety_event_id=safety_event_id,
         feedback_type=feedback_type,
         feedback_text=feedback_text,
-        reviewer_id=reviewer_id,
+        reviewer_id=account.id,
         original_decision=original_decision,
         override_decision=override_decision,
         is_correct=is_correct,
@@ -372,7 +386,7 @@ def create_safety_feedback(
     return db_feedback
 
 
-@router.get("/feedback/{person_id}", response_model=List[SafetyFeedback])
+@router.get("/feedback/{person_id}", response_model=List[SafetyFeedback], dependencies=[Depends(require_person_access("read"))])
 def list_safety_feedback(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
     return (
         db.query(SafetyFeedbackModel)
@@ -383,13 +397,13 @@ def list_safety_feedback(person_id: str, limit: int = 50, db: Session = Depends(
     )
 
 
-@router.post("/regression-check", response_model=List[SafetyRegressionCheck])
+@router.post("/regression-check", response_model=List[SafetyRegressionCheck], dependencies=[Depends(require_staff)])
 def run_regression_check(previous_results: List[Dict[str, Any]], current_results: List[Dict[str, Any]], threshold: float = 0.95):
     suite = SafetyEvaluationSuite()
     return suite.run_regression_check(current_results, previous_results, threshold)
 
 
-@router.get("/metrics/{person_id}")
+@router.get("/metrics/{person_id}", dependencies=[Depends(require_person_access("read"))])
 def get_safety_metrics(person_id: str, db: Session = Depends(get_db)):
     events = db.query(SafetyEventModel).filter(SafetyEventModel.person_id == person_id).all()
     total = len(events)
