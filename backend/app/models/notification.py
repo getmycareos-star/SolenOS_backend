@@ -106,6 +106,16 @@ class Notification(Base):
     feedback_rating = Column(Integer, nullable=True)  # 1-5 rating if feedback requested
     feedback_comment = Column(Text, nullable=True)
     
+    @property
+    def type(self):
+        """Compatibility property matching the API schema's `type` field."""
+        metadata = self.notification_metadata or {}
+        return metadata.get("original_type") or (
+            self.notification_type.value
+            if hasattr(self.notification_type, "value")
+            else self.notification_type
+        )
+
     # Relationships
     recipient = relationship("Person", foreign_keys=[recipient_person_id])
     action_taker = relationship("Person", foreign_keys=[action_taken_by])
