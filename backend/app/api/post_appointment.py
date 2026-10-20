@@ -7,7 +7,7 @@ from uuid import UUID
 from app.core.database import get_db
 from app.services.post_appointment_workflow import PostAppointmentWorkflowService
 from app.schemas.post_appointment.workflow import (
-    PostAppointmentWorkflowStart,
+    PostAppointmentWorkflowRequest,
     PostAppointmentWorkflowResponse,
     PostAppointmentCaptureData,
     PostAppointmentReconciliationResult,
@@ -30,7 +30,7 @@ def get_post_appointment_workflow_service(
 
 @router.post("/workflow/start", response_model=PostAppointmentWorkflowResponse)
 def start_post_appointment_workflow(
-    workflow_request: PostAppointmentWorkflowStart,
+    workflow_request: PostAppointmentWorkflowRequest,
     service: PostAppointmentWorkflowService = Depends(get_post_appointment_workflow_service),
     current_user: AuthenticatedPrincipal = Depends(get_current_active_user)
 ):
@@ -450,7 +450,7 @@ def process_completed_appointment(
         )
     
     # Start the workflow
-    workflow_request = PostAppointmentWorkflowStart(
+    workflow_request = PostAppointmentWorkflowRequest(
         appointment_id=appointment_id,
         caregiver_id=caregiver_id,
         workflow_notes=caregiver_notes,
