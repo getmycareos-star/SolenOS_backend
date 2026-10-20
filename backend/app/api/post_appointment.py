@@ -58,7 +58,7 @@ def start_post_appointment_workflow(
 
     caregiver_id = _get_caregiver_id_for_person(
         db=service.db,
-        account_id=current_user.account_id,
+        account_id=current_user.account.id,
         person_id=person_id,
     )
     if not caregiver_id:
@@ -102,13 +102,13 @@ def capture_appointment_data(
     
     # Derive caregiver ID from the caregiver-person relationship
     caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
+                                              account_id=current_user.account.id,
                                               person_id=person_id)
     
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+            detail=f"No caregiver relationship found for user {current_user.account.id} and person {person_id}"
         )
     
     # Override the captured_by_caregiver_id with the actual caregiver ID for this person
@@ -180,13 +180,13 @@ def update_open_loops(
     
     # Derive caregiver ID from the caregiver-person relationship
     caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
+                                              account_id=current_user.account.id,
                                               person_id=person_id)
     
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+            detail=f"No caregiver relationship found for user {current_user.account.id} and person {person_id}"
         )
     
     # Override the captured_by_caregiver_id in capture_data with the actual caregiver ID for this person
@@ -220,13 +220,13 @@ def update_responsibilities(
     
     # Derive caregiver ID from the caregiver-person relationship
     caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
+                                              account_id=current_user.account.id,
                                               person_id=person_id)
     
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+            detail=f"No caregiver relationship found for user {current_user.account.id} and person {person_id}"
         )
     
     # Override the captured_by_caregiver_id in capture_data with the actual caregiver ID for this person
@@ -259,13 +259,13 @@ def update_upcoming_events(
     
     # Derive caregiver ID from the caregiver-person relationship
     caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
+                                              account_id=current_user.account.id,
                                               person_id=person_id)
     
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+            detail=f"No caregiver relationship found for user {current_user.account.id} and person {person_id}"
         )
     
     # Override the captured_by_caregiver_id in capture_data with the actual caregiver ID for this person
@@ -317,13 +317,13 @@ def generate_family_summary(
     # Otherwise, verify the viewer_caregiver_id corresponds to a valid caregiver for this person
     if viewer_caregiver_id is None:
         viewer_caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                                          account_id=current_user.account_id,
+                                                          account_id=current_user.account.id,
                                                           person_id=person_id)
         
         if not viewer_caregiver_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"No caregiver relationship found for user {current_user.account_id} and person {person_id}"
+                detail=f"No caregiver relationship found for user {current_user.account.id} and person {person_id}"
             )
     else:
         # Verify that the specified viewer_caregiver_id is valid for this person
@@ -446,13 +446,13 @@ def process_completed_appointment(
     
     # Determine caregiver ID - this should come from the caregiver relationship between the user and the person
     caregiver_id = _get_caregiver_id_for_person(db=service.db, 
-                                              account_id=current_user.account_id,
+                                              account_id=current_user.account.id,
                                               person_id=appointment.person_id)
     
     if not caregiver_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"No caregiver relationship found for user {current_user.account_id} and person {appointment.person_id}"
+            detail=f"No caregiver relationship found for user {current_user.account.id} and person {appointment.person_id}"
         )
     
     # Start the workflow
