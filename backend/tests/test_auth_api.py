@@ -70,6 +70,8 @@ def test_signup_login_current_account_and_logout():
             assert unauthenticated_change_read.status_code == 401
             unauthenticated_causal_read = client.get("/api/v1/causal/hypotheses/not-authorized")
             assert unauthenticated_causal_read.status_code == 401
+            unauthenticated_legacy_read = client.get("/api/v1/persons/not-authorized")
+            assert unauthenticated_legacy_read.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -89,6 +91,8 @@ def test_signup_login_current_account_and_logout():
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
             assert [item["person_id"] for item in listed.json()] == [context["person_id"]]
+            own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
+            assert own_legacy_person.status_code == 200, own_legacy_person.text
             own_gaps = client.get("/api/v1/uncertainty/gaps/" + context["person_id"], headers=headers)
             assert own_gaps.status_code == 200, own_gaps.text
             assert own_gaps.json() == []
@@ -113,6 +117,8 @@ def test_signup_login_current_account_and_logout():
                     assert False, "Cross-person access should be denied"
                 except HTTPException as exc:
                     assert exc.status_code == 403
+            unrelated_legacy_person = client.get("/api/v1/persons/" + unrelated.id, headers=headers)
+            assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
             unrelated_read = client.get("/api/v1/uncertainty/gaps/" + unrelated.id, headers=headers)
             assert unrelated_read.status_code == 403, unrelated_read.text
             unrelated_baselines = client.get("/api/v1/change/baselines/" + unrelated.id, headers=headers)
