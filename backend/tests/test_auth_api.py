@@ -17,6 +17,14 @@ from app.models.action import Action as ActionModel
 from app.models.uncertainty import InformationGap
 
 
+
+
+
+def test_cors_allows_deployed_netlify_frontend():
+    cors = next(middleware for middleware in app.user_middleware if middleware.cls.__name__ == "CORSMiddleware")
+    assert "https://solenosai.netlify.app" in cors.options["allow_origins"]
+
+
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, ActionModel.__table__, InsightModel.__table__])
