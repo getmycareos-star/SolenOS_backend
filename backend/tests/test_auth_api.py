@@ -1,16 +1,19 @@
 from fastapi.testclient import TestClient
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.auth_identity import AuthAccount, AuthSession
+from app.core.authz import require_person_access
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
+from app.models.care import Person
 
 
 def test_signup_login_current_account_and_logout():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[AuthAccount.__table__, AuthSession.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -64,11 +67,40 @@ def test_signup_login_current_account_and_logout():
             assert current.status_code == 200, current.text
             assert current.json()["email"] == "caregiver@example.com"
 
+            created_context = client.post(
+                "/api/v1/auth/care-contexts",
+                headers=headers,
+                json={"name": "Care Recipient"},
+            )
+            assert created_context.status_code == 201, created_context.text
+            context = created_context.json()
+            assert context["name"] == "Care Recipient"
+            assert context["role"] == "owner"
+            assert set(context["permissions"]) == {"read", "write", "admin"}
+            listed = client.get("/api/v1/auth/care-contexts", headers=headers)
+            assert listed.status_code == 200
+            assert [item["person_id"] for item in listed.json()] == [context["person_id"]]
+
+            guard = require_person_access("read")
+            with TestingSession() as db:
+                account = db.query(AuthAccount).filter_by(email="caregiver@example.com").one()
+                allowed = guard(person_id=context["person_id"], account=account, db=db)
+                assert allowed.id == account.id
+                unrelated = Person(name="Unrelated Person")
+                db.add(unrelated)
+                db.commit()
+                db.refresh(unrelated)
+                try:
+                    guard(person_id=unrelated.id, account=account, db=db)
+                    assert False, "Cross-person access should be denied"
+                except HTTPException as exc:
+                    assert exc.status_code == 403
+
             logout = client.post("/api/v1/auth/logout", headers=headers)
             assert logout.status_code == 204
             after_logout = client.get("/api/v1/auth/me", headers=headers)
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[AuthSession.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
