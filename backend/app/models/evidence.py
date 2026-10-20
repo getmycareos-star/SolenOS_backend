@@ -209,3 +209,108 @@ class Evidence(Base):
     subject_person = relationship("Person", foreign_keys=[subject_id])
     # Last processed by relationship
     last_processed_by_rel = relationship("Account", foreign_keys=[last_processed_by])
+
+
+class EvidenceRelationship(Base):
+    """Typed, reversible relationship between two evidence records."""
+
+    __tablename__ = "evidence_relationships"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_evidence_id",
+            "target_evidence_id",
+            "relationship_type",
+            name="uq_evidence_relationship_pair_type",
+        ),
+        Index("ix_evidence_relationship_source", "source_evidence_id", "is_active"),
+        Index("ix_evidence_relationship_target", "target_evidence_id", "is_active"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    target_evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_type = Column(String, nullable=False)
+    temporal_relationship = Column(String, nullable=True)
+    detection_method = Column(String, nullable=True)
+    detection_confidence = Column(Float, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_by = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    created_by_system = Column(Boolean, nullable=False, default=False)
+
+    source_evidence = relationship("Evidence", foreign_keys=[source_evidence_id])
+    target_evidence = relationship("Evidence", foreign_keys=[target_evidence_id])
+
+
+class EvidenceVersion(Base):
+    """Immutable snapshot of evidence fields before/after a correction."""
+
+    __tablename__ = "evidence_versions"
+    __table_args__ = (
+        UniqueConstraint("evidence_id", "version", name="uq_evidence_version_number"),
+        Index("ix_evidence_versions_evidence", "evidence_id", "version"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    evidence_id = Column(
+        String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False
+    )
+    version = Column(Integer, nullable=False)
+
+    # Evidence content and provenance snapshot.
+    subject_role = Column(String, nullable=False)
+    subject_id = Column(String, nullable=True)
+    observer_role = Column(String, nullable=True)
+    observer_id = Column(String, nullable=True)
+    author_role = Column(String, nullable=True)
+    author_id = Column(String, nullable=True)
+    type = Column(String, nullable=False)
+    subtype = Column(String, nullable=True)
+    source_text = Column(Text, nullable=False)
+    normalized_text = Column(Text, nullable=True)
+    normalization_type = Column(String, nullable=True)
+    normalization_details = Column(Text, nullable=True)
+    negation_status = Column(String, nullable=False)
+    uncertainty_level = Column(String, nullable=False)
+    hedge_type = Column(String, nullable=True)
+    hedge_text = Column(String, nullable=True)
+
+    # Temporal and source lineage snapshot.
+    event_time = Column(DateTime(timezone=True), nullable=True)
+    event_time_granularity = Column(String, nullable=True)
+    event_time_text = Column(String, nullable=True)
+    event_time_anchor = Column(String, nullable=True)
+    observation_time = Column(DateTime(timezone=True), nullable=True)
+    document_time = Column(DateTime(timezone=True), nullable=True)
+    source_id = Column(String, nullable=True)
+    source_version = Column(Integer, nullable=True)
+    source_type = Column(String, nullable=True)
+    source_location_page = Column(Integer, nullable=True)
+    source_location_paragraph = Column(Integer, nullable=True)
+    source_location_text_span_start = Column(Integer, nullable=True)
+    source_location_text_span_end = Column(Integer, nullable=True)
+
+    # Extraction confidence and validity snapshot.
+    extraction_method = Column(String, nullable=True)
+    extraction_version = Column(String, nullable=True)
+    extraction_model = Column(String, nullable=True)
+    confidence_extraction = Column(Float, nullable=True)
+    confidence_entity_resolution = Column(Float, nullable=True)
+    confidence_temporal = Column(Float, nullable=True)
+    confidence_source_support = Column(Float, nullable=True)
+    confidence_interpretation = Column(Float, nullable=True)
+    status = Column(String, nullable=False)
+    status_reason = Column(Text, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+
+    # Audit metadata. Snapshots are append-only in the service layer.
+    change_type = Column(String, nullable=False)
+    change_reason = Column(Text, nullable=True)
+    changed_by = Column(String, nullable=True)
+    changed_by_system = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
