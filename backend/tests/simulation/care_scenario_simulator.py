@@ -30,8 +30,9 @@ class CareSimulationEnvironment:
         Args:
             seed: Optional seed for reproducible simulations
         """
-        if seed is not None:
-            random.seed(seed)
+        # Each environment owns its RNG; one simulation must not mutate global
+        # random state or affect another seeded simulation.
+        self.rng = random.Random(seed)
         
         # Sample data for generating realistic scenarios
         self.person_names = [
@@ -67,13 +68,13 @@ class CareSimulationEnvironment:
     def generate_person(self, person_id: Optional[str] = None) -> Dict[str, Any]:
         """Generate a realistic person record."""
         if person_id is None:
-            person_id = f"p{random.randint(1000, 9999)}"
+            person_id = f"p{self.rng.randint(1000, 9999)}"
         
         return {
             "id": person_id,
-            "name": random.choice(self.person_names),
-            "date_of_birth": f"{random.randint(1930, 1950)}-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-            "gender": random.choice(["Male", "Female"]),
+            "name": self.rng.choice(self.person_names),
+            "date_of_birth": f"{self.rng.randint(1930, 1950)}-{self.rng.randint(1,12):02d}-{self.rng.randint(1,28):02d}",
+            "gender": self.rng.choice(["Male", "Female"]),
             "created_at": self._random_timestamp(past_days=365).isoformat(),
             "updated_at": self._random_timestamp(past_days=30).isoformat()
         }
@@ -81,14 +82,14 @@ class CareSimulationEnvironment:
     def generate_caregiver(self, person_id: str, caregiver_id: Optional[str] = None) -> Dict[str, Any]:
         """Generate a realistic caregiver record."""
         if caregiver_id is None:
-            caregiver_id = f"cg{random.randint(1000, 9999)}"
+            caregiver_id = f"cg{self.rng.randint(1000, 9999)}"
         
         return {
             "id": caregiver_id,
-            "name": random.choice(self.caregiver_names),
-            "relationship": random.choice(["daughter", "son", "spouse", "friend", "neighbor"]),
+            "name": self.rng.choice(self.caregiver_names),
+            "relationship": self.rng.choice(["daughter", "son", "spouse", "friend", "neighbor"]),
             "email": f"{self.caregiver_names[0].lower().replace(' ', '.')}@example.com",
-            "phone": f"+1-{random.randint(200,999)}-{random.randint(200,999)}-{random.randint(1000,9999)}",
+            "phone": f"+1-{self.rng.randint(200,999)}-{self.rng.randint(200,999)}-{self.rng.randint(1000,9999)}",
             "person_id": person_id,
             "created_at": self._random_timestamp(past_days=365).isoformat(),
             "updated_at": self._random_timestamp(past_days=30).isoformat()
@@ -100,25 +101,25 @@ class CareSimulationEnvironment:
                          scenario_type: CareScenarioType = CareScenarioType.DAILY_ROUTINE) -> Dict[str, Any]:
         """Generate realistic evidence based on scenario type."""
         if evidence_id is None:
-            evidence_id = f"e{random.randint(1000, 9999)}"
+            evidence_id = f"e{self.rng.randint(1000, 9999)}"
         
         # Generate content based on scenario type
         if scenario_type == CareScenarioType.MEDICATION_CHANGE:
-            source_text = f"Administered {random.choice(self.medications)} as prescribed"
+            source_text = f"Administered {self.rng.choice(self.medications)} as prescribed"
             evidence_type = "MEDICATION"
         elif scenario_type == CareScenarioType.HEALTH_DECLINE:
-            symptom = random.choice(self.symptoms)
+            symptom = self.rng.choice(self.symptoms)
             source_text = f"Observed {symptom} during afternoon check"
             evidence_type = "SYMPTOM"
         elif scenario_type == CareScenarioType.BEHAVIORAL_CHANGE:
-            source_text = f"Noted unusual behavior: {random.choice(['increased agitation', 'withdrawal', 'repetitive questioning'])}"
+            source_text = f"Noted unusual behavior: {self.rng.choice(['increased agitation', 'withdrawal', 'repetitive questioning'])}"
             evidence_type = "BEHAVIOR"
         elif scenario_type == CareScenarioType.APPOINTMENT_SCHEDULE:
-            appt_type = random.choice(self.appointment_types)
+            appt_type = self.rng.choice(self.appointment_types)
             source_text = f"Attended {appt_type} appointment at 2:00 PM"
             evidence_type = "ACTIVITY"
         else:  # DAILY_ROUTINE or others
-            activity = random.choice(self.activities)
+            activity = self.rng.choice(self.activities)
             source_text = f"{activity.capitalize()} in the morning"
             evidence_type = "OBSERVATION"
         
@@ -127,11 +128,11 @@ class CareSimulationEnvironment:
             "subject_id": person_id,
             "type": evidence_type,
             "source_text": source_text,
-            "uploaded_by_caregiver_id": f"cg{random.randint(1000, 9999)}",
-            "source_type": random.choice(["MANUAL_CAREGIVER_INPUT", "DEVICE", "NURSE_ENTRY"]),
-            "status": random.choice(["RECORDED", "PROCESSED", "VALIDATED"]),
+            "uploaded_by_caregiver_id": f"cg{self.rng.randint(1000, 9999)}",
+            "source_type": self.rng.choice(["MANUAL_CAREGIVER_INPUT", "DEVICE", "NURSE_ENTRY"]),
+            "status": self.rng.choice(["RECORDED", "PROCESSED", "VALIDATED"]),
             "created_at": self._random_timestamp(past_days=7).isoformat(),
-            "confidence_overall": round(random.uniform(0.7, 0.95), 2)
+            "confidence_overall": round(self.rng.uniform(0.7, 0.95), 2)
         }
     
     def generate_care_event(self,
@@ -140,13 +141,13 @@ class CareSimulationEnvironment:
                            scenario_type: CareScenarioType = CareScenarioType.DAILY_ROUTINE) -> Dict[str, Any]:
         """Generate realistic care events based on scenario type."""
         if event_id is None:
-            event_id = f"ev{random.randint(1000, 9999)}"
+            event_id = f"ev{self.rng.randint(1000, 9999)}"
         
         # Map scenario types to care event types
         scenario_mapping = {
             CareScenarioType.DAILY_ROUTINE: ("OBSERVATION_COMPLETED", "LOW"),
             CareScenarioType.MEDICATION_CHANGE: ("MEDICATION_ADMINISTERED", "MODERATE"),
-            CareScenarioType.HEALTH_DECLINE: ("SYMPTOM_OBSERVED", random.choice(["MODERATE", "HIGH"])),
+            CareScenarioType.HEALTH_DECLINE: ("SYMPTOM_OBSERVED", self.rng.choice(["MODERATE", "HIGH"])),
             CareScenarioType.EMERGENCY_EVENT: ("EMERGENCY_RESPONSE", "CRITICAL"),
             CareScenarioType.FAMILY_VISIT: ("SOCIAL_INTERACTION", "LOW"),
             CareScenarioType.APPOINTMENT_SCHEDULE: ("APPOINTMENT_COMPLETED", "MODERATE"),
@@ -158,7 +159,7 @@ class CareSimulationEnvironment:
         
         # Generate timestamps
         event_time = self._random_timestamp(past_days=2)
-        created_at = event_time + timedelta(minutes=random.randint(0, 60))
+        created_at = event_time + timedelta(minutes=self.rng.randint(0, 60))
         
         return {
             "id": event_id,
@@ -169,10 +170,10 @@ class CareSimulationEnvironment:
             "original_expression": self._generate_original_expression(scenario_type, person_id),
             "event_time": event_time.isoformat(),
             "created_at": created_at.isoformat(),
-            "status": random.choice(["ACTIVE", "RESOLVED", "VALIDATED"]),
+            "status": self.rng.choice(["ACTIVE", "RESOLVED", "VALIDATED"]),
             "severity": default_severity,
-            "confidence_overall": round(random.uniform(0.6, 0.98), 2),
-            "evidence_ids": [f"e{random.randint(1000, 9999)}" for _ in range(random.randint(1, 3))],
+            "confidence_overall": round(self.rng.uniform(0.6, 0.98), 2),
+            "evidence_ids": [f"e{self.rng.randint(1000, 9999)}" for _ in range(self.rng.randint(1, 3))],
             "subject_id": person_id  # Usually the person for most events
         }
     
@@ -197,8 +198,8 @@ class CareSimulationEnvironment:
             # Generate multiple evidence/events per day
             for _ in range(events_per_day):
                 # Offset within the day
-                offset_hours = random.randint(0, 23)
-                offset_minutes = random.randint(0, 59)
+                offset_hours = self.rng.randint(0, 23)
+                offset_minutes = self.rng.randint(0, 59)
                 event_time = day_start + timedelta(hours=offset_hours, minutes=offset_minutes)
                 
                 # Generate evidence
@@ -235,7 +236,7 @@ class CareSimulationEnvironment:
     def generate_adversarial_scenario(self) -> Dict[str, Any]:
         """Generate adversarial test scenarios designed to stress-test the system."""
         scenario_types = list(CareScenarioType)
-        scenario_type = random.choice(scenario_types)
+        scenario_type = self.rng.choice(scenario_types)
         
         # Generate a base scenario
         base_scenario = self.generate_care_scenario(scenario_type, duration_days=1, events_per_day=5)
@@ -245,7 +246,7 @@ class CareSimulationEnvironment:
         
         # 1. Conflicting timestamps
         if base_scenario["event_list"]:
-            event = random.choice(base_scenario["event_list"])
+            event = self.rng.choice(base_scenario["event_list"])
             # Make event_time before created_at (temporally impossible)
             event_time = datetime.fromisoformat(event["event_time"].replace("Z", "+00:00"))
             created_time = event_time - timedelta(minutes=10)
@@ -254,8 +255,8 @@ class CareSimulationEnvironment:
         
         # 2. Invalid confidence scores
         if base_scenario["evidence_list"]:
-            evidence = random.choice(base_scenario["evidence_list"])
-            evidence["confidence_overall"] = random.choice([-0.1, 1.5, 2.0])  # Outside valid range
+            evidence = self.rng.choice(base_scenario["evidence_list"])
+            evidence["confidence_overall"] = self.rng.choice([-0.1, 1.5, 2.0])  # Outside valid range
             adversarial_elements.append("invalid_confidence")
         
         # 3. Missing required fields
@@ -276,10 +277,10 @@ class CareSimulationEnvironment:
     
     def _random_timestamp(self, past_days: int = 30) -> datetime:
         """Generate a random timestamp within the past N days."""
-        days_ago = random.randint(0, past_days)
-        hours_ago = random.randint(0, 23)
-        minutes_ago = random.randint(0, 59)
-        seconds_ago = random.randint(0, 59)
+        days_ago = self.rng.randint(0, past_days)
+        hours_ago = self.rng.randint(0, 23)
+        minutes_ago = self.rng.randint(0, 59)
+        seconds_ago = self.rng.randint(0, 59)
         
         return datetime.now() - timedelta(
             days=days_ago, 
@@ -299,23 +300,23 @@ class CareSimulationEnvironment:
                 f"{person_name} took a short walk in the garden"
             ],
             CareScenarioType.MEDICATION_CHANGE: [
-                f"Administered {random.choice(self.medications)} to {person_name} as prescribed",
+                f"Administered {self.rng.choice(self.medications)} to {person_name} as prescribed",
                 f"{person_name} took medication with water after breakfast",
                 f"Medication adherence observed for {person_name}"
             ],
             CareScenarioType.HEALTH_DECLINE: [
-                f"Observed {random.choice(self.symptoms)} in {person_name} during evening check",
-                f"{person_name} reported increased {random.choice(self.symptoms)} today",
-                f"Noted worsening of {random.choice(self.symptoms)} symptoms"
+                f"Observed {self.rng.choice(self.symptoms)} in {person_name} during evening check",
+                f"{person_name} reported increased {self.rng.choice(self.symptoms)} today",
+                f"Noted worsening of {self.rng.choice(self.symptoms)} symptoms"
             ],
             CareScenarioType.BEHAVIORAL_CHANGE: [
-                f"Noted {random.choice(['increased agitation', 'withdrawal', 'repetitive questioning'])} in {person_name}",
+                f"Noted {self.rng.choice(['increased agitation', 'withdrawal', 'repetitive questioning'])} in {person_name}",
                 f"{person_name} displayed unusual behavior patterns today",
                 f"Caregiver observed changes in {person_name}'s typical behavior"
             ],
             CareScenarioType.APPOINTMENT_SCHEDULE: [
-                f"{person_name} attended {random.choice(self.appointment_types)} appointment",
-                f"Successfully completed {random.choice(self.appointment_types)} visit",
+                f"{person_name} attended {self.rng.choice(self.appointment_types)} appointment",
+                f"Successfully completed {self.rng.choice(self.appointment_types)} visit",
                 f"{person_name} returned from medical appointment with positive outcomes"
             ]
         }
@@ -326,7 +327,7 @@ class CareSimulationEnvironment:
             f"Standard monitoring activities completed for {person_name}"
         ]
         
-        return random.choice(
+        return self.rng.choice(
             expressions.get(scenario_type, default_expressions)
         )
 
