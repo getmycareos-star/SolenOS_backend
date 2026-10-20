@@ -34,6 +34,7 @@ from app.api.daily_care import router as daily_care_router
 from app.api.activation import router as activation_router
 from app.api.job import router as job_router  # Job management endpoints
 from app.api.reasoning import router as reasoning_router
+from app.api.causal import router as causal_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.knowledge_revision import router as knowledge_revision_router
 from app.api.safety import router as safety_router
@@ -638,6 +639,7 @@ app.include_router(daily_care_router, prefix="/api/v1")
 app.include_router(activation_router, prefix="/api/v1")
 app.include_router(job_router, prefix="/api/v1")  # Job management endpoints
 app.include_router(reasoning_router, prefix="/reasoning")
+app.include_router(causal_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(knowledge_revision_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
