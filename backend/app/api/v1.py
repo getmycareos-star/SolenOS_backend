@@ -952,7 +952,14 @@ def list_temporal_relations(person_id: str, db: Session = Depends(get_db)):
 @router.post("/temporal/reference-frames", response_model=TemporalReferenceFrameSchema)
 def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, frame.person_id, "write")
-
+    if frame.source_event_id:
+        source_event = db.query(CareEventModel).filter(CareEventModel.id == frame.source_event_id, CareEventModel.person_id == frame.person_id).first()
+        if source_event is None:
+            raise HTTPException(status_code=400, detail="source_event_id must belong to this care record")
+    if frame.source_fact_id:
+        source_fact = db.query(TemporalFactModel).filter(TemporalFactModel.id == frame.source_fact_id, TemporalFactModel.person_id == frame.person_id).first()
+        if source_fact is None:
+            raise HTTPException(status_code=400, detail="source_fact_id must belong to this care record")
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
