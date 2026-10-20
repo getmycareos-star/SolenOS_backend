@@ -109,16 +109,20 @@ def list_caregiver_profiles(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/caregiver-profiles/detail/{caregiver_id}", response_model=CaregiverProfile)
-def get_caregiver_profile(caregiver_id: str, db: Session = Depends(get_db)):
-    service = CaregiverIntelligenceService(db)
-    profile = service.get_caregiver_profile(caregiver_id)
+def get_caregiver_profile(caregiver_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    profile = db.query(CaregiverProfileModel).filter(CaregiverProfileModel.id == caregiver_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Caregiver profile not found")
+    assert_person_access(db, account.id, profile.person_id, "read")
     return profile
 
 
 @router.patch("/caregiver-profiles/{caregiver_id}/involvement")
-def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = Depends(get_db)):
+def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    profile_before = db.query(CaregiverProfileModel).filter(CaregiverProfileModel.id == caregiver_id).first()
+    if profile_before is None:
+        raise HTTPException(status_code=404, detail="Caregiver profile not found")
+    assert_person_access(db, account.id, profile_before.person_id, "write")
     service = CaregiverIntelligenceService(db)
     try:
         involvement_status = CaregiverInvolvementStatus(status)
@@ -154,6 +158,8 @@ def list_caregiver_roles(person_id: str, caregiver_id: Optional[str] = None, db:
 @router.post("/caregiver-responsibilities", response_model=CaregiverResponsibility)
 def create_responsibility(responsibility: CaregiverResponsibilityCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, responsibility.person_id, "write")
+    _assert_profile_in_person(db, responsibility.caregiver_id, responsibility.person_id)
+    _assert_profile_in_person(db, responsibility.joint_with_caregiver_id, responsibility.person_id)
     service = CaregiverIntelligenceService(db)
     db_resp = service.assign_responsibility(responsibility)
     _log_and_learn(
@@ -175,7 +181,9 @@ def list_responsibilities(person_id: str, caregiver_id: Optional[str] = None, db
 
 
 @router.get("/caregiver-responsibilities/history/{caregiver_id}", response_model=List[CaregiverResponsibility])
-def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = Depends(get_db)):
+def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, person_id, "read")
+    _assert_profile_in_person(db, caregiver_id, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_responsibility_history(person_id, caregiver_id)
 
@@ -215,7 +223,12 @@ def list_caregiver_observations(person_id: str, caregiver_id: str, db: Session =
 
 
 @router.post("/caregiver-observations/{observation_id}/promote")
-def promote_observation(observation_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def promote_observation(observation_id: str, caregiver_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    observation_record = db.query(CaregiverObservationModel).filter(CaregiverObservationModel.id == observation_id).first()
+    if observation_record is None:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    assert_person_access(db, account.id, observation_record.person_id, "write")
+    _assert_profile_in_person(db, caregiver_id, observation_record.person_id)
     service = CaregiverIntelligenceService(db)
     observation = service.promote_observation_to_shared(observation_id, caregiver_id)
     if not observation:
@@ -248,7 +261,12 @@ def list_perspectives(person_id: str, caregiver_id: Optional[str] = None, db: Se
 
 
 @router.post("/caregiver-perspectives/{perspective_id}/promote")
-def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    perspective_record = db.query(CaregiverPerspectiveModel).filter(CaregiverPerspectiveModel.id == perspective_id).first()
+    if perspective_record is None:
+        raise HTTPException(status_code=404, detail="Perspective not found")
+    assert_person_access(db, account.id, perspective_record.person_id, "write")
+    _assert_profile_in_person(db, caregiver_id, perspective_record.person_id)
     service = CaregiverIntelligenceService(db)
     perspective = service.promote_perspective_to_shared(perspective_id, caregiver_id)
     if not perspective:
@@ -276,7 +294,11 @@ def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db
 
 
 @router.post("/caregiver-handoffs/{handoff_id}/accept")
-def accept_handoff(handoff_id: str, acceptance_evidence: Optional[str] = None, db: Session = Depends(get_db)):
+def accept_handoff(handoff_id: str, acceptance_evidence: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    handoff_record = db.query(CaregiverHandoffModel).filter(CaregiverHandoffModel.id == handoff_id).first()
+    if handoff_record is None:
+        raise HTTPException(status_code=404, detail="Handoff not found")
+    assert_person_access(db, account.id, handoff_record.person_id, "write")
     service = CaregiverIntelligenceService(db)
     handoff = service.accept_handoff(handoff_id, acceptance_evidence)
     if not handoff:
@@ -316,6 +338,10 @@ def list_activities(person_id: str, caregiver_id: Optional[str] = None, limit: i
 @router.post("/caregiver-communications", response_model=CaregiverCommunication)
 def create_communication(communication: CaregiverCommunicationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, communication.person_id, "write")
+    _assert_profile_in_person(db, communication.from_caregiver_id, communication.person_id)
+    _assert_profile_in_person(db, communication.to_caregiver_id, communication.person_id)
+    for recipient_id in communication.recipient_caregiver_ids or []:
+        _assert_profile_in_person(db, recipient_id, communication.person_id)
     service = CaregiverIntelligenceService(db)
     db_comm = service.record_communication(communication)
     _log_and_learn(
@@ -346,6 +372,8 @@ def list_communications(person_id: str, caregiver_id: Optional[str] = None, db: 
 @router.post("/care-network-relationships", response_model=CareNetworkRelationship)
 def create_network_relationship(relationship: CareNetworkRelationshipCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, relationship.person_id, "write")
+    _assert_profile_in_person(db, relationship.from_caregiver_id, relationship.person_id)
+    _assert_profile_in_person(db, relationship.to_caregiver_id, relationship.person_id)
     service = CaregiverIntelligenceService(db)
     db_rel = service.create_care_network_relationship(relationship)
     return db_rel
@@ -406,6 +434,8 @@ def list_perspective_conflicts(person_id: str, db: Session = Depends(get_db)):
 @router.post("/duplicate-actions", response_model=DuplicateAction)
 def create_duplicate_action(duplicate: DuplicateActionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, duplicate.person_id, "write")
+    _assert_profile_in_person(db, duplicate.caregiver_a_id, duplicate.person_id)
+    _assert_profile_in_person(db, duplicate.caregiver_b_id, duplicate.person_id)
     service = CaregiverIntelligenceService(db)
     db_dup = service.detect_duplicate_actions(
         duplicate.person_id,
@@ -426,6 +456,7 @@ def list_duplicate_actions(person_id: str, db: Session = Depends(get_db)):
 
 @router.get("/caregiver-summary/{person_id}/{caregiver_id}", response_model=CaregiverSummary, dependencies=[Depends(require_person_access("read"))])
 def get_caregiver_summary(person_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+    _assert_profile_in_person(db, caregiver_id, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_caregiver_summary(person_id, caregiver_id)
 
@@ -443,7 +474,9 @@ def get_care_network_state(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/unknown-actor-activity")
-def record_unknown_actor_activity(person_id: str, activity_type: str, description: str, occurred_at: str, shared_account_id: Optional[str] = None, db: Session = Depends(get_db)):
+def record_unknown_actor_activity(person_id: str, activity_type: str, description: str, occurred_at: str, shared_account_id: Optional[str] = None, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, person_id, "write")
+    _assert_profile_in_person(db, shared_account_id, person_id)
     service = CaregiverIntelligenceService(db)
     try:
         activity_type_enum = CaregiverActivityType(activity_type)
@@ -455,9 +488,9 @@ def record_unknown_actor_activity(person_id: str, activity_type: str, descriptio
 
 
 @router.get("/caregivers/by-email")
-def get_caregiver_by_email(email: str, db: Session = Depends(get_db)):
-    service = CaregiverIntelligenceService(db)
-    profile = service.get_caregiver_by_email(email)
+def get_caregiver_by_email(email: str, person_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, person_id, "read")
+    profile = db.query(CaregiverProfileModel).filter(CaregiverProfileModel.email == email.strip().lower(), CaregiverProfileModel.person_id == person_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Caregiver not found")
     return {"id": profile.id, "name": profile.name, "person_id": profile.person_id}
