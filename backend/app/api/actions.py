@@ -6,7 +6,8 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_person_access
 from app.models.auth_identity import AuthAccount
-from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel
+from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel, CareEvent as CareEventModel
+from app.models.temporal import TemporalReferenceFrame as TemporalReferenceFrameModel
 from app.models.action import Action as ActionModel, ActionStatus
 from app.schemas.action import (
     ActionCreate,
@@ -27,6 +28,15 @@ extraction_engine = ActionExtractionEngine()
 normalization_service = ActionNormalizationService()
 lifecycle_service = ActionLifecycleService()
 identity_service = ActionIdentityService()
+
+
+def _assert_evidence_ids_for_person(db: Session, evidence_ids: Optional[List[str]], person_id: str) -> None:
+    requested = set(evidence_ids or [])
+    if not requested:
+        return
+    found = {row[0] for row in db.query(EvidenceModel.id).filter(EvidenceModel.id.in_(requested), EvidenceModel.person_id == person_id).all()}
+    if found != requested:
+        raise HTTPException(status_code=400, detail="All evidence IDs must belong to this care record")
 
 
 def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
@@ -122,6 +132,29 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db), account: 
     creator = db.query(CaregiverModel).filter(CaregiverModel.id == action.created_by_caregiver_id, CaregiverModel.person_id == action.person_id).first()
     if creator is None:
         raise HTTPException(status_code=400, detail="Creator must be a caregiver belonging to this care record")
+    _assert_evidence_ids_for_person(db, action.completion_evidence_ids, action.person_id)
+    if action.actor_type == "caregiver" and action.actor_id:
+        actor = db.query(CaregiverModel).filter(CaregiverModel.id == action.actor_id, CaregiverModel.person_id == action.person_id).first()
+        if actor is None:
+            raise HTTPException(status_code=400, detail="Caregiver actor must belong to this care record")
+    if action.actor_type == "patient" and action.actor_id and action.actor_id != action.person_id:
+        raise HTTPException(status_code=400, detail="Patient actor must match this care record")
+    if action.reference_frame_id:
+        frame = db.query(TemporalReferenceFrameModel).filter(TemporalReferenceFrameModel.id == action.reference_frame_id, TemporalReferenceFrameModel.person_id == action.person_id).first()
+        if frame is None:
+            raise HTTPException(status_code=400, detail="Reference frame must belong to this care record")
+    if action.depends_on_event_id:
+        event = db.query(CareEventModel).filter(CareEventModel.id == action.depends_on_event_id, CareEventModel.person_id == action.person_id).first()
+        if event is None:
+            raise HTTPException(status_code=400, detail="Dependency event must belong to this care record")
+    if action.prerequisite_action_ids:
+        prerequisites = db.query(ActionModel.id).filter(ActionModel.id.in_(set(action.prerequisite_action_ids)), ActionModel.person_id == action.person_id).all()
+        if {row[0] for row in prerequisites} != set(action.prerequisite_action_ids):
+            raise HTTPException(status_code=400, detail="Prerequisite actions must belong to this care record")
+    if action.superseded_by_action_id:
+        replacement = db.query(ActionModel).filter(ActionModel.id == action.superseded_by_action_id, ActionModel.person_id == action.person_id).first()
+        if replacement is None:
+            raise HTTPException(status_code=400, detail="Replacement action must belong to this care record")
 
     candidate = ActionCandidate(
         source_evidence_id=action.source_evidence_id,
@@ -221,6 +254,12 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
         raise HTTPException(status_code=403, detail="Action has no care-record scope")
     assert_person_access(db, account.id, db_action.person_id, "write")
     update_data = update.model_dump(exclude_unset=True)
+    if "completion_evidence_ids" in update_data:
+        _assert_evidence_ids_for_person(db, update_data["completion_evidence_ids"], db_action.person_id)
+    if update_data.get("superseded_by_action_id"):
+        replacement = _get_action_or_404(db, update_data["superseded_by_action_id"])
+        if replacement.person_id != db_action.person_id:
+            raise HTTPException(status_code=400, detail="Replacement action must belong to this care record")
 
     for field, value in update_data.items():
         if value is not None:
@@ -238,6 +277,7 @@ def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Sess
     if not db_action.person_id:
         raise HTTPException(status_code=403, detail="Action has no care-record scope")
     assert_person_access(db, account.id, db_action.person_id, "write")
+    _assert_evidence_ids_for_person(db, evidence.evidence_ids, db_action.person_id)
     return lifecycle_service.record_completion(db_action, evidence, db)
 
 
