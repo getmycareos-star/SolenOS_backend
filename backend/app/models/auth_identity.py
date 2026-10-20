@@ -41,3 +41,35 @@ class AccountPersonAccess(Base):
         UniqueConstraint("account_id", "person_id", name="uq_auth_account_person_access"),
         Index("ix_auth_access_active_person", "person_id", "is_active"),
     )
+
+
+class CaregiverAccountLink(Base):
+    """Verified account-to-caregiver identity link created by accepting an owner invitation."""
+    __tablename__ = "auth_caregiver_account_links"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, unique=True, index=True)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    linked_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        UniqueConstraint("account_id", "caregiver_id", name="uq_auth_caregiver_account_link"),
+    )
+
+
+class CaregiverInvitation(Base):
+    """Single-use, expiring invitation proving control of a caregiver invitation token."""
+    __tablename__ = "auth_caregiver_invitations"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    token_digest = Column(String(64), nullable=False, unique=True, index=True)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    invited_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False)
+    accepted_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=True)
+    permissions = Column(JSON, nullable=False, default=lambda: ["read", "write"])
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
