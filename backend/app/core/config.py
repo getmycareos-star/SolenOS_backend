@@ -6,7 +6,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     app_name: str = "SolenOS"
-    debug: bool = True
+    debug: bool = False
     database_url: str = "sqlite:///./solenos.db"
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
