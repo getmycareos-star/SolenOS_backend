@@ -1,12 +1,14 @@
 """Authenticated daily capture and image evidence endpoints."""
 import hashlib
 import re
+from io import BytesIO
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
 
 from app.api.authentication import current_account
@@ -136,6 +138,19 @@ def upload_image_evidence(
         raise HTTPException(status_code=413, detail="Image exceeds the 10 MiB upload limit")
     if not _image_signature_matches(content_type, content):
         raise HTTPException(status_code=415, detail="Image content does not match its declared file type")
+    expected_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[content_type]
+    try:
+        with Image.open(BytesIO(content)) as image:
+            if image.format != expected_format:
+                raise HTTPException(status_code=415, detail="Image content does not match its declared file type")
+            width, height = image.size
+            if width < 1 or height < 1 or width * height > 40_000_000:
+                raise HTTPException(status_code=413, detail="Image dimensions exceed the allowed limit")
+            image.verify()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError):
+        raise HTTPException(status_code=415, detail="Uploaded file is not a valid supported image")
 
     raw_filename = (file.filename or "care-image").replace("\\", "/").split("/")[-1]
     safe_filename = re.sub(r"[^A-Za-z0-9._ -]", "_", raw_filename).strip(" .")[:255] or "care-image"
