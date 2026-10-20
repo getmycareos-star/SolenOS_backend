@@ -4,7 +4,7 @@ Implements the API for generating two-week care reviews to help caregivers
 understand care trajectory over time.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Optional
@@ -39,6 +39,12 @@ def get_two_week_review(
     The review integrates with the canonical Care Graph, Open Loop system,
     decision/outcome tracking, and caregiver workload analysis.
     """
+    if not current_user.has_access_to_person(person_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Not authorized to access person {person_id}",
+        )
+
     try:
         # Verify the person exists and user has access (basic check)
         # In a full implementation, you would add more sophisticated authorization
@@ -67,7 +73,7 @@ def get_two_week_review_history(
     has evolved over time.
     """
     # Verify the user has access to the person
-    if not current_user.can_access_person(person_id):
+    if not current_user.has_access_to_person(person_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Not authorized to access person {person_id}"
