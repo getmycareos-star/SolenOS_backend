@@ -16,6 +16,9 @@ from app.models.evidence import Evidence
 from app.models.care_event import CareEvent
 from app.models.change import Change, Situation
 from app.schemas.situation import SituationInput
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -33,6 +36,17 @@ def override_get_db():
         yield db
     finally:
         db.close()
+
+
+def override_principal(email: str, person_id: str):
+    account = Account(
+        id=f"runtime-test-account-{email}",
+        email=email,
+        account_type=AccountType.CAREGIVER,
+        is_active=True,
+    )
+    principal = AuthenticatedPrincipal(account, [person_id])
+    app.dependency_overrides[get_current_principal] = lambda: principal
 
 
 def setup_db():
@@ -63,6 +77,7 @@ def test_post_situation_persists_change_detection_and_situation_results():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("int-test-1@example.com", "int-person-1")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
@@ -127,6 +142,7 @@ def test_multi_update_longitudinal_reasoning():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("int-test-2@example.com", "int-person-2")
 
         client = TestClient(app, base_url="http://localhost")
         inputs = [
@@ -181,6 +197,7 @@ def test_idempotent_identical_input():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("int-test-3@example.com", "int-person-3")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
@@ -221,6 +238,7 @@ def test_empty_input_returns_400():
         db.add_all([person, caregiver])
         db.commit()
         db.close()
+        override_principal("int-test-4@example.com", "int-person-4")
 
         client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
