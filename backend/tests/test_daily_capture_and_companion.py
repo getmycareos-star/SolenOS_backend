@@ -546,8 +546,18 @@ class TestDailyCareMerge:
         assert response.status_code == 200
         # It is not in the typed table, but it is still in the record.
         assert db.query(VitalSign).count() == 0
-        event = db.query(CareEvent).filter(CareEvent.event_type == "vital_signs").one()
-        assert "sitting_bp" in event.description
+        # The situation pipeline owns event classification; assert the
+        # actual persisted narrative, not an assumed event_type label.
+        event = (
+            db.query(CareEvent)
+            .filter(
+                CareEvent.person_id == person.id,
+                CareEvent.description.contains("sitting_bp"),
+            )
+            .first()
+        )
+        assert event is not None
+        assert "120/80" in event.description
 
     def test_the_five_button_scales_land_in_the_typed_table(self, db, person, caregiver, client):
         response = client.post(
