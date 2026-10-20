@@ -40,3 +40,11 @@ def require_person_access(permission: str = "read"):
         assert_person_access(db, account.id, person_id, permission)
         return account
     return dependency
+
+
+
+def require_staff(account: AuthAccount = Depends(current_account)) -> AuthAccount:
+    """Deny system-wide administrative actions unless staff was granted out of band."""
+    if not account.is_staff:
+        raise HTTPException(status_code=403, detail="Staff access required")
+    return account
