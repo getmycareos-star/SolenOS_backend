@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.api.authentication import current_account
-from app.core.authz import assert_person_access, require_person_access
+from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
 from app.models.auth_identity import AuthAccount
 from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel, CareEvent as CareEventModel
 from app.models.temporal import TemporalReferenceFrame as TemporalReferenceFrameModel
@@ -67,6 +67,7 @@ def extract_actions_from_document(
     caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id).first() if caregiver_id else None
     if caregiver is None:
         raise HTTPException(status_code=400, detail="A caregiver belonging to this care record is required")
+    assert_account_is_caregiver(db, account.id, caregiver.id, person_id)
     ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
 
     candidates = extraction_engine.extract(
@@ -132,6 +133,7 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db), account: 
     creator = db.query(CaregiverModel).filter(CaregiverModel.id == action.created_by_caregiver_id, CaregiverModel.person_id == action.person_id).first()
     if creator is None:
         raise HTTPException(status_code=400, detail="Creator must be a caregiver belonging to this care record")
+    assert_account_is_caregiver(db, account.id, creator.id, action.person_id)
     _assert_evidence_ids_for_person(db, action.completion_evidence_ids, action.person_id)
     if action.actor_type == "caregiver" and action.actor_id:
         actor = db.query(CaregiverModel).filter(CaregiverModel.id == action.actor_id, CaregiverModel.person_id == action.person_id).first()
