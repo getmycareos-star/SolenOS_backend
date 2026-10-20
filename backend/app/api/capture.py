@@ -79,6 +79,8 @@ def save_daily_capture(
         vitals=[item.model_dump(mode="json") for item in payload.vitals],
         scales=[item.model_dump(mode="json") for item in payload.scales],
         notes=payload.notes,
+        location=payload.location.model_dump(mode="json") if payload.location else None,
+        location_provenance=payload.location_provenance if payload.location else None,
         recorded_at=recorded_at,
     )
     db.add(capture)
