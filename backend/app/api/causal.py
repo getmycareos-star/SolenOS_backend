@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
 from app.core.database import get_db
+from app.core.security import get_current_principal
 from app.core.causal_enums import (
     CausalRelationshipStatus,
     EvidenceStrength,
@@ -24,7 +25,7 @@ from app.schemas.causal import (
 )
 from app.services.causal_reasoning import CausalReasoningEngine
 
-router = APIRouter(prefix="/causal", tags=["causal"])
+router = APIRouter(prefix="/causal", tags=["causal"], dependencies=[Depends(get_current_principal)])
 
 
 def get_engine(db: Session = Depends(get_db)) -> CausalReasoningEngine:
