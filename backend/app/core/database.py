@@ -81,6 +81,9 @@ def init_db():
         import app.models.action  # noqa: F401
         import app.models.caregiver_intelligence  # noqa: F401
         import app.models.causal  # noqa: F401
+        import app.models.memory  # noqa: F401
+        import app.models.time_location  # noqa: F401
+        import app.models.safety  # noqa: F401
         import app.models.auth_identity  # noqa: F401
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
