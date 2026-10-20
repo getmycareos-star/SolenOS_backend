@@ -213,19 +213,32 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
         if measured_at.tzinfo is None:
             measured_at = measured_at.replace(tzinfo=timezone.utc)
         for vital_name, raw_value in entry.vitals.items():
+            # Form clients have historically sent both enum values ("heart_rate")
+            # and enum names ("HEART_RATE"). Normalize both explicitly; preserve
+            # unrecognized/free-text readings in the narrative evidence above.
+            normalized_name = str(vital_name).strip()
+            vital_type = VitalType.__members__.get(normalized_name.upper())
+            if vital_type is None:
+                try:
+                    vital_type = VitalType(normalized_name.lower())
+                except ValueError:
+                    continue
             try:
-                vital_type = VitalType(vital_name)
                 value = float(raw_value)
             except (ValueError, TypeError):
+                # Non-numeric values remain in the narrative evidence and are
+                # intentionally not coerced into a fabricated numeric reading.
                 continue
             vital_service.record_vital({
                 "person_id": entry.person_id,
                 "caregiver_id": entry.caregiver_id,
                 "vital_type": vital_type,
                 "value": value,
-                "unit": "mmHg" if vital_type in (VitalType.SYSTOLIC_BP, VitalType.DIASTOLIC_BP) else None,
+                "unit": None,
                 "measured_at": measured_at,
             })
+        # Flush the complete structured write set before returning success.
+        db.flush()
     # Record scales via the daily capture service
     if entry.mood_scale is not None or entry.agitation_scale is not None:
         scale_service = DailyCaptureService(db)
