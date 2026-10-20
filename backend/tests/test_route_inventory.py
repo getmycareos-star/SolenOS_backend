@@ -41,4 +41,15 @@ def test_critical_care_continuity_routes_are_mounted():
         ("POST", "/api/v1/causal/hypotheses"),
     }
     missing = expected - registrations
-    assert not missing, f"Critical care-continuity routes are not mounted: {sorted(missing)}"
+    if missing:
+        related_routes = sorted(
+            (method, route.path, route.endpoint.__module__ + "." + route.endpoint.__name__)
+            for route in app.routes
+            if isinstance(route, APIRoute)
+            and any(token in route.path for token in ("graph", "daily-care", "causal"))
+            for method in (route.methods or set())
+        )
+        raise AssertionError(
+            "Critical care-continuity routes are not mounted: "
+            f"{sorted(missing)}; related registered routes={related_routes}"
+        )
