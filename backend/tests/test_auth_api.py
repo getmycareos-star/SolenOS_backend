@@ -12,12 +12,13 @@ from app.models.care import Person
 from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
+from app.models.safety import SafetyAuditRecordModel
 from app.models.uncertainty import InformationGap
 
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -77,6 +78,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unauthenticated_legacy_read.status_code == 401
             unauthenticated_caregiver_read = client.get("/api/v1/caregiver-profiles/not-authorized")
             assert unauthenticated_caregiver_read.status_code == 401
+            unauthenticated_safety_read = client.get("/api/v1/safety/audit/not-authorized")
+            assert unauthenticated_safety_read.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -99,6 +102,11 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
             assert {item["person_id"] for item in listed.json()} == {context["person_id"], legacy_created.json()["id"]}
+            own_safety_audits = client.get("/api/v1/safety/audit/" + context["person_id"], headers=headers)
+            assert own_safety_audits.status_code == 200, own_safety_audits.text
+            assert own_safety_audits.json() == []
+            staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
+            assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
             assert own_legacy_person.status_code == 200, own_legacy_person.text
             profile_create = client.post("/api/v1/caregiver-profiles", headers=headers, json={"person_id": context["person_id"], "name": "Second Caregiver", "email": "second@example.com", "relationship": "daughter"})
@@ -136,6 +144,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
             unrelated_caregiver_read = client.get("/api/v1/caregiver-profiles/" + unrelated.id, headers=headers)
             assert unrelated_caregiver_read.status_code == 403, unrelated_caregiver_read.text
+            unrelated_safety_read = client.get("/api/v1/safety/audit/" + unrelated.id, headers=headers)
+            assert unrelated_safety_read.status_code == 403, unrelated_safety_read.text
             unrelated_email_lookup = client.get("/api/v1/caregivers/by-email", headers=headers, params={"person_id": unrelated.id, "email": "second@example.com"})
             assert unrelated_email_lookup.status_code == 403, unrelated_email_lookup.text
             unrelated_write = client.post("/api/v1/care-windows", headers=headers, params={"person_id": unrelated.id, "event_type": "test", "occurred_at": "not-a-date"})
@@ -153,5 +163,5 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
