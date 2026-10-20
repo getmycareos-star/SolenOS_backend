@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Text, Integer, ForeignKey, Index, Boolean
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 import uuid
 from app.core.database import Base
 from app.core.types import JSONDict, JSONList
