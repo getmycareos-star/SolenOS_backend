@@ -70,7 +70,7 @@ def extract_actions_from_document(
     ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
 
     candidates = extraction_engine.extract(
-        document_text=document_text,
+        document_text=source_document.source_text,
         source_evidence_id=document_id,
         source_document_type=source_document_type,
         source_authority=source_authority,
