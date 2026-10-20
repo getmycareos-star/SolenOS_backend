@@ -74,6 +74,27 @@ jobs:
           print(f"Migration baseline created {len(tables)} tables; required tables present.")
           engine.dispose()
           PY
+          set +e
+          python -m alembic -c backend/alembic.ini downgrade base > backend/alembic-downgrade.log 2>&1
+          downgrade_status=$?
+          set -e
+          if [ "$downgrade_status" -eq 0 ]; then
+            echo "Unsafe baseline downgrade unexpectedly succeeded."
+            exit 1
+          fi
+          grep -F "intentionally irreversible" backend/alembic-downgrade.log
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tables = set(inspect(engine).get_table_names())
+          required = {"persons", "vital_signs", "evidence", "alembic_version"}
+          missing = required - tables
+          assert not missing, f"Downgrade removed required tables: {sorted(missing)}"
+          print("Rejected downgrade left required care tables and Alembic version intact.")
+          engine.dispose()
+          PY
 
       - name: Commit validated baseline migration to remediation branch
         if: success()
