@@ -8,6 +8,7 @@ from collections import defaultdict
 from fastapi.routing import APIRoute
 
 from app.main import app
+from conftest import APP_ROUTES_BASELINE
 
 
 def test_no_duplicate_http_method_and_path_registrations():
@@ -42,6 +43,12 @@ def test_critical_care_continuity_routes_are_mounted():
     }
     missing = expected - registrations
     if missing:
+        baseline_routes = sorted(
+            (method, getattr(route, "path", repr(route)))
+            for route in APP_ROUTES_BASELINE
+            if isinstance(route, APIRoute)
+            for method in (route.methods or set())
+        )
         related_routes = sorted(
             (method, route.path, route.endpoint.__module__ + "." + route.endpoint.__name__)
             for route in app.routes
@@ -51,5 +58,7 @@ def test_critical_care_continuity_routes_are_mounted():
         )
         raise AssertionError(
             "Critical care-continuity routes are not mounted: "
-            f"{sorted(missing)}; related registered routes={related_routes}"
+            f"{sorted(missing)}; baseline_has_expected={expected.issubset(set(baseline_routes))}; "
+            f"related baseline routes={[r for r in baseline_routes if any(t in r[1] for t in ('graph', 'daily-care', 'causal'))]}; "
+            f"related current routes={related_routes}"
         )
