@@ -158,6 +158,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
             foreign_safety_event = client.post("/api/v1/safety/events", headers=headers, params={"event_type": "invariant_violation", "person_id": context["person_id"], "subject_type": "evidence", "subject_id": own_evidence_id, "description": "cross-record evidence regression"}, json={"evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_event.status_code == 400, foreign_safety_event.text
+            foreign_safety_escalation = client.post("/api/v1/safety/escalations", headers=headers, params={"person_id": context["person_id"], "affected_person_id": context["person_id"], "trigger": "cross-record evidence regression", "risk_category": "low_risk", "recommended_reviewer": "caregiver"}, json={"evidence_ids": [foreign_evidence_id]})
+            assert foreign_safety_escalation.status_code == 400, foreign_safety_escalation.text
             foreign_uploader_write = client.post("/api/v1/evidence", headers=headers, json={"person_id": context["person_id"], "type": "note", "source_text": "forged uploader", "uploaded_by_caregiver_id": foreign_caregiver_id})
             assert foreign_uploader_write.status_code == 400, foreign_uploader_write.text
             foreign_evidence_event = client.post("/api/v1/events", headers=headers, json={"person_id": context["person_id"], "event_type": "observation", "occurred_at": "2026-10-20T09:00:00Z", "title": "Cross-record evidence attempt", "evidence_ids": [foreign_evidence_id], "created_by_caregiver_id": caregiver.id})
