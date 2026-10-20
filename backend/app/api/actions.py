@@ -339,7 +339,11 @@ def find_duplicate_actions(action_id: str, db: Session = Depends(get_db), accoun
 
 
 @router.post("/actions/safety-check", response_model=ActionSafetyCheck)
-def check_action_safety(candidate: ActionCandidate):
+def check_action_safety(candidate: ActionCandidate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    source_evidence = db.query(EvidenceModel).filter(EvidenceModel.id == candidate.source_evidence_id).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=404, detail="Source evidence not found")
+    assert_person_access(db, account.id, source_evidence.person_id, "read")
     return normalization_service.safety_check(candidate)
 
 
