@@ -1,0 +1,44 @@
+name: Authentication foundation regression
+
+on:
+  pull_request:
+    paths:
+      - "backend/app/models/auth_identity.py"
+      - "backend/app/services/auth_service.py"
+      - "backend/app/api/authentication.py"
+      - "backend/app/core/authz.py"
+      - "backend/app/core/database.py"
+      - "backend/app/main.py"
+      - "backend/tests/test_auth_service_primitives.py"
+      - ".github/workflows/auth-foundation-regression.yml"
+  push:
+    branches:
+      - security/auth-foundation-step1
+
+permissions:
+  contents: read
+
+jobs:
+  auth-foundation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Run password-hashing primitive regressions
+        run: python -m pytest -q tests/test_auth_service_primitives.py
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/core/database.py app/main.py
