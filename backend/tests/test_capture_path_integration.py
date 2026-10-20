@@ -90,7 +90,7 @@ def test_multiple_observations_persist_as_distinct_time_ordered_events(db, clien
     for index, observation in enumerate(observations):
         event_time = base_time + timedelta(days=index)
         payload = make_payload(person, caregiver, observation, event_time.isoformat())
-        response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+        response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {caregiver.id}"})
         assert response.status_code == 200, f"Observation {index + 1} failed: {response.text}"
         response_data.append(response.json())
 
@@ -143,7 +143,7 @@ def test_empty_input_returns_client_error(db, client):
         person_id=person.id,
         raw_input="   ",
     )
-    response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+    response = client.post("/api/situation", json=payload.model_dump(mode="json"), headers={"Authorization": f"Bearer {caregiver.id}"})
     assert response.status_code == 400, response.text
 
 
