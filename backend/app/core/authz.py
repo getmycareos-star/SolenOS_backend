@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.api.authentication import current_account
 from app.core.database import get_db
-from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverProfileAccountLink
 
 
 def assert_person_access(db: Session, account_id: str, person_id: str, permission: str = "read") -> AccountPersonAccess:
@@ -61,4 +61,18 @@ def assert_account_is_caregiver(db: Session, account_id: str, caregiver_id: str,
     ).first()
     if link is None:
         raise HTTPException(status_code=403, detail="Authenticated account is not linked to this caregiver identity")
+    return link
+
+
+def assert_account_is_caregiver_profile(db: Session, account_id: str, caregiver_profile_id: str, person_id: str) -> CaregiverProfileAccountLink:
+    """Require verified account ownership of a caregiver-intelligence profile identity."""
+    link = db.query(CaregiverProfileAccountLink).filter(
+        CaregiverProfileAccountLink.account_id == account_id,
+        CaregiverProfileAccountLink.caregiver_profile_id == caregiver_profile_id,
+        CaregiverProfileAccountLink.person_id == person_id,
+        CaregiverProfileAccountLink.is_active.is_(True),
+        CaregiverProfileAccountLink.revoked_at.is_(None),
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=403, detail="Authenticated account is not linked to this caregiver profile")
     return link
