@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_person_access, require_staff
 from app.models.auth_identity import AuthAccount
+from app.models.care import Caregiver as CaregiverModel
 from app.schemas.safety import (
     SafetyContractInput,
     SafetyContractOutput,
@@ -210,7 +211,7 @@ def create_safety_event(
         input_claims=input_claims or [],
         evidence_ids=evidence_ids or [],
         final_output=final_output,
-        reviewer_id=account.id,
+        reviewer_id=None,
         override_reason=override_reason,
         timestamp=datetime.now(timezone.utc),
         created_by_caregiver_id=None,
@@ -377,13 +378,16 @@ def create_safety_feedback(
     event = db.query(SafetyEventModel).filter(SafetyEventModel.id == safety_event_id, SafetyEventModel.person_id == person_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Safety event not found for this care record")
+    reviewer = db.query(CaregiverModel).filter(CaregiverModel.id == reviewer_id, CaregiverModel.person_id == person_id).first()
+    if reviewer is None:
+        raise HTTPException(status_code=400, detail="Reviewer must be a caregiver in this care record")
     db_feedback = SafetyFeedbackModel(
         id=str(uuid.uuid4()),
         person_id=person_id,
         safety_event_id=safety_event_id,
         feedback_type=feedback_type,
         feedback_text=feedback_text,
-        reviewer_id=account.id,
+        reviewer_id=reviewer.id,
         original_decision=original_decision,
         override_decision=override_decision,
         is_correct=is_correct,
