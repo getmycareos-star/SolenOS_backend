@@ -51,6 +51,8 @@ def authenticated_domain_test_client(request, monkeypatch):
         module = importlib.import_module(module_name)
         if hasattr(module, "assert_person_access"):
             monkeypatch.setattr(module, "assert_person_access", allow_test_care_record)
+        if module_name == "app.api.caregiver_intelligence" and hasattr(module, "_assert_profile_account"):
+            monkeypatch.setattr(module, "_assert_profile_account", lambda *args, **kwargs: None)
 
     yield
     app.dependency_overrides.pop(current_account, None)
