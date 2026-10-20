@@ -59,7 +59,7 @@ def test_post_situation_creates_evidence_and_event():
 
         client = TestClient(app)
         response = client.post(
-            "/api/situation",
+            "/api/v1/situation",
             json={
                 "caregiver_id": "caregiver-1",
                 "person_id": "person-1",
@@ -101,7 +101,7 @@ def test_post_situation_with_documents():
 
         client = TestClient(app)
         response = client.post(
-            "/api/situation",
+            "/api/v1/situation",
             json={
                 "caregiver_id": "caregiver-2",
                 "person_id": "person-2",
@@ -141,7 +141,7 @@ def test_post_situation_missing_caregiver():
 
         client = TestClient(app)
         response = client.post(
-            "/api/situation",
+            "/api/v1/situation",
             json={
                 "caregiver_id": "nonexistent",
                 "person_id": "person-1",
@@ -174,7 +174,7 @@ def test_post_situation_missing_person():
 
         client = TestClient(app)
         response = client.post(
-            "/api/situation",
+            "/api/v1/situation",
             json={
                 "caregiver_id": "caregiver-3",
                 "person_id": "nonexistent",
@@ -208,7 +208,7 @@ def test_post_situation_empty_input_and_no_documents():
 
         client = TestClient(app)
         response = client.post(
-            "/api/situation",
+            "/api/v1/situation",
             json={
                 "caregiver_id": "caregiver-4",
                 "person_id": "person-4",
@@ -220,3 +220,38 @@ def test_post_situation_empty_input_and_no_documents():
         assert "No valid evidence provided" in response.json()["detail"]
     finally:
         teardown_db()
+
+def test_post_situation_rejects_caregiver_linked_to_another_person():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person_a = Person(id="person-a", name="Person A")
+        person_b = Person(id="person-b", name="Person B")
+        caregiver = Caregiver(
+            id="caregiver-a",
+            name="Caregiver A",
+            email="caregiver-a@example.com",
+            relationship="Family",
+            person_id=person_a.id,
+        )
+        db.add_all([person_a, person_b, caregiver])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/situation",
+            json={
+                "caregiver_id": "caregiver-a",
+                "person_id": "person-b",
+                "raw_input": "This must not be written to another person's record.",
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Caregiver is not linked to this person"
+    finally:
+        teardown_db()
+
