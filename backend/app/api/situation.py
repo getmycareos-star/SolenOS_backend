@@ -48,12 +48,6 @@ def _is_guest_care_key(value: Optional[str]) -> bool:
 
 def _ensure_guest_context(db: Session, care_key: str):
     """Create the minimum empty care context for a new browser-held capability key."""
-    if not _is_guest_care_key(care_key):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="A valid durable care key is required",
-        )
-
     caregiver = db.query(Caregiver).filter(Caregiver.id == care_key).first()
     if caregiver is not None:
         person = db.query(Person).filter(Person.id == caregiver.person_id).first()
@@ -62,6 +56,12 @@ def _ensure_guest_context(db: Session, care_key: str):
         if not caregiver.is_active:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Care context is inactive")
         return caregiver, person
+
+    if not _is_guest_care_key(care_key):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A valid durable care key is required",
+        )
 
     person = Person(name="Care recipient")
     db.add(person)
@@ -119,7 +119,12 @@ async def authorize_situation_context(
     token = _bearer_token(request)
     query_caregiver_id = request.query_params.get("caregiver_id")
 
-    if token and _is_guest_care_key(token):
+    existing_guest_caregiver = (
+        db.query(Caregiver).filter(Caregiver.id == token).first()
+        if token
+        else None
+    )
+    if token and (_is_guest_care_key(token) or existing_guest_caregiver is not None):
         if query_caregiver_id and query_caregiver_id != token:
             raise HTTPException(status_code=403, detail="Care key does not match request context")
         if request.method == "GET":
