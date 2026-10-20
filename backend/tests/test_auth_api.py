@@ -83,6 +83,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unauthenticated_safety_read.status_code == 401
             unauthenticated_action_read = client.get("/api/v1/actions/actions/not-authorized")
             assert unauthenticated_action_read.status_code == 401
+            unauthenticated_action_safety = client.post("/api/v1/actions/actions/safety-check", json={"source_evidence_id": "not-authorized", "source_passage": "test", "original_text": "test", "extraction_confidence": 0.5, "normalized_action": "test"})
+            assert unauthenticated_action_safety.status_code == 401
             unauthenticated_situation_write = client.post("/api/situation", json={"person_id": "not-authorized", "caregiver_id": "not-authorized", "raw_input": "test"})
             assert unauthenticated_situation_write.status_code == 401
 
@@ -113,6 +115,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             own_actions = client.get("/api/v1/actions/actions/" + context["person_id"], headers=headers)
             assert own_actions.status_code == 200, own_actions.text
             assert own_actions.json() == []
+            own_uncompleted_actions = client.get("/api/v1/actions/actions/" + context["person_id"] + "/uncompleted", headers=headers)
+            assert own_uncompleted_actions.status_code == 200, own_uncompleted_actions.text
+            assert own_uncompleted_actions.json() == []
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
             own_legacy_person = client.get("/api/v1/persons/" + context["person_id"], headers=headers)
