@@ -255,3 +255,9 @@ def test_post_situation_rejects_caregiver_linked_to_another_person():
     finally:
         teardown_db()
 
+def test_readiness_checks_database_connectivity():
+    client = TestClient(app)
+    response = client.get("/ready")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["database"] == "reachable"
