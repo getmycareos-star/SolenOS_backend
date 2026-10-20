@@ -99,6 +99,7 @@ def test_daily_intelligence_uses_persisted_records_and_open_care_state(reasoning
             value=195.0,
             unit="mmHg",
             measured_at=now - timedelta(minutes=20),
+            recorded_by_caregiver_id=caregiver.id,
             is_out_of_range=True,
             range_note="Outside configured attention range; not a diagnosis.",
         ),
