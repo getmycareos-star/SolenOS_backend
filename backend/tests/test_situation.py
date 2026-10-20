@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
+from app.models.evidence import Evidence
 from app.core.security import AuthenticatedPrincipal, get_current_principal
 from app.core.identity_enums import AccountType
 from app.models.identity import Account
@@ -288,5 +289,114 @@ def test_post_situation_temporal_uncertainty():
         assert event.occurred_at is None
         assert event.time_provenance == "submission_time_used:unparseable_timestamp:maybe Tuesday evening"
         db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_situation_rejects_unauthenticated_capture():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-unauthenticated",
+                "person_id": "person-unauthenticated",
+                "raw_input": "This must not be stored.",
+            },
+        )
+        assert response.status_code == 401
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).count() == 0
+            assert db.query(CareEvent).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_situation_rejects_a_person_outside_the_callers_care_context():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-owned-by-someone-else", name="Private Person")
+        caregiver = Caregiver(
+            id="caregiver-authorized-email",
+            name="Authorized Email",
+            email="authorized@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+        override_principal("authorized@example.com", ["different-person-id"])
+
+        response = TestClient(app).post(
+            "/api/situation",
+            json={
+                "caregiver_id": caregiver.id,
+                "person_id": person.id,
+                "raw_input": "This must not be stored.",
+            },
+        )
+        assert response.status_code == 403
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter(Evidence.person_id == person.id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person.id).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_situation_rejects_spoofed_caregiver_attribution():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-shared-context", name="Shared Person")
+        actual_caregiver = Caregiver(
+            id="caregiver-actual",
+            name="Authenticated Caregiver",
+            email="actual@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        spoofed_caregiver = Caregiver(
+            id="caregiver-spoofed",
+            name="Other Caregiver",
+            email="other@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, actual_caregiver, spoofed_caregiver])
+        db.commit()
+        db.close()
+        override_principal("actual@example.com", [person.id])
+
+        response = TestClient(app).post(
+            "/api/situation",
+            json={
+                "caregiver_id": spoofed_caregiver.id,
+                "person_id": person.id,
+                "raw_input": "This must not be attributed to another caregiver.",
+            },
+        )
+        assert response.status_code == 403
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter(Evidence.person_id == person.id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person.id).count() == 0
+        finally:
+            db.close()
     finally:
         teardown_db()
