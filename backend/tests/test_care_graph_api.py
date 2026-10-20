@@ -44,54 +44,46 @@ def client(db: Session):
 
     mock_principal = MockAuthenticatedPrincipal(mock_account, [])
 
-    app.dependency_overrides[app.dependency_overrides.get('get_db', None)] = get_test_db
     app.dependency_overrides[get_db] = get_test_db
-
-    # Override the get_current_active_user dependency to return a mock authenticated principal
     app.dependency_overrides[get_current_active_user] = lambda: mock_principal
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    # Unit tests must not start production schedulers/backup jobs.
+    yield TestClient(app)
+    app.dependency_overrides.pop(get_db, None)
+    app.dependency_overrides.pop(get_current_active_user, None)
 
 
 def test_person_boundary_enforcement(client: TestClient, db: Session):
-    """Test that person boundary enforcement works correctly."""
-    # Arrange
+    """A caregiver can read their own graph but cannot read another person's graph."""
     person_id = str(uuid.uuid4())
     other_person_id = str(uuid.uuid4())
     caregiver_id = str(uuid.uuid4())
-    
+
     person = Person(id=person_id, name="Test Person")
     other_person = Person(id=other_person_id, name="Other Person")
     caregiver = Caregiver(
-        id=caregiver_id, 
-        name="Test Caregiver", 
+        id=caregiver_id,
+        name="Test Caregiver",
         email="test@example.com",
         relationship="daughter",
-        person_id=person_id
+        person_id=person_id,
     )
-    
     db.add_all([person, other_person, caregiver])
     db.commit()
-    
-    # Override auth by patching the verify_person_access function
-    with patch('app.api.care_graph.verify_person_access') as mock_verify:
-        # Make the mock do nothing (allow access)
-        mock_verify.return_value = None
-        
-        # Act & Assert - Try to access other person's graph
-        response = client.get(f"/api/v1/graph/{other_person_id}/test")
-        print(f"Other person response: {response.status_code}, {response.json()}")
-        # This should now work since we patched the verification
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
-        
-        # Access own person's graph should also work
-        response = client.get(f"/api/v1/graph/{person_id}/test")
-        print(f"Own person response: {response.status_code}, {response.json()}")
-        assert response.status_code == 200
-        assert response.json()["status"] == "ok"
+
+    from app.core.security import get_current_active_user, AuthenticatedPrincipal
+    from app.models.identity import Account
+    from app.core.identity_enums import AccountType
+
+    account = Account(id="boundary-test-account", is_active=True, account_type=AccountType.CAREGIVER)
+    principal = AuthenticatedPrincipal(account, [person_id])
+    app.dependency_overrides[get_current_active_user] = lambda: principal
+
+    other_response = client.get(f"/api/v1/graph/{other_person_id}/snapshot")
+    assert other_response.status_code == 403, other_response.text
+
+    own_response = client.get(f"/api/v1/graph/{person_id}/snapshot")
+    assert own_response.status_code == 200, own_response.text
 
 
 def test_create_node(client: TestClient, db: Session):
