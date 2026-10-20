@@ -21,6 +21,12 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     if not person:
         raise ValueError("Person not found")
 
+    # A caregiver may only write to the person record they are linked to.
+    # This association check is necessary but does not replace authentication;
+    # caller identity must still be established by a trusted auth layer.
+    if caregiver.person_id != person.id:
+        raise ValueError("Caregiver is not linked to this person")
+
     timestamp = payload.timestamp
     if timestamp:
         try:
