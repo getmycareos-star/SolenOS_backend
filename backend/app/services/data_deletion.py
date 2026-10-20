@@ -388,40 +388,6 @@ def delete_expired_data(db_session: Session, dry_run: bool = False) -> Dict[str,
     return service.delete_expired_data(dry_run=dry_run)
 
 
-# Global instance for easy access
-data_deletion_service = DataDeletionService(SessionLocal())
-
-# Convenience functions
-def delete_expired_data(dry_run: bool = False) -> Dict[str, Any]:
-    """Convenience function to delete expired data.
-    
-    Args:
-        dry_run: If True, only report what would be deleted without actually deleting
-        
-    Returns:
-        Dictionary with deletion statistics and any errors
-    """
-    return data_deletion_service.delete_expired_data(dry_run=dry_run)
-
-
 def delete_expired_data_with_db(db_session: Session, dry_run: bool = False) -> Dict[str, Any]:
-    """Convenience function to delete expired data with a specific DB session.
-    
-    Args:
-        db_session: SQLAlchemy database session
-        dry_run: If True, only report what would be deleted without actually deleting
-        
-    Returns:
-        Dictionary with deletion statistics and any errors
-    """
-    service = DataDeletionService(db_session)
-    return service.delete_expired_data(dry_run=dry_run)
-
-
-if __name__ == "__main__":
-    # This would be used for testing or direct invocation
-    # In practice, this service would be called by a scheduler
-    logging.basicConfig(level=logging.INFO)
-    print("DataDeletionService module loaded.")
-    print("Use delete_expired_data() function to invoke with default session.")
-    print("Use delete_expired_data_with_db(session) function to invoke with specific session.")
+    """Backward-compatible explicit-session entry point."""
+    return delete_expired_data(db_session, dry_run=dry_run)
