@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_person_access
 from app.models.auth_identity import AuthAccount
+from app.models.care import Caregiver as CaregiverModel
 from app.models.caregiver_intelligence import (
     CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
@@ -68,9 +69,18 @@ def _assert_profile_in_person(db: Session, caregiver_id: Optional[str], person_i
         CaregiverProfileModel.id == caregiver_id,
         CaregiverProfileModel.person_id == person_id,
     ).first()
-    if profile is None:
-        raise HTTPException(status_code=400, detail="Caregiver profile does not belong to this care record")
-    return profile
+    if profile is not None:
+        return profile
+    # Legacy care routes use caregivers.id while the intelligence layer also has
+    # a separate CaregiverProfile table. Accept either identity only when its
+    # person_id matches; never accept an ID found under another person.
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id,
+        CaregiverModel.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=400, detail="Caregiver reference does not belong to this care record")
+    return caregiver
 
 
 def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, source_type: str, source_id: str = None, caregiver_id: str = None):
