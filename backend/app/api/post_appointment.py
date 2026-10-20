@@ -5,10 +5,7 @@ from datetime import datetime
 from uuid import UUID
 
 from app.core.database import get_db
-from app.services.post_appointment_workflow import (
-    PostAppointmentWorkflowService,
-    get_post_appointment_workflow_service
-)
+from app.services.post_appointment_workflow import PostAppointmentWorkflowService
 from app.schemas.post_appointment.workflow import (
     PostAppointmentWorkflowStart,
     PostAppointmentWorkflowResponse,
@@ -22,6 +19,13 @@ from app.models.caregiver import Caregiver as CaregiverModel
 from app.core.security import get_current_active_user, AuthenticatedPrincipal
 
 router = APIRouter(prefix="/post-appointment", tags=["post-appointment"])
+
+
+def get_post_appointment_workflow_service(
+    db: Session = Depends(get_db),
+) -> PostAppointmentWorkflowService:
+    """Provide a request-scoped workflow service bound to the request DB session."""
+    return PostAppointmentWorkflowService(db)
 
 
 @router.post("/workflow/start", response_model=PostAppointmentWorkflowResponse)
