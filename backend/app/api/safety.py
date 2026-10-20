@@ -105,12 +105,14 @@ def create_escalation(
     uncertainty: Optional[str] = None,
     provenance: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "write")
+    assert_person_access(db, account.id, affected_person_id, "write")
     escalation_engine = EscalationEngine()
     escalation_data = escalation_engine.determine_escalation(risk_category, trigger, person_id)
 
-    assert_person_access(db, account.id, person_id, "write")
-    assert_person_access(db, account.id, affected_person_id, "write")
+    # Authorized before any escalation record is constructed.
     db_escalation = EscalationModel(
         id=str(uuid.uuid4()),
         person_id=person_id,
@@ -147,6 +149,7 @@ def update_escalation(
     reviewer_identity: Optional[str] = None,
     resolution: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
     db_escalation = db.query(EscalationModel).filter(EscalationModel.id == escalation_id).first()
     if not db_escalation:
@@ -156,8 +159,8 @@ def update_escalation(
     db_escalation.status = status
     if decision:
         db_escalation.decision = decision
-    if reviewer_identity:
-        db_escalation.reviewer_identity = reviewer_identity
+    if decision or resolution:
+        db_escalation.reviewer_identity = account.id
     if resolution:
         db_escalation.resolution = resolution
     if status in (EscalationStatusEnum.RESOLVED, EscalationStatusEnum.DISMISSED):
@@ -186,7 +189,13 @@ def create_safety_event(
     override_reason: Optional[str] = None,
     created_by_caregiver_id: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "write")
+    if escalation_id:
+        linked_escalation = db.query(EscalationModel).filter(EscalationModel.id == escalation_id, EscalationModel.person_id == person_id).first()
+        if linked_escalation is None:
+            raise HTTPException(status_code=404, detail="Escalation not found for this care record")
     db_event = SafetyEventModel(
         id=str(uuid.uuid4()),
         event_type=event_type,
@@ -362,6 +371,7 @@ def create_safety_feedback(
     is_correct: bool = False,
     lesson_learned: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
     assert_person_access(db, account.id, person_id, "write")
     event = db.query(SafetyEventModel).filter(SafetyEventModel.id == safety_event_id, SafetyEventModel.person_id == person_id).first()
