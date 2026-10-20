@@ -9,11 +9,12 @@ from app.main import app
 from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession
 from app.models.care import Person
+from app.models.uncertainty import InformationGap
 
 
 def test_signup_login_current_account_and_logout():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -61,6 +62,8 @@ def test_signup_login_current_account_and_logout():
 
             no_token = client.get("/api/v1/auth/me")
             assert no_token.status_code == 401
+            unauthenticated_care_read = client.get("/api/v1/uncertainty/gaps/not-authorized")
+            assert unauthenticated_care_read.status_code == 401
 
             headers = {"Authorization": f"Bearer {token}"}
             current = client.get("/api/v1/auth/me", headers=headers)
@@ -80,6 +83,9 @@ def test_signup_login_current_account_and_logout():
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
             assert [item["person_id"] for item in listed.json()] == [context["person_id"]]
+            own_gaps = client.get("/api/v1/uncertainty/gaps/" + context["person_id"], headers=headers)
+            assert own_gaps.status_code == 200, own_gaps.text
+            assert own_gaps.json() == []
 
             guard = require_person_access("read")
             with TestingSession() as db:
@@ -95,6 +101,8 @@ def test_signup_login_current_account_and_logout():
                     assert False, "Cross-person access should be denied"
                 except HTTPException as exc:
                     assert exc.status_code == 403
+            unrelated_read = client.get("/api/v1/uncertainty/gaps/" + unrelated.id, headers=headers)
+            assert unrelated_read.status_code == 403, unrelated_read.text
 
             logout = client.post("/api/v1/auth/logout", headers=headers)
             assert logout.status_code == 204
@@ -102,5 +110,5 @@ def test_signup_login_current_account_and_logout():
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[InformationGap.__table__, AccountPersonAccess.__table__, AuthSession.__table__, Person.__table__, AuthAccount.__table__])
         engine.dispose()
