@@ -306,7 +306,7 @@ class PostAppointmentWorkflowService:
         self.db.commit()
         
         return PostAppointmentReconciliationResult(
-            reconciliation_id=uuid.uuid4(),
+            reconciliation_id=str(uuid.uuid4()),
             unchanged_items=unchanged_items,
             updated_items=updated_items,
             superseded_items=superseded_items,
@@ -933,7 +933,6 @@ class PostAppointmentWorkflowService:
         
         # Import handoff-related models and services
         from app.models.handoff import Handoff, HandoffResponsibility
-        from app.core.handoff_enums import HandoffStatus
         
         handoff_context_updated = False
         handoff_version = 1
