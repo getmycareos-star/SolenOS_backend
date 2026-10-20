@@ -376,6 +376,7 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 def create_observation(observation: ObservationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, observation.person_id, "write")
     _require_caregiver_in_person(db, observation.caregiver_id, observation.person_id, "caregiver_id")
+    _require_evidence_ids_in_person(db, observation.evidence_ids, observation.person_id)
 
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
@@ -412,6 +413,7 @@ def get_observation_trends(person_id: str, db: Session = Depends(get_db)):
 @router.post("/reasoning-memory", response_model=ReasoningMemorySchema)
 def create_reasoning_memory(memory: ReasoningMemoryCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, memory.person_id, "write")
+    _require_evidence_ids_in_person(db, memory.source_evidence_ids, memory.person_id)
 
     db_memory = ReasoningMemoryModel(**memory.model_dump())
     db.add(db_memory)
