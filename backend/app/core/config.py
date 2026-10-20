@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     
     # Data deletion settings
-    data_deletion_enabled: bool = True
+    data_deletion_enabled: bool = False
     data_deletion_interval_hours: int = 24  # Run daily by default
 
     @model_validator(mode="after")
