@@ -37,7 +37,19 @@ def teardown_db():
 
 def get_test_client():
     from app.core.database import get_db
+    from app.core.security import get_current_active_user, AuthenticatedPrincipal
+    from app.models.identity import Account
+    from app.core.identity_enums import AccountType
+
     app.dependency_overrides[get_db] = override_get_db
+    # Explicitly authenticated test principal scoped to the seeded person.
+    account = Account(
+        id="caregiver-intelligence-test-account",
+        is_active=True,
+        account_type=AccountType.CAREGIVER,
+    )
+    principal = AuthenticatedPrincipal(account, ["person-1"])
+    app.dependency_overrides[get_current_active_user] = lambda: principal
     return TestClient(app)
 
 
