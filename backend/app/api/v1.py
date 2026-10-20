@@ -889,7 +889,9 @@ def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depen
 @router.post("/temporal/facts", response_model=TemporalFactSchema)
 def create_temporal_fact_endpoint(fact: TemporalFactCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, fact.person_id, "write")
-
+    _require_evidence_ids_in_person(db, fact.evidence_ids, fact.person_id)
+    if fact.created_by_caregiver_id:
+        _require_caregiver_in_person(db, fact.created_by_caregiver_id, fact.person_id, "created_by_caregiver_id")
     return create_temporal_fact(db, fact)
 
 
@@ -899,6 +901,7 @@ def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, db: 
     if not fact_record:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
     assert_person_access(db, account.id, fact_record.person_id, "write")
+    _require_evidence_ids_in_person(db, update.evidence_ids, fact_record.person_id)
     result = update_temporal_fact(db, fact_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -933,7 +936,11 @@ def list_temporal_facts(person_id: str, subject_type: Optional[str] = None, subj
 @router.post("/temporal/relations", response_model=TemporalRelationSchema)
 def create_temporal_relation_endpoint(relation: TemporalRelationCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, relation.person_id, "write")
-
+    for fact_id in (relation.fact_a_id, relation.fact_b_id):
+        fact_record = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id, TemporalFactModel.person_id == relation.person_id).first()
+        if fact_record is None:
+            raise HTTPException(status_code=400, detail="Both temporal facts must belong to this care record")
+    _require_evidence_ids_in_person(db, relation.evidence_ids, relation.person_id)
     return create_temporal_relation(db, relation)
 
 
@@ -983,7 +990,13 @@ def list_temporal_conflicts(person_id: str, subject_type: Optional[str] = None, 
 @router.post("/temporal/contradictions", response_model=TemporalContradictionSchema)
 def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, contradiction.person_id, "write")
-
+    for fact_id in (contradiction.fact_a_id, contradiction.fact_b_id):
+        fact_record = db.query(TemporalFactModel).filter(TemporalFactModel.id == fact_id, TemporalFactModel.person_id == contradiction.person_id).first()
+        if fact_record is None:
+            raise HTTPException(status_code=400, detail="Both contradiction facts must belong to this care record")
+    _require_evidence_ids_in_person(db, contradiction.evidence_ids, contradiction.person_id)
+    if contradiction.resolved_by_caregiver_id:
+        _require_caregiver_in_person(db, contradiction.resolved_by_caregiver_id, contradiction.person_id, "resolved_by_caregiver_id")
     return create_temporal_contradiction(db, contradiction)
 
 
@@ -993,6 +1006,9 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
     if not contradiction_record:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
     assert_person_access(db, account.id, contradiction_record.person_id, "write")
+    _require_evidence_ids_in_person(db, update.evidence_ids, contradiction_record.person_id)
+    if update.resolved_by_caregiver_id:
+        _require_caregiver_in_person(db, update.resolved_by_caregiver_id, contradiction_record.person_id, "resolved_by_caregiver_id")
     result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
