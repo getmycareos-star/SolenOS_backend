@@ -37,7 +37,11 @@ def teardown_db():
 
 def get_test_client():
     from app.core.database import get_db
-    from app.core.security import get_current_active_user, AuthenticatedPrincipal
+    from app.core.security import (
+        get_current_active_user,
+        get_current_principal,
+        AuthenticatedPrincipal,
+    )
     from app.models.identity import Account
     from app.core.identity_enums import AccountType
 
@@ -50,6 +54,7 @@ def get_test_client():
     )
     principal = AuthenticatedPrincipal(account, ["person-1"])
     app.dependency_overrides[get_current_active_user] = lambda: principal
+    app.dependency_overrides[get_current_principal] = lambda: principal
     return TestClient(app)
 
 
