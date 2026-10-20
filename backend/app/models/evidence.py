@@ -48,10 +48,10 @@ class Evidence(Base):
     person_id = Column(String, ForeignKey("persons.id"), nullable=False)
     
     # Subject details (from rich model)
-    subject_role = Column(String, nullable=False)  # EvidenceSubjectRole
+    subject_role = Column(String, nullable=False, default=EvidenceSubjectRole.OTHER.value)  # Safe when subject is unknown
     subject_id = Column(String, ForeignKey("persons.id"), nullable=True)  # FK to persons.id or other entities
     subject_identifier = Column(String, nullable=True)  # external identifier
-    entity_resolution_status = Column(String, nullable=False)  # EntityResolutionStatus
+    entity_resolution_status = Column(String, nullable=False, default=EntityResolutionStatus.UNRESOLVED.value)  # Do not imply an unverified match
     entity_resolution_confidence = Column(Float, nullable=True)
     
     # Observer details (from rich model)
