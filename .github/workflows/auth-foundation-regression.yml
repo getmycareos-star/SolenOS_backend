@@ -10,6 +10,7 @@ on:
       - "backend/app/core/database.py"
       - "backend/app/main.py"
       - "backend/tests/test_auth_service_primitives.py"
+      - "backend/tests/test_auth_service_sessions.py"
       - ".github/workflows/auth-foundation-regression.yml"
   push:
     branches:
@@ -39,6 +40,8 @@ jobs:
           python -m pip install -e . pytest
       - name: Run password-hashing primitive regressions
         run: python -m pytest -q tests/test_auth_service_primitives.py
+      - name: Run account and session lifecycle regressions
+        run: python -m pytest -q tests/test_auth_service_sessions.py
       - name: Compile changed Python modules
         run: |
           python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/core/database.py app/main.py
