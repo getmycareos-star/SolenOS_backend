@@ -9,15 +9,18 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: solenos-backend-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
+    timeout-minutes: 15
     env:
       DEBUG: "true"
       DATABASE_URL: "sqlite:///./solenos-ci.db"
+      PYTHONPATH: "backend:."
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -30,13 +33,13 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install package and test dependencies
-        run: python -m pip install -e ".[test]"
+        run: python -m pip install -e "backend/.[test]"
 
       - name: Compile application and tests
-        run: python -m compileall -q app tests
+        run: python -m compileall -q backend/app backend/tests
 
       - name: Run automated tests
-        run: python -m pytest -q --disable-warnings
+        run: python -m pytest -q --timeout=120 backend/tests
 
       - name: Build production container
-        run: docker build --tag solenos-backend-ci .
+        run: docker build --file backend/Dockerfile --tag solenos-backend-ci backend
