@@ -21,6 +21,12 @@ dependencies = [
     # Writes the Living Care Summary PDF. Local-only, no network calls: the
     # summary contains a person's care record and must never leave the machine.
     "reportlab>=4.0.0",
+    "sentry-sdk>=2.0.0",
+    # Prometheus metrics endpoint
+    "prometheus-client>=0.19.0",
+    # Asynchronous processing dependencies
+    "redis>=4.5.0",
+    "celery>=5.3.0",
 ]
 
 [build-system]
@@ -33,3 +39,4 @@ packages = ["app"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+

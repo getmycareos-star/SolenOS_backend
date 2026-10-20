@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.dementia_reasoning import DementiaReasoningEngine
+from app.core.cache_decorators import cached_response
+
 from app.schemas.dementia import (
     DementiaBaselineCreate,
     DementiaBaselineUpdate,
@@ -52,6 +54,7 @@ def create_baseline(
     return created
 
 
+@cached_response(ttl=3600, key_prefix="dementia_baselines_list")
 @router.get("/baselines/{person_id}", response_model=List[DementiaBaselineResponse])
 def list_baselines(
     person_id: str,
@@ -71,6 +74,7 @@ def list_baselines(
     return query.order_by(DementiaBaselineModel.established_date.desc()).all()
 
 
+@cached_response(ttl=7200, key_prefix="dementia_baseline")
 @router.get("/baselines/{baseline_id}", response_model=DementiaBaselineResponse)
 def get_baseline(
     baseline_id: str,
@@ -113,6 +117,7 @@ def create_observation(
     return created
 
 
+@cached_response(ttl=1800, key_prefix="dementia_observations")
 @router.get("/observations/{person_id}", response_model=List[DementiaObservationResponse])
 def list_observations(
     person_id: str,
@@ -177,6 +182,7 @@ def record_caregiver_disagreement(
     return record
 
 
+@cached_response(ttl=3600, key_prefix="dementia_disagreements")
 @router.get("/caregiver-disagreements/{person_id}", response_model=List[DementiaCaregiverDisagreementResponse])
 def list_caregiver_disagreements(
     person_id: str,
@@ -204,6 +210,7 @@ def create_safety_event(
     return record
 
 
+@cached_response(ttl=1800, key_prefix="dementia_safety_events")
 @router.get("/safety-events/{person_id}", response_model=List[DementiaSafetyEventResponse])
 def list_safety_events(
     person_id: str,
@@ -218,6 +225,7 @@ def list_safety_events(
     ).order_by(DementiaSafetyEventModel.created_at.desc()).all()
 
 
+@cached_response(ttl=3600, key_prefix="dementia_summary")
 @router.get("/summary/{person_id}", response_model=DementiaReasoningSummary)
 def get_dementia_summary(
     person_id: str,

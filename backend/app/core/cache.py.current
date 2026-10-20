@@ -1,0 +1,5 @@
+﻿"""
+Redis caching service for SolenOS.
+Provides distributed caching with automatic serialization and cache key management.
+from typing import Optional, List
+from typing import Optional, List

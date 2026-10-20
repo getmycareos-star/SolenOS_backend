@@ -1,0 +1,63 @@
+import sys
+sys.path.insert(0, '.')
+
+from datetime import datetime, timezone
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base
+from app.models.identity import Person
+from app.models.caregiver import Caregiver
+from app.schemas.situation import SituationInput
+from app.services.situation import process_situation_input
+
+SQLALCHEMY_DATABASE_URL = 'sqlite:///:memory:'
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={'check_same_thread': False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Setup
+Base.metadata.create_all(bind=engine)
+
+try:
+    db = TestingSessionLocal()
+    person = Person(id='int-person-1', name='Test Person')
+    caregiver = Caregiver(
+        id='int-cg-1',
+        name='Test Caregiver',
+        email='int-test-1@example.com',
+        relationship='Family',
+        person_id=person.id,
+        timezone='UTC',
+    )
+    db.add_all([person, caregiver])
+    db.commit()
+    db.close()
+
+    db = TestingSessionLocal()
+    payload = SituationInput(
+        caregiver_id='int-cg-1',
+        person_id='int-person-1',
+        raw_input='The person fell while getting out of bed.',
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    response = process_situation_input(db, payload)
+    print("Response:", response)
+except Exception as e:
+    print(f"Error: {e}")
+    import traceback
+    traceback.print_exc()
+finally:
+    Base.metadata.drop_all(bind=engine)

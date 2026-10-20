@@ -1,0 +1,656 @@
+﻿"""Authentication API routes for SolenOS.
+
+Implements two-door entry:
+- Door 1: Anonymous access (no account required)
+- Door 2: Account creation/login with record claim/merge
+"""
+
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+from typing import Optional, Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Cookie, Form
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.config import get_settings
+from app.services.authentication import (
+    authenticate_account,
+    create_account,
+    create_anonymous_session,
+    refresh_access_token,
+    validate_session,
+    revoke_session,
+    revoke_all_sessions,
+    create_claim_session,
+    complete_claim,
+    generate_device_fingerprint,
+    InvalidCredentialsError,
+    AccountLockedError,
+    SessionExpiredError,
+    SessionRevokedError,
+    AuthenticationError,
+)
+from app.services.authorization import (
+    authorize,
+    require_authorization,
+    AuthorizationContext,
+    DataClassification,
+)
+from app.models.identity import Account, Session, AnonymousSessionRecord, Person, CaregiverRoleLink
+from app.models.caregiver_intelligence import CaregiverProfile
+from app.models.caregiver import Caregiver
+# Rate limiting storage
+_login_attempts = defaultdict(list)
+_RATE_LIMIT_WINDOW = timedelta(minutes=1)
+_MAX_ATTEMPTS = 5
+
+router = APIRouter(tags=["authentication"])
+settings = get_settings()
+
+
+# ==================== Request/Response Models ====================
+
+class AnonymousSessionResponse(BaseModel):
+    session_id: str
+    access_token: str
+    expires_at: str
+    message: str = "Anonymous session created. You can start building your care record."
+
+
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=128)
+    display_name: Optional[str] = None
+    anonymous_session_id: Optional[str] = None  # For claiming anonymous record
+    care_session_id: Optional[str] = None  # Frontend session ID
+
+
+class SignupResponse(BaseModel):
+    account_id: str
+    session_id: str
+    access_token: str
+    refresh_token: str
+    claimed_person_ids: List[str] = []
+    message: str
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+    anonymous_session_id: Optional[str] = None  # For merging anonymous record
+    remember_me: bool = False
+
+
+class LoginResponse(BaseModel):
+    account_id: str
+    session_id: str
+    access_token: str
+    refresh_token: str
+    merged_person_ids: List[str] = []
+    message: str
+
+
+class ClaimRequest(BaseModel):
+    anonymous_session_id: str
+
+
+class ClaimResponse(BaseModel):
+    claimed_person_ids: List[str]
+    message: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+
+
+class SessionInfoResponse(BaseModel):
+    authenticated: bool
+    account_id: Optional[str] = None
+    session_type: str
+    authorized_person_ids: List[str] = []
+    caregiver_roles: Dict[str, str] = {}
+    professional_roles: Dict[str, str] = {}
+    anonymous_session_id: Optional[str] = None
+    expires_at: str
+    mfa_verified: bool = False
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    error_code: str
+    details: Optional[Dict[str, Any]] = None
+
+
+# ==================== Helper Functions ====================
+
+def get_device_fingerprint(request: Request) -> str:
+    """Extract device fingerprint from request."""
+    user_agent = request.headers.get("user-agent", "")
+    ip = request.client.host if request.client else "unknown"
+    # Add additional entropy from headers
+    additional = request.headers.get("accept-language", "") + request.headers.get("accept-encoding", "")
+    return generate_device_fingerprint(user_agent, ip, additional)
+
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: Optional[str] = None, remember_me: bool = False):
+    """Set authentication cookies."""
+    # Access token - short lived, httponly, secure
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=not settings.debug,  # Secure in production
+        samesite="lax",
+        max_age=30 * 60,  # 30 minutes
+        path="/",
+    )
+    
+    # Refresh token - longer lived, httponly, secure
+    if refresh_token:
+        max_age = 30 * 24 * 60 * 60 if remember_me else 24 * 60 * 60  # 30 days or 1 day
+        response.set_cookie(
+            key="refresh_token",
+            value=refresh_token,
+            httponly=True,
+            secure=not settings.debug,
+            samesite="lax",
+            max_age=max_age,
+            path="/auth/refresh",
+        )
+
+
+def clear_auth_cookies(response: Response):
+    """Clear authentication cookies."""
+    response.delete_cookie("access_token", path="/")
+    response.delete_cookie("refresh_token", path="/auth/refresh")
+
+
+def get_current_session(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+) -> Session:
+    """Get current session from access token (cookie or header)."""
+    # Also check Authorization header
+    if not access_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+    
+    if not access_token:
+        raise HTTPException(status_code=401, detail="No authentication token")
+    
+    try:
+        session = validate_session(db, access_token)
+        return session
+    except SessionExpiredError:
+        raise HTTPException(status_code=401, detail="Session expired")
+    except SessionRevokedError:
+        raise HTTPException(status_code=401, detail="Session revoked")
+    except AuthenticationError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+def get_optional_session(
+    request: Request,
+    access_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+) -> Optional[Session]:
+    """Get current session if available, None otherwise."""
+    if not access_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            access_token = auth_header[7:]
+    
+    if not access_token:
+        return None
+    
+    try:
+        return validate_session(db, access_token)
+    except (SessionExpiredError, SessionRevokedError, AuthenticationError):
+        return None
+
+
+# ==================== Door 1: Anonymous Access ====================
+
+@router.post("/anonymous", response_model=AnonymousSessionResponse)
+async def create_anonymous(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    """Create anonymous session for first-time users.
+    
+    Door 1: Use SolenOS without an account.
+    No credentials required. Returns session token for immediate use.
+    """
+    device_fingerprint = get_device_fingerprint(request)
+    
+    session, access_token = create_anonymous_session(
+        db=db,
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+        device_fingerprint=device_fingerprint,
+    )
+    
+    # Set cookie for seamless experience
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=not settings.debug,
+        samesite="lax",
+        max_age=90 * 24 * 60 * 60,  # 90 days for anonymous
+        path="/",
+    )
+    
+    return AnonymousSessionResponse(
+        session_id=session.id,
+        access_token=access_token,
+        expires_at=session.expires_at.isoformat(),
+    )
+
+
+# ==================== Door 2: Account Creation ====================
+
+@router.post("/signup", response_model=SignupResponse)
+async def signup(
+    request: Request,
+    response: Response,
+    signup_data: SignupRequest,
+    db: Session = Depends(get_db),
+):
+    """Create account and optionally claim anonymous record.
+    
+    Door 2: Create account to preserve your record.
+    If anonymous_session_id provided, claims the anonymous record.
+    """
+    device_fingerprint = get_device_fingerprint(request)
+    
+    # Create account
+    try:
+        account = create_account(
+            db=db,
+            email=signup_data.email,
+            password=signup_data.password,
+            account_type="caregiver",
+            display_name=signup_data.display_name,
+        )
+    except AuthenticationError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    
+    claimed_person_ids = []
+    
+    # If anonymous session provided, claim it
+    if signup_data.anonymous_session_id:
+        # Create claiming session
+        claim_session, claim_access_token, claim_refresh_token = create_claim_session(
+            db=db,
+            anonymous_session_id=signup_data.anonymous_session_id,
+            account=account,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        
+        # Complete claim
+        claimed_person_ids = complete_claim(
+            db=db,
+            anonymous_session_id=signup_data.anonymous_session_id,
+            account=account,
+            claim_session=claim_session,
+        )
+        
+        # Use claim session tokens
+        access_token = claim_access_token
+        refresh_token = claim_refresh_token
+        session_id = claim_session.id
+    else:
+        # Regular authenticated session
+        account, session, access_token, refresh_token = authenticate_account(
+            db=db,
+            email=signup_data.email,
+            password=signup_data.password,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            device_fingerprint=device_fingerprint,
+        )
+        session_id = session.id
+    
+    # Set cookies
+    set_auth_cookies(response, access_token, refresh_token)
+    
+    return SignupResponse(
+        account_id=account.id,
+        session_id=session_id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        claimed_person_ids=claimed_person_ids,
+        message="Account created successfully" + (f" and claimed {len(claimed_person_ids)} care record(s)" if claimed_person_ids else ""),
+    )
+
+
+@router.post("/login", response_model=LoginResponse)
+async def login(
+    request: Request,
+    response: Response,
+    login_data: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    """Login to existing account.
+    
+    Optionally merge anonymous record if anonymous_session_id provided.
+    """
+    # Rate limiting
+    ip = request.client.host if request.client else "unknown"
+    now = datetime.now()
+    # Remove attempts older than the window
+    _login_attempts[ip] = [attempt for attempt in _login_attempts[ip] if now - attempt < _RATE_LIMIT_WINDOW]
+    if len(_login_attempts[ip]) >= _MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+        )
+    device_fingerprint = get_device_fingerprint(request)
+    
+    try:
+        account, session, access_token, refresh_token = authenticate_account(
+            db=db,
+            email=login_data.email,
+            password=login_data.password,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            device_fingerprint=device_fingerprint,
+        )
+    except InvalidCredentialsError:
+        # Update rate limiting attempts
+        ip = request.client.host if request.client else "unknown"
+        _login_attempts[ip].append(datetime.now())
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    except AccountLockedError as e:
+        # Update rate limiting attempts
+        ip = request.client.host if request.client else "unknown"
+        _login_attempts[ip].append(datetime.now())
+        raise HTTPException(status_code=423, detail=str(e))
+    
+    merged_person_ids = []
+    
+    # If anonymous session provided, merge it
+    if login_data.anonymous_session_id:
+        # Verify anonymous session exists and is unclaimed
+        anon_record = db.query(AnonymousSessionRecord).filter(
+            AnonymousSessionRecord.anonymous_session_id == login_data.anonymous_session_id,
+            AnonymousSessionRecord.claimed == False,
+            AnonymousSessionRecord.expires_at > datetime.now(timezone.utc),
+        ).first()
+        
+        if anon_record:
+            # Create claiming session
+            claim_session, _, _ = create_claim_session(
+                db=db,
+                anonymous_session_id=login_data.anonymous_session_id,
+                account=account,
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+            
+            # Complete claim
+            merged_person_ids = complete_claim(
+                db=db,
+                anonymous_session_id=login_data.anonymous_session_id,
+                account=account,
+                claim_session=claim_session,
+            )
+    
+    # Set cookies
+    set_auth_cookies(response, access_token, refresh_token, login_data.remember_me)
+    
+    return LoginResponse(
+        account_id=account.id,
+        session_id=session.id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        merged_person_ids=merged_person_ids,
+        message="Login successful" + (f" and merged {len(merged_person_ids)} care record(s)" if merged_person_ids else ""),
+    )
+
+
+# ==================== Token Management ====================
+
+@router.post("/refresh", response_model=RefreshResponse)
+async def refresh_token(
+    request: Request,
+    response: Response,
+    refresh_token: Optional[str] = Cookie(None),
+    db: Session = Depends(get_db),
+):
+    """Refresh access token using refresh token."""
+    # Also check body
+    if not refresh_token:
+        body = await request.json()
+        refresh_token = body.get("refresh_token")
+    
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token")
+    
+    try:
+        new_access_token, new_refresh_token = refresh_access_token(db, refresh_token)
+    except (SessionExpiredError, SessionRevokedError, AuthenticationError) as e:
+        clear_auth_cookies(response)
+        raise HTTPException(status_code=401, detail=str(e))
+    
+    # Update cookies
+    set_auth_cookies(response, new_access_token, new_refresh_token)
+    
+    return RefreshResponse(
+        access_token=new_access_token,
+        refresh_token=new_refresh_token,
+    )
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_current_session),
+    db: Session = Depends(get_db),
+):
+    """Logout and revoke current session."""
+    revoke_session(db, session.id, "user_logout")
+    clear_auth_cookies(response)
+    return {"message": "Logged out successfully"}
+
+
+@router.post("/logout-all")
+async def logout_all(
+    request: Request,
+    response: Response,
+    session: Session = Depends(get_current_session),
+    db: Session = Depends(get_db),
+):
+    """Logout from all devices (revoke all sessions)."""
+    if session.account_id:
+        count = revoke_all_sessions(db, session.account_id, except_session_id=session.id, reason="logout_all")
+    clear_auth_cookies(response)
+    return {"message": f"Logged out from all devices ({count} sessions revoked)"}
+
+
+# ==================== Session Info ====================
+
+@router.get("/session", response_model=SessionInfoResponse)
+async def get_session_info(
+    session: Session = Depends(get_current_session),
+    db: Session = Depends(get_db),
+):
+    """Get current session information."""
+    return SessionInfoResponse(
+        authenticated=session.account_id is not None,
+        account_id=session.account_id,
+        session_type=session.session_type.value,
+        authorized_person_ids=session.authorized_person_ids or [],
+        caregiver_roles=session.authorized_caregiver_roles or {},
+        professional_roles=session.authorized_professional_roles or {},
+        anonymous_session_id=session.anonymous_session_id,
+        expires_at=session.expires_at.isoformat(),
+        mfa_verified=session.mfa_verified,
+    )
+
+
+@router.get("/session/anonymous")
+async def get_anonymous_session_info(
+    session: Optional[Session] = Depends(get_optional_session),
+    db: Session = Depends(get_db),
+):
+    """Get anonymous session info (for frontend to check if anonymous record exists)."""
+    if not session:
+        return {"has_anonymous_session": False}
+    
+    if session.session_type.value != "anonymous":
+        return {"has_anonymous_session": False, "authenticated": True}
+    
+    # Get anonymous records
+    anon_records = db.query(AnonymousSessionRecord).filter(
+        AnonymousSessionRecord.anonymous_session_id == session.anonymous_session_id,
+        AnonymousSessionRecord.claimed == False,
+    ).all()
+    
+    # Calculate record value score
+    total_evidence = sum(len(r.evidence_ids or []) for r in anon_records)
+    total_events = sum(len(r.care_event_ids or []) for r in anon_records)
+    total_documents = sum(len(r.document_ids or []) for r in anon_records)
+    has_person = any(r.person_id for r in anon_records)
+    
+    record_value = total_evidence * 2 + total_events * 3 + total_documents * 5 + (10 if has_person else 0)
+    
+    return {
+        "has_anonymous_session": True,
+        "anonymous_session_id": session.anonymous_session_id,
+        "record_value_score": record_value,
+        "has_person": has_person,
+        "evidence_count": total_evidence,
+        "events_count": total_events,
+        "documents_count": total_documents,
+        "signup_eligible": record_value >= 15,  # Threshold for signup prompt
+        "expires_at": session.expires_at.isoformat(),
+    }
+
+
+# ==================== Record Creation (Anonymous & Authenticated) ====================
+
+class RecordValueRequest(BaseModel):
+    """Request to calculate record value for signup prompt."""
+    person_id: Optional[str] = None
+
+
+@router.post("/record-value")
+async def calculate_record_value(
+    request: RecordValueRequest,
+    session: Optional[Session] = Depends(get_optional_session),
+    db: Session = Depends(get_db),
+):
+    """Calculate record value for signup eligibility."""
+    if not session:
+        return {"value_score": 0, "eligible": False}
+    
+    if session.account_id:
+        # Authenticated - check their records
+        person_ids = session.authorized_person_ids or []
+    else:
+        # Anonymous - check anonymous records
+        anon_records = db.query(AnonymousSessionRecord).filter(
+            AnonymousSessionRecord.anonymous_session_id == session.anonymous_session_id,
+            AnonymousSessionRecord.claimed == False,
+        ).all()
+        person_ids = [r.person_id for r in anon_records if r.person_id]
+    
+    total_score = 0
+    for pid in person_ids:
+        if not pid:
+            continue
+        # Count evidence
+        from app.models.evidence import Evidence
+        evidence_count = db.query(Evidence).filter(Evidence.subject_id == pid).count()
+        # Count events
+        from app.models.care_event import CareEvent
+        event_count = db.query(CareEvent).filter(CareEvent.person_id == pid).count()
+        # Count documents
+        from app.models.document import Document
+        doc_count = db.query(Document).filter(Document.person_id == pid).count()
+        
+        total_score += evidence_count * 2 + event_count * 3 + doc_count * 5 + 10
+    
+    return {
+        "value_score": total_score,
+        "eligible": total_score >= 15,
+        "person_count": len(person_ids),
+    }
+
+
+# ==================== Development/Testing ====================
+
+@router.post("/dev/reset-failed-logins/{email}")
+async def dev_reset_failed_logins(
+    email: str,
+    db: Session = Depends(get_db),
+    session: Session = Depends(get_current_session),
+):
+    """Development helper: reset failed login attempts.
+
+    Only available when debug mode is enabled and caller is authenticated.
+    """
+    if not settings.debug:
+        from app.core.security import _log_security_event
+        _log_security_event(
+            "authz_failure",
+            request=None,
+            principal=None,
+            reason="dev endpoint accessed in production mode",
+            status_code=404,
+        )
+        raise HTTPException(status_code=404, detail="Not found")
+    account = db.query(Account).filter(Account.email == email.lower()).first()
+    if account:
+        account.failed_login_attempts = 0
+        account.locked_until = None
+        db.commit()
+    return {"ok": True}
+
+
+@router.get("/dev/sessions")
+async def dev_list_sessions(
+    db: Session = Depends(get_db),
+    session: Session = Depends(get_current_session),
+):
+    """Development helper: list all sessions.
+
+    Only available when debug mode is enabled and caller is staff.
+    """
+    if not settings.debug:
+        from app.core.security import _log_security_event
+        _log_security_event(
+            "authz_failure",
+            request=None,
+            principal=None,
+            reason="dev endpoint accessed in production mode",
+            status_code=404,
+        )
+        raise HTTPException(status_code=404, detail="Not found")
+    sessions = db.query(Session).all()
+    return [
+        {
+            "id": s.id,
+            "account_id": s.account_id,
+            "type": s.session_type.value,
+            "anonymous_id": s.anonymous_session_id,
+            "revoked": s.revoked_at is not None,
+            "expires": s.expires_at.isoformat(),
+        }
+        for s in sessions
+    ]
+

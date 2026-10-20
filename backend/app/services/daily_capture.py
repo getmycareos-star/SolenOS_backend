@@ -31,7 +31,8 @@ from app.core.daily_capture_enums import (
     ScaleAxis,
     VitalType,
 )
-from app.models.care import CareEvent, Evidence
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence
 from app.models.daily_capture import MedicationRecord, ScaleObservation, VitalSign
 
 

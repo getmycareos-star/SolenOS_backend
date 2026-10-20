@@ -1,0 +1,231 @@
+"""Identity Architecture Enums for SolenOS.
+
+Separates distinct identity types to prevent conflation.
+Each identity type has its own lifecycle, verification, and authorization context.
+"""
+
+from enum import Enum
+
+
+class AccountType(str, Enum):
+    """Type of account in SolenOS.
+
+    This is the authentication identity - how someone signs in.
+    Separate from person identity (who the care is about) and
+    role identity (what permissions they have).
+    """
+
+    CAREGIVER = "caregiver"
+    """Family caregiver account - primary user type."""
+
+    PROFESSIONAL = "professional"
+    """Verified professional account - clinician, nurse, social worker, etc."""
+
+    CARE_RECIPIENT = "care_recipient"
+    """Care recipient account - for direct access (future)."""
+
+    SOLENOS_STAFF = "solenos_staff"
+    """Internal SolenOS team member account."""
+
+    SERVICE = "service"
+    """Service-to-service account for internal systems."""
+
+
+class PersonType(str, Enum):
+    """Type of person identity in the care context."""
+
+    CARE_RECIPIENT = "care_recipient"
+    """The person receiving care."""
+
+    CAREGIVER = "caregiver"
+    """A family caregiver (also has Account identity)."""
+
+    PROFESSIONAL = "professional"
+    """A professional participant (also has Account identity)."""
+
+    FAMILY_MEMBER = "family_member"
+    """Family member not acting as primary caregiver."""
+
+    OTHER = "other"
+    """Other person in the care network."""
+
+
+class CaregiverRole(str, Enum):
+    """Caregiver role within a specific care context.
+
+    This is distinct from AccountType - a person with a CAREGIVER account
+    may have different roles in different care contexts.
+    """
+
+    PRIMARY = "primary"
+    """Primary decision-maker and coordinator."""
+
+    SECONDARY = "secondary"
+    """Active participant, not primary coordinator."""
+
+    OBSERVER = "observer"
+    """View-only access to selected information."""
+
+    DELEGATE = "delegate"
+    """Acting on behalf of primary with specific permissions."""
+
+    EMERGENCY = "emergency"
+    """Break-glass access for emergency situations."""
+
+
+class ProfessionalRole(str, Enum):
+    """Professional role types.
+
+    These are verified credentials, not self-declared.
+    """
+
+    PHYSICIAN = "physician"
+    NURSE = "nurse"
+    NURSE_PRACTITIONER = "nurse_practitioner"
+    PHYSICIAN_ASSISTANT = "physician_assistant"
+    SOCIAL_WORKER = "social_worker"
+    CARE_MANAGER = "care_manager"
+    DEMENTIA_SPECIALIST = "dementia_specialist"
+    PHARMACIST = "pharmacist"
+    THERAPIST = "therapist"
+    OCCUPATIONAL_THERAPIST = "occupational_therapist"
+    PHYSICAL_THERAPIST = "physical_therapist"
+    SPEECH_THERAPIST = "speech_therapist"
+    GERIATRICIAN = "geriatrician"
+    NEUROLOGIST = "neurologist"
+    PSYCHIATRIST = "psychiatrist"
+    HOME_CARE_PROFESSIONAL = "home_care_professional"
+    COMMUNITY_CARE_PROFESSIONAL = "community_care_professional"
+    PALLIATIVE_CARE_SPECIALIST = "palliative_care_specialist"
+    CASE_MANAGER = "case_manager"
+    OTHER_CLINICAL = "other_clinical"
+    OTHER_NON_CLINICAL = "other_non_clinical"
+
+
+class ProfessionalVerificationStatus(str, Enum):
+    """Verification status of a professional's credentials."""
+
+    UNVERIFIED = "unverified"
+    """No verification attempted."""
+
+    PENDING_VERIFICATION = "pending_verification"
+    """Verification submitted, under review."""
+
+    VERIFIED = "verified"
+    """Credentials verified and current."""
+
+    REVERIFICATION_DUE = "reverification_due"
+    """Verification expired, needs renewal."""
+
+    EXPIRED = "expired"
+    """Credentials expired."""
+
+    SUSPENDED = "suspended"
+    """Credentials suspended by issuer."""
+
+    REVOKED = "revoked"
+    """Credentials revoked by issuer."""
+
+    REJECTED = "rejected"
+    """Verification attempt failed."""
+
+
+class VerificationMethod(str, Enum):
+    """Method used to verify professional credentials."""
+
+    MANUAL_REVIEW = "manual_review"
+    """Human reviewer verified documents."""
+
+    AUTOMATED_API = "automated_api"
+    """Verified via licensing board API."""
+
+    THIRD_PARTY_SERVICE = "third_party_service"
+    """Verified via credential verification service."""
+
+    SELF_ATTESTED = "self_attested"
+    """Self-declared, not verified (lowest trust)."""
+
+
+class SessionType(str, Enum):
+    """Type of session for access control."""
+
+    AUTHENTICATED = "authenticated"
+    """Fully authenticated user session."""
+
+    ANONYMOUS = "anonymous"
+    """Anonymous session with ephemeral record."""
+
+    CLAIMING = "claiming"
+    """Session in process of claiming anonymous record."""
+
+    ELEVATED = "elevated"
+    """Privileged session (admin, break-glass)."""
+
+    SERVICE = "service"
+    """Service-to-service session."""
+
+
+class DeviceTrustLevel(str, Enum):
+    """Trust level of a device."""
+
+    UNKNOWN = "unknown"
+    """First time seen."""
+
+    TRUSTED = "trusted"
+    """User has marked as trusted (MFA completed)."""
+
+    UNTRUSTED = "untrusted"
+    """Flagged for suspicious activity."""
+
+    REVOKED = "revoked"
+    """Explicitly revoked by user or admin."""
+
+
+class IdentityLinkType(str, Enum):
+    """How two identities are linked."""
+
+    SAME_PERSON = "same_person"
+    """Account and person are the same individual."""
+
+    CAREGIVER_FOR = "caregiver_for"
+    """Account holder is caregiver for person."""
+
+    PROFESSIONAL_FOR = "professional_for"
+    """Account holder is professional for person."""
+
+    FAMILY_OF = "family_of"
+    """Account holder is family member of person."""
+
+    DELEGATE_OF = "delegate_of"
+    """Account holder is delegate for person."""
+
+    STAFF_FOR = "staff_for"
+    """SolenOS staff acting in official capacity."""
+
+
+class AuthProvider(str, Enum):
+    """Authentication provider."""
+
+    EMAIL_PASSWORD = "email_password"
+    GOOGLE = "google"
+    APPLE = "apple"
+    MICROSOFT = "microsoft"
+    MAGIC_LINK = "magic_link"
+    PASSKEY = "passkey"
+
+class EvidenceTypeEnum(str, Enum):
+    OBSERVATION = "observation"
+    MEDICATION_ADMINISTERED = "medication_administered"
+    SYMPTOM_REPORTED = "symptom_reported"
+    VITAL_SIGNS_MEASURED = "vital_signs_measured"
+    BEHAVIOR_OBSERVED = "behavior_observed"
+
+
+
+class EvidenceTypeEnum(str, Enum):
+    """Evidence types used in belief updating."""
+    OBSERVATION = "observation"
+    MEDICATION_ADMINISTERED = "medication_administered"
+    SYMPTOM_REPORTED = "symptom_reported"
+    VITAL_SIGNS_MEASURED = "vital_signs_measured"
+    BEHAVIOR_OBSERVED = "behavior_observed"

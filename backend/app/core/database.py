@@ -1,7 +1,11 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import get_settings
+from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -9,7 +13,39 @@ engine = create_engine(settings.database_url, connect_args={"check_same_thread":
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-import app.models.care
+# Database connection metrics
+try:
+    from app.core.metrics import DATABASE_CONNECTIONS_ACTIVE
+    # Event listeners for connection pool
+    @event.listens_for(engine, "connect")
+    def receive_connect(dbapi_connection, connection_record):
+        """Increment active connection count when a new connection is created."""
+        DATABASE_CONNECTIONS_ACTIVE.inc()
+        logger.debug("Database connection created")
+
+    @event.listens_for(engine, "close")
+    def receive_close(dbapi_connection, connection_record):
+        """Decrement active connection count when a connection is closed."""
+        DATABASE_CONNECTIONS_ACTIVE.dec()
+        logger.debug("Database connection closed")
+        
+    @event.listens_for(engine, "checkout")
+    def receive_checkout(dbapi_connection, connection_record, connection_proxy):
+        """Increment active connection count when a connection is checked out from pool."""
+        pass  # Already counted in connect event
+        
+    @event.listens_for(engine, "checkin")
+    def receive_checkin(dbapi_connection, connection_record):
+        """Decrement active connection count when a connection is returned to pool."""
+        pass  # Already counted in close event
+        
+except ImportError:
+    # Metrics module not available, skip monitoring
+    logger.warning("Metrics module not available, database connection monitoring disabled")
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
 import app.models.document
 import app.models.uncertainty
 import app.models.temporal
@@ -17,6 +53,7 @@ import app.models.change
 import app.models.significance
 import app.models.action
 import app.models.caregiver_intelligence
+import app.models.caregiver
 import app.models.causal
 import app.models.safety
 import app.models.memory
@@ -34,10 +71,17 @@ import app.models.contradiction
 import app.models.care_planning
 import app.models.follow_up
 import app.models.conversation
-import app.models.daily_capture
 import app.models.wellbeing
 import app.models.care_sharing
 import app.models.community
+import app.models.care_circle
+import app.models.identity
+import app.models.care
+import app.models.care_event
+import app.models.evidence
+import app.models.notification
+import app.models.situation_information
+import app.models.job  # Add this line
 
 _initialized = False
 
@@ -131,3 +175,4 @@ def ensure_database_schema(bind=None):
 
 
 ensure_database_schema()
+

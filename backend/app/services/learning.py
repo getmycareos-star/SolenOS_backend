@@ -6,7 +6,9 @@ from app.models.memory import (
     Observation as ObservationModel,
     LearningEvent as LearningEventModel,
 )
-from app.models.care import Insight as InsightModel, CareEvent as CareEventModel, Evidence as EvidenceModel
+from app.models.care import Insight as InsightModel
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence as EvidenceModel
 
 
 class SavePipelineEvent:
@@ -62,7 +64,6 @@ class LearningEngine:
         self.evaluate_understanding(person_id)
 
     def evaluate_understanding(self, person_id: str):
-        from app.models.care import CareEvent
         from datetime import datetime, timezone, timedelta
 
         recent = (
@@ -103,7 +104,7 @@ class LearningEngine:
                 self._invalidate_derived_state(person_id, insight.evidence_ids or [])
 
         elif target_type == "care_event":
-            care_event = self.db.query(CareEventModel).filter(CareEventModel.id == target_id).first()
+            care_event = self.db.query(CareEvent).filter(CareEvent.id == target_id).first()
             if care_event:
                 old_description = care_event.description
                 if old_description == correction.original_text or not old_description:
@@ -229,11 +230,11 @@ class LearningEngine:
         try:
             care_events = (
                 self.db.query(CareEventModel)
-                .filter(
-                    CareEventModel.person_id == person_id,
-                    CareEventModel.evidence_ids.contains(evidence.id),
-                )
-                .all()
+                  .filter(
+                      CareEvent.person_id == person_id,
+                      CareEvent.evidence_ids.contains(evidence.id),
+                  )
+                  .all()
             )
             for ce in care_events:
                 if original_text and (ce.description == original_text or ce.description is None):

@@ -10,7 +10,10 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
-from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.identity import Person
+from app.models.caregiver import Caregiver
+from app.models.evidence import Evidence
+from app.models.care_event import CareEvent
 from app.models.change import Change, Situation
 from app.schemas.situation import SituationInput
 
@@ -61,13 +64,13 @@ def test_post_situation_triggers_change_detection_and_situations():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
-            caregiver_id="int-cg-1",
-            person_id="int-person-1",
-            raw_input="The person fell while getting out of bed.",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-        )
+                caregiver_id="int-cg-1",
+                person_id="int-person-1",
+                raw_input="The person fell while getting out of bed.",
+                timestamp=datetime.now(timezone.utc).isoformat(),
+            )
         response = client.post("/api/situation", json=payload.model_dump(mode="json"))
         assert response.status_code == 200
         data = response.json()
@@ -117,7 +120,7 @@ def test_multi_update_longitudinal_reasoning():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://localhost")
         inputs = [
             "The person fell while getting out of bed.",
             "Another fall occurred in the bathroom today.",
@@ -164,7 +167,7 @@ def test_idempotent_identical_input():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
             caregiver_id="int-cg-3",
             person_id="int-person-3",
@@ -204,7 +207,7 @@ def test_empty_input_returns_400():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = TestClient(app, base_url="http://localhost")
         payload = SituationInput(
             caregiver_id="int-cg-4",
             person_id="int-person-4",

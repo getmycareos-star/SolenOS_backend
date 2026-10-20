@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.conversation import ConversationEngine
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/companion", tags=["companion"])
 
@@ -69,6 +70,7 @@ def get_engine(db: Session = Depends(get_db)) -> ConversationEngine:
     return ConversationEngine(db)
 
 
+@cached_response(ttl=60, key_prefix="companion")
 @router.post("/query", response_model=CompanionAnswer)
 def query(
     payload: CompanionQuery,
@@ -95,6 +97,7 @@ def query(
     return _to_answer(payload.person_id, result)
 
 
+@cached_response(ttl=60, key_prefix="companion")
 @router.post("/conversation", response_model=CompanionAnswer)
 def conversation(
     payload: CompanionQuery,

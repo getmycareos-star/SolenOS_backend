@@ -10,7 +10,7 @@ from app.models.causal import (
     AlternativeExplanation as AlternativeExplanationModel,
     Confounder as ConfounderModel,
 )
-from app.models.care import CareEvent as CareEventModel
+from app.models.care_event import CareEvent
 from app.schemas.causal import (
     CausalHypothesisCreate,
     CausalHypothesisUpdate,
@@ -68,12 +68,12 @@ class CausalReasoningEngine:
         cause_types: Optional[List[str]] = None,
         outcome_types: Optional[List[str]] = None,
     ) -> List[TemporalAssociation]:
-        events = (
-            self.db.query(CareEventModel)
-            .filter(CareEventModel.person_id == person_id)
-            .order_by(CareEventModel.occurred_at.asc())
-            .all()
-        )
+          events = (
+              self.db.query(CareEvent)
+              .filter(CareEvent.person_id == person_id)
+              .order_by(CareEvent.occurred_at.asc())
+              .all()
+          )
 
         reference = None
         if reference_event_id:
@@ -600,11 +600,11 @@ class CausalReasoningEngine:
         window_end = _ensure_utc(center) + window
 
         events = (
-            self.db.query(CareEventModel)
+            self.db.query(CareEvent)
             .filter(
-                CareEventModel.person_id == person_id,
-                CareEventModel.occurred_at >= window_start,
-                CareEventModel.occurred_at <= window_end,
+                CareEvent.person_id == person_id,
+                CareEvent.occurred_at >= window_start,
+                CareEvent.occurred_at <= window_end,
             )
             .all()
         )
@@ -641,11 +641,11 @@ class CausalReasoningEngine:
         window_end = _ensure_utc(center) + window
 
         events = (
-            self.db.query(CareEventModel)
+            self.db.query(CareEvent)
             .filter(
-                CareEventModel.person_id == person_id,
-                CareEventModel.occurred_at >= window_start,
-                CareEventModel.occurred_at <= window_end,
+                CareEvent.person_id == person_id,
+                CareEvent.occurred_at >= window_start,
+                CareEvent.occurred_at <= window_end,
             )
             .all()
         )

@@ -19,6 +19,7 @@ from app.schemas.daily_capture import (
     VitalSignResponse,
 )
 from app.services.daily_capture import DailyCaptureService
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/daily", tags=["daily"])
 
@@ -132,7 +133,9 @@ def record_scale(
     return record
 
 
-@router.get("/adherence/{person_id}", response_model=AdherenceTrendResponse)
+@cached_response(ttl=300, key_prefix="adherence")
+@router.get("/adherence/{person_id}", 
+response_model=AdherenceTrendResponse)
 def adherence(
     person_id: str,
     medication_name: str,

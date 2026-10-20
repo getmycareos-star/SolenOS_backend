@@ -1,0 +1,16 @@
+"""Orchestration for local-model reasoning.
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+import asyncio
+import hashlib
+import json
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+"""Orchestration for local-model reasoning.
+    return task.value if hasattr(task, "value") else str(task)

@@ -1,0 +1,172 @@
+"""Orchestration for local-model reasoning.
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+import asyncio
+import hashlib
+import json
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+@dataclass
+class CacheEntry:
+class LocalReasoningEngine:
+    _breaker: Optional[CircuitBreaker] = None
+    _cache: Dict[str, CacheEntry] = {}
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _executor: Optional[ThreadPoolExecutor] = None
+
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+        self.db = db
+        self._client = client
+        self.settings = get_settings()
+        self.enabled = self.settings.llm_enabled
+
+        # Initialize thread pool for blocking operations
+        if self._executor is None:
+
+    def _get_cache_key(self, prompt: str, payload: Optional[Dict[str, Any]]) -> str:
+        payload_str = json.dumps(payload or {}, sort_keys=True)
+        combined = prompt + '|' + payload_str
+        return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+    async def _get_from_cache(self, cache_key: str) -> Optional[LLMReasoningResult]:
+        async with self._cache_lock:
+            entry = self._cache.get(cache_key)
+            if entry and not entry.is_expired():
+                entry.hit_count = entry.hit_count + 1
+                return entry.response
+            elif entry and entry.is_expired():
+                del self._cache[cache_key]
+            return None
+
+    async def _store_in_cache(self, cache_key: str, response: Optional[LLMReasoningResult], ttl: float = 300.0) -> None:
+        async with self._cache_lock:
+
+    def reason(
+        self,
+        task: Any,
+        person_id: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+        evidence_ids: Optional[Sequence[str]] = None,
+        evidence_texts: Optional[Dict[str, str]] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        mode: LLMReasoningMode = LLMReasoningMode.LLM_ASSISTED,
+        allow_diagnostic: bool = False,
+        allow_medical_action: bool = False,
+        require_evidence: bool = True,
+    ) -> Optional[LLMReasoningResult]:
+        task_value = _task_value(task)
+        evidence_list = list(evidence_ids or [])
+
+        if not self.enabled:
+            self._audit(person_id, task_value, mode, LLMStatus.DISABLED, note='local reasoning disabled')
+            return None
+        if mode == LLMReasoningMode.DETERMINISTIC_ONLY:
+            self._audit(
+                person_id,
+                task_value,
+                mode,
+                LLMStatus.OK,
+                fallback=True,
+                note='caller requested deterministic only',
+            )
+            return None
+        if self.breaker().is_open:
+            self._audit(
+                person_id,
+                task_value,
+                mode,
+                LLMStatus.CIRCUIT_OPEN,
+                fallback=True,
+                note='circuit open after repeated local-model failures',
+                evidence_ids=evidence_list,
+            )
+            return None
+
+        prompt = get_prompt(task_value)
+        request_payload = dict(payload or {})
+        cache_key = self._get_cache_key(prompt, request_payload)
+
+        # Try to get from cache first
+        cached_response = None
+        try:
+            loop = asyncio.new_event_loop()
+            cached_response = loop.run_until_complete(self._get_from_cache(cache_key))
+            loop.close()
+        except:
+            pass
+
+        if cached_response is not None:
+            # Audit the cache hit
+            try:
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
+                    self._audit(
+                        person_id, task_value, mode, LLMStatus.OK,
+                        latency_ms=1,
+                        note='cache hit',
+                        evidence_ids=evidence_list,
+                    )
+                )
+                loop.close()
+            except:
+                pass
+
+            return cached_response
+
+            self._cache[cache_key] = CacheEntry(
+        async with self._cache_lock:
+    async def _store_in_cache(self, cache_key: str, response: Optional[LLMReasoningResult], ttl: float = 300.0) -> None:
+
+            return None
+                del self._cache[cache_key]
+            elif entry and entry.is_expired():
+                return entry.response
+                entry.hit_count = entry.hit_count + 1
+            if entry and not entry.is_expired():
+            entry = self._cache.get(cache_key)
+        async with self._cache_lock:
+    async def _get_from_cache(self, cache_key: str) -> Optional[LLMReasoningResult]:
+
+        return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+        combined = prompt + '|' + payload_str
+        payload_str = json.dumps(payload or {}, sort_keys=True)
+    def _get_cache_key(self, prompt: str, payload: Optional[Dict[str, Any]]) -> str:
+
+        if self._executor is None:
+        # Initialize thread pool for blocking operations
+
+        self.enabled = self.settings.llm_enabled
+        self.settings = get_settings()
+        self._client = client
+        self.db = db
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+
+    _executor: Optional[ThreadPoolExecutor] = None
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _cache: Dict[str, CacheEntry] = {}
+    _breaker: Optional[CircuitBreaker] = None
+class LocalReasoningEngine:
+class CacheEntry:
+@dataclass
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+import time
+import json
+import hashlib
+import asyncio
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+"""Orchestration for local-model reasoning.
+    return task.value if hasattr(task, "value") else str(task)

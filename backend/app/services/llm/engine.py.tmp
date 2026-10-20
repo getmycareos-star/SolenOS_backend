@@ -1,0 +1,352 @@
+Orchestration for local-model reasoning with caching.
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+    reason(...) -> LLMReasoningResult | None
+
+It returns None whenever it could not produce something the trust guard is
+willing to let exist: the model is off, unreachable, circuit-broken, slow,
+unparseable, or answered with something the record cannot support. Every caller
+is written to treat None as "use the deterministic answer instead", which is why
+a stopped Ollama degrades the product rather than breaking it.
+
+Every attempt, including the failures, is written to the llm_calls audit table.
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
+from app.core.llm_enums import (
+    LLMReasoningMode,
+    LLMStatus,
+    LLMTask,
+    GuardVerdict,
+)
+from app.models.llm import LLMCall, LLMReasoningResult
+from app.services.llm.circuit import CircuitBreaker
+from app.services.llm.client import OllamaClient
+from app.services.llm.prompts import get_prompt
+from app.services.llm.trust_guard import TrustGuard
+
+
+@dataclass
+class CacheEntry:
+    prompt_hash: str
+    response: Optional[LLMReasoningResult]
+    timestamp: float
+    ttl: float = 300.0
+    hit_count: int = 0
+    
+    def is_expired(self) -> bool:
+        return time.time() - self.timestamp > self.ttl
+class LocalReasoningEngine:
+    _breaker: Optional[CircuitBreaker] = None
+    _cache: Dict[str, CacheEntry] = {}
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _executor: Optional[ThreadPoolExecutor] = None
+    
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+        self.db = db
+        self._client = client
+        self.settings = get_settings()
+        self.enabled = self.settings.llm_enabled
+        
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=getattr(self.settings, 'llm_max_workers', 4),
+                thread_name_prefix='llm_worker'
+            )
+
+    @classmethod
+    def breaker(cls) -> CircuitBreaker:
+        if cls._breaker is None:
+            settings = get_settings()
+            cls._breaker = CircuitBreaker(
+                failure_threshold=settings.llm_circuit_failure_threshold,
+                reset_seconds=settings.llm_circuit_reset_seconds,
+            )
+        return cls._breaker
+
+    @classmethod
+    def reset_circuit(cls) -> None:
+        cls.breaker().reset()
+
+    @property
+    def client(self) -> OllamaClient:
+        if self._client is None:
+            self._client = OllamaClient()
+        return self._client
+
+    def is_available(self) -> bool:
+        if not self.enabled:
+            return False
+        if self.breaker().is_open:
+            return False
+        ok, _ = self.client.is_available()
+        return ok
+
+    def health(self) -> Dict[str, Any]:
+        settings = self.settings
+        breaker = self.breaker()
+        if not self.enabled:
+            return {
+                "enabled": False,
+                "available": False,
+                "status": LLMStatus.DISABLED.value,
+                "base_url": settings.llm_base_url,
+                "model": settings.llm_model,
+                "circuit": breaker.state(),
+                "consecutive_failures": breaker.consecutive_failures,
+                "detail": "local reasoning is disabled by configuration",
+                "optimizations": {
+                    "caching_enabled": True,
+                    "async_processing": True,
+                    "cache_size": len(self._cache),
+                }
+            }
+        breaker_open = breaker.is_open
+        ok, detail = self.client.is_available()
+        return {
+            "enabled": True,
+            "available": bool(ok and not breaker_open),
+            "status": (
+                LLMStatus.CIRCUIT_OPEN.value
+                if breaker_open
+                else (LLMStatus.OK.value if ok else LLMStatus.UNAVAILABLE.value)
+            ),
+            "base_url": settings.llm_base_url,
+            "model": settings.llm_model,
+            "circuit": breaker.state(),
+            "consecutive_failures": breaker.consecutive_failures,
+            "detail": detail,
+            "optimizations": {
+                "caching_enabled": True,
+                "async_processing": True,
+                "cache_size": len(self._cache),
+                "cache_hits": sum(entry.hit_count for entry in self._cache.values()),
+            }
+        }
+
+    def _get_cache_key(self, prompt: str, payload: Optional[Dict[str, Any]]) -> str:
+        payload_str = json.dumps(payload or {}, sort_keys=True)
+        combined = prompt + "|" + payload_str
+        return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+    async def _get_from_cache(self, cache_key: str) -> Optional[LLMReasoningResult]:
+        async with self._cache_lock:
+            entry = self._cache.get(cache_key)
+            if entry and not entry.is_expired():
+                entry.hit_count = entry.hit_count + 1
+                return entry.response
+            elif entry and entry.is_expired():
+                del self._cache[cache_key]
+            return None
+
+    async def _store_in_cache(self, cache_key: str, response: Optional[LLMReasoningResult], ttl: float = 300.0) -> None:
+        async with self._cache_lock:
+            self._cache[cache_key] = CacheEntry(
+                prompt_hash=cache_key,
+                response=response,
+                timestamp=time.time(),
+                ttl=ttl,
+                hit_count=0
+            )
+            
+            max_cache_size = getattr(self.settings, 'llm_cache_size', 1000)
+            if len(self._cache) > max_cache_size:
+                sorted_entries = sorted(
+                    self._cache.items(),
+                    key=lambda x: x[1].timestamp
+                )
+                for key, _ in sorted_entries[:-max_cache_size]:
+                    del self._cache[key]
+    def reason(
+        self,
+        task: Any,
+        person_id: Optional[str] = None,
+        payload: Optional[Dict[str, Any]] = None,
+        evidence_ids: Optional[Sequence[str]] = None,
+        evidence_texts: Optional[Dict[str, str]] = None,
+        subject_type: Optional[str] = None,
+        subject_id: Optional[str] = None,
+        mode: LLMReasoningMode = LLMReasoningMode.LLM_ASSISTED,
+        allow_diagnostic: bool = False,
+        allow_medical_action: bool = False,
+        require_evidence: bool = True,
+    ) -> Optional[LLMReasoningResult]:
+        task_value = _task_value(task)
+        evidence_list = list(evidence_ids or [])
+
+        if not self.enabled:
+            self._audit(person_id, task_value, mode, LLMStatus.DISABLED, note="local reasoning disabled")
+            return None
+        if mode == LLMReasoningMode.DETERMINISTIC_ONLY:
+            self._audit(
+                person_id,
+                task_value,
+                mode,
+                LLMStatus.OK,
+                fallback=True,
+                note="caller requested deterministic only",
+            )
+            return None
+        if self.breaker().is_open:
+            self._audit(
+                person_id,
+                task_value,
+                mode,
+                LLMStatus.CIRCUIT_OPEN,
+                fallback=True,
+                note="circuit open after repeated local-model failures",
+                evidence_ids=evidence_list,
+            )
+            return None
+
+        prompt = get_prompt(task_value)
+        request_payload = dict(payload or {})
+        cache_key = self._get_cache_key(prompt, request_payload)
+        
+        # Try to get from cache first
+        cached_response = None
+        try:
+            loop = asyncio.new_event_loop()
+            cached_response = loop.run_until_complete(self._get_from_cache(cache_key))
+            loop.close()
+        except:
+            pass
+            
+        if cached_response is not None:
+            # Audit the cache hit
+            try:
+                loop = asyncio.new_event_loop()
+                loop.run_until_complete(
+                    self._audit(
+                        person_id, task_value, mode, LLMStatus.OK,
+                        latency_ms=1,
+                        note="cache hit",
+                        evidence_ids=evidence_list,
+                    )
+                )
+                loop.close()
+            except:
+                pass
+            
+            return cached_response
+
+        ok, parsed, raw, meta = self.client.generate_json(prompt, request_payload)
+        status = LLMStatus(meta.get("status", LLMStatus.ERROR.value))
+        latency_ms = meta.get("latency_ms")
+
+        if not ok:
+            self.breaker().record_failure()
+            self._audit(
+                person_id,
+                task_value,
+                mode,
+                status,
+                latency_ms=latency_ms,
+                error=raw or "local model call failed",
+                evidence_ids=evidence_list,
+                fallback=True,
+            )
+            return None
+
+        self.breaker().record_success()
+
+        guard = TrustGuard(
+            permitted_evidence_ids=evidence_list,
+            evidence_texts=evidence_texts,
+            allow_diagnostic=allow_diagnostic,
+            allow_medical_action=allow_medical_action,
+            require_evidence=require_evidence,
+        )
+
+        if task_value == LLMTask.CONVERSATION_REPLY.value:
+            guarded = guard.guard_conversation(parsed)
+        else:
+            guarded = guard.guard_insight(parsed)
+
+        call = self._audit(
+            person_id,
+            task_value,
+            mode,
+            status,
+            latency_ms=latency_ms,
+            prompt=prompt,
+            raw=raw,
+            parsed=parsed,
+            evidence_ids=evidence_list,
+            output_evidence_ids=guarded.output_evidence_ids,
+            dropped_evidence_ids=guarded.dropped_evidence_ids,
+            guard_verdict=guarded.verdict,
+            guard_reasons=guarded.reasons,
+            error="; ".join(guarded.reasons) if guarded.verdict == GuardVerdict.REJECTED else None,
+            prompt_tokens=meta.get("prompt_tokens"),
+            completion_tokens=meta.get("completion_tokens"),
+        )
+
+        if not guarded.is_usable:
+            return None
+
+        record = LLMReasoningResult(
+            person_id=person_id,
+            task=task_value,
+            call_id=call.id if call is not None else None,
+            subject_type=subject_type,
+            subject_id=subject_id,
+            summary=(
+                guarded.payload.get("summary")
+                or guarded.payload.get("reply")
+                or ""
+            ),
+            detail=_build_detail(guarded.payload),
+            evidence_ids=guarded.output_evidence_ids,
+            possible_context=guarded.payload.get("possible_context"),
+            confidence=guarded.confidence,
+            guard_verdict=guarded.verdict,
+            qualifications=guarded.qualifications or None,
+        )
+        if self.db is not None:
+            try:
+                self.db.add(record)
+                self.db.flush()
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                return None
+        
+        # Store result in cache for future use
+        try:
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(
+                self._store_in_cache(cache_key, record, ttl=300.0)
+            )
+            loop.close()
+        except:
+            pass
+            
+        return record
+def _build_detail(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    detail: List[Dict[str, Any]] = []
+    for key, value in payload.items():
+        if key in ("summary", "evidence_ids", "confidence", "possible_context"):
+            continue
+        detail.append({"field": key, "value": value})
+    return detail
+
+
+def _task_value(task: Any) -> str:
+    if isinstance(task, LLMTask):
+        return task.value
+    return task.value if hasattr(task, "value") else str(task)
+

@@ -1,0 +1,554 @@
+2026-10-14 02:01:00 - solenos.logging - INFO - 1168:13884 - logging.py:71 - Logging configured. Level: INFO, File: logs\solenos.log
+2026-10-14 02:01:10 - solenos.logging - INFO - 2856:8216 - logging.py:71 - Logging configured. Level: INFO, File: logs\solenos.log
+2026-10-14 03:06:04 - solenos.logging - INFO - 15348:14388 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:07:54 - solenos.logging - INFO - 4272:15912 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:07:55 - solenos.logging - INFO - 4272:15912 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:09:04 - solenos.logging - INFO - 13852:13108 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:09:04 - solenos.logging - INFO - 13852:13108 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:09:51 - solenos.logging - INFO - 6236:14136 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:09:52 - solenos.logging - INFO - 6236:14136 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:23:41 - solenos.logging - INFO - 11068:3084 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:23:42 - solenos.logging - INFO - 11068:3084 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:24:41 - solenos.logging - INFO - 9708:13872 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:24:42 - solenos.logging - INFO - 9708:13872 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:24:42 - solenos.logging - INFO - 9708:13872 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:24:42 - solenos.logging - INFO - 9708:13872 - main.py:173 - Validating configuration...
+2026-10-14 03:24:42 - solenos.logging - INFO - 9708:13872 - main.py:183 - Database connection verified.
+2026-10-14 03:25:16 - solenos.logging - INFO - 10576:4120 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:25:17 - solenos.logging - INFO - 10576:4120 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:25:17 - solenos.logging - INFO - 10576:4120 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:25:17 - solenos.logging - INFO - 10576:4120 - main.py:173 - Validating configuration...
+2026-10-14 03:25:17 - solenos.logging - INFO - 10576:4120 - main.py:183 - Database connection verified.
+2026-10-14 03:30:36 - solenos.logging - INFO - 14116:11568 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:173 - Validating configuration...
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:183 - Database connection verified.
+2026-10-14 03:30:37 - app.core.metrics - WARNING - 14116:11568 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:228 - SolenOS startup complete.
+2026-10-14 03:30:37 - solenos.logging - INFO - 14116:11568 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 03:30:38 - app.services.backup - ERROR - 14116:11568 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 03:30:38 - solenos.logging - ERROR - 14116:11568 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 03:33:23 - solenos.logging - INFO - 15712:9948 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:33:23 - solenos.logging - INFO - 15712:9948 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:34:37 - solenos.logging - INFO - 5836:12852 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:173 - Validating configuration...
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:183 - Database connection verified.
+2026-10-14 03:34:38 - app.core.metrics - WARNING - 5836:12852 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:228 - SolenOS startup complete.
+2026-10-14 03:34:38 - solenos.logging - INFO - 5836:12852 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 03:34:38 - app.services.backup - ERROR - 5836:12852 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 03:34:38 - solenos.logging - ERROR - 5836:12852 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 03:35:03 - solenos.logging - INFO - 5836:12852 - main.py:136 - Request started: e2112365-6e64-41d9-843e-e4a5ebd65f5b GET / from 127.0.0.1
+2026-10-14 03:35:03 - solenos.logging - INFO - 5836:12852 - main.py:156 - Request completed: e2112365-6e64-41d9-843e-e4a5ebd65f5b GET / status=200 took 0.00s
+2026-10-14 03:35:14 - solenos.logging - INFO - 6332:10376 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:35:15 - solenos.logging - INFO - 6332:10376 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:37:54 - solenos.logging - INFO - 7728:5188 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:37:55 - solenos.logging - INFO - 7728:5188 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:41:36 - solenos.logging - INFO - 10728:16164 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:41:36 - solenos.logging - INFO - 10728:16164 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:42:23 - solenos.logging - INFO - 15492:3524 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:42:23 - solenos.logging - INFO - 8504:6876 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:42:24 - solenos.logging - INFO - 15492:3524 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:173 - Validating configuration...
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:183 - Database connection verified.
+2026-10-14 03:42:24 - app.core.metrics - WARNING - 8504:6876 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:228 - SolenOS startup complete.
+2026-10-14 03:42:24 - solenos.logging - INFO - 8504:6876 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 03:42:24 - app.services.backup - ERROR - 8504:6876 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 03:42:24 - solenos.logging - ERROR - 8504:6876 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 03:42:41 - solenos.logging - INFO - 8504:6876 - main.py:136 - Request started: 58c66cde-ec30-48f8-b9f8-e595270b7fcb GET / from 127.0.0.1
+2026-10-14 03:42:41 - solenos.logging - INFO - 8504:6876 - main.py:156 - Request completed: 58c66cde-ec30-48f8-b9f8-e595270b7fcb GET / status=200 took 0.00s
+2026-10-14 03:42:43 - solenos.logging - INFO - 15108:16032 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:42:44 - solenos.logging - INFO - 15108:16032 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:43:23 - solenos.logging - INFO - 7612:12984 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:43:24 - solenos.logging - INFO - 7612:12984 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:43:39 - solenos.logging - INFO - 8504:6876 - main.py:136 - Request started: 6367595c-42d0-43db-bb0d-0d2130592072 GET /health from 127.0.0.1
+2026-10-14 03:43:39 - solenos.logging - INFO - 8504:6876 - main.py:156 - Request completed: 6367595c-42d0-43db-bb0d-0d2130592072 GET /health status=200 took 0.00s
+2026-10-14 03:43:52 - solenos.logging - INFO - 8504:6876 - main.py:136 - Request started: 91d6765a-e750-4a18-904a-f81d46f3a1ad GET /health from 127.0.0.1
+2026-10-14 03:43:52 - solenos.logging - INFO - 8504:6876 - main.py:156 - Request completed: 91d6765a-e750-4a18-904a-f81d46f3a1ad GET /health status=200 took 0.00s
+2026-10-14 03:50:17 - solenos.logging - INFO - 4032:14388 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:173 - Validating configuration...
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:183 - Database connection verified.
+2026-10-14 03:50:18 - app.core.metrics - WARNING - 4032:14388 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:228 - SolenOS startup complete.
+2026-10-14 03:50:18 - solenos.logging - INFO - 4032:14388 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 03:50:18 - app.services.backup - ERROR - 4032:14388 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 03:50:18 - solenos.logging - ERROR - 4032:14388 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 03:50:23 - solenos.logging - INFO - 13376:15504 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:50:24 - solenos.logging - INFO - 13376:15504 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:51:28 - solenos.logging - INFO - 15436:9788 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 03:51:29 - solenos.logging - INFO - 15436:9788 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 03:51:31 - solenos.logging - INFO - 15436:9788 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 03:51:31 - solenos.logging - INFO - 15436:9788 - main.py:173 - Validating configuration...
+2026-10-14 03:51:31 - solenos.logging - INFO - 15436:9788 - main.py:183 - Database connection verified.
+2026-10-14 03:51:31 - app.core.metrics - WARNING - 15436:9788 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 03:51:31 - solenos.logging - INFO - 15436:9788 - main.py:228 - SolenOS startup complete.
+2026-10-14 03:51:31 - solenos.logging - INFO - 15436:9788 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 03:51:31 - app.services.backup - ERROR - 15436:9788 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 03:51:32 - solenos.logging - ERROR - 15436:9788 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 03:54:19 - solenos.logging - INFO - 4032:14388 - main.py:136 - Request started: 17063d60-fc0a-4893-a64c-46f9d92af303 GET /health from 127.0.0.1
+2026-10-14 03:54:19 - solenos.logging - INFO - 4032:14388 - main.py:156 - Request completed: 17063d60-fc0a-4893-a64c-46f9d92af303 GET /health status=200 took 0.23s
+2026-10-14 03:54:34 - solenos.logging - INFO - 4032:14388 - main.py:136 - Request started: 5da955b0-44db-4e63-8df8-8959a173e8ec GET / from 127.0.0.1
+2026-10-14 03:54:34 - solenos.logging - INFO - 4032:14388 - main.py:156 - Request completed: 5da955b0-44db-4e63-8df8-8959a173e8ec GET / status=200 took 0.00s
+2026-10-14 04:00:29 - solenos.logging - INFO - 4032:14388 - main.py:136 - Request started: 495e2c1e-8e4f-4a44-8f34-ed789a3300c8 GET / from 127.0.0.1
+2026-10-14 04:00:30 - solenos.logging - INFO - 4032:14388 - main.py:156 - Request completed: 495e2c1e-8e4f-4a44-8f34-ed789a3300c8 GET / status=200 took 0.11s
+2026-10-14 04:02:11 - solenos.logging - INFO - 10308:13404 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:173 - Validating configuration...
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:183 - Database connection verified.
+2026-10-14 04:02:13 - app.core.metrics - WARNING - 10308:13404 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:02:13 - app.services.backup - ERROR - 10308:13404 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:02:13 - solenos.logging - ERROR - 10308:13404 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:256 - Shutting down SolenOS...
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:265 - Automatic backup scheduler stopped.
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:272 - Database connections closed.
+2026-10-14 04:02:13 - solenos.logging - INFO - 10308:13404 - main.py:276 - Shutdown complete.
+2026-10-14 04:02:21 - solenos.logging - INFO - 4032:14388 - main.py:136 - Request started: b5605647-3b9e-497b-be67-0da9902049f7 GET /routes from 127.0.0.1
+2026-10-14 04:02:21 - solenos.logging - INFO - 4032:14388 - main.py:156 - Request completed: b5605647-3b9e-497b-be67-0da9902049f7 GET /routes status=200 took 0.02s
+2026-10-14 04:02:42 - solenos.logging - INFO - 4032:14388 - main.py:136 - Request started: b7502884-c807-4374-bef3-dd108b2b7d96 GET /routes from 127.0.0.1
+2026-10-14 04:02:42 - solenos.logging - INFO - 4032:14388 - main.py:156 - Request completed: b7502884-c807-4374-bef3-dd108b2b7d96 GET /routes status=200 took 0.31s
+2026-10-14 04:05:07 - solenos.logging - INFO - 8412:10892 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:05:07 - solenos.logging - INFO - 8412:10892 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 04:05:08 - solenos.logging - INFO - 8412:10892 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:05:08 - solenos.logging - INFO - 8412:10892 - main.py:173 - Validating configuration...
+2026-10-14 04:05:08 - solenos.logging - INFO - 8412:10892 - main.py:183 - Database connection verified.
+2026-10-14 04:05:08 - app.core.metrics - WARNING - 8412:10892 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:05:08 - solenos.logging - INFO - 8412:10892 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:05:08 - solenos.logging - INFO - 8412:10892 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:05:08 - app.services.backup - ERROR - 8412:10892 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:05:08 - solenos.logging - ERROR - 8412:10892 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:13:55 - solenos.logging - INFO - 13812:12188 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:173 - Validating configuration...
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:183 - Database connection verified.
+2026-10-14 04:13:56 - app.core.metrics - WARNING - 13812:12188 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:13:56 - solenos.logging - INFO - 13812:12188 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:13:56 - app.services.backup - ERROR - 13812:12188 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:13:56 - solenos.logging - ERROR - 13812:12188 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:15:49 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: af1662ba-7750-4ded-bc5e-85c93f5820b3 GET /health from 127.0.0.1
+2026-10-14 04:15:49 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: af1662ba-7750-4ded-bc5e-85c93f5820b3 GET /health status=200 took 0.00s
+2026-10-14 04:16:01 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: 6684ae7c-08c1-4921-a91b-fb711edb87cb GET /metrics from 127.0.0.1
+2026-10-14 04:16:01 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: 6684ae7c-08c1-4921-a91b-fb711edb87cb GET /metrics status=200 took 0.00s
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:641 - SolenOS backend application initialized successfully.
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:173 - Validating configuration...
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:183 - Database connection verified.
+2026-10-14 04:18:35 - app.core.metrics - WARNING - 11156:13216 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:18:35 - solenos.logging - INFO - 11156:13216 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:18:35 - app.services.backup - ERROR - 11156:13216 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:18:35 - solenos.logging - ERROR - 11156:13216 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:18:36 - solenos.logging - INFO - 11156:13216 - main.py:256 - Shutting down SolenOS...
+2026-10-14 04:18:36 - solenos.logging - INFO - 11156:13216 - main.py:265 - Automatic backup scheduler stopped.
+2026-10-14 04:18:36 - solenos.logging - INFO - 11156:13216 - main.py:272 - Database connections closed.
+2026-10-14 04:18:36 - solenos.logging - INFO - 11156:13216 - main.py:276 - Shutdown complete.
+2026-10-14 04:18:45 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: f81dc14d-0608-46aa-97a8-b05065cc2313 GET / from 127.0.0.1
+2026-10-14 04:18:45 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: f81dc14d-0608-46aa-97a8-b05065cc2313 GET / status=200 took 0.33s
+2026-10-14 04:20:07 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: 868607a3-4619-4654-b0e0-b15f83a64baa GET /routes from 127.0.0.1
+2026-10-14 04:20:07 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: 868607a3-4619-4654-b0e0-b15f83a64baa GET /routes status=200 took 0.02s
+2026-10-14 04:20:39 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: d41c306b-278c-4d0d-afac-a14794f2fa67 GET /routes from 127.0.0.1
+2026-10-14 04:20:39 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: d41c306b-278c-4d0d-afac-a14794f2fa67 GET /routes status=200 took 0.01s
+2026-10-14 04:20:54 - solenos.logging - INFO - 11648:15284 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:20:55 - solenos.logging - INFO - 11648:15284 - main.py:642 - SolenOS backend application initialized successfully.
+2026-10-14 04:21:02 - solenos.logging - INFO - 13812:12188 - main.py:136 - Request started: c06eda1c-9c10-41ee-b660-bd812c619208 GET /routes from 127.0.0.1
+2026-10-14 04:21:02 - solenos.logging - INFO - 13812:12188 - main.py:156 - Request completed: c06eda1c-9c10-41ee-b660-bd812c619208 GET /routes status=200 took 0.03s
+2026-10-14 04:21:29 - solenos.logging - INFO - 9576:15336 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:642 - SolenOS backend application initialized successfully.
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:173 - Validating configuration...
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:183 - Database connection verified.
+2026-10-14 04:21:30 - app.core.metrics - WARNING - 9576:15336 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:21:30 - solenos.logging - INFO - 9576:15336 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:21:30 - app.services.backup - ERROR - 9576:15336 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:21:30 - solenos.logging - ERROR - 9576:15336 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:21:43 - solenos.logging - INFO - 15896:7676 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 04:21:44 - solenos.logging - INFO - 15896:7676 - main.py:642 - SolenOS backend application initialized successfully.
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:173 - Validating configuration...
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:183 - Database connection verified.
+2026-10-14 04:21:47 - app.core.metrics - WARNING - 15896:7676 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:228 - SolenOS startup complete.
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 04:21:47 - app.services.backup - ERROR - 15896:7676 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 04:21:47 - solenos.logging - ERROR - 15896:7676 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:256 - Shutting down SolenOS...
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:265 - Automatic backup scheduler stopped.
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:272 - Database connections closed.
+2026-10-14 04:21:47 - solenos.logging - INFO - 15896:7676 - main.py:276 - Shutdown complete.
+2026-10-14 04:22:09 - solenos.logging - INFO - 9576:15336 - main.py:136 - Request started: b5dd998a-c7c3-464e-ab1c-d5680f96ed38 GET / from 127.0.0.1
+2026-10-14 04:22:09 - solenos.logging - INFO - 9576:15336 - main.py:156 - Request completed: b5dd998a-c7c3-464e-ab1c-d5680f96ed38 GET / status=200 took 0.00s
+2026-10-14 04:22:18 - solenos.logging - INFO - 9576:15336 - main.py:136 - Request started: 1becb70f-feeb-4c88-a1a2-e42057b8922e GET /routes from 127.0.0.1
+2026-10-14 04:22:19 - solenos.logging - INFO - 9576:15336 - main.py:156 - Request completed: 1becb70f-feeb-4c88-a1a2-e42057b8922e GET /routes status=200 took 0.10s
+2026-10-14 05:08:58 - solenos.logging - INFO - 8484:14652 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:08:58 - solenos.logging - INFO - 8484:14652 - main.py:642 - SolenOS backend application initialized successfully.
+2026-10-14 05:08:59 - solenos.logging - INFO - 8484:14652 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 05:08:59 - solenos.logging - INFO - 8484:14652 - main.py:173 - Validating configuration...
+2026-10-14 05:08:59 - solenos.logging - INFO - 8484:14652 - main.py:183 - Database connection verified.
+2026-10-14 05:08:59 - app.core.metrics - WARNING - 8484:14652 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:08:59 - solenos.logging - INFO - 8484:14652 - main.py:228 - SolenOS startup complete.
+2026-10-14 05:08:59 - solenos.logging - INFO - 8484:14652 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:08:59 - app.services.backup - ERROR - 8484:14652 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:08:59 - solenos.logging - ERROR - 8484:14652 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:19:20 - solenos.logging - INFO - 18260:16572 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:642 - SolenOS backend application initialized successfully.
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:170 - Starting SolenOS version 0.1.0...
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:173 - Validating configuration...
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:183 - Database connection verified.
+2026-10-14 05:19:21 - app.core.metrics - WARNING - 18260:16572 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:228 - SolenOS startup complete.
+2026-10-14 05:19:21 - solenos.logging - INFO - 18260:16572 - main.py:233 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:19:21 - app.services.backup - ERROR - 18260:16572 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:19:21 - solenos.logging - ERROR - 18260:16572 - main.py:240 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:21:05 - solenos.logging - INFO - 18260:16572 - main.py:136 - Request started: deb7a9ce-3c83-4553-8d74-f6789606ada4 GET /health from 127.0.0.1
+2026-10-14 05:21:05 - solenos.logging - INFO - 18260:16572 - main.py:156 - Request completed: deb7a9ce-3c83-4553-8d74-f6789606ada4 GET /health status=200 took 0.05s
+2026-10-14 05:24:47 - solenos.logging - INFO - 17736:15576 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:24:48 - solenos.logging - INFO - 17736:15576 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 05:28:12 - solenos.logging - INFO - 18172:11924 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:28:12 - solenos.logging - INFO - 18172:11924 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 05:28:12 - solenos.logging - INFO - 18172:11924 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 05:28:12 - solenos.logging - INFO - 18172:11924 - main.py:174 - Validating configuration...
+2026-10-14 05:28:12 - solenos.logging - INFO - 18172:11924 - main.py:184 - Database connection verified.
+2026-10-14 05:28:17 - app.core.cache - ERROR - 18172:11924 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:28:17 - solenos.logging - WARNING - 18172:11924 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:28:17 - solenos.logging - WARNING - 18172:11924 - main.py:207 - Application will continue without caching.
+2026-10-14 05:28:17 - app.core.metrics - WARNING - 18172:11924 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:28:17 - solenos.logging - INFO - 18172:11924 - main.py:237 - SolenOS startup complete.
+2026-10-14 05:28:17 - solenos.logging - INFO - 18172:11924 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:28:17 - app.services.backup - ERROR - 18172:11924 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:28:17 - solenos.logging - ERROR - 18172:11924 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:30:10 - solenos.logging - INFO - 18172:11924 - main.py:137 - Request started: 44865051-f9af-4c54-b9bc-769edd6f74a8 GET /health from 127.0.0.1
+2026-10-14 05:30:10 - solenos.logging - INFO - 18172:11924 - main.py:157 - Request completed: 44865051-f9af-4c54-b9bc-769edd6f74a8 GET /health status=200 took 0.00s
+2026-10-14 05:35:06 - solenos.logging - INFO - 16728:13720 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:35:07 - solenos.logging - INFO - 16728:13720 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 05:35:07 - solenos.logging - INFO - 16728:13720 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 05:35:07 - solenos.logging - INFO - 16728:13720 - main.py:174 - Validating configuration...
+2026-10-14 05:35:07 - solenos.logging - INFO - 16728:13720 - main.py:184 - Database connection verified.
+2026-10-14 05:35:11 - app.core.cache - ERROR - 16728:13720 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:35:11 - solenos.logging - WARNING - 16728:13720 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:35:11 - solenos.logging - WARNING - 16728:13720 - main.py:207 - Application will continue without caching.
+2026-10-14 05:35:11 - app.core.metrics - WARNING - 16728:13720 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:35:11 - solenos.logging - INFO - 16728:13720 - main.py:237 - SolenOS startup complete.
+2026-10-14 05:35:11 - solenos.logging - INFO - 16728:13720 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:35:11 - app.services.backup - ERROR - 16728:13720 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:35:11 - solenos.logging - ERROR - 16728:13720 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:37:01 - solenos.logging - INFO - 16728:13720 - main.py:137 - Request started: 7f151802-787f-4763-9b81-6a4f360fec3e GET /health from 127.0.0.1
+2026-10-14 05:37:01 - solenos.logging - INFO - 16728:13720 - main.py:157 - Request completed: 7f151802-787f-4763-9b81-6a4f360fec3e GET /health status=200 took 0.00s
+2026-10-14 05:38:38 - solenos.logging - INFO - 17356:17348 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:38:40 - solenos.logging - INFO - 17356:17348 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 05:38:40 - solenos.logging - INFO - 17356:17348 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 05:38:40 - solenos.logging - INFO - 17356:17348 - main.py:174 - Validating configuration...
+2026-10-14 05:38:40 - solenos.logging - INFO - 17356:17348 - main.py:184 - Database connection verified.
+2026-10-14 05:38:44 - app.core.cache - ERROR - 17356:17348 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:38:44 - solenos.logging - WARNING - 17356:17348 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:38:44 - solenos.logging - WARNING - 17356:17348 - main.py:207 - Application will continue without caching.
+2026-10-14 05:38:44 - app.core.metrics - WARNING - 17356:17348 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:38:44 - solenos.logging - INFO - 17356:17348 - main.py:237 - SolenOS startup complete.
+2026-10-14 05:38:44 - solenos.logging - INFO - 17356:17348 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:38:44 - app.services.backup - ERROR - 17356:17348 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:38:44 - solenos.logging - ERROR - 17356:17348 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:40:31 - solenos.logging - INFO - 17356:17348 - main.py:137 - Request started: ee1b9226-809b-4be0-a0ea-c1cb3680528c GET /health from 127.0.0.1
+2026-10-14 05:40:31 - solenos.logging - INFO - 17356:17348 - main.py:157 - Request completed: ee1b9226-809b-4be0-a0ea-c1cb3680528c GET /health status=200 took 0.22s
+2026-10-14 05:41:43 - solenos.logging - INFO - 10328:5968 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:41:43 - solenos.logging - INFO - 10328:5968 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 05:41:44 - solenos.logging - INFO - 10328:5968 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 05:41:44 - solenos.logging - INFO - 10328:5968 - main.py:174 - Validating configuration...
+2026-10-14 05:41:44 - solenos.logging - INFO - 10328:5968 - main.py:184 - Database connection verified.
+2026-10-14 05:41:48 - app.core.cache - ERROR - 10328:5968 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:41:48 - solenos.logging - WARNING - 10328:5968 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 05:41:48 - solenos.logging - WARNING - 10328:5968 - main.py:207 - Application will continue without caching.
+2026-10-14 05:41:48 - app.core.metrics - WARNING - 10328:5968 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 05:41:48 - solenos.logging - INFO - 10328:5968 - main.py:237 - SolenOS startup complete.
+2026-10-14 05:41:48 - solenos.logging - INFO - 10328:5968 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 05:41:48 - app.services.backup - ERROR - 10328:5968 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 05:41:48 - solenos.logging - ERROR - 10328:5968 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 05:43:38 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: f92db0ea-65ad-4cad-8677-3cf580f0d1ce GET /health from 127.0.0.1
+2026-10-14 05:43:38 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: f92db0ea-65ad-4cad-8677-3cf580f0d1ce GET /health status=200 took 0.00s
+2026-10-14 05:44:09 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: 5eda137a-4675-4578-b1f8-c44f1c187426 GET /routes from 127.0.0.1
+2026-10-14 05:44:09 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: 5eda137a-4675-4578-b1f8-c44f1c187426 GET /routes status=200 took 0.01s
+2026-10-14 05:44:36 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: e2f6d912-9377-47d9-bd9a-25a3fc462fe4 GET /info from 127.0.0.1
+2026-10-14 05:44:36 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: e2f6d912-9377-47d9-bd9a-25a3fc462fe4 GET /info status=200 took 0.00s
+2026-10-14 05:44:42 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: 1407eaa2-67ec-468a-bdaf-560ede3e68c8 GET /version from 127.0.0.1
+2026-10-14 05:44:42 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: 1407eaa2-67ec-468a-bdaf-560ede3e68c8 GET /version status=200 took 0.02s
+2026-10-14 05:45:06 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: 2dccbf57-a331-42fd-987c-b65de6d04322 GET /metrics from 127.0.0.1
+2026-10-14 05:45:06 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: 2dccbf57-a331-42fd-987c-b65de6d04322 GET /metrics status=200 took 0.01s
+2026-10-14 05:46:12 - solenos.logging - INFO - 10328:5968 - main.py:137 - Request started: b068e477-8838-4dcf-bed2-84b33ecf1791 GET /health from 127.0.0.1
+2026-10-14 05:46:12 - solenos.logging - INFO - 10328:5968 - main.py:157 - Request completed: b068e477-8838-4dcf-bed2-84b33ecf1791 GET /health status=200 took 0.01s
+2026-10-14 05:55:25 - solenos.logging - INFO - 18140:15428 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 05:55:25 - solenos.logging - INFO - 18140:15428 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 18:52:14 - app.services.backup - ERROR - 10328:5968 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 18:52:18 - solenos.logging - ERROR - 10328:5968 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 19:01:41 - solenos.logging - INFO - 14756:13268 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 19:01:42 - solenos.logging - INFO - 14756:13268 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 19:01:42 - solenos.logging - INFO - 14756:13268 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 19:01:42 - solenos.logging - INFO - 14756:13268 - main.py:174 - Validating configuration...
+2026-10-14 19:01:42 - solenos.logging - INFO - 14756:13268 - main.py:184 - Database connection verified.
+2026-10-14 19:01:46 - app.core.cache - ERROR - 14756:13268 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:01:46 - solenos.logging - WARNING - 14756:13268 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:01:46 - solenos.logging - WARNING - 14756:13268 - main.py:207 - Application will continue without caching.
+2026-10-14 19:01:46 - app.core.metrics - WARNING - 14756:13268 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 19:01:46 - solenos.logging - INFO - 14756:13268 - main.py:237 - SolenOS startup complete.
+2026-10-14 19:01:46 - solenos.logging - INFO - 14756:13268 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 19:01:46 - app.services.backup - ERROR - 14756:13268 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 19:01:46 - solenos.logging - ERROR - 14756:13268 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 19:02:26 - solenos.logging - INFO - 14756:13268 - main.py:137 - Request started: 76ac25f4-632d-46ca-bd34-efd2be9520db GET /health from 127.0.0.1
+2026-10-14 19:02:26 - solenos.logging - INFO - 14756:13268 - main.py:157 - Request completed: 76ac25f4-632d-46ca-bd34-efd2be9520db GET /health status=200 took 0.37s
+2026-10-14 19:28:37 - solenos.logging - INFO - 16596:17292 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 19:28:37 - solenos.logging - INFO - 16596:17292 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 19:28:38 - solenos.logging - INFO - 16596:17292 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 19:28:38 - solenos.logging - INFO - 16596:17292 - main.py:174 - Validating configuration...
+2026-10-14 19:28:38 - solenos.logging - INFO - 16596:17292 - main.py:184 - Database connection verified.
+2026-10-14 19:28:42 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:28:42 - solenos.logging - WARNING - 16596:17292 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:28:43 - solenos.logging - WARNING - 16596:17292 - main.py:207 - Application will continue without caching.
+2026-10-14 19:28:43 - app.core.metrics - WARNING - 16596:17292 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 19:28:43 - solenos.logging - INFO - 16596:17292 - main.py:237 - SolenOS startup complete.
+2026-10-14 19:28:43 - solenos.logging - INFO - 16596:17292 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 19:28:43 - app.services.backup - ERROR - 16596:17292 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 19:28:43 - solenos.logging - ERROR - 16596:17292 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 19:30:51 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: 808ad5b8-d010-47e7-8330-87819bf6a97c GET /health from 127.0.0.1
+2026-10-14 19:30:51 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: 808ad5b8-d010-47e7-8330-87819bf6a97c GET /health status=200 took 0.00s
+2026-10-14 19:30:55 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:30:55 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-4124434951111338660: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:30:57 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:30:57 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: 904d28e2-eca6-4266-9b63-7373c40cc3f1 GET /health from 127.0.0.1
+2026-10-14 19:30:57 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: 904d28e2-eca6-4266-9b63-7373c40cc3f1 GET /health status=200 took 0.00s
+2026-10-14 19:31:04 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:04 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:4056369537013542448: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:04 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:09 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:09 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-7642115697375526860: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:09 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:13 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:13 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:5131370921358750357: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:13 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:18 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:18 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-8911911239636912751: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:18 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:22 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:22 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-4145581733178774695: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:22 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:27 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:27 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-2784261142589641252: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:27 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:33 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:33 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-3820065176051145217: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:33 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:37 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:37 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:2248905858260931197: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:37 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:42 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:42 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:8271949019637886997: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:42 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:46 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:46 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-3060362443641046308: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:46 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:51 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:51 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:605430098765447261: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:51 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:31:55 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:55 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:3159363198105416447: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:31:55 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:00 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:00 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-431282868413594829: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:00 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:04 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:04 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:3910233846026221574: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:04 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:09 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:09 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:4972145221638128050: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:09 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:13 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: 80aceff6-96bc-4e9a-991c-1499b9ad9fd3 GET /info from 127.0.0.1
+2026-10-14 19:32:13 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: 80aceff6-96bc-4e9a-991c-1499b9ad9fd3 GET /info status=200 took 0.00s
+2026-10-14 19:32:14 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:14 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:5617344834003638180: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:14 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:18 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:18 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:1041141311710939390: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:18 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:23 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:23 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:8971139639001459120: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:23 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:27 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:27 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:1713557841436464492: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:27 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:29 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: a6d227e7-998a-41de-b62a-7360740912ec GET /version from 127.0.0.1
+2026-10-14 19:32:29 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: a6d227e7-998a-41de-b62a-7360740912ec GET /version status=200 took 0.00s
+2026-10-14 19:32:32 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:32 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-3089899434398314681: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:32 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:36 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:36 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:8971139639001459120: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:36 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:41 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:41 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-614242133144845723: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:32:41 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:32:59 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: a1676b82-b001-417d-9482-286dde839d79 GET /health from 127.0.0.1
+2026-10-14 19:32:59 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: a1676b82-b001-417d-9482-286dde839d79 GET /health status=200 took 0.04s
+2026-10-14 19:33:10 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: 492803aa-88fb-412a-a107-1da092595927 GET /health from 127.0.0.1
+2026-10-14 19:33:10 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: 492803aa-88fb-412a-a107-1da092595927 GET /health status=200 took 0.00s
+2026-10-14 19:33:47 - solenos.logging - INFO - 17168:5872 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 19:33:48 - solenos.logging - INFO - 17168:5872 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 19:34:27 - solenos.logging - INFO - 16596:17292 - main.py:137 - Request started: eab1fb9f-1e71-4fa3-8b2a-24f3aa06cf81 GET /health from 127.0.0.1
+2026-10-14 19:34:27 - solenos.logging - INFO - 16596:17292 - main.py:157 - Request completed: eab1fb9f-1e71-4fa3-8b2a-24f3aa06cf81 GET /health status=200 took 0.01s
+2026-10-14 19:34:31 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:31 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-2377745734831310641: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:31 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:34:38 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:38 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:1480080072333364375: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:38 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:34:42 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:42 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-7771792231690349132: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:42 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:34:47 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:47 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:7747186659986227075: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:47 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:34:51 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:51 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-6900387766439775032: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:51 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:34:57 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:57 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-9203239359071824389: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:34:57 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:35:01 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:01 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:5455478821833357968: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:01 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:35:06 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:06 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:-2075485992112063924: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:06 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:35:10 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:10 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:1832200074794081252: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:10 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:35:15 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:15 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_events:395950481470371571: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:15 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:35:20 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:20 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_insights:1269344814006235767: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:20 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_insights: object list can't be used in 'await' expression
+2026-10-14 19:35:24 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:24 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_insights:-3168171090144058088: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:24 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_insights: object list can't be used in 'await' expression
+2026-10-14 19:35:29 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:29 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_insights:-4585780224171948117: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:29 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_insights: object list can't be used in 'await' expression
+2026-10-14 19:35:33 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:33 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_insights:4972145221638128050: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:33 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_insights: object list can't be used in 'await' expression
+2026-10-14 19:35:38 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:38 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_insights:7872073544253865047: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:38 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_insights: object list can't be used in 'await' expression
+2026-10-14 19:35:43 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:43 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_observations:-1872071170555089515: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:43 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_observations: object list can't be used in 'await' expression
+2026-10-14 19:35:47 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:47 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_observations:5617693572882051208: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:47 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_observations: object list can't be used in 'await' expression
+2026-10-14 19:35:52 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:52 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_observations:-7184335183578572600: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:52 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_observations: object list can't be used in 'await' expression
+2026-10-14 19:35:56 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:56 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_observations:-1235665580192435754: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:35:56 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_observations: object list can't be used in 'await' expression
+2026-10-14 19:36:01 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:01 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_observations:8320042872121066806: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:01 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_observations: object list can't be used in 'await' expression
+2026-10-14 19:36:06 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:06 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_caregivers:-3144153135216760542: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:06 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_caregivers: object list can't be used in 'await' expression
+2026-10-14 19:36:10 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:10 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_caregivers:-3778017941556032068: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:10 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_caregivers: object list can't be used in 'await' expression
+2026-10-14 19:36:15 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:15 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_caregivers:-530639500251012062: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:15 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_caregivers: object list can't be used in 'await' expression
+2026-10-14 19:36:19 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:19 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_caregivers:-3063049748741517605: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:19 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_caregivers: object list can't be used in 'await' expression
+2026-10-14 19:36:24 - app.core.cache - ERROR - 16596:17292 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:24 - app.core.cache - WARNING - 16596:17292 - cache.py:79 - Cache get failed for key func:list_caregivers:8117775027536722859: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:36:24 - app.core.cache_decorators - ERROR - 16596:17292 - cache_decorators.py:214 - Error executing cached function list_caregivers: object list can't be used in 'await' expression
+2026-10-14 19:37:01 - solenos.logging - INFO - 16128:14912 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 19:37:03 - solenos.logging - INFO - 16128:14912 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 19:37:03 - solenos.logging - INFO - 16128:14912 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 19:37:03 - solenos.logging - INFO - 16128:14912 - main.py:174 - Validating configuration...
+2026-10-14 19:37:03 - solenos.logging - INFO - 16128:14912 - main.py:184 - Database connection verified.
+2026-10-14 19:37:07 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:37:07 - solenos.logging - WARNING - 16128:14912 - main.py:206 - Failed to connect to Redis cache: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:37:07 - solenos.logging - WARNING - 16128:14912 - main.py:207 - Application will continue without caching.
+2026-10-14 19:37:07 - app.core.metrics - WARNING - 16128:14912 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 19:37:07 - solenos.logging - INFO - 16128:14912 - main.py:237 - SolenOS startup complete.
+2026-10-14 19:37:07 - solenos.logging - INFO - 16128:14912 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 19:37:07 - app.services.backup - ERROR - 16128:14912 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 19:37:07 - solenos.logging - ERROR - 16128:14912 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-14 19:37:27 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 6db61ee4-7443-4a14-8bbc-b7b4b466ffb3 GET /health from 127.0.0.1
+2026-10-14 19:37:27 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 6db61ee4-7443-4a14-8bbc-b7b4b466ffb3 GET /health status=200 took 0.01s
+2026-10-14 19:37:48 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 1341ecfa-4ce0-4520-b31a-dfe31faffae6 GET /health from 127.0.0.1
+2026-10-14 19:37:48 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 1341ecfa-4ce0-4520-b31a-dfe31faffae6 GET /health status=200 took 0.08s
+2026-10-14 19:38:03 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: fb8ff22c-10dc-4996-9e94-9f4b88b4386f GET /health from 127.0.0.1
+2026-10-14 19:38:04 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: fb8ff22c-10dc-4996-9e94-9f4b88b4386f GET /health status=200 took 0.08s
+2026-10-14 19:38:18 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:38:18 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:8746914843967839764: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:38:19 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:40:24 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 50b8ca6c-d2a1-4b57-987e-4c14a892c157 GET /health from 127.0.0.1
+2026-10-14 19:40:25 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 50b8ca6c-d2a1-4b57-987e-4c14a892c157 GET /health status=200 took 0.09s
+2026-10-14 19:40:34 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:40:34 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:-790020937738072434: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:40:34 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:41:26 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:41:26 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:8808674985781648120: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:41:26 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:43:16 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 18dfcaf4-6cb5-47bb-96f6-d5d6afb85b6b GET /info from 127.0.0.1
+2026-10-14 19:43:16 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 18dfcaf4-6cb5-47bb-96f6-d5d6afb85b6b GET /info status=200 took 0.00s
+2026-10-14 19:43:21 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: e72647ff-2565-42ad-9cee-c56185b5759c GET /version from 127.0.0.1
+2026-10-14 19:43:21 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: e72647ff-2565-42ad-9cee-c56185b5759c GET /version status=200 took 0.00s
+2026-10-14 19:43:22 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 94c5fd5c-063f-441c-b000-8e8400ede64d GET /ping from 127.0.0.1
+2026-10-14 19:43:22 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 94c5fd5c-063f-441c-b000-8e8400ede64d GET /ping status=200 took 0.00s
+2026-10-14 19:45:28 - solenos.logging - INFO - 16128:14912 - main.py:137 - Request started: 8cef90b0-cb48-44dd-8d7f-ddd5fc439f0d GET /health from 127.0.0.1
+2026-10-14 19:45:28 - solenos.logging - INFO - 16128:14912 - main.py:157 - Request completed: 8cef90b0-cb48-44dd-8d7f-ddd5fc439f0d GET /health status=200 took 0.01s
+2026-10-14 19:48:00 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:48:00 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:-8306266950141376748: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:48:01 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:51:31 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:51:32 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:2993998901682845646: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:51:32 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:52:13 - app.core.cache - ERROR - 16128:14912 - cache.py:34 - Failed to connect to Redis: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:52:13 - app.core.cache - WARNING - 16128:14912 - cache.py:79 - Cache get failed for key func:list_events:-5923849352553804486: Error Multiple exceptions: [Errno 10061] Connect call failed ('::1', 6379, 0, 0), [Errno 10061] Connect call failed ('127.0.0.1', 6379) connecting to localhost:6379.
+2026-10-14 19:52:13 - app.core.cache_decorators - ERROR - 16128:14912 - cache_decorators.py:214 - Error executing cached function list_events: object list can't be used in 'await' expression
+2026-10-14 19:58:57 - solenos.logging - INFO - 18224:15412 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-14 19:58:59 - solenos.logging - INFO - 18224:15412 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-14 19:58:59 - solenos.logging - INFO - 18224:15412 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-14 19:58:59 - solenos.logging - INFO - 18224:15412 - main.py:174 - Validating configuration...
+2026-10-14 19:58:59 - solenos.logging - INFO - 18224:15412 - main.py:184 - Database connection verified.
+2026-10-14 19:59:03 - app.core.cache - ERROR - 18224:15412 - cache.py:35 - Failed to connect to Redis: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+2026-10-14 19:59:07 - solenos.logging - WARNING - 18224:15412 - main.py:206 - Failed to connect to Redis cache: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+2026-10-14 19:59:07 - solenos.logging - WARNING - 18224:15412 - main.py:207 - Application will continue without caching.
+2026-10-14 19:59:07 - app.core.metrics - WARNING - 18224:15412 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-14 19:59:07 - solenos.logging - INFO - 18224:15412 - main.py:237 - SolenOS startup complete.
+2026-10-14 19:59:07 - solenos.logging - INFO - 18224:15412 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-14 19:59:07 - app.services.backup - ERROR - 18224:15412 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-14 19:59:07 - solenos.logging - ERROR - 18224:15412 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified
+2026-10-15 15:37:39 - solenos.logging - INFO - 15072:11472 - logging.py:108 - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+2026-10-15 15:37:41 - solenos.logging - INFO - 15072:11472 - main.py:658 - SolenOS backend application initialized successfully.
+2026-10-15 15:37:41 - solenos.logging - INFO - 15072:11472 - main.py:171 - Starting SolenOS version 0.1.0...
+2026-10-15 15:37:41 - solenos.logging - INFO - 15072:11472 - main.py:174 - Validating configuration...
+2026-10-15 15:37:41 - solenos.logging - INFO - 15072:11472 - main.py:184 - Database connection verified.
+2026-10-15 15:37:46 - app.core.cache - ERROR - 15072:11472 - cache.py:35 - Failed to connect to Redis: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+2026-10-15 15:37:46 - solenos.logging - WARNING - 15072:11472 - main.py:206 - Failed to connect to Redis cache: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+2026-10-15 15:37:46 - solenos.logging - WARNING - 15072:11472 - main.py:207 - Application will continue without caching.
+2026-10-15 15:37:46 - app.core.metrics - WARNING - 15072:11472 - metrics.py:97 - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+2026-10-15 15:37:46 - solenos.logging - INFO - 15072:11472 - main.py:237 - SolenOS startup complete.
+2026-10-15 15:37:46 - solenos.logging - INFO - 15072:11472 - main.py:242 - Starting automatic backup scheduler (interval: 6 hours)
+2026-10-15 15:37:46 - app.services.backup - ERROR - 15072:11472 - backup.py:74 - Failed to create backup: [WinError 2] The system cannot find the file specified
+2026-10-15 15:37:46 - solenos.logging - ERROR - 15072:11472 - main.py:249 - Automatic backup failed: [WinError 2] The system cannot find the file specified

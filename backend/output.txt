@@ -1,0 +1,7 @@
+INFO:     127.0.0.1:58608 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58611 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58614 - "GET /api/v1/caregiver_intelligence HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58628 - "GET /docs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58633 - "GET /api/v1/caregiver_intelligence/ HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58680 - "GET /api/v1/uncertainty HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:58695 - "POST /situation HTTP/1.1" 404 Not Found

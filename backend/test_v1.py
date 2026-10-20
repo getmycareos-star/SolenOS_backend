@@ -1,0 +1,1 @@
+import app.api.v1; print('V1 import succeeded')

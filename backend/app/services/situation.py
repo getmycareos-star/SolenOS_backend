@@ -2,7 +2,10 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional
 import json
 from sqlalchemy.orm import Session
-from app.models.care import Caregiver, Person, Evidence, CareEvent
+from app.models.caregiver import Caregiver
+from app.models.identity import Person
+from app.models.evidence import Evidence
+from app.models.care_event import CareEvent
 from app.schemas.situation import SituationInput, SituationResponse, SituationEvent, SituationDocument
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
@@ -140,15 +143,15 @@ def _record_contradictions(
 ) -> None:
     from app.models.uncertainty import Contradiction as ContradictionModel
     from app.services.significance import _reports_conflict
-    from app.models.care import CareEvent as CareEventModel
+    from app.models.care_event import CareEvent
 
     recent = (
-        db.query(CareEventModel)
+        db.query(CareEvent)
         .filter(
-            CareEventModel.person_id == person_id,
-            CareEventModel.id != current_event.id,
+            CareEvent.person_id == person_id,
+            CareEvent.id != current_event.id,
         )
-        .order_by(CareEventModel.occurred_at.desc())
+        .order_by(CareEvent.occurred_at.desc())
         .all()
     )
     if now is not None:
@@ -319,6 +322,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             confidence=None,
             evidence_status="reported",
             source_type=source_type,
+            subject_role="care_recipient",
+            entity_resolution_status="not_applicable",
         )
         db.add(evidence)
         db.flush()

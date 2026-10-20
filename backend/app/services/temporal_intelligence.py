@@ -206,7 +206,7 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
         return RelativeTimeResolution(
             original_text=expression,
             reference_frame_id=reference_frame_id,
-            reference_frame_name=frame.name,
+            reference_frame_name=frame.name if frame else None,
             resolved_point=resolved_point,
             is_resolved=True,
             confidence=confidence,
@@ -223,6 +223,8 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
         is_resolved=False,
         confidence=0.0,
         derivation_method="unresolved",
+        lower_bound=lower_bound,
+        upper_bound=upper_bound,
     )
 
 
@@ -611,3 +613,88 @@ def check_temporal_conflict(db: Session, fact_a_id: str, fact_b_id: str) -> Opti
         "subject_id": fact_a.subject_id,
         "suggested_action": "create_temporal_contradiction",
     }
+
+
+class TemporalIntelligenceService:
+    """Service for temporal intelligence operations."""
+    
+    def get_utc_now(self) -> datetime:
+        """Get current UTC time."""
+        return utc_now()
+    
+    def ensure_utc(self, dt: Optional[datetime]) -> Optional[datetime]:
+        """Ensure datetime is in UTC timezone."""
+        return _ensure_utc(dt)
+    
+    def diff_in_days(self, a: Optional[datetime], b: Optional[datetime]) -> Optional[float]:
+        """Calculate difference in days between two datetimes."""
+        return _diff_in_days(a, b)
+    
+    def create_temporal_fact(self, db: Session, fact: TemporalFactCreate) -> TemporalFactModel:
+        """Create a new temporal fact."""
+        return create_temporal_fact(db, fact)
+    
+    def update_temporal_fact(self, db: Session, fact_id: str, update: TemporalFactUpdate) -> Optional[TemporalFactModel]:
+        """Update an existing temporal fact."""
+        return update_temporal_fact(db, fact_id, update)
+    
+    def supersede_temporal_fact(self, db: Session, old_fact_id: str, new_fact_id: str) -> Optional[TemporalFactModel]:
+        """Supersede a temporal fact with a new one."""
+        return supersede_temporal_fact(db, old_fact_id, new_fact_id)
+    
+    def create_temporal_relation(self, db: Session, relation: TemporalRelationCreate) -> TemporalRelationModel:
+        """Create a new temporal relation."""
+        return create_temporal_relation(db, relation)
+    
+    def create_temporal_reference_frame(self, db: Session, person_id: str, name: str, 
+                                      reference_time: Optional[datetime] = None, 
+                                      source_event_id: Optional[str] = None, 
+                                      source_fact_id: Optional[str] = None, 
+                                      is_resolved: bool = False) -> TemporalReferenceFrameModel:
+        """Create a new temporal reference frame."""
+        return create_temporal_reference_frame(db, person_id, name, reference_time, source_event_id, source_fact_id, is_resolved)
+    
+    def resolve_relative_time(self, db: Session, person_id: str, expression: str, 
+                             reference_frame_id: Optional[str] = None) -> RelativeTimeResolution:
+        """Resolve a relative time expression."""
+        return resolve_relative_time(db, person_id, expression, reference_frame_id)
+    
+    def infer_temporal_relation(self, db: Session, fact_a_id: str, fact_b_id: str) -> Optional[Dict[str, Any]]:
+        """Infer temporal relation between two facts."""
+        return infer_temporal_relation(db, fact_a_id, fact_b_id)
+    
+    def detect_temporal_conflicts(self, db: Session, person_id: str, 
+                                 subject_type: Optional[str] = None, 
+                                 subject_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Detect temporal conflicts for a person."""
+        return detect_temporal_conflicts(db, person_id, subject_type, subject_id)
+    
+    def create_temporal_contradiction(self, db: Session, contradiction: TemporalContradictionCreate) -> TemporalContradictionModel:
+        """Create a new temporal contradiction."""
+        return create_temporal_contradiction(db, contradiction)
+    
+    def update_temporal_contradiction(self, db: Session, contradiction_id: str, 
+                                     update: TemporalContradictionUpdate) -> Optional[TemporalContradictionModel]:
+        """Update an existing temporal contradiction."""
+        return update_temporal_contradiction(db, contradiction_id, update)
+    
+    def get_temporal_view_at_point(self, db: Session, person_id: str, point_in_time: datetime) -> TemporalViewAtPoint:
+        """Get temporal view at a specific point in time."""
+        return get_temporal_view_at_point(db, person_id, point_in_time)
+    
+    def get_subject_temporal_view(self, db: Session, person_id: str, subject_type: str, subject_id: str) -> SubjectTemporalView:
+        """Get temporal view for a specific subject."""
+        return get_subject_temporal_view(db, person_id, subject_type, subject_id)
+    
+    def calculate_duration(self, db: Session, fact_id: str) -> Optional[Dict[str, Any]]:
+        """Calculate duration of a temporal fact."""
+        return calculate_duration(db, fact_id)
+    
+    def classify_temporal_status(self, db: Session, fact: TemporalFactModel, 
+                                reference_time: Optional[datetime] = None) -> str:
+        """Classify temporal status of a fact."""
+        return classify_temporal_status(fact, reference_time)
+    
+    def check_temporal_conflict(self, db: Session, fact_a_id: str, fact_b_id: str) -> Optional[Dict[str, Any]]:
+        """Check for temporal conflict between two facts."""
+        return check_temporal_conflict(db, fact_a_id, fact_b_id)

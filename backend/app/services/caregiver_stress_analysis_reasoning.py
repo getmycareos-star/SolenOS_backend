@@ -1,0 +1,174 @@
+"""Service for analyzing caregiver stress and burnout signs using AI-assisted reasoning.
+This service follows SolenOS's strict safety patterns: it only provides suggestions
+that must pass through the TrustGuard and always falls back to deterministic logic.
+"""
+from __future__ import annotations
+
+from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
+
+from app.core.llm_enums import LLMTask, LLMReasoningMode
+from app.models.identity import Person
+from app.models.caregiver import Caregiver as CaregiverModel
+from app.models.evidence import Evidence as EvidenceModel
+from app.models.care_event import CareEvent as CareEventModel
+from app.services.llm import LocalReasoningEngine, LLMReasoningResult
+
+
+class CaregiverStressAnalysisReasoning:
+    """Analyzes caregiver language and observations for stress/burnout signs.
+    
+    This service is designed to be used via LocalReasoningEngine which provides:
+    - Circuit breaker protection
+    - Audit logging
+    - Fallback to deterministic answers
+    - TrustGuard validation of all outputs
+    """
+    
+    def __init__(self, db: Session, llm_engine: Optional[LocalReasoningEngine] = None) -> None:
+        self.db = db
+        self._llm_engine = llm_engine or LocalReasoningEngine(db)
+        
+    def reason(
+        self,
+        task: LLMTask,
+        person_id: str,
+        payload: Dict[str, Any],
+        evidence_ids: List[str],
+        subject_type: Optional[str],
+        subject_id: Optional[str],
+        mode: LLMReasoningMode,
+        allow_diagnostic: bool,
+        allow_medical_action: bool,
+        require_evidence: bool,
+    ) -> Optional[LLMReasoningResult]:
+        """Main reasoning method called by LocalReasoningEngine.
+        
+        Returns None if:
+        - The task is not BEHAVIOR_INTERPRETATION (delegates to other services)
+        - LLM is unavailable 
+        - Output fails TrustGuard validation
+        - Insufficient data for analysis
+        """
+        # Only handle our specific task - defer to engine for others
+        if task != LLMTask.BEHAVIOR_INTERPRETATION:
+            return None
+            
+        # Extract caregiver ID or person_id (caregiver is linked to person)
+        caregiver_id = payload.get("caregiver_id")
+        # If not provided, we might look for the primary caregiver, but for now require it
+        if not caregiver_id:
+            return None
+            
+        # Verify person exists
+        try:
+            person = self.db.query(Person).filter(Person.id == person_id).first()
+            if not person:
+                return None
+        except Exception:
+            # Database error - fail safe
+            return None
+            
+        # Verify caregiver exists and is linked to the person
+        try:
+            caregiver = self.db.query(CaregiverModel).filter(
+                CaregiverModel.id == caregiver_id,
+                CaregiverModel.person_id == person_id
+            ).first()
+            if not caregiver:
+                # Caregiver not found or not linked to person
+                return None
+        except Exception:
+            return None
+            
+        # Gather relevant contextual data
+        try:
+            # Get recent evidence from the caregiver
+            recent_evidence = []
+            if evidence_ids:
+                recent_evidence = self.db.query(EvidenceModel).filter(
+                    EvidenceModel.id.in_(evidence_ids),
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id
+                ).all()
+            else:
+                # If no specific evidence IDs, get recent evidence uploaded by this caregiver
+                recent_evidence = self.db.query(EvidenceModel).filter(
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id
+                ).order_by(EvidenceModel.created_at.desc()).limit(10).all()
+                
+            # Get recent care events (to see patterns)
+            recent_events = self.db.query(CareEventModel).filter(
+                CareEventModel.person_id == person_id
+            ).order_by(CareEventModel.occurred_at.desc()).limit(10).all()
+            
+        except Exception:
+            # If we can't gather context, still proceed with what we have
+            recent_evidence = []
+            recent_events = []
+            
+        # Prepare payload for LLM
+        llm_payload = {
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "caregiver_info": {
+                "id": caregiver.id,
+                "name": caregiver.name,
+                "relationship": caregiver.relationship,
+                "email": caregiver.email,
+            },
+            "recent_evidence": [
+                {
+                    "id": e.id,
+                    "type": e.type,
+                    "source_text": e.source_text[:500] if e.source_text else None,  # More text for language analysis
+                    "created_at": e.created_at.isoformat() if e.created_at else None,
+                    "uploaded_by_caregiver_id": e.uploaded_by_caregiver_id,
+                }
+                for e in recent_evidence
+            ],
+            "recent_events": [
+                {
+                    "id": e.id,
+                    "event_type": e.event_type,
+                    "title": e.title,
+                    "description": e.description,
+                    "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+                }
+                for e in recent_events
+            ],
+            "context": payload.get("context", {}),
+            "analysis_focus": payload.get("analysis_focus", [
+                "language_patterns",
+                "emotional_tone",
+                "frequency_of_concerns",
+                "self_care_mentions",
+                "help_seeking_behavior"
+            ]),
+            "time_period": payload.get("time_period", "last_30_days"),
+        }
+        
+        # Use the LLM engine to get reasoning result
+        # This will go through: LocalReasoningEngine -> OllamaClient -> TrustGuard
+        try:
+            result = self._llm_engine.reason(
+                task=LLMTask.BEHAVIOR_INTERPRETATION,
+                person_id=person_id,
+                payload=llm_payload,
+                evidence_ids=evidence_ids,
+                subject_type="CaregiverBehavior",
+                subject_id=caregiver_id,
+                mode=mode,
+                allow_diagnostic=allow_diagnostic,  # Stress analysis is not medical diagnosis
+                allow_medical_action=False,         # This is observational, not a medical action
+                require_evidence=require_evidence,
+            )
+            return result
+        except Exception:
+            # Any error in LLM processing - fail safe to None
+            return None
+            
+    def get_supported_tasks(self) -> List[LLMTask]:
+        """Return list of tasks this service can handle."""
+        return [LLMTask.BEHAVIOR_INTERPRETATION]

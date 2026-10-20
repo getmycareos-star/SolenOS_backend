@@ -21,7 +21,9 @@ from app.core.change_enums import SignificanceVerdict, EvidenceStatus, BaselineC
 from app.models.meaning import Meaning, MeaningEvidenceLink, MeaningChangeLink
 from app.models.change import Change, Baseline, Pattern
 from app.models.prioritization import Prioritization
-from app.models.care import Evidence, CareEvent, Caregiver
+from app.models.evidence import Evidence
+from app.models.care_event import CareEvent
+from app.models.caregiver import Caregiver
 from app.models.significance import SignificanceAssessment
 from app.models.causal import CausalHypothesis
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion

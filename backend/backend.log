@@ -1,0 +1,13 @@
+15:37:39 - INFO - Logging configured. Level: INFO, Format: text, File: logs\solenos.log
+15:37:41 - INFO - SolenOS backend application initialized successfully.
+15:37:41 - INFO - Starting SolenOS version 0.1.0...
+15:37:41 - INFO - Validating configuration...
+15:37:41 - INFO - Database connection verified.
+15:37:46 - ERROR - Failed to connect to Redis: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+15:37:46 - WARNING - Failed to connect to Redis cache: Error 22 connecting to localhost:6379. The remote computer refused the network connection.
+15:37:46 - WARNING - Application will continue without caching.
+15:37:46 - WARNING - Could not initialize app info metric: 'Info' object has no attribute '_labelname_set'
+15:37:46 - INFO - SolenOS startup complete.
+15:37:46 - INFO - Starting automatic backup scheduler (interval: 6 hours)
+15:37:46 - ERROR - Failed to create backup: [WinError 2] The system cannot find the file specified
+15:37:46 - ERROR - Automatic backup failed: [WinError 2] The system cannot find the file specified

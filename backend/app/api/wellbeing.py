@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.wellbeing import WellbeingService
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/caregiver-wellbeing", tags=["caregiver-wellbeing"])
 
@@ -83,6 +84,7 @@ def check_in(payload: CheckIn, service: WellbeingService = Depends(get_service))
     return _to_response(row)
 
 
+@cached_response(ttl=300, key_prefix="wellbeing")
 @router.get("/{caregiver_id}")
 def view(
     caregiver_id: str,
@@ -143,6 +145,7 @@ def support_taken(action_id: str, service: WellbeingService = Depends(get_servic
     return {"id": action.id, "is_taken": action.is_taken}
 
 
+@cached_response(ttl=300, key_prefix="wellbeing_support")
 @router.get("/{caregiver_id}/support", response_model=List[dict])
 def open_support(caregiver_id: str, service: WellbeingService = Depends(get_service)):
     return [

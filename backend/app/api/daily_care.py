@@ -1,14 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 
 from app.core.database import get_db
+from app.models.identity import Person as PersonModel
+from app.core.evidence_enums import EvidenceSubjectRole
 from app.core.daily_capture_enums import MedicationStatus, VitalType
-from app.models.care import Person as PersonModel, Caregiver as CaregiverModel, Evidence as EvidenceModel, CareEvent as CareEventModel
+from app.models.caregiver import Caregiver as CaregiverModel
+from app.models.evidence import Evidence as EvidenceModel
+from app.models.care_event import CareEvent as CareEventModel
 from app.services.daily_capture import DailyCaptureService
 from app.services.learning import LearningEngine, SavePipelineEvent
+from app.services.situation import process_situation_input
+from app.schemas.situation import SituationInput, SituationDocument, SituationProvenance
 
 
 router = APIRouter(prefix="/daily-care", tags=["daily-care"])
@@ -101,270 +107,155 @@ def create_daily_care_entry(entry: DailyCareEntry, db: Session = Depends(get_db)
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver not authorized for this person")
 
-    occurred_at = entry.occurred_at or _now_iso()
-    ts = datetime.fromisoformat(occurred_at.replace("Z", "+00:00")) if "T" in occurred_at else datetime.fromisoformat(occurred_at)
-
-    evidence_texts: List[str] = []
-    evidence_items: List[EvidenceModel] = []
-    tags: List[str] = []
-    events_to_create: List[Dict[str, Any]] = []
-
-    # The typed service, used to write the rows the daily-capture endpoints and
-    # the adherence tracker read. Declared once here so every section below can
-    # reach it, including when no medication was recorded.
-    capture = DailyCaptureService(db)
-
-    # --- Medication ---
+    # Construct raw input string from the entry
+    evidence_texts = []
     if entry.medication:
         for med in entry.medication:
-            # The checkbox collapses to two values, but the stored status keeps
-            # the distinction a prescriber actually needs.
             status = med.resolved_status()
             notes = med.dose_or_notes or ""
-            text = f"Medication '{med.name}' {status.value}" + (f" — {notes}" if notes else "")
+            text = f"Medication '{med.name}' {status.value}" + (f" â€” {notes}" if notes else "")
             evidence_texts.append(text)
-            events_to_create.append({
-                "event_type": "medication",
-                "title": f"{med.name} — {status.value}",
-                "description": f"Scheduled: {med.scheduled_time or 'not specified'}. Notes: {notes}" if notes else f"Scheduled: {med.scheduled_time or 'not specified'}",
-                "tags": ["medication", status.value, "daily_care"],
-            })
-
-            # Also written through the typed service, so adherence tracking and
-            # the daily-capture timeline see this dose rather than having to
-            # reconstruct it from tags.
-            administered_at = None
-            if med.administered_at:
-                administered_at = datetime.fromisoformat(
-                    med.administered_at.replace("Z", "+00:00")
-                )
-            capture.record_medication(
-                {
-                    "person_id": entry.person_id,
-                    "caregiver_id": entry.caregiver_id,
-                    "medication_name": med.name,
-                    "status": status.value,
-                    "scheduled_for": None,
-                    "administered_at": administered_at,
-                    "note": med.dose_or_notes,
-                    "photo_evidence_id": med.photo_evidence_id,
-                }
-            )
-
-    # --- Mood ---
     if entry.mood or entry.mood_scale is not None:
         scale_text = f" (scale {entry.mood_scale}/5)" if entry.mood_scale else ""
         text = f"Mood: {entry.mood or 'recorded'}{scale_text}"
         evidence_texts.append(text)
-        tags.append("mood")
-        events_to_create.append({
-            "event_type": "mood",
-            "title": "Daily mood check",
-            "description": entry.mood or "",
-            "tags": ["mood", "daily_care", f"scale_{entry.mood_scale}" if entry.mood_scale else "scale_recorded"],
-        })
-        if entry.mood_scale is not None:
-            capture.record_scale({
-                "person_id": entry.person_id,
-                "caregiver_id": entry.caregiver_id,
-                "axis": "mood",
-                "score": entry.mood_scale,
-                "observed_at": ts,
-                "note": entry.mood or None,
-            })
-
-    # --- Agitation ---
     if entry.agitation_level or entry.agitation_scale is not None:
         scale_text = f" (scale {entry.agitation_scale}/5)" if entry.agitation_scale else ""
         text = f"Agitation: {entry.agitation_level or 'recorded'}{scale_text}"
         evidence_texts.append(text)
-        tags.append("agitation")
-        events_to_create.append({
-            "event_type": "agitation",
-            "title": "Agitation check",
-            "description": entry.agitation_level or "",
-            "tags": ["agitation", "daily_care", f"scale_{entry.agitation_scale}" if entry.agitation_scale else "scale_recorded"],
-        })
-        if entry.agitation_scale is not None:
-            # A five-button agitation scale is exactly what the typed scale
-            # table exists for, so the value lands there rather than existing
-            # only as a tag on a text event.
-            capture.record_scale({
-                "person_id": entry.person_id,
-                "caregiver_id": entry.caregiver_id,
-                "axis": "agitation",
-                "score": entry.agitation_scale,
-                "observed_at": ts,
-                "note": entry.agitation_level or None,
-            })
-
-    # --- Vitals ---
     if entry.vitals:
         vitals_text = "Vitals: " + ", ".join(f"{k}={v}" for k, v in entry.vitals.items())
         evidence_texts.append(vitals_text)
-        tags.append("vitals")
-        events_to_create.append({
-            "event_type": "vital_signs",
-            "title": "Vital signs",
-            "description": vitals_text,
-            "tags": ["vitals", "daily_care"] + [f"v_{k}" for k in entry.vitals.keys()],
-        })
-
-        # The free-text form above stays for the record's readability, but the
-        # values are also written through the typed service so they carry a
-        # unit and get range-checked. A string "195" cannot be flagged, and an
-        # unusual reading nobody noticed is worse than one that was recorded.
-        for key, raw_value in entry.vitals.items():
-            try:
-                vital_type = VitalType(key)
-            except ValueError:
-                # The form allows free-text names. An unrecognised vital is
-                # still kept in the evidence above rather than being dropped,
-                # because losing a reading is worse than not typing it up.
-                continue
-            try:
-                numeric = float(raw_value)
-            except (TypeError, ValueError):
-                continue
-            capture.record_vital(
-                {
-                    "person_id": entry.person_id,
-                    "caregiver_id": entry.caregiver_id,
-                    "vital_type": vital_type.value,
-                    "value": numeric,
-                    "unit": None,
-                    "measured_at": ts,
-                    "note": None,
-                }
-            )
-
-    # --- Behavior ---
     if entry.behavior_notes:
         evidence_texts.append(f"Behavior: {entry.behavior_notes}")
-        tags.append("behavior")
-        events_to_create.append({
-            "event_type": "behavior",
-            "title": "Behavior observation",
-            "description": entry.behavior_notes,
-            "tags": ["behavior", "daily_care"],
-        })
-
-    # --- Sleep ---
     if entry.sleep_notes:
         evidence_texts.append(f"Sleep: {entry.sleep_notes}")
-        tags.append("sleep")
-        events_to_create.append({
-            "event_type": "sleep",
-            "title": "Sleep notes",
-            "description": entry.sleep_notes,
-            "tags": ["sleep", "daily_care"],
-        })
-
-    # --- Eating ---
     if entry.eating_notes:
         evidence_texts.append(f"Eating: {entry.eating_notes}")
-        tags.append("eating")
-        events_to_create.append({
-            "event_type": "eating",
-            "title": "Eating/appetite",
-            "description": entry.eating_notes,
-            "tags": ["eating", "daily_care"],
-        })
-
-    # --- Wellbeing ---
     if entry.wellbeing_stress is not None or entry.wellbeing_notes:
         stress_text = f"Wellbeing: stress level {entry.wellbeing_stress}/5" if entry.wellbeing_stress is not None else "Wellbeing check recorded"
         if entry.wellbeing_notes:
-            stress_text += f" — {entry.wellbeing_notes}"
+            stress_text += f" â€” {entry.wellbeing_notes}"
         evidence_texts.append(stress_text)
-        tags.append("wellbeing")
-        events_to_create.append({
-            "event_type": "wellbeing",
-            "title": "Caregiver wellbeing check",
-            "description": entry.wellbeing_notes or "",
-            "tags": ["wellbeing", "caregiver_wellbeing", f"stress_{entry.wellbeing_stress}" if entry.wellbeing_stress else "stress_recorded"],
-        })
-
-    # --- General notes ---
     if entry.general_notes:
         evidence_texts.append(f"General: {entry.general_notes}")
-        events_to_create.append({
-            "event_type": "general",
-            "title": "General notes",
-            "description": entry.general_notes,
-            "tags": ["general", "daily_care"],
-        })
 
-    combined_text = "\n".join(evidence_texts)
-    evidence = EvidenceModel(
-        person_id=entry.person_id,
-        type="daily_care_entry",
-        source_text=combined_text,
-        uploaded_by_caregiver_id=entry.caregiver_id,
-        confidence=1.0,
-        evidence_status="confirmed",
-        source_type="caregiver_observation",
-    )
-    db.add(evidence)
-    db.flush()
-    evidence_items.append(evidence)
+    raw_input = "\n".join(evidence_texts).strip()
+    if not raw_input:
+        raw_input = "Daily care entry"
 
-    created_events: List[CareEventModel] = []
-    attention = False
-    follow_up = False
+    # Determine timestamp
+    timestamp = None
+    if entry.occurred_at:
+        timestamp = entry.occurred_at
 
-    for evt in events_to_create:
-        event = CareEventModel(
-            person_id=entry.person_id,
-            event_type=evt["event_type"],
-            title=evt["title"],
-            description=evt["description"],
-            occurred_at=ts,
-            occurred_at_timezone=caregiver.timezone,
-            evidence_ids=[evidence.id],
-            created_by_caregiver_id=entry.caregiver_id,
-            tags=evt["tags"],
-            status="recorded",
-        )
-        db.add(event)
-        db.flush()
-        created_events.append(event)
-
-    db.commit()
-
-    engine = LearningEngine(db)
-    engine.log_pipeline_event(SavePipelineEvent(
-        step="daily_care_entry",
-        person_id=entry.person_id,
-        detail=f"Daily care entry: {len(evidence_texts)} entries, {len(created_events)} events",
-    ))
-    engine.record_learning_event(
-        entry.person_id,
-        "daily_care_entry",
-        f"Recorded daily care: {combined_text[:200]}",
-        "daily_care",
-        source_id=evidence.id,
+    # Create SituationInput
+    situation_input = SituationInput(
         caregiver_id=entry.caregiver_id,
-    )
-
-    # Check for attention/follow-up triggers
-    if entry.wellbeing_stress is not None and entry.wellbeing_stress >= 4:
-        attention = True
-    if entry.mood_scale is not None and entry.mood_scale <= 2:
-        follow_up = True
-    if entry.agitation_level and entry.agitation_level in ("severe", "extreme", "7", "8", "9", "10"):
-        attention = True
-
-    return DailyCareResponse(
-        ok=True,
-        entry_id=evidence.id,
         person_id=entry.person_id,
-        events_created=len(created_events),
-        evidence_created=len(evidence_items),
-        attention_candidate=attention,
-        follow_up_candidate=follow_up,
-        message=f"Recorded {len(created_events)} care event(s) at {ts.isoformat()}.",
+        raw_input=raw_input,
+        documents=None,
+        provenance=SituationProvenance(
+            input_type="daily_care_entry",
+            entry_method="api",
+            captured_at=_now_iso(),
+            recognition_confidence=1.0,
+            transcript_uncertain=False,
+        ),
+        timestamp=timestamp,
     )
+
+    # Process through situation pipeline
+    try:
+        situation_result = process_situation_input(db, situation_input)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Situation processing failed: {str(e)}")
+
+    # Record medication entries via the daily capture service
+    if entry.medication:
+        medication_service = DailyCaptureService(db)
+        for med in entry.medication:
+            # Use the resolved status method which considers explicit status, taken flag, and refusal notes
+            status = med.resolved_status()
+            # Note: the daily care entry uses dose_or_notes for notes, not for dose.
+            # We'll leave dose as None to let the service default to "the prescribed dose".
+            # For the note, we'll use dose_or_notes.
+            # Convert string times to datetime if provided.
+            administered_at_dt = None
+            if med.administered_at:
+                administered_at_dt = datetime.fromisoformat(med.administered_at)
+            scheduled_for_dt = None
+            if med.scheduled_time:
+                scheduled_for_dt = datetime.fromisoformat(med.scheduled_time)
+            payload = {
+                "person_id": entry.person_id,
+                "caregiver_id": entry.caregiver_id,
+                "medication_name": med.name,
+                "status": status,
+                "dose": None,  # let the service default to "the prescribed dose"
+                "note": med.dose_or_notes,
+                "administered_at": administered_at_dt,
+                "scheduled_for": scheduled_for_dt,
+            }
+            # Remove None values
+            medication_service.record_medication(payload)
+        # Record vitals via the daily capture service
+        if entry.vitals:
+            payload = {k: v for k, v in payload.items() if v is not None}
+            vital_service.record_vital(payload)
+    # Record scales via the daily capture service
+    if entry.mood_scale is not None or entry.agitation_scale is not None:
+        scale_service = DailyCaptureService(db)
+        if entry.mood_scale is not None:
+            try:
+                mood_score = float(entry.mood_scale)
+            except (ValueError, TypeError):
+                mood_score = None
+            if mood_score is not None:
+                    scale_axis_enum = ScaleAxis["MOOD"]
+                    scale_axis_enum = None
+            if scale_axis_enum is not None:
+                    payload = {
+                        "person_id": entry.person_id,
+                        "caregiver_id": entry.caregiver_id,
+                        "scale_axis": scale_axis_enum,
+                        "score": mood_score,
+                    }
+                    payload = {k: v for k, v in payload.items() if v is not None}
+                    scale_service.record_scale(payload)
+        if entry.agitation_scale is not None:
+            try:
+                agitation_score = float(entry.agitation_scale)
+            except (ValueError, TypeError):
+                agitation_score = None
+            if agitation_score is not None:
+                    scale_axis_enum = ScaleAxis["AGITATION"]
+                    scale_axis_enum = None
+            if scale_axis_enum is not None:
+                    payload = {
+                        "person_id": entry.person_id,
+                        "caregiver_id": entry.caregiver_id,
+                        "scale_axis": scale_axis_enum,
+                        "score": agitation_score,
+                    }
+                    payload = {k: v for k, v in payload.items() if v is not None}
+                    scale_service.record_scale(payload)
+
+
+     # Map SituationResponse to DailyCareResponse
+    return DailyCareResponse(
+        ok=situation_result.ok,
+        entry_id=situation_result.evidence_id,
+        person_id=situation_result.person_id,
+        events_created=len(situation_result.events) if situation_result.events else 0,
+        evidence_created=1,  # One evidence created
+        attention_candidate=situation_result.attention_candidate,
+        follow_up_candidate=situation_result.follow_up_candidate,
+        message=situation_result.message,
+    )
+
 
 
 @router.get("/{person_id}", response_model=List[Dict[str, Any]])
@@ -400,3 +291,7 @@ def list_daily_care_entries(person_id: str, limit: int = 30, db: Session = Depen
         }
         for e in events
     ]
+
+
+
+

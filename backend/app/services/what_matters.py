@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.core.care_context_enums import AlignmentVerdict, MattersCategory, MattersImportance
 from app.core.llm_enums import LLMReasoningMode, LLMTask
-from app.models.care import CareEvent
+from app.models.care_event import CareEvent
 from app.models.llm import LLMReasoningResult
 from app.models.what_matters import (
     AlignmentAssessment,

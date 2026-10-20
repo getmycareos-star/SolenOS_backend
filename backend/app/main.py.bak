@@ -1,0 +1,519 @@
+﻿import os
+import time
+import uuid
+import logging
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, Response, HTTPException, RequestValidationError
+from fastapi.middleware.cors = CORSMiddleware
+from fastapi.middleware.trustedhost = TrustedHostMiddleware
+from fastapi.middleware.gzip = GZipMiddleware
+from fastapi.responses = JSONResponse, PlainTextResponse
+from fastapi.staticfiles = StaticFiles
+from fastapi.routing = APIRoute
+from app.core.config = get_settings
+from app.api.v1 = router as v1_router
+from app.api.notification = router as notification_router
+from app.api.situation = router as situation_router
+from app.api.caregiver_intelligence = router as caregiver_intelligence_router
+from app.api.change = router as change_router
+from app.api.care_summary = router as care_summary_router
+from app.api.care_graph = router as care_graph_router
+from app.api.companion = router as companion_router
+from app.api.user = router as user_router
+from app.api.weekly_review = router as weekly_review_router
+from app.api.wellbeing = router as wellbeing_router
+from app.api.what_matters = router as what_matters_router
+from app.api.what_should_i_do = router as what_should_i_do_router
+from app.api.dementia = router as dementia_router
+from app.api.daily_capture = router as daily_capture_router
+from app.api.daily_care = router as daily_care_router
+from app.api.activation = router as activation_router
+from app.core.security = add_security_headers
+from app.api.auth = ErrorResponse
+from app.core.database = engine
+from sqlalchemy = text
+
+settings = get_settings()
+
+# Configure logging
+log_level = logging.DEBUG if settings.debug else logging.INFO
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("solenos")
+
+# Rate limiting storage
+# Simple in-memory rate limiter using fixed window counter
+class RateLimiter:
+    def __init__(self, requests_per_window: int, window_seconds: int):
+        self.requests_per_window = requests_per_window
+        self.window_seconds = window_seconds
+        self.requests = defaultdict(list)  # key -> list of timestamps
+    
+    def is_allowed(self, key: str) -> bool:
+        now = time.time()
+        window_start = now - self.window_seconds
+        
+        # Clean old entries
+        if key in self.requests:
+            self.requests[key] = [ts for ts in self.requests[key] if ts > window_start]
+        else:
+            self.requests[key] = []
+        
+        # Check if under limit
+        if len(self.requests[key]) < self.requests_per_window:
+            self.requests[key].append(now)
+            return True
+        return False
+
+# Rate limiter instances
+# Different limits for different types of endpoints
+auth_limiter = RateLimiter(requests_per_window=10, window_seconds=60)  # 10 per minute for auth
+api_limiter = RateLimiter(requests_per_window=100, window_seconds=60)  # 100 per minute for general API
+strict_limiter = RateLimiter(requests_per_window=5, window_seconds=60)  # 5 per minute for sensitive ops
+
+def get_client_identifier(request: Request) -> str:
+    """Get client identifier for rate limiting (IP address)."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.client.host if request.client else "unknown"
+    return ip
+
+# CORS Configuration
+def get_cors_origins():
+    origins_env = os.getenv("ALLOWED_ORIGINS", "")
+    origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+    if settings.debug:
+        # Common development origins
+        dev_origins = [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        ]
+        for origin in dev_origins:
+            if origin not in origins:
+                origins.append(origin)
+    return origins
+
+# Trusted Host Configuration
+def get_trusted_hosts():
+    hosts_env = os.getenv("ALLOWED_HOSTS", "")
+    hosts = [host.strip() for host in hosts_env.split(",") if host.strip()]
+    if settings.debug:
+        # Allow localhost and 127.0.0.1 in debug mode
+        debug_hosts = ["localhost", "127.0.0.1"]
+        for host in debug_hosts:
+            if host not in hosts:
+                hosts.append(host)
+    return hosts
+
+# Custom route class for logging and timing
+class LoggingRoute(APIRoute):
+    def get_route_handler(self) -> callable:
+        original_route_handler = super().get_route_handler()
+        async def custom_route_handler(request: Request) -> Response:
+            request_id = str(uuid.uuid4())
+            request.state.request_id = request_id
+            start_time = time.time()
+            
+            # Log request
+            client_host = request.client.host if request.client else "unknown"
+            logger.info(
+                f"Request started: {request_id} {request.method} {request.url.path} "
+                f"from {client_host}"
+            )
+            
+            # Process request
+            try:
+                response: Response = await original_route_handler(request)
+            except Exception as e:
+                # Log exception
+                process_time = time.time() - start_time
+                logger.error(
+                    f"Request failed: {request_id} {request.method} {request.url.path} "
+                    f"after {process_time:.2f}s with error: {e}",
+                    exc_info=settings.debug
+                )
+                raise e
+            
+            # Log response
+            process_time = time.time() - start_time
+            logger.info(
+                f"Request completed: {request_id} {request.method} {request.url.path} "
+                f"status={response.status_code} took {process_time:.2f}s"
+            )
+            
+            # Add correlation ID to response headers
+            response.headers["X-Request-ID"] = request_id
+            response.headers["X-Process-Time"] = str(process_time)
+            return response
+        return custom_route_handler
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info(f"Starting {settings.app_name} version {settings.version if hasattr(settings, 'version') else '0.1.0'}...")
+    
+    # Configuration validation
+    logger.info("Validating configuration...")
+    
+    # Validate secret key in production
+    if not settings.debug and settings.secret_key == "change-me-in-production":
+        logger.warning("SECRET_KEY is using default value in production! This is insecure.")
+    
+    # Validate database connection
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+            logger.info("Database connection verified.")
+    except Exception as e:
+        logger.error(f"Database connection failed: {e}")
+        if not settings.debug:
+            raise RuntimeError(f"Cannot start application without database connection: {e}")
+        else:
+            logger.warning("Starting in debug mode despite database connection failure.")
+    
+    # Validate required directories
+    uploads_dir = "uploads"
+    if not os.path.exists(uploads_dir):
+        try:
+            os.makedirs(uploads_dir)
+            logger.info(f"Created uploads directory: {uploads_dir}")
+        except Exception as e:
+            logger.error(f"Failed to create uploads directory: {e}")
+    
+    # Initialize Sentry if DSN is configured
+    sentry_dsn = os.getenv("SENTRY_DSN")
+    if sentry_dsn and not settings.debug:
+        try:
+            import sentry_sdk
+            from sentry_sdk.integrations.asgi = SentryAsgiMiddleware
+            sentry_sdk.init(
+                dsn=sentry_dsn,
+                traces_sample_rate=0.1,
+                _experiments={"enable_logs": True},
+            )
+            app.add_middleware(SentryAsgiMiddleware)
+            logger.info("Sentry error tracking initialized.")
+        except Exception as e:
+            logger.error(f"Failed to initialize Sentry: {e}")
+    
+    # Log startup complete
+    logger.info(f"{settings.app_name} startup complete.")
+    
+    yield
+    
+    # Shutdown
+    logger.info(f"Shutting down {settings.app_name}...")
+    
+    # Close database connections
+    try:
+        # SQLAlchemy engine doesn't need explicit closing in most cases
+        # but we can dispose if we have connection pool issues
+        # engine.dispose()
+        logger.info("Database connections closed.")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}")
+    
+    logger.info("Shutdown complete.")
+
+# Create FastAPI app
+app = FastAPI(
+    title=settings.app_name,
+    version=getattr(settings, 'version', "0.1.0"),
+    description="SolenOS: Trust-first living care record",
+    lifespan=lifespan,
+    # Disable docs in production if desired
+    # docs_url=None if not settings.debug else "/docs",
+    # redoc_url=None if not settings.debug else "/redoc",
+)
+
+# Set custom route class for logging and timing
+app.router.route_class = LoggingRoute
+
+# Middleware (order matters!)
+# CORS - must be first to handle preflight requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=get_cors_origins(),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["X-Report-ID", "X-Process-Time"],
+)
+
+# Trusted Host - validate incoming requests
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=get_trusted_hosts(),
+)
+
+# GZip compression for responses
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Rate limiting middleware
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    # Skip rate limiting for health checks and docs
+    if request.url.path in ["/health", "/ping", "/ready", "/info", "/version", "/docs", "/redoc", "/openapi.json"]:
+        return await call_next(request)
+    
+    client_id = get_client_identifier(request)
+    path = request.url.path
+    
+    # Determine which limiter to use based on path
+    if path.startswith("/api/v1/auth") or path.startswith("/auth"):
+        limiter = auth_limiter
+    elif path.startswith("/api/v1") or path.startswith("/api/"):
+        limiter = api_limiter
+    else:
+        # Default limiter for other endpoints
+        limiter = api_limiter
+    
+    # Create a key that combines client ID and endpoint pattern to limit per-endpoint
+    # For simplicity, we'll use client ID + general limiter for now
+    # In a more sophisticated implementation, we might have different limits per endpoint
+    if not limiter.is_allowed(client_id):
+        return JSONResponse(
+        status_code=429,
+        content=ErrorResponse(
+            error="Rate limit exceeded",
+            error_code="RATE_LIMIT_EXCEEDED",
+            details={"limit": limiter.requests_per_window, "window_seconds": limiter.window_seconds},
+        ).model_dump(),
+        )
+    
+    response: Response = await call_next(request)
+    return response
+
+# Security headers middleware
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response: Response = await call_next(request)
+    return add_security_headers(response)
+
+# Request size limiting middleware
+@app.middleware("http")
+async def report_size_limit_middleware(request: Request, call_next):
+    # Check content-length header
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            length = int(content_length)
+            # Limit to 10MB by default
+            max_size = 10 * 1024 * 1024  # 10MB
+            if length > max_size:
+                return JSONResponse(
+                    status_code=413,
+                    content=ErrorResponse(
+                        error="Payload too large",
+                        error_code="PAYLOAD_TOO_LARGE",
+                        details={"max_size_mb": max_size // (1024 * 1024)},
+                    ).model_dump(),
+                )
+        except ValueError:
+            pass  # Invalid header, let downstream handle it
+    
+    response: Response = await call_next(request)
+    return response
+
+# HTTP method validation middleware
+@app.middleware("http")
+async def http_method_validation_middleware(request: Request, call_next):
+    allowed_methods = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+    if request.method not in allowed_methods:
+        return JSONResponse(
+        status_code=405,
+        content=ErrorResponse(
+            error=f"Method {request.method} not allowed",
+            error_code="METHOD_NOT_ALLOWED",
+            details={"allowed_methods": list(allowed_methods)},
+        ).model_dump(),
+    )
+    
+    response: Response = await count_next(request)
+    return response
+
+# Exception handlers
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    request_id = getattr(request.state, "report_id", "unknown")
+    error_response = ErrorResponse(
+        error=exc.detail,
+        error_code=f"HTTP_{exc.status_code}",
+        details={"report_id": report_id},
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response.model_dump(),
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    report_id = getattr(request.state, "report_id", "unknown")
+    error_response = ErrorResponse(
+        error="Validation error",
+        error_code="VALIDATION_ERROR",
+        details={
+            "report_id": report_id,
+            "errors": exc.errors(),
+        },
+    )
+    return JSONResponse(
+        status_code=422,
+        content=error_response.model_dump(),
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    report_id = getattr(request.state, "report_id", "unknown")
+    if settings.debug:
+        # In debug mode, we can return more details (but still be cautious)
+        error_response = ErrorResponse(
+            error="Internal server error",
+            error_code="INTERNAL_SERVER_ERROR",
+            details={
+                "report_id": report_id,
+                "debug": {
+                    "exception": str(exc),
+                    "type": type(exc).__name__,
+                },
+            },
+        )
+    else:
+        error_response = ErrorResponse(
+            error="Internal server error",
+            error_code="INTERNAL_SERVER_ERROR",
+            details={"report_id": report_id},
+        )
+    return JSONResponse(
+        status_code=500,
+        content=error_response.model_dump(),
+    )
+
+# Include all routers with appropriate prefixes
+app.include_router(situation_router)  # situation router has prefix="/api", so it becomes "/api/situation"
+app.include_router(v1_router, prefix="/api/v1")
+app.include_router(notification_router, prefix="/api/v1")
+app.include_router(caregiver_intelligence_router, prefix="/api/v1")
+app.include_router(change_router, prefix="/api/v1")
+app.include_router(care_summary_router, prefix="/api/v1")
+app.include_router(care_graph_router, prefix="/api/v1")
+app.include_router(companion_router, prefix="/api/v1")
+app.include_router(user_router, prefix="/api/v1")
+app.include_router(weekly_review_router, prefix="/api/v1")
+app.include_router(wellbeing_router, prefix="/api/v1")
+app.include_router(what_matters_router, prefix="/api/v1")
+app.include_router(what_should_i_do_router, prefix="/api/v1")
+app.include_router(dementia_router, prefix="/api/v1")
+app.include_router(daily_capture_router, prefix="/api/v1")
+app.include_router(daily_care_router, prefix="/api/v1")
+app.include_router(activation_router, prefix="/api/v1")
+
+# Root endpoints
+@app.get("/", tags=["root"])
+async def root():
+    return {
+        "app": settings.app_name,
+        "version": getattr(settings, 'version', "0.1.0"),
+        "status": "running",
+        "docs": "/docs",
+        "api": "/api/v1",
+        "role": "api",
+        "environment": "development" if settings.debug else "production",
+    }
+
+@app.get("/health", tags=["monitoring])
+def health_check():
+    """Liveness probe - checks if the application is running."""
+    return {"status": "healthy", "app": settings.app_name}
+
+@app.get("/ping", tags=["monitoring])
+def ping():
+    """Simple liveness check - lighter than health check."""
+    return PlainTextResponse("OK")
+
+@app.get("/ready", tags=["monitoring])
+def readiness_check():
+    """
+    Readiness probe - checks critical dependencies.
+    Returns 200 if all dependencies are healthy, 503 otherwise.
+    """
+    checks = {}
+    overall_status = "ready"
+    
+    # Check database
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"failed: {e}"
+        overall_status = "not ready"
+    
+    # Check uploads directory
+    uploads_dir = "uploads"
+    if os.path.exists(uploads_dir) and os.access(uploads_dir, os.W_OK):
+        checks["uploads_directory"] = "ok"
+    else:
+        checks["uploads_directory"] = "failed: directory missing or not writable"
+        overall_status = "not ready"
+    
+    # In a real application, we might check other dependencies (e.g., external services)
+    # For now, we check database and filesystem.
+    
+    if overall_status == "ready":
+        return {"status": "ready", "checks": checks}
+    else:
+        # Return 503 Service Unavailable
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not ready", "checks": checks},
+        )
+
+@app.get("/info", tags=["monitoring])
+def app_info():
+    """Application information endpoint."""
+    return {
+        "name": settings.app_name,
+        "version": getattr(settings, 'version', "0.1.0"),
+        "description": "SolenOS: Trust-first living care record",
+        "environment": "development" if settings.debug else "production",
+        "debug": settings.debug,
+        "python_version": os.sys.version,
+    }
+
+@app.get("/version", tags=["monitoring])
+def version():
+    """Version information endpoint."""
+    return {
+        "version": getattr(settings, 'version', "0.1.0"),
+        "api_version": "v1",
+    }
+
+# Serve OpenAPI spec directly (useful for API gateways)
+@app.get("/api/v1/openapi.json", include_in_schema=False)
+def get_openapi_json():
+    return app.openapi()
+
+# Add a custom route to list all routes (for debugging)
+if settings.debug:
+    @app.get("/routes", include_in_schema=False)
+    def list_routes():
+        """List all registered routes (debug only)."
+        routes = []
+        for report in app.routes:
+            if hasattr(report, "path"):
+                routes.append({
+                    "path": report.path,
+                    "name": getattr(report, "name", "unknown"),
+                    "methods": getattr(report, "methods", []),
+                })
+        return {"routes": routes}
+
+logger.info("SolenOS backend application initialized successfully.")

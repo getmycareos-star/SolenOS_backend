@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
-from app.models.care import CareEvent
+from app.models.care_event import CareEvent
 from app.models.change import Baseline, Change, Pattern, Situation
 from app.schemas.change import (
     BaselineCreate,
@@ -16,6 +16,7 @@ from app.schemas.change import (
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/change", tags=["change"])
 
@@ -29,6 +30,7 @@ def create_baseline(baseline: BaselineCreate, db: Session = Depends(get_db)):
     return db_baseline
 
 
+@cached_response(ttl=3600, key_prefix="change_baselines")
 @router.get("/baselines/{person_id}", response_model=List[BaselineSchema])
 def list_baselines(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Baseline).filter(Baseline.person_id == person_id)
@@ -37,6 +39,7 @@ def list_baselines(person_id: str, subject_type: Optional[str] = None, db: Sessi
     return query.order_by(Baseline.created_at.desc()).all()
 
 
+@cached_response(ttl=60, key_prefix="changes_detect")
 @router.get("/changes/detect", response_model=List[ChangeSchema])
 def detect_changes(
     person_id: str,
@@ -50,6 +53,7 @@ def detect_changes(
     return changes
 
 
+@cached_response(ttl=300, key_prefix="changes_list")
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
 def list_changes(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Change).filter(Change.person_id == person_id)
@@ -58,6 +62,7 @@ def list_changes(person_id: str, subject_type: Optional[str] = None, db: Session
     return query.order_by(Change.created_at.desc()).all()
 
 
+@cached_response(ttl=60, key_prefix="patterns_detect")
 @router.get("/patterns/detect", response_model=List[PatternSchema])
 def detect_patterns_endpoint(
     person_id: str,
@@ -72,6 +77,7 @@ def detect_patterns_endpoint(
     return patterns
 
 
+@cached_response(ttl=300, key_prefix="patterns_list")
 @router.get("/patterns/{person_id}", response_model=List[PatternSchema])
 def list_patterns(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Pattern).filter(Pattern.person_id == person_id)
@@ -80,6 +86,7 @@ def list_patterns(person_id: str, subject_type: Optional[str] = None, db: Sessio
     return query.order_by(Pattern.created_at.desc()).all()
 
 
+@cached_response(ttl=60, key_prefix="situations_detect")
 @router.get("/situations/detect", response_model=List[SituationResponse])
 def detect_situations_endpoint(
     person_id: str,
@@ -139,6 +146,7 @@ def detect_situations_endpoint(
     return result
 
 
+@cached_response(ttl=300, key_prefix="situations_list")
 @router.get("/situations/{person_id}", response_model=List[SituationSchema])
 def list_situations(person_id: str, db: Session = Depends(get_db)):
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()

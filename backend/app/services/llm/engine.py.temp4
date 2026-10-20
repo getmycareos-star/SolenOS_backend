@@ -1,0 +1,53 @@
+"""Orchestration for local-model reasoning.
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+import asyncio
+import hashlib
+import json
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+@dataclass
+class CacheEntry:
+class LocalReasoningEngine:
+    _breaker: Optional[CircuitBreaker] = None
+    _cache: Dict[str, CacheEntry] = {}
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _executor: Optional[ThreadPoolExecutor] = None
+
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+        self.db = db
+        self._client = client
+        self.settings = get_settings()
+        self.enabled = self.settings.llm_enabled
+
+        # Initialize thread pool for blocking operations
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(
+                max_workers=getattr(self.settings, 'llm_max_workers', 4),
+                thread_name_prefix='llm_worker'
+            )
+
+    prompt_hash: str
+class CacheEntry:
+@dataclass
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+import time
+import json
+import hashlib
+import asyncio
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+"""Orchestration for local-model reasoning.
+    return task.value if hasattr(task, "value") else str(task)

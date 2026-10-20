@@ -1,0 +1,1 @@
+﻿import app.core.cache; print('Cache import successful')

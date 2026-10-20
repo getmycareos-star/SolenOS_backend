@@ -1,13 +1,25 @@
 import os
+os.environ["ALLOWED_HOSTS"] = "testserver,localhost,127.0.0.1"
+
+from app.core.config import get_settings
+get_settings.cache_clear()
+
+from app.main import app
 
 import pytest
+
 from sqlalchemy import create_engine
+
 from sqlalchemy.orm import sessionmaker
+
 from sqlalchemy.pool import StaticPool
 
+
 from app.core.database import Base
-from app.main import app
-from app.models.care import Caregiver, Evidence, Person
+
+from app.models.caregiver import Caregiver
+from app.models.evidence import Evidence
+from app.models.identity import Person
 
 
 @pytest.fixture(autouse=True)

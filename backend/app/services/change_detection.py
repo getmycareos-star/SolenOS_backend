@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.models.care import CareEvent
+from app.models.care_event import CareEvent
 from app.models.change import Baseline, Change
 from app.services.baseline import (
     build_baseline,
@@ -194,3 +194,39 @@ def _calculate_change_confidence(comparison: Dict[str, Any], event_count: int) -
     if event_count < 2:
         confidence -= 0.2
     return max(0.1, min(1.0, confidence))
+
+
+class ChangeDetectionService:
+    """Service for detecting changes in care events."""
+    
+    def detect_changes(
+        self,
+        db: Session,
+        person_id: str,
+        event_type: str,
+        subject_id: Optional[str] = None,
+        reference_time: Optional[datetime] = None,
+        min_persistence_days: int = 14,
+    ) -> List[Change]:
+        """
+        Detect changes in care events for a person.
+        
+        Args:
+            db: Database session
+            person_id: The ID of the person
+            event_type: Type of event to analyze
+            subject_id: Optional specific subject ID
+            reference_time: Reference time for detection (defaults to now)
+            min_persistence_days: Minimum days for a change to be considered persistent
+            
+        Returns:
+            List of Change objects
+        """
+        return detect_event_changes(
+            db=db,
+            person_id=person_id,
+            event_type=event_type,
+            subject_id=subject_id,
+            reference_time=reference_time,
+            min_persistence_days=min_persistence_days,
+        )

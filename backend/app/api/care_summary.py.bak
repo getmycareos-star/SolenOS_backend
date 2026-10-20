@@ -1,0 +1,196 @@
+from app.core.security import get_current_principal, require_care_context_access, require_authenticated, AuthenticatedPrincipal
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy.orm import Session
+from typing import Dict, Any, List, Optional
+from datetime import datetime, timezone
+
+from app.core.database import get_db
+from app.models.care import Person as PersonModel, Caregiver as CaregiverModel, Evidence as EvidenceModel, CareEvent as CareEventModel, Insight as InsightModel
+from app.models.meaning import Meaning as MeaningModel, MeaningEvidenceLink
+from app.models.behavior import BehaviorObservation as BehaviorObservationModel, BehaviorInterpretation as BehaviorInterpretationModel
+from app.models.follow_up import FollowUp
+from app.models.action import Action as ActionModel
+from app.services.care_common import utc_now
+from app.services.person_model import PersonModelEngine
+from app.services.meaning import MeaningEngine
+from app.services.behavior import BehaviorEngine
+from app.services.care_summary import CareSummaryBuilder
+from app.services.care_summary_pdf import render_summary_pdf
+from app.services.care_sharing import CareSharingService
+
+router = APIRouter(prefix="/summary", tags=["summary"])
+
+
+export_router = APIRouter(prefix="/care-summary", tags=["care-summary"])
+
+
+def _safe_iso(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    return dt.isoformat()
+
+
+@router.get("/{person_id}", response_model=Dict[str, Any])
+def get_care_summary(person_id: str, include_evidence: bool = False, db: Session = Depends(get_db)):
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    
+    engine = PersonModelEngine(db)
+    meaning_engine = MeaningEngine(db)
+    behavior_engine = BehaviorEngine(db)
+    
+    profile = engine.get_profile(person_id)
+    meanings = meaning_engine.list_meanings(person_id)
+    observations = behavior_engine.list_observations(person_id, limit=30)
+    events = (
+        db.query(CareEventModel)
+        .filter(CareEventModel.person_id == person_id)
+        .order_by(CareEventModel.occurred_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    
+    # Build the summary dictionary
+    summary = {
+        "person": {
+            "id": person.id,
+            "name": person.name,
+            "first_name": person.first_name,
+            "last_name": person.last_name,
+            "birth_date": person.birth_date.isoformat() if person.birth_date else None,
+            "gender": person.gender,
+        },
+        "profile": profile.dict() if profile else None,
+        "meanings": [m.dict() for m in meanings],
+        "recent_observations": [
+            {
+                "id": obs.id,
+                "type": obs.type,
+                "description": obs.description,
+                "occurred_at": _safe_iso(obs.occurred_at),
+                "tags": obs.tags or [],
+            }
+            for obs in observations
+        ],
+        "recent_events": [
+            {
+                "id": event.id,
+                "type": event.type,
+                "title": event.title,
+                "description": event.description,
+                "occurred_at": _safe_iso(event.occurred_at),
+                "tags": event.tags or [],
+                "significance_verdict": event.significance_verdict,
+                "attention_candidate": event.attention_candidate or False,
+                "follow_up_candidate": event.follow_up_candidate or False,
+                "confidence": event.confidence,
+            }
+            for event in events
+        ],
+    }
+    
+    if include_evidence:
+        evidence_rows = (
+            db.query(EvidenceModel)
+            .filter(EvidenceModel.person_id == person_id)
+            .order_by(EvidenceModel.uploaded_at.desc())
+            .limit(100)
+            .all()
+        )
+        summary["evidence"] = [
+            {
+                "id": ev.id,
+                "type": ev.type,
+                "description": ev.description,
+                "uploaded_at": _safe_iso(ev.uploaded_at),
+                "confidence": ev.confidence,
+            }
+            for ev in evidence_rows
+        ]
+        summary["evidence_timeline"] = summary["evidence"]
+    
+    return summary
+
+
+def _build_or_refuse(person_id: str, window_days: int, caregiver_id: Optional[str], db):
+    """Assemble a summary for this viewer, or refuse.
+
+    When caregiver_id is supplied it is a request from within a care circle, and
+    the grants decide what comes back. When it is absent this is the local
+    single-user install, where there is nobody to withhold anything from.
+    """
+    sharing = CareSharingService(db)
+    if caregiver_id is not None:
+        allowed = sharing.visible_categories(person_id, caregiver_id)
+        if not allowed:
+            # Logged as a denial so a request that produced nothing is still a
+            # recorded event rather than a silent empty response.
+            sharing.can_see(
+                person_id, caregiver_id, "clinical_documents", surface="care_summary", log=True
+            )
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Nothing has been shared with this caregiver yet, so there is no "
+                    "summary to give them. Ask the family to share what you need."
+                ),
+            )
+    try:
+        return CareSummaryBuilder(db).build(
+            person_id, window_days=window_days, viewer_caregiver_id=caregiver_id, surface="care_summary"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@export_router.get("/{person_id}/json")
+def export_json(
+    person_id: str,
+    window_days: int = 30,
+    caregiver_id: Optional[str] = None,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    """The structured record, for another system or a GP portal."""
+    require_authenticated(principal)
+    # Authorization check: ensure the authenticated user can access the person whose summary is being requested
+    require_care_context_access(principal, person_id, "care summary export")
+    return _build_or_refuse(person_id, window_days, caregiver_id, db)
+
+
+@export_router.get("/{person_id}/pdf")
+def export_pdf(
+    person_id: str,
+    window_days: int = 30,
+    caregiver_id: Optional[str] = None,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    """One-tap PDF for an appointment.
+
+    Served as an attachment rather than rendered in a page, because a clinician
+    wants a document they can keep, not a screen they have to read on a phone in
+    a waiting room.
+    """
+    require_authenticated(principal)
+    # Authorization check: ensure the authenticated user can access the person whose PDF is being requested
+    require_care_context_access(principal, person_id, "care summary PDF export")
+    summary = _build_or_refuse(person_id, window_days, caregiver_id, db)
+    
+    try:
+        pdf_bytes = render_summary_pdf(summary)
+    except Exception as exc:  # pragma: no cover - reportlab layout failure
+        raise HTTPException(status_code=500, detail=f"could not render the summary: {exc}")
+
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in "-_" else "-" for ch in (summary["person"]["name"] or "person")
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="care-summary-{}.pdf"'.format(safe_name)
+        },
+    )

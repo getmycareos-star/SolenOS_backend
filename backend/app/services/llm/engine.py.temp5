@@ -1,0 +1,97 @@
+"""Orchestration for local-model reasoning.
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+import asyncio
+import hashlib
+import json
+import time
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+@dataclass
+class CacheEntry:
+class LocalReasoningEngine:
+    _breaker: Optional[CircuitBreaker] = None
+    _cache: Dict[str, CacheEntry] = {}
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _executor: Optional[ThreadPoolExecutor] = None
+
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+        self.db = db
+        self._client = client
+        self.settings = get_settings()
+        self.enabled = self.settings.llm_enabled
+
+        # Initialize thread pool for blocking operations
+        if self._executor is None:
+
+    def _get_cache_key(self, prompt: str, payload: Optional[Dict[str, Any]]) -> str:
+        payload_str = json.dumps(payload or {}, sort_keys=True)
+        combined = prompt + '|' + payload_str
+        return hashlib.sha256(combined.encode('utf-8')).hexdigest()
+
+    async def _get_from_cache(self, cache_key: str) -> Optional[LLMReasoningResult]:
+        async with self._cache_lock:
+            entry = self._cache.get(cache_key)
+            if entry and not entry.is_expired():
+                entry.hit_count = entry.hit_count + 1
+                return entry.response
+            elif entry and entry.is_expired():
+                del self._cache[cache_key]
+            return None
+
+    async def _store_in_cache(self, cache_key: str, response: Optional[LLMReasoningResult], ttl: float = 300.0) -> None:
+        async with self._cache_lock:
+            self._cache[cache_key] = CacheEntry(
+                prompt_hash=cache_key,
+                response=response,
+                timestamp=time.time(),
+                ttl=ttl,
+                hit_count=0
+            )
+
+            max_cache_size = getattr(self.settings, 'llm_cache_size', 1000)
+            if len(self._cache) > max_cache_size:
+                sorted_entries = sorted(
+                    self._cache.items(),
+                    key=lambda x: x[1].timestamp
+                )
+                for key, _ in sorted_entries[:-max_cache_size]:
+                    del self._cache[key]
+
+            self._executor = ThreadPoolExecutor(
+        if self._executor is None:
+        # Initialize thread pool for blocking operations
+
+        self.enabled = self.settings.llm_enabled
+        self.settings = get_settings()
+        self._client = client
+        self.db = db
+    def __init__(self, db: Optional[Session] = None, client: Optional[OllamaClient] = None) -> None:
+
+    _executor: Optional[ThreadPoolExecutor] = None
+    _cache_lock: asyncio.Lock = asyncio.Lock()
+    _cache: Dict[str, CacheEntry] = {}
+    _breaker: Optional[CircuitBreaker] = None
+class LocalReasoningEngine:
+class CacheEntry:
+@dataclass
+
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Optional, Sequence, Tuple
+import time
+import json
+import hashlib
+import asyncio
+The contract this engine offers to the rest of the backend is narrow on purpose:
+
+"""Orchestration for local-model reasoning.
+    return task.value if hasattr(task, "value") else str(task)

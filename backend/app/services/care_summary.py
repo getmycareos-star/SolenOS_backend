@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy.orm import Session
 
 from app.core.sharing_enums import ShareCategory
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.identity import Person
+from app.models.care_event import CareEvent
+from app.models.caregiver import Caregiver
 from app.models.contradiction import ContradictionAnalysis
 from app.models.daily_capture import MedicationRecord, ScaleObservation, VitalSign
 from app.models.follow_up import FollowUp
@@ -361,3 +363,4 @@ class CareSummaryBuilder:
             points.append(gap["gap"] + " " + gap["why_it_matters"])
 
         return points
+

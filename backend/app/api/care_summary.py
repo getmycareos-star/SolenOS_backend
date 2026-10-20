@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+﻿from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 from app.core.database import get_db
-from app.models.care import Person as PersonModel, Caregiver as CaregiverModel, Evidence as EvidenceModel, CareEvent as CareEventModel, Insight as InsightModel
+from app.models.identity import Person as PersonModel
+from app.models.caregiver import Caregiver as CaregiverModel
+from app.models.evidence import Evidence as EvidenceModel
+from app.models.care_event import CareEvent as CareEventModel
+from app.models.care import Insight as InsightModel
 from app.models.meaning import Meaning as MeaningModel, MeaningEvidenceLink
 from app.models.behavior import BehaviorObservation as BehaviorObservationModel, BehaviorInterpretation as BehaviorInterpretationModel
 from app.models.follow_up import FollowUp
@@ -17,6 +21,7 @@ from app.services.behavior import BehaviorEngine
 from app.services.care_summary import CareSummaryBuilder
 from app.services.care_summary_pdf import render_summary_pdf
 from app.services.care_sharing import CareSharingService
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
@@ -27,6 +32,7 @@ def _safe_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat()
 
 
+@cached_response(ttl=300, key_prefix="care_summary")
 @router.get("/{person_id}", response_model=Dict[str, Any])
 def get_care_summary(person_id: str, include_evidence: bool = False, db: Session = Depends(get_db)):
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
@@ -265,6 +271,8 @@ def _build_or_refuse(person_id: str, window_days: int, caregiver_id: Optional[st
         raise HTTPException(status_code=404, detail=str(exc))
 
 
+@cached_response(ttl=300, key_prefix="care_summary")
+@cached_response(ttl=300, key_prefix="care_summary")
 @export_router.get("/{person_id}/json")
 def export_json(
     person_id: str,
@@ -276,6 +284,7 @@ def export_json(
     return _build_or_refuse(person_id, window_days, caregiver_id, db)
 
 
+@cached_response(ttl=300, key_prefix="care_summary")
 @export_router.get("/{person_id}/pdf")
 def export_pdf(
     person_id: str,
@@ -306,3 +315,4 @@ def export_pdf(
             "Content-Disposition": 'attachment; filename="care-summary-{}.pdf"'.format(safe_name)
         },
     )
+

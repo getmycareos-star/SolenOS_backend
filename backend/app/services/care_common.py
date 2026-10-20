@@ -14,7 +14,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from app.models.care import Evidence
+from app.models.evidence import Evidence
 
 
 def utc_now() -> datetime:

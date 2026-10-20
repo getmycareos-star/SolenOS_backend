@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
-from app.models.care import CareEvent
+from app.models.care_event import CareEvent
 from app.models.change import Baseline
 from app.core.change_enums import BaselineType, BaselineConfidence
 from app.services.temporal_intelligence import utc_now
@@ -70,8 +70,48 @@ def get_longitudinal_event_counts(
         "current_window_end": now,
         "recent_events": recent_events,
         "all_events": events,
-    }
+     }
 
+
+class BaselineService:
+    """Service for managing baselines."""
+    
+    def get_or_create_baseline(self, person_id: str, db: Session) -> Baseline:
+        """Get or create a baseline for a person.
+        
+        Args:
+            person_id: The ID of the person
+            db: Database session
+            
+        Returns:
+            Baseline: The baseline object
+        """
+        # For now, we'll create a simple baseline.
+        # In a full implementation, this would look at the person's events
+        # to determine the appropriate event_type and subject_id.
+        from datetime import datetime, timedelta, timezone
+        from app.core.change_enums import BaselineType, BaselineConfidence
+        
+        # Create a minimal baseline
+        baseline = Baseline(
+            person_id=person_id,
+            subject_type="observation",  # Default event type
+            subject_id="",  # No specific subject
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=datetime.now(timezone) - timedelta(days=180),
+            window_end=datetime.now(timezone) - timedelta(days=42),
+            event_count=0,
+            frequency_per_period=0.0,
+            state_value=None,
+            confidence=BaselineConfidence.LOW,
+            is_stable=True,
+            observation_density=0.0,
+            documentation_bias_flag=False,
+            evidence_ids=[],
+        )
+        db.add(baseline)
+        db.flush()
+        return baseline
 
 def build_baseline(
     db: Session,

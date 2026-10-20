@@ -17,6 +17,7 @@ from app.schemas.care_context import (
 )
 from app.services.behavior import BehaviorEngine
 from app.services.person_model import PersonModelEngine
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/person", tags=["person"])
 
@@ -25,6 +26,7 @@ def get_engine(db: Session = Depends(get_db)) -> PersonModelEngine:
     return PersonModelEngine(db)
 
 
+@cached_response(ttl=300, key_prefix="person_profile")
 @router.get("/{person_id}/profile", response_model=PersonProfileResponse)
 def get_profile(person_id: str, engine: PersonModelEngine = Depends(get_engine)):
     profile = engine.get_profile(person_id)
@@ -38,6 +40,7 @@ def build_profile(person_id: str, engine: PersonModelEngine = Depends(get_engine
     return engine.build_profile(person_id)
 
 
+@cached_response(ttl=300, key_prefix="person_describe")
 @router.get("/{person_id}/describe")
 def describe(person_id: str, engine: PersonModelEngine = Depends(get_engine)):
     return engine.describe(person_id)
@@ -63,6 +66,7 @@ def add_attribute(payload: PersonAttributeCreate, engine: PersonModelEngine = De
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@cached_response(ttl=300, key_prefix="person_attributes")
 @router.get("/{person_id}/attributes", response_model=List[PersonAttributeResponse])
 def list_attributes(
     person_id: str,
@@ -93,6 +97,7 @@ def add_trigger(payload: PersonTriggerCreate, engine: PersonModelEngine = Depend
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@cached_response(ttl=300, key_prefix="person_triggers")
 @router.get("/{person_id}/triggers", response_model=List[PersonTriggerResponse])
 def list_triggers(person_id: str, engine: PersonModelEngine = Depends(get_engine)):
     return engine.list_triggers(person_id)
@@ -114,6 +119,7 @@ def add_calmer(payload: PersonCalmerCreate, engine: PersonModelEngine = Depends(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@cached_response(ttl=300, key_prefix="person_calmers")
 @router.get("/{person_id}/calmers", response_model=List[PersonCalmerResponse])
 def list_calmers(person_id: str, engine: PersonModelEngine = Depends(get_engine)):
     return engine.list_calmers(person_id)

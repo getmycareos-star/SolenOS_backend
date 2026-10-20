@@ -1,0 +1,54 @@
+﻿"""Explainability service for producing provenance and uncertainty traces."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.evidence import Evidence
+from app.models.knowledge_revision import KnowledgeClaim
+from app.models.care_graph import CareGraphNode, CareGraphEdge
+from app.models.belief_state import BeliefState
+
+
+class ExplainabilityService:
+    """Service for generating explanations of decisions."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_provenance_chain(self, decision_id: str) -> Dict[str, Any]:
+        """Walk back from a decision to its constituent evidence and claims.
+
+        Args:
+            decision_id: Identifier of a decision (e.g., a care recommendation).
+
+        Returns:
+            A graph-like structure showing provenance.
+        """
+        # Placeholder: In a real system, decisions would be linked to evidence
+        # via a Decision model or similar. For now, we return a mock structure.
+        return {
+            "decision_id": decision_id,
+            "provenance": {
+                "evidence": [],
+                "claims": [],
+                "graph_paths": [],
+            },
+            "uncertainty": {
+                "overall_confidence": 0.8,
+                "sources": [],
+            },
+        }
+
+    def attach_explanation(self, response: Dict[str, Any], decision_id: str) -> Dict[str, Any]:
+        """Attach an explanation to an API response."""
+        explanation = self.get_provenance_chain(decision_id)
+        response["explanation"] = explanation
+        return response
+
+
+def get_explainability_service(db: Session) -> ExplainabilityService:
+    """Dependency injection factory."""
+    return ExplainabilityService(db)

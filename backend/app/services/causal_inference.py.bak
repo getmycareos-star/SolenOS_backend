@@ -1,0 +1,66 @@
+﻿"""Causal inference service for counterfactual simulations over the Care Graph."""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.care_graph import CareGraphNode, CareGraphEdge
+from app.models.identity import Person
+
+
+class CausalInferenceService:
+    """Service for performing causal inference on the Care Graph."""
+
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_person_subgraph(self, person_id: str) -> Dict[str, Any]:
+        """Extract the subgraph relevant to a person."""
+        nodes = (
+            self.db.query(CareGraphNode)
+            .filter(CareGraphNode.person_id == person_id)
+            .all()
+        )
+        node_ids = [n.id for n in nodes]
+        edges = (
+            self.db.query(CareGraphEdge)
+            .filter(
+                (CareGraphEdge.source_id.in_(node_ids))
+                | (CareGraphEdge.target_id.in_(node_ids))
+            )
+            .all()
+        )
+        return {
+            "nodes": [n.__dict__ for n in nodes],
+            "edges": [e.__dict__ for e in edges],
+        }
+
+    def counterfactual_simulation(
+        self, person_id: str, intervention: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Run a counterfactual simulation given an intervention.
+
+        Args:
+            person_id: ID of the person.
+            intervention: Dictionary specifying changes to nodes/edges.
+
+        Returns:
+            Dictionary with predicted outcomes.
+        """
+        # Placeholder: In a full implementation, we would use a causal
+        # inference library (e.g., DoWhy, causalnex) to compute the effect.
+        subgraph = self.get_person_subgraph(person_id)
+        # For now, just return the subgraph and the intervention.
+        return {
+            "person_id": person_id,
+            "intervention": intervention,
+            "subgraph": subgraph,
+            "predicted_outcome": "placeholder",
+        }
+
+
+def get_causal_inference_service(db: Session) -> CausalInferenceService:
+    """Dependency injection factory."""
+    return CausalInferenceService(db)

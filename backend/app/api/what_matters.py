@@ -15,6 +15,7 @@ from app.schemas.care_context import (
 )
 from app.services.trajectory import TrajectoryEngine
 from app.services.what_matters import WhatMattersEngine
+from app.core.cache_decorators import cached_response
 
 router = APIRouter(prefix="/what-matters", tags=["what-matters"])
 
@@ -46,6 +47,7 @@ def add_entry(payload: WhatMattersCreate, engine: WhatMattersEngine = Depends(ge
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@cached_response(ttl=3600, key_prefix="what_matters_entries")
 @router.get("/{person_id}/entries", response_model=List[WhatMattersResponse])
 def list_entries(
     person_id: str,
@@ -56,6 +58,7 @@ def list_entries(
     return engine.list_entries(person_id, category, minimum_importance)
 
 
+@cached_response(ttl=3600, key_prefix="what_matters_view")
 @router.get("/{person_id}/view")
 def what_matters_view(person_id: str, engine: WhatMattersEngine = Depends(get_engine)):
     return engine.what_matters_view(person_id)
@@ -90,6 +93,7 @@ def assess_action(payload: AlignmentRequest, engine: WhatMattersEngine = Depends
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@cached_response(ttl=3600, key_prefix="what_matters_alignment")
 @router.get("/{person_id}/alignment")
 def list_alignments(
     person_id: str, engine: WhatMattersEngine = Depends(get_engine)

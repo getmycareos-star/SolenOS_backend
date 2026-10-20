@@ -1,0 +1,7 @@
+﻿from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.core.database = get_db
+from app.api.care_summary import router as care_summary_router
+router.include_router(care_summary_router)
+from app.api.care_summary import export_router as care_summary_export_router
+router.include_router(care_summary_export_router)

@@ -12,7 +12,8 @@ from fastapi.testclient import TestClient
 
 from app.core.database import get_db
 from app.main import app
-from app.models.care import CareEvent, Evidence
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence
 
 
 @pytest.fixture()
@@ -105,7 +106,10 @@ class TestDailyCareEntry:
     def test_caregiver_not_authorized(self, client, person, caregiver):
         """A caregiver not tied to this person must be rejected."""
         resp = client.post("/api/v1/daily-care/entries", json=_payload(caregiver_id="c-other"))
-        assert resp.status_code == 403
+        if resp.status_code != 403:
+            print(f"Unexpected status code: {resp.status_code}")
+            print(f"Response body: {resp.json()}")
+            assert resp.status_code == 403
 
     def test_medication_missed_records_status(self, client, db, person, caregiver):
         payload = _payload()

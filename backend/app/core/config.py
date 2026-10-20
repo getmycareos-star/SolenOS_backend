@@ -1,3 +1,4 @@
+﻿from typing import Optional, List
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -53,6 +54,42 @@ class Settings(BaseSettings):
     # instead of retrying on every request.
     llm_circuit_failure_threshold: int = 3
     llm_circuit_reset_seconds: float = 120.0
+
+    log_format: str = "text"
+    
+    # Malware scanning settings
+    malware_scanning_enabled: bool = False
+    malware_scanner_command: str = "clamscan"  # Command to run for scanning
+    malware_scan_timeout: int = 30  # Timeout in seconds for scanning
+    # Alerting settings
+    alerting_enabled: bool = False
+    alert_webhook_url: Optional[str] = None  # URL for sending alerts (e.g., Slack webhook)
+    alert_email_enabled: bool = False  # Whether to send email alerts
+    alert_email_smtp_server: Optional[str] = None
+    alert_email_smtp_port: int = 587
+    alert_email_username: Optional[str] = None
+    alert_email_password: Optional[str] = None
+    alert_email_from: Optional[str] = None
+    alert_email_to: List[str] = []  # List of recipient email addresses
+    
+    # JWT settings
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 30
+    jwt_refresh_token_expire_days: int = 30
+    jwt_anonymous_session_expire_days: int = 90
+    
+    # Keycloak settings
+    keycloak_url: str = "http://localhost:8080"
+    keycloak_realm: str = "solenos"
+    keycloak_client_id: str = "solenos-frontend"
+    keycloak_client_secret: Optional[str] = None
+    
+    # Redis configuration for Celery broker
+    redis_url: str = "redis://localhost:6379/0"
+    
+    # Data deletion settings
+    data_deletion_enabled: bool = True
+    data_deletion_interval_hours: int = 24  # Run daily by default
 
     class Config:
         env_file = ".env"

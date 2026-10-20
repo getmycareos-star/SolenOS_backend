@@ -1,4 +1,4 @@
-"""Care continuity.
+﻿"""Care continuity.
 
 This is the through-line rather than a layer. Every other module answers a
 question about the present; this one is the only place that answers "how did we
@@ -45,6 +45,8 @@ from app.services.care_common import (
 )
 from app.services.llm import LocalReasoningEngine
 
+from app.services.notification import create_notification_service
+from app.schemas.notification import NotificationCreate
 # A thread is stale when nothing has been recorded against it for this long. Not
 # a clinical threshold: it is the point at which "this has been going on" stops
 # being available to a new caregiver who has not been here.
@@ -86,6 +88,19 @@ class CareContinuityEngine:
             )
             self.db.add(thread)
             self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         else:
             if label and thread.label != label:
                 thread.label = label
@@ -100,6 +115,19 @@ class CareContinuityEngine:
 
         thread.observation_count = (thread.observation_count or 0) + 1
         self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         return thread
 
     def get_thread(self, person_id: str, subject: str) -> Optional[ContinuityThread]:
@@ -148,6 +176,19 @@ class CareContinuityEngine:
                     thread.stale_since = None
                     changed.append(thread)
         self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         return changed
 
     # ------------------------------------------------------------------
@@ -236,10 +277,36 @@ class CareContinuityEngine:
         )
         self.db.add(snapshot)
         self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         if existing is not None:
             existing.is_active = False
             existing.superseded_by_snapshot_id = snapshot.id
         self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         return snapshot
 
     def _events_for(
@@ -492,6 +559,19 @@ class CareContinuityEngine:
         )
         self.db.add(handoff)
         self.db.flush()
+        # Send notification for significant thread updates (only for certain observation counts)
+        if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
+            notification_service = create_notification_service(self.db)
+            notification_data = NotificationCreate(
+                recipient_person_id=person_id,
+                type='care_thread_updated',
+                title='Care Activity Recorded',
+                message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
+                related_entity_type='continuity_thread',
+                related_entity_id=thread.id,
+                priority='low'
+            )
+            notification_service.create_notification(notification_data)
         return handoff
 
     def _deterministic_handoff(
@@ -821,3 +901,7 @@ def _enum_or_value(value: Any, enum_cls) -> Any:
         return enum_cls(raw)
     except ValueError:
         return list(enum_cls)[0]
+
+
+
+

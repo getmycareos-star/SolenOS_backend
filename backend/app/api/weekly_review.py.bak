@@ -1,0 +1,108 @@
+"""Weekly Care Review API - RESTful endpoints for the Weekly Care Review Service.
+
+Implements the API for generating weekly care reviews to help caregivers
+maintain Care Memory through structured review, verification, and reconciliation.
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from app.core.database import get_db
+from app.services.weekly_care_review import WeeklyCareReviewService
+from app.core.security import get_current_active_user, AuthenticatedPrincipal
+
+router = APIRouter(prefix="/weekly-review", tags=["weekly_review"])
+
+def get_weekly_review_service(db: Session = Depends(get_db)) -> WeeklyCareReviewService:
+    return WeeklyCareReviewService(db)
+
+@router.get("/{person_id}")
+def get_weekly_review(
+    person_id: str = Path(..., description="Person ID"),
+    end_date: Optional[datetime] = Query(None, description="End of review period (ISO format)"),
+    review_start_date: Optional[datetime] = Query(None, description="Start of review period (ISO format)"),
+    service: WeeklyCareReviewService = Depends(get_weekly_review_service),
+    current_user: AuthenticatedPrincipal = Depends(get_current_active_user)
+):
+    """Generate a weekly care review for a person.
+    
+    Returns a structured review focused on Care Memory maintenance,
+    helping caregivers answer:
+    - What changed this week?
+    - What matters now?
+    - What remains unresolved?
+    - What do we need to follow up?
+    
+    The review integrates with canonical Evidence, Care Graph,
+    Open Loop system, decision/outcome tracking, medication management,
+    appointments, and caregiver responsibilities.
+    """
+    try:
+        # Verify the person exists and user has access (basic check)
+        # In a full implementation, you would add more sophisticated authorization
+        
+        review = service.generate_review(
+            person_id=person_id,
+            end_date=end_date,
+            review_start_date=review_start_date
+        )
+        return review
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@router.get("/{person_id}/history")
+def get_weekly_review_history(
+    person_id: str = Path(..., description="Person ID"),
+    limit: int = Query(10, ge=1, le=50, description="Maximum number of reviews to return"),
+    service: WeeklyCareReviewService = Depends(get_weekly_review_service),
+    current_user: AuthenticatedPrincipal = Depends(get_current_active_user)
+):
+    """Get historical weekly reviews for a person.
+    
+    Returns a list of past reviews showing how the care situation
+    has been maintained over time.
+    """
+    # This would require storing review results in the database
+    # For now, return a placeholder indicating this feature is planned
+    return {
+        "message": "Historical weekly review tracking is planned for future implementation",
+        "person_id": person_id,
+        "planned_features": [
+            "Stored review results for trend analysis",
+            "Comparison between different time periods",
+            "Care Memory maintenance trajectory visualization",
+            "Verification and correction history tracking"
+        ]
+    }
+
+@router.post("/{person_id}/complete")
+def complete_weekly_review(
+    person_id: str = Path(..., description="Person ID"),
+    review_data: dict = None,  # Would contain user-verifications, corrections, etc.
+    service: WeeklyCareReviewService = Depends(get_weekly_review_service),
+    current_user: AuthenticatedPrincipal = Depends(get_current_active_user)
+):
+    """Mark a weekly review as complete and apply any user-verified changes.
+    
+    In a full implementation, this would:
+    1. Apply user-verifications and corrections to canonical state
+    2. Update Open Loops based on resolutions
+    3. Record the review completion for historical tracking
+    4. Generate care memory update summary
+    """
+    # Placeholder for future implementation
+    return {
+        "message": "Weekly review completion processing is planned for future implementation",
+        "person_id": person_id,
+        "features_planned": [
+            "Application of user-verified corrections to canonical state",
+            "Open Loop resolution tracking",
+            "Care Memory version update",
+            "Historical review record creation"
+        ]
+    }

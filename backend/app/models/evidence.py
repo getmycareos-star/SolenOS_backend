@@ -1,0 +1,211 @@
+﻿from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, UniqueConstraint, Index
+from sqlalchemy.sql import func
+import uuid
+from app.core.database import Base
+from app.core.types import JSONList, JSONDict
+from sqlalchemy.orm import relationship
+
+from app.core.evidence_enums import (
+    EvidenceType,
+    EvidenceStatus,
+    EvidenceSubjectRole,
+    EvidenceObserverRole,
+    EvidenceAuthorRole,
+    EvidenceRelationshipType,
+    ConfidenceDimension,
+    TemporalGranularity,
+    TemporalAnchorType,
+    SourceType,
+    ExtractionMethod,
+    EntityResolutionStatus,
+    NegationStatus,
+    NormalizationType,
+    CorrectionType,
+    InvalidationReason,
+    SupersessionReason,
+    UncertaintyLevel,
+    HedgeType,
+)
+
+
+class Evidence(Base):
+    __tablename__ = "evidence"
+    __table_args__ = (
+        Index("ix_evidence_person_id", "person_id"),
+        Index("ix_evidence_uploaded_by", "uploaded_by_caregiver_id"),
+        Index("ix_evidence_source_id", "source_id"),
+        Index("ix_evidence_type", "type"),
+        Index("ix_evidence_status", "evidence_status"),
+        Index("ix_evidence_created_at", "created_at"),
+        Index("ix_evidence_uploaded_at", "uploaded_at"),
+        Index("ix_evidence_content_hash", "content_hash"),
+    )
+
+    # Primary key
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    
+    # Person reference
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False)
+    
+    # Subject details (from rich model)
+    subject_role = Column(String, nullable=False)  # EvidenceSubjectRole
+    subject_id = Column(String, ForeignKey("persons.id"), nullable=True)  # FK to persons.id or other entities
+    subject_identifier = Column(String, nullable=True)  # external identifier
+    entity_resolution_status = Column(String, nullable=False)  # EntityResolutionStatus
+    entity_resolution_confidence = Column(Float, nullable=True)
+    
+    # Observer details (from rich model)
+    observer_role = Column(String, nullable=True)  # EvidenceObserverRole
+    observer_id = Column(String, nullable=True)
+    observer_name = Column(String, nullable=True)
+    
+    # Author details (from rich model)
+    author_role = Column(String, nullable=True)  # EvidenceAuthorRole
+    author_id = Column(String, nullable=True)
+    author_name = Column(String, nullable=True)
+    
+    # Uploader
+    uploaded_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    
+    # Evidence core (from both models)
+    type = Column(String, nullable=False)  # EvidenceType
+    subtype = Column(String, nullable=True)
+    source_text = Column(Text, nullable=False)
+    
+    # Simple model columns (backward compatibility)
+    original_file_path = Column(String, nullable=True)
+    uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
+    extra_metadata = Column(Text, nullable=True)
+    time_provenance = Column(String, nullable=True)
+    location = Column(String, nullable=True)
+    confidence = Column(Float, nullable=True)  # single confidence for backward compatibility
+    evidence_status = Column(String, nullable=False, default="active")  # EvidenceStatus
+    source_type = Column(String, nullable=True)  # SourceType
+    source_span_start = Column(Integer, nullable=True)
+    source_span_end = Column(Integer, nullable=True)
+    
+    # === ADDITIONAL CONFIDENCE DIMENSIONS ===
+    # Confidence in source reliability (how trustworthy is the source)
+    confidence_source_reliability = Column(Float, nullable=True)
+    # Confidence in collector expertise (how knowledgeable is the collector)
+    confidence_collector_expertise = Column(Float, nullable=True)
+    # Confidence in environmental conditions during collection
+    confidence_collection_conditions = Column(Float, nullable=True)
+    
+    # === MORE DETAILED TEMPORAL FIELDS ===
+    # Duration of the event/evidence
+    duration_value = Column(Float, nullable=True)  # Numeric duration
+    duration_unit = Column(String, nullable=True)  # seconds, minutes, hours, days, etc.
+    duration_is_exact = Column(Boolean, nullable=True)  # Whether duration is exact or estimated
+    # Frequency/recurrence information
+    frequency_value = Column(Float, nullable=True)  # How often it occurs
+    frequency_unit = Column(String, nullable=True)  # per second, minute, hour, day, etc.
+    frequency_pattern = Column(String, nullable=True)  # e.g., "daily", "weekly", "irregular"
+    recurrence_pattern = Column(JSONDict, nullable=True)  # Detailed recurrence pattern
+    
+    # === RICH MODEL COLUMNS: normalized text ===
+    normalized_text = Column(Text, nullable=True)
+    normalization_type = Column(String, nullable=True)  # NormalizationType
+    normalization_details = Column(Text, nullable=True)  # JSON stored as text
+    
+    # Negation, uncertainty, hedging
+    negation_status = Column(String, nullable=False, default="asserted")  # NegationStatus
+    uncertainty_level = Column(String, nullable=False, default="certain")  # UncertaintyLevel
+    hedge_type = Column(String, nullable=True)  # HedgeType
+    hedge_text = Column(String, nullable=True)
+    
+    # === TEMPORAL INFORMATION (rich model) ===
+    event_time = Column(DateTime(timezone=True), nullable=True)
+    event_time_granularity = Column(String, nullable=True)  # TemporalGranularity
+    event_time_text = Column(String, nullable=True)
+    event_time_anchor = Column(String, nullable=True)  # TemporalAnchorType
+    event_time_anchor_reference = Column(String, nullable=True)
+    observation_time = Column(DateTime(timezone=True), nullable=True)
+    observation_time_granularity = Column(String, nullable=True)  # TemporalGranularity
+    observation_time_text = Column(String, nullable=True)
+    document_time = Column(DateTime(timezone=True), nullable=True)
+    authoring_time = Column(DateTime(timezone=True), nullable=True)
+    
+    # === ENHANCED SOURCE PROVENANCE ===
+    source_id = Column(String, ForeignKey("documents.id"), nullable=True)
+    source_version = Column(Integer, nullable=True)
+    source_type_col = Column(String, nullable=True)  # SourceType (renamed to avoid conflict)
+    
+    # Chain of custody tracking
+    chain_of_custody = Column(JSONList, nullable=True)  # List of custodians with timestamps
+    handling_procedures = Column(JSONDict, nullable=True)  # Procedures followed during handling
+    storage_conditions = Column(JSONDict, nullable=True)  # Storage conditions (temperature, humidity, etc.)
+    transport_method = Column(String, nullable=True)  # How evidence was transported
+    
+    # Source location details
+    source_location_page = Column(Integer, nullable=True)
+    source_location_paragraph = Column(Integer, nullable=True)
+    source_location_text_span_start = Column(Integer, nullable=True)
+    source_location_text_span_end = Column(Integer, nullable=True)
+    source_location_image_region = Column(Text, nullable=True)  # JSON stored as text
+    source_location_structured_field = Column(String, nullable=True)
+    
+    # === RICH EXTRACTION METADATA ===
+    extraction_method = Column(String, nullable=True)  # ExtractionMethod
+    extraction_version = Column(String, nullable=True)
+    extraction_model = Column(String, nullable=True)
+    extraction_model_version = Column(String, nullable=True)  # Specific version of the model
+    extraction_parameters = Column(JSONDict, nullable=True)  # Model parameters used
+    preprocessing_steps = Column(JSONList, nullable=True)  # Steps taken before extraction
+    postprocessing_steps = Column(JSONList, nullable=True)  # Steps taken after extraction
+    extraction_confidence = Column(Float, nullable=True)
+    extraction_timestamp = Column(DateTime(timezone=True), nullable=True)
+    
+    # === CONFIDENCE DIMENSIONS (rich model) ===
+    confidence_extraction = Column(Float, nullable=True)
+    confidence_entity_resolution = Column(Float, nullable=True)
+    confidence_temporal = Column(Float, nullable=True)
+    confidence_source_support = Column(Float, nullable=True)
+    confidence_interpretation = Column(Float, nullable=True)
+    
+    # === STATUS AND VALIDITY (rich model) ===
+    status_reason = Column(String, nullable=True)
+    valid_from = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    
+    # === PROCESSING LINEAGE ===
+    # Track which processes have modified this evidence
+    processing_history = Column(JSONList, nullable=True)  # List of processing steps with timestamps
+    processing_version = Column(String, nullable=True)
+    last_processed_by = Column(String, ForeignKey("accounts.id"), nullable=True)  # Who last processed it
+    last_processed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # === QUALITY GATE ===
+    quality_gate_passed = Column(Boolean, nullable=True)
+    quality_gate_details = Column(Text, nullable=True)  # JSON stored as text
+    quality_gate_rules = Column(JSONList, nullable=True)  # Detailed validation rules applied
+    quality_gate_thresholds = Column(JSONDict, nullable=True)  # Confidence thresholds used
+    
+    # === VERSIONING FOR OPTIMISTIC LOCKING / AUDIT ===
+    version = Column(Integer, nullable=False, default=1)
+    
+    # === USER-DEFINED CUSTOM FIELDS ===
+    # For extensibility without schema changes
+    custom_fields = Column(JSONDict, nullable=True)  # Arbitrary key-value pairs
+    
+    # === INTEGRATION WITH EXTERNAL EVIDENCE STANDARDS ===
+    # Mapping to external standards
+    iso_standard_references = Column(JSONList, nullable=True)  # References to ISO standards
+    legal_evidence_format = Column(String, nullable=True)  # e.g., "FRE 702", "Daubert"
+    external_evidence_ids = Column(JSONList, nullable=True)  # IDs in external systems
+    
+    # === EVIDENCE SIMILARITY/SEARCH FEATURES ===
+    content_hash = Column(String, nullable=True)  # Hash of content for duplicate detection
+    feature_vector = Column(Text, nullable=True)  # Serialized feature vector for similarity search
+    
+    # === TIMESTAMPS ===
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # === RELATIONSHIPS ===
+    # Person reference relationship
+    person = relationship("Person", foreign_keys=[person_id])
+    # Subject person relationship (when subject_id refers to a person)
+    subject_person = relationship("Person", foreign_keys=[subject_id])
+    # Last processed by relationship
+    last_processed_by_rel = relationship("Account", foreign_keys=[last_processed_by])

@@ -27,7 +27,8 @@ from app.core.care_context_enums import (
     ContradictionResolutionPath,
 )
 from app.core.llm_enums import LLMReasoningMode, LLMTask
-from app.models.care import CareEvent, Evidence
+from app.models.care_event import CareEvent
+from app.models.evidence import Evidence
 from app.models.contradiction import ContradictionAnalysis, ContradictionResolution
 from app.models.llm import LLMReasoningResult
 from app.models.uncertainty import Contradiction as ContradictionModel

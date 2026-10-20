@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.models.care import CareEvent
+from app.models.care_event import CareEvent
 from app.models.change import Change, Pattern, Situation
 from app.models.uncertainty import (
     Contradiction as ContradictionModel,
@@ -175,7 +175,7 @@ def _derive_situation_type(db: Session, changes: List[Change], increasing: List[
 
 
 def _collect_evidence_texts(db: Session, changes: List[Change]) -> List[str]:
-    from app.models.care import Evidence
+    from app.models.evidence import Evidence
     evidence_ids = []
     for c in changes:
         evidence_ids.extend(c.evidence_ids or [])
@@ -219,7 +219,7 @@ def _derive_frequency_situation_type(db: Session, pattern: Pattern) -> Situation
 
 
 def _collect_evidence_texts_from_patterns(db: Session, patterns: List[Pattern]) -> List[str]:
-    from app.models.care import Evidence
+    from app.models.evidence import Evidence
     evidence_ids = []
     for p in patterns:
         evidence_ids.extend(p.event_ids or [])
@@ -299,8 +299,7 @@ def _epistemic_context(db: Session, person_id: str, subject_type: str, subject_i
             InformationGapModel.subject_type == subject_type,
             InformationGapModel.lifecycle_status == GapLifecycleStatus.OPEN,
         )
-        .all()
-    )
+    ).all()
     if subject_id:
         gaps = [g for g in gaps if g.subject_id == subject_id or g.subject_id == ""]
 
@@ -393,9 +392,7 @@ def _form_pattern_situation(
         temporal_end=temporal_end,
         pattern_ids=[p.id for p in active_patterns],
         change_ids=[c.id for c in changes],
-        significance_assessment_id=(
-            next((v.id for v in change_sigs.values()), None)
-        ),
+        significance_assessment_id=(next((v.id for v in change_sigs.values()), None)),
         confidence=min(p.confidence for p in active_patterns) * 0.9,
         alternative_interpretations=[
             {
@@ -573,3 +570,30 @@ def update_situations(
     if updated:
         db.commit()
     return updated
+
+
+class SituationFormationService:
+    """Service for forming situations from changes and patterns."""
+    
+    def form_situations(
+        self,
+        db: Session,
+        person_id: str,
+        reference_time: Optional[datetime] = None,
+    ) -> List[Situation]:
+        """
+        Form situations from changes and patterns for a person.
+        
+        Args:
+            db: Database session
+            person_id: The ID of the person
+            reference_time: Reference time for situation formation (defaults to now)
+            
+        Returns:
+            List of Situation objects
+        """
+        return detect_situations(
+            db=db,
+            person_id=person_id,
+            reference_time=reference_time,
+        )

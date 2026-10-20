@@ -1,6 +1,8 @@
 import os
 import uuid
 import hashlib
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass, field
@@ -11,6 +13,60 @@ try:
     from pypdf import PdfReader
 except ImportError:
     PdfReader = None
+
+
+from app.core.config import get_settings
+
+settings = get_settings()
+
+
+def scan_file_for_malware(file_path: str) -> tuple[bool, str]:
+    """
+    Scan a file for malware using configured antivirus scanner.
+    
+    Args:
+        file_path: Path to the file to scan
+        
+    Returns:
+        tuple: (is_clean, message)
+               is_clean: True if file is clean, False if malware detected
+               message: Informational message about the scan result
+    """
+    if not settings.malware_scanning_enabled:
+        return True, "Malware scanning disabled"
+    
+    if not settings.malware_scanner_command:
+        return True, "No malware scanner configured"
+    
+    try:
+        # Run the malware scanner
+        # Note: This is a basic implementation. In production, you might want to:
+        # 1. Use a proper antivirus library/service
+        # 2. Handle scanner output more robustly
+        # 3. Consider sandboxing the scan
+        # 4. Implement quarantine for infected files
+        result = subprocess.run(
+            [settings.malware_scanner_command, "--no-summary", file_path],
+            capture_output=True,
+            text=True,
+            timeout=settings.malware_scan_timeout
+        )
+        
+        # clamscan returns 0 if clean, 1 if infected, 2 for error
+        if result.returncode == 0:
+            return True, "File is clean"
+        elif result.returncode == 1:
+            return False, f"Malware detected: {result.stdout.strip()}"
+        else:
+            # Scanner error
+            return False, f"Scanner error: {result.stderr.strip()}"
+            
+    except subprocess.TimeoutExpired:
+        return False, "Malware scan timed out"
+    except FileNotFoundError:
+        return False, f"Malware scanner not found: {settings.malware_scanner_command}"
+    except Exception as e:
+        return False, f"Malware scan failed: {str(e)}"
 
 
 SUPPORTED_MIME_TYPES = {
@@ -292,6 +348,34 @@ def save_uploaded_file(file_content: bytes, original_filename: str, mime_type: s
     storage_path = os.path.join(person_dir, stored_filename)
     with open(storage_path, "wb") as f:
         f.write(file_content)
+    
+    # Scan for malware if enabled
+    is_clean, scan_message = scan_file_for_malware(storage_path)
+    if not is_clean:
+        # Remove the infected file
+        try:
+            os.remove(storage_path)
+        except OSError:
+            pass  # If we can't remove it, we'll still raise the exception below
+        
+        # Send security alert
+        send_security_alert(
+            event_type="malware_detected_in_upload",
+            description=f"Malware detected in uploaded file: {original_filename}",
+            severity="critical",
+            source_ip=None,  # Would need to be passed from the API layer
+            details={
+                "original_filename": original_filename,
+                "sanitized_filename": sanitized,
+                "mime_type": mime_type,
+                "file_size": len(file_content),
+                "scan_message": scan_message,
+                "person_id": person_id
+            }
+        )
+        
+        raise ValueError(f"File rejected due to malware detection: {scan_message}")
+    
     content_hash = hashlib.sha256(file_content).hexdigest()
     doc_type = _detect_document_type(sanitized, mime_type, storage_path)
     doc = DocumentModel(

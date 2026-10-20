@@ -16,6 +16,13 @@ from app.schemas.dementia import (
     DementiaReasoningSummary,
     DementiaChangeAssessmentResponse,
 )
+from app.schemas.job import (
+    JobBase,
+    JobCreate,
+    JobUpdate,
+    JobResponse,
+    JobListResponse,
+)
 
 __all__ = [
     "DementiaBaselineCreate",
@@ -34,4 +41,9 @@ __all__ = [
     "DementiaSafetyEventResponse",
     "DementiaReasoningSummary",
     "DementiaChangeAssessmentResponse",
+    "JobBase",
+    "JobCreate",
+    "JobUpdate",
+    "JobResponse",
+    "JobListResponse",
 ]
