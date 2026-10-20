@@ -34,10 +34,15 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
+    # The post-collection hook normally fills this snapshot. Keep a lazy fallback
+    # because some pytest/plugin invocation modes may not run that hook before
+    # the first fixture setup.
+    if not APP_ROUTES_BASELINE:
+        APP_ROUTES_BASELINE[:] = list(app.router.routes)
+
     # Dependency overrides, route registration and rate counters are
-    # process-global. Restore the route table from the post-collection snapshot
-    # so one test cannot contaminate another, while retaining every router loaded
-    # during application/test-module initialization.
+    # process-global. Restore the complete route table so one test cannot
+    # contaminate another.
     app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
