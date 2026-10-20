@@ -6,9 +6,9 @@ get_settings.cache_clear()
 
 from app.main import app, api_limiter, auth_limiter, strict_limiter
 
-# Snapshot the real route table once. Some tests mutate process-global app state;
-# restore the registered routes between tests so route tests verify the app, not
-# whichever test happened to run immediately beforehand.
+# Snapshot the real route table for diagnostics only. The application route
+# table is part of the object under test and must not be replaced by a potentially
+# partial snapshot during test isolation.
 APP_ROUTES_BASELINE = tuple(app.router.routes)
 
 import pytest
@@ -29,14 +29,14 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
-    # Dependency overrides, route registration and in-memory rate counters are
-    # process-global. Restore all three so one test cannot contaminate another.
-    app.router.routes[:] = list(APP_ROUTES_BASELINE)
+    # Dependency overrides and rate counters are process-global. Reset those
+    # between tests, but never replace app.router.routes: doing so can remove
+    # routers registered during application initialization and make route tests
+    # validate the test fixture instead of the running application.
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
     yield
-    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
