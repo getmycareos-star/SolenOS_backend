@@ -1,31 +1,18 @@
+"""Database setup with model registration deferred until first use."""
+from threading import Lock
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.core.config import get_settings
 
 settings = get_settings()
-
 engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-import app.models.uncertainty  # noqa: E402, F401
-import app.models.temporal  # noqa: E402, F401
-import app.models.change  # noqa: E402, F401
-import app.models.significance  # noqa: E402, F401
-import app.models.action  # noqa: E402, F401
-import app.models.caregiver_intelligence  # noqa: E402, F401
-import app.models.causal  # noqa: E402, F401
-
-Base.metadata.create_all(bind=engine)
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+_initialized = False
+_init_lock = Lock()
 
 
 def _sqlite_column_type(col, dialect):
@@ -36,17 +23,12 @@ def _sqlite_column_type(col, dialect):
 
 
 def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
+    """Add only missing nullable/defaulted columns to legacy SQLite tables.
 
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
+    This legacy compatibility helper is not a substitute for reviewed migrations.
+    It does not drop or rewrite existing data.
     """
     from sqlalchemy import inspect, text
-
     target = bind or engine
     try:
         insp = inspect(target)
@@ -78,9 +60,37 @@ def ensure_database_schema(bind=None):
                 with target.begin() as conn:
                     conn.execute(stmt)
             except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
+                # Preserve the existing legacy behavior; schema verification must
+                # surface unresolved missing columns before production rollout.
                 pass
 
 
-ensure_database_schema()
+def init_db():
+    """Register all models before schema creation; run once per process."""
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        import app.models.care  # noqa: F401
+        import app.models.uncertainty  # noqa: F401
+        import app.models.temporal  # noqa: F401
+        import app.models.change  # noqa: F401
+        import app.models.significance  # noqa: F401
+        import app.models.action  # noqa: F401
+        import app.models.caregiver_intelligence  # noqa: F401
+        import app.models.causal  # noqa: F401
+        import app.models.auth_identity  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        ensure_database_schema()
+        _initialized = True
+
+
+def get_db():
+    init_db()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
