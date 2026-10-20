@@ -133,8 +133,9 @@ def test_identical_retry_does_not_duplicate_event_or_evidence(db, client):
     payload = make_payload(person, caregiver, raw_input, timestamp)
     body = payload.model_dump(mode="json")
 
-    first = client.post("/api/situation", json=body)
-    retry = client.post("/api/situation", json=body)
+    headers = {"Idempotency-Key": "capture-retry-003"}
+    first = client.post("/api/situation", json=body, headers=headers)
+    retry = client.post("/api/situation", json=body, headers=headers)
     assert first.status_code == 200, first.text
     assert retry.status_code == 200, retry.text
 
@@ -158,3 +159,31 @@ def test_empty_input_returns_client_error(db, client):
     )
     response = client.post("/api/situation", json=payload.model_dump(mode="json"))
     assert response.status_code == 400, response.text
+
+
+def test_reusing_idempotency_key_for_different_content_is_rejected(db, client):
+    person, caregiver = setup_person_and_caregiver(db, "_005")
+    timestamp = datetime.now(timezone.utc).isoformat()
+    headers = {"Idempotency-Key": "capture-key-reuse-005"}
+
+    first = client.post(
+        "/api/situation",
+        json=make_payload(
+            person, caregiver, "The person fell beside the bed.", timestamp
+        ).model_dump(mode="json"),
+        headers=headers,
+    )
+    conflicting = client.post(
+        "/api/situation",
+        json=make_payload(
+            person, caregiver, "The person did not fall; caregiver corrected the report.", timestamp
+        ).model_dump(mode="json"),
+        headers=headers,
+    )
+
+    assert first.status_code == 200, first.text
+    assert conflicting.status_code == 409, conflicting.text
+    assert "different capture request" in conflicting.text
+    assert db.query(CareEvent).filter(CareEvent.person_id == person.id).count() == 1
+    assert db.query(Evidence).filter(Evidence.person_id == person.id).count() == 1
+
