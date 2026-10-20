@@ -1,5 +1,5 @@
 ﻿from typing import Optional, List
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
@@ -91,6 +91,16 @@ class Settings(BaseSettings):
     # Data deletion settings
     data_deletion_enabled: bool = True
     data_deletion_interval_hours: int = 24  # Run daily by default
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Refuse to boot in production with the development signing key."""
+        if not self.debug:
+            if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:
+                raise ValueError(
+                    "SECRET_KEY must be configured with at least 32 characters when DEBUG=false"
+                )
+        return self
 
     class Config:
         env_file = ".env"
