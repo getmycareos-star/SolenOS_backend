@@ -1,8 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.database import get_db
+from app.core.security import (
+    AuthenticatedPrincipal,
+    get_current_principal,
+    require_authenticated,
+    require_care_context_access,
+    require_team_access,
+)
 from app.schemas.safety import (
     SafetyContractInput,
     SafetyContractOutput,
@@ -36,12 +43,84 @@ from app.models.safety import (
     SafetyBlindSpotModel,
     SafetyFeedbackModel,
 )
+from app.models.safety import EscalationModel as EscalationRecordModel
 from app.services.safety import SafetyEngine
 from app.services.risk_escalation import EscalationEngine
 from app.services.safety_evaluation import SafetyEvaluationSuite
 import uuid
 
-router = APIRouter()
+async def authorize_safety_request(
+    request: Request,
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+    db: Session = Depends(get_db),
+) -> None:
+    """Protect safety endpoints by care context or SolenOS operations role.
+
+    Policy/benchmark/regression controls are operations-only. Record-level
+    endpoints must resolve a care context and verify access before reading or
+    mutating data. The client never supplies the authenticated identity.
+    """
+    require_authenticated(principal)
+    path = request.url.path.rstrip("/")
+    operations_only = (
+        path.endswith("/policy-rules")
+        or path.endswith("/benchmark-cases")
+        or path.endswith("/evaluate-benchmark")
+        or path.endswith("/adversarial-tests")
+        or path.endswith("/blind-spots")
+        or path.endswith("/regression-check")
+        or path.endswith("/validate-response")
+    )
+    if operations_only:
+        require_team_access(principal)
+        return
+
+    payload = {}
+    if request.method in {"POST", "PUT", "PATCH"}:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                payload = body
+        except Exception:
+            payload = {}
+
+    def find_context(value):
+        if isinstance(value, dict):
+            for key in ("person_id", "affected_person_id"):
+                if value.get(key):
+                    return str(value[key])
+            for nested in value.values():
+                found = find_context(nested)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = find_context(nested)
+                if found:
+                    return found
+        return None
+
+    person_id = (
+        request.path_params.get("person_id")
+        or request.query_params.get("person_id")
+        or find_context(payload)
+    )
+    escalation_id = request.path_params.get("escalation_id")
+    if not person_id and escalation_id:
+        escalation = db.query(EscalationRecordModel).filter(
+            EscalationRecordModel.id == escalation_id
+        ).first()
+        person_id = getattr(escalation, "person_id", None) if escalation else None
+
+    if not person_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A care context is required for safety record access.",
+        )
+    require_care_context_access(principal, str(person_id), "safety record access")
+
+
+router = APIRouter(dependencies=[Depends(authorize_safety_request)])
 
 
 @router.post("/evaluate", response_model=SafetyContractOutput)
