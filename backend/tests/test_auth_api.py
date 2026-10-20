@@ -14,7 +14,7 @@ from app.models.causal import CausalHypothesis
 from app.models.uncertainty import InformationGap
 
 
-def test_signup_login_current_account_and_logout():
+def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(bind=engine, tables=[Person.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
@@ -27,6 +27,7 @@ def test_signup_login_current_account_and_logout():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr("app.api.v1._log_and_learn", lambda *args, **kwargs: None)
     try:
         with TestClient(app) as client:
             signup = client.post("/api/v1/auth/signup", json={
@@ -77,6 +78,9 @@ def test_signup_login_current_account_and_logout():
             current = client.get("/api/v1/auth/me", headers=headers)
             assert current.status_code == 200, current.text
             assert current.json()["email"] == "caregiver@example.com"
+            legacy_created = client.post("/api/v1/persons", headers=headers, json={"name": "Legacy Care Recipient"})
+            assert legacy_created.status_code == 200, legacy_created.text
+            assert client.get("/api/v1/persons/" + legacy_created.json()["id"], headers=headers).status_code == 200
 
             created_context = client.post(
                 "/api/v1/auth/care-contexts",
@@ -119,6 +123,8 @@ def test_signup_login_current_account_and_logout():
                     assert exc.status_code == 403
             unrelated_legacy_person = client.get("/api/v1/persons/" + unrelated.id, headers=headers)
             assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
+            unrelated_write = client.post("/api/v1/care-windows", headers=headers, params={"person_id": unrelated.id, "event_type": "test", "occurred_at": "not-a-date"})
+            assert unrelated_write.status_code == 403, unrelated_write.text
             unrelated_read = client.get("/api/v1/uncertainty/gaps/" + unrelated.id, headers=headers)
             assert unrelated_read.status_code == 403, unrelated_read.text
             unrelated_baselines = client.get("/api/v1/change/baselines/" + unrelated.id, headers=headers)
