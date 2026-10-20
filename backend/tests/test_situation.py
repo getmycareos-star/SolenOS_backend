@@ -335,22 +335,24 @@ def test_situation_rejects_a_person_outside_the_callers_care_context():
         )
         db.add_all([person, caregiver])
         db.commit()
+        person_id = person.id
+        caregiver_id = caregiver.id
         db.close()
         override_principal("authorized@example.com", ["different-person-id"])
 
         response = TestClient(app).post(
             "/api/situation",
             json={
-                "caregiver_id": caregiver.id,
-                "person_id": person.id,
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
                 "raw_input": "This must not be stored.",
             },
         )
         assert response.status_code == 403
         db = TestingSessionLocal()
         try:
-            assert db.query(Evidence).filter(Evidence.person_id == person.id).count() == 0
-            assert db.query(CareEvent).filter(CareEvent.person_id == person.id).count() == 0
+            assert db.query(Evidence).filter(Evidence.person_id == person_id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 0
         finally:
             db.close()
     finally:
@@ -380,22 +382,24 @@ def test_situation_rejects_spoofed_caregiver_attribution():
         )
         db.add_all([person, actual_caregiver, spoofed_caregiver])
         db.commit()
+        person_id = person.id
+        spoofed_caregiver_id = spoofed_caregiver.id
         db.close()
-        override_principal("actual@example.com", [person.id])
+        override_principal("actual@example.com", [person_id])
 
         response = TestClient(app).post(
             "/api/situation",
             json={
-                "caregiver_id": spoofed_caregiver.id,
-                "person_id": person.id,
+                "caregiver_id": spoofed_caregiver_id,
+                "person_id": person_id,
                 "raw_input": "This must not be attributed to another caregiver.",
             },
         )
         assert response.status_code == 403
         db = TestingSessionLocal()
         try:
-            assert db.query(Evidence).filter(Evidence.person_id == person.id).count() == 0
-            assert db.query(CareEvent).filter(CareEvent.person_id == person.id).count() == 0
+            assert db.query(Evidence).filter(Evidence.person_id == person_id).count() == 0
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 0
         finally:
             db.close()
     finally:
