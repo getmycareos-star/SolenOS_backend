@@ -33,11 +33,16 @@ def test_no_duplicate_http_method_and_path_registrations():
 
 
 def test_critical_care_continuity_routes_are_mounted():
+    # FastAPI's newer router inclusion implementation can expose lazily
+    # included routers rather than flattening each child into app.router.routes.
+    # OpenAPI is generated from the effective route tree and is the appropriate
+    # inventory for checking the externally addressable method/path contract.
+    openapi_paths = app.openapi()["paths"]
     registrations = {
-        (method, route.path)
-        for route in app.router.routes
-        if isinstance(route, APIRoute)
-        for method in (route.methods or set())
+        (method.upper(), path)
+        for path, operations in openapi_paths.items()
+        for method in operations
+        if method.lower() in {"get", "post", "put", "patch", "delete", "head", "options"}
     }
     expected = {
         ("POST", "/api/v1/daily-care/entries"),
@@ -45,32 +50,8 @@ def test_critical_care_continuity_routes_are_mounted():
         ("POST", "/api/v1/causal/hypotheses"),
     }
     missing = expected - registrations
-    if missing:
-        baseline_routes = sorted(
-            (method, getattr(route, "path", repr(route)))
-            for route in APP_ROUTES_BASELINE
-            if isinstance(route, APIRoute)
-            for method in (route.methods or set())
-        )
-        raw_related_baseline = sorted(
-            (type(route).__module__ + "." + type(route).__name__, getattr(route, "path", None))
-            for route in APP_ROUTES_BASELINE
-            if any(token in str(getattr(route, "path", "")) for token in ("graph", "daily-care", "causal"))
-        )
-        raw_related_current = sorted(
-            (type(route).__module__ + "." + type(route).__name__, getattr(route, "path", None))
-            for route in app.router.routes
-            if any(token in str(getattr(route, "path", "")) for token in ("graph", "daily-care", "causal"))
-        )
-        router_counts = {
-            "care_graph": len(care_graph_router.routes),
-            "daily_care": len(daily_care_router.routes),
-            "causal": len(causal_router.routes),
-        }
-        raise AssertionError(
-            "Critical care-continuity routes are not mounted: "
-            f"{sorted(missing)}; baseline_has_expected={expected.issubset(set(baseline_routes))}; "
-            f"router_counts={router_counts}; raw_related_baseline={raw_related_baseline}; "
-            f"raw_related_current={raw_related_current}; "
-            f"typed_related_baseline={[r for r in baseline_routes if any(t in r[1] for t in ('graph', 'daily-care', 'causal'))]}"
-        )
+    assert not missing, (
+        "Critical care-continuity routes are absent from the effective OpenAPI "
+        f"contract: {sorted(missing)}; available related paths="
+        f"{sorted(path for path in openapi_paths if any(token in path for token in ('graph', 'daily-care', 'causal')))}"
+    )
