@@ -139,6 +139,11 @@ def test_post_situation_missing_caregiver():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
+        db = TestingSessionLocal()
+        db.add(Person(id="person-1", name="Test Person"))
+        db.commit()
+        db.close()
+
         client = TestClient(app)
         response = client.post(
             "/api/situation",
