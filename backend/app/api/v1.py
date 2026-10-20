@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date
 from app.core.database import get_db
+from app.api.authentication import current_account
+from app.core.authz import require_person_access
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -121,7 +123,7 @@ from app.services.temporal_intelligence import (
 )
 from app.api.actions import router as actions_router
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(current_account)])
 
 
 def _log_and_learn(
@@ -570,7 +572,7 @@ def list_care_transitions(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/transitions/{person_id}/sequence/{transition_type}")
+@router.get("/transitions/{person_id}/sequence/{transition_type}", dependencies=[Depends(require_person_access("read"))])
 def get_care_transition_sequence(person_id: str, transition_type: str, db: Session = Depends(get_db)):
     from app.services.location_intelligence import CARE_TRANSITION_SEQUENCES
 
@@ -616,7 +618,7 @@ def list_locations(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/locations/{person_id}/enriched")
+@router.get("/locations/{person_id}/enriched", dependencies=[Depends(require_person_access("read"))])
 def get_enriched_locations(person_id: str, timezone: Optional[str] = None, db: Session = Depends(get_db)):
     locations = (
         db.query(LocationModel)
@@ -785,7 +787,7 @@ def list_temporal_relationships(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/time-patterns/{person_id}")
+@router.get("/time-patterns/{person_id}", dependencies=[Depends(require_person_access("read"))])
 def get_time_patterns(person_id: str, window_days: int = 30, db: Session = Depends(get_db)):
     events = (
         db.query(CareEventModel)
@@ -871,7 +873,7 @@ def infer_relation_endpoint(fact_a_id: str, fact_b_id: str, db: Session = Depend
     return result
 
 
-@router.get("/temporal/conflicts/{person_id}")
+@router.get("/temporal/conflicts/{person_id}", dependencies=[Depends(require_person_access("read"))])
 def list_temporal_conflicts(person_id: str, subject_type: Optional[str] = None, subject_id: Optional[str] = None, db: Session = Depends(get_db)):
     return detect_temporal_conflicts(db, person_id, subject_type, subject_id)
 
