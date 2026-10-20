@@ -390,3 +390,82 @@ def test_situation_rejects_spoofed_caregiver_attribution():
             db.close()
     finally:
         teardown_db()
+
+
+def test_guest_care_key_bootstrap_capture_and_reload_preserve_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        care_key = "care_test_bootstrap_key_0001"
+        headers = {"Authorization": f"Bearer {care_key}"}
+
+        first_load = client.get(
+            "/api/situation?care_session_id=sess_test_00000001&offer_return_invite=0",
+            headers=headers,
+        )
+        assert first_load.status_code == 200, first_load.text
+        initial = first_load.json()
+        person_id = initial["care_recipient_id"]
+        assert initial["care_key"] == care_key
+        assert person_id
+        assert initial["has_context_root"] is False
+
+        capture_text = "The person seemed more confused after dinner."
+        saved = client.post(
+            "/api/situation",
+            headers={**headers, "Idempotency-Key": "guest-capture-0001"},
+            json={
+                "caregiver_id": care_key,
+                "person_id": person_id,
+                "raw_input": capture_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["person_id"] == person_id
+
+        reloaded = client.get(
+            "/api/situation?care_session_id=sess_test_00000002&offer_return_invite=0",
+            headers=headers,
+        )
+        assert reloaded.status_code == 200, reloaded.text
+        restored = reloaded.json()
+        assert restored["care_key"] == care_key
+        assert restored["care_recipient_id"] == person_id
+        assert restored["has_context_root"] is True
+        assert restored["total_events"] == 1
+        assert restored["context"]["events"][0]["raw_input"] == capture_text
+        assert restored["active_care_situation"]["observations"][0]["raw_text"] == capture_text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Person).filter(Person.id == person_id).count() == 1
+            assert db.query(Caregiver).filter(Caregiver.id == care_key).count() == 1
+            assert db.query(CareEvent).filter(CareEvent.person_id == person_id).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_guest_care_context_does_not_accept_shared_default_key():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        response = TestClient(app).get(
+            "/api/situation?caregiver_id=default_caregiver",
+            headers={"Authorization": "Bearer default_caregiver"},
+        )
+        assert response.status_code == 401
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Person).count() == 0
+            assert db.query(Caregiver).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
