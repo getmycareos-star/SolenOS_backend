@@ -323,6 +323,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             evidence_status="reported",
             source_type=source_type,
             subject_role="care_recipient",
+            subject_id=payload.person_id,
             entity_resolution_status="not_applicable",
         )
         db.add(evidence)
