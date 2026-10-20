@@ -6,6 +6,11 @@ get_settings.cache_clear()
 
 from app.main import app, api_limiter, auth_limiter, strict_limiter
 
+# Snapshot the real route table once. Some tests mutate process-global app state;
+# restore the registered routes between tests so route tests verify the app, not
+# whichever test happened to run immediately beforehand.
+APP_ROUTES_BASELINE = tuple(app.router.routes)
+
 import pytest
 
 from sqlalchemy import create_engine
@@ -24,12 +29,14 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
-    # Dependency overrides and in-memory rate counters are process-global. Reset
-    # them per test so one test cannot make unrelated endpoints return 429.
+    # Dependency overrides, route registration and in-memory rate counters are
+    # process-global. Restore all three so one test cannot contaminate another.
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
     yield
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
