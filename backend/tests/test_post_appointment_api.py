@@ -36,7 +36,7 @@ def client(db: Session):
 def test_initiate_post_appointment_workflow(client: TestClient, db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
@@ -98,7 +98,7 @@ def test_initiate_post_appointment_workflow(client: TestClient, db: Session):
 def test_capture_appointment_data(client: TestClient, db: Session):
     # Arrange
     person = Person(id="p1", name="Test Person")
-    caregiver = Caregiver(id="c1", name="Test Caregiver", person_id="p1")
+    caregiver = Caregiver(id="c1", name="Test Caregiver", email="caregiver@example.com", relationship="family", person_id="p1", timezone="UTC")
     db.add_all([person, caregiver])
     db.commit()
 
