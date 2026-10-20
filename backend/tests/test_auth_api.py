@@ -158,6 +158,16 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_caregiver_correction.status_code == 400, foreign_caregiver_correction.text
             foreign_insight_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": caregiver.id})
             assert foreign_insight_correction.status_code == 400, foreign_insight_correction.text
+            foreign_evidence_observation = client.post("/api/v1/observations", headers=headers, json={"person_id": context["person_id"], "observed_at": "2026-10-20T09:00:00Z", "original_text": "Cross-record observation", "caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_observation.status_code == 400, foreign_evidence_observation.text
+            foreign_evidence_memory = client.post("/api/v1/reasoning-memory", headers=headers, json={"person_id": context["person_id"], "memory_type": "fact", "key": "test", "value": ["cross-record"], "confidence": 0.5, "source_evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_memory.status_code == 400, foreign_evidence_memory.text
+            foreign_evidence_appointment = client.post("/api/v1/appointments", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record appointment", "scheduled_at": "2026-10-21T09:00:00Z", "created_by_caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_appointment.status_code == 400, foreign_evidence_appointment.text
+            foreign_evidence_transition = client.post("/api/v1/transitions", headers=headers, json={"person_id": context["person_id"], "to_location": "Clinic", "transition_type": "visit", "occurred_at": "2026-10-20T09:00:00Z", "created_by_caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_transition.status_code == 400, foreign_evidence_transition.text
+            foreign_evidence_temporal_fact = client.post("/api/v1/temporal/facts", headers=headers, json={"person_id": context["person_id"], "subject_type": "person", "subject_id": context["person_id"], "evidence_ids": [foreign_evidence_id]})
+            assert foreign_evidence_temporal_fact.status_code == 400, foreign_evidence_temporal_fact.text
             action_create = client.post("/api/v1/actions/actions", headers=headers, json={
                 "person_id": context["person_id"],
                 "source_evidence_id": own_evidence_id,
