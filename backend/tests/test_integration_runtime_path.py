@@ -178,7 +178,7 @@ def test_multi_update_longitudinal_reasoning():
         teardown_db()
 
 
-def test_idempotent_identical_input():
+def test_identical_payload_without_idempotency_key_is_two_submissions():
     setup_db()
     try:
         from app.core.database import get_db
@@ -213,7 +213,11 @@ def test_idempotent_identical_input():
 
         db = TestingSessionLocal()
         events = db.query(CareEvent).filter(CareEvent.person_id == "int-person-3").count()
+        evidence_items = db.query(Evidence).filter(Evidence.person_id == "int-person-3").count()
+        # Without an Idempotency-Key the server cannot distinguish a retry
+        # from a second intentional capture; the client contract must supply it.
         assert events == 2
+        assert evidence_items == 2
         db.close()
     finally:
         teardown_db()
