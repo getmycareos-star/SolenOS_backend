@@ -1,0 +1,63 @@
+name: Alembic baseline preview
+
+on:
+  push:
+    branches:
+      - fix/systematic-remediation
+    paths:
+      - "backend/app/**"
+      - "backend/pyproject.toml"
+      - "backend/alembic.ini"
+      - "backend/alembic/**"
+      - ".github/workflows/alembic-baseline-preview.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  generate-baseline-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and migration dependencies
+        run: python -m pip install -e "backend/.[test]"
+
+      - name: Generate and apply baseline on a disposable empty SQLite database
+        env:
+          DATABASE_URL: sqlite:///./backend/alembic-preview.db
+          PYTHONPATH: backend:.
+        run: |
+          rm -f backend/alembic-preview.db
+          python -m alembic -c backend/alembic.ini revision --autogenerate --rev-id 0001_initial_schema -m "initial schema baseline"
+          python -m alembic -c backend/alembic.ini upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          tables = set(inspect(engine).get_table_names())
+          required = {"persons", "vital_signs", "evidence"}
+          missing = required - tables
+          assert not missing, f"Migration omitted required tables: {sorted(missing)}"
+          assert "alembic_version" in tables, "Alembic version table was not created"
+          print(f"Migration baseline created {len(tables)} tables; required tables present.")
+          engine.dispose()
+          PY
+
+      - name: Upload generated migration for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: alembic-baseline-preview
+          path: backend/alembic/versions/*.py
+          if-no-files-found: error
+          retention-days: 3
