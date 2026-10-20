@@ -7,6 +7,7 @@ on:
       - "backend/app/services/auth_service.py"
       - "backend/app/api/authentication.py"
       - "backend/app/core/authz.py"
+      - "backend/app/api/uncertainty.py"
       - "backend/app/core/database.py"
       - "backend/app/main.py"
       - "backend/pyproject.toml"
@@ -50,4 +51,4 @@ jobs:
         run: python -c "from app.main import app; assert '/api/v1/auth/me' in app.openapi()['paths']"
       - name: Compile changed Python modules
         run: |
-          python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/core/database.py app/main.py
+          python -m py_compile app/models/auth_identity.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/api/uncertainty.py app/core/database.py app/main.py
