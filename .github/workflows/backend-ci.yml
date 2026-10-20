@@ -60,7 +60,7 @@ jobs:
           assert "alembic_version" in tables, "Alembic version table is missing"
           with engine.connect() as connection:
               version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-          assert version == "0001_initial_schema", f"Unexpected migration version: {version}"
+          assert version == "0002_capture_idempotency", f"Unexpected migration version: {version}"
           print(f"Fresh migration created all {len(expected)} model tables; revision={version}.")
           engine.dispose()
           PY
