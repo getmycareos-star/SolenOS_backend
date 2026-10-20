@@ -18,6 +18,8 @@ jobs:
   generate-baseline-preview:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DEBUG: "true"
     steps:
       - name: Check out source
         uses: actions/checkout@v4
