@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.core.authz import require_person_access
-from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession, CaregiverAccountLink, CaregiverInvitation
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession, CaregiverAccountLink, CaregiverInvitation, CaregiverProfileAccountLink, CaregiverProfileInvitation
 from app.models.care import Person, Caregiver as CaregiverModel, Evidence as EvidenceModel, Insight as InsightModel
 from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
@@ -27,7 +27,7 @@ def test_cors_allows_deployed_netlify_frontend():
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -130,6 +130,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 caregiver = CaregiverModel(name="Authorized caregiver", email="owner-caregiver@example.com", relationship="family", person_id=context["person_id"], timezone="UTC")
                 db.add(caregiver)
                 db.flush()
+                caregiver_profile = CaregiverProfileModel(person_id=context["person_id"], name="Authorized caregiver profile", email="owner-profile@example.com", relationship="family")
+                db.add(caregiver_profile)
+                db.flush()
                 own_evidence = EvidenceModel(person_id=context["person_id"], type="note", source_text="Call the clinic tomorrow.", uploaded_by_caregiver_id=caregiver.id, confidence=1.0)
                 foreign_person = Person(name="Private unrelated person")
                 db.add(foreign_person)
@@ -148,6 +151,17 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 foreign_person_id = foreign_person.id
                 foreign_caregiver_id = foreign_caregiver.id
                 foreign_insight_id = foreign_insight.id
+                caregiver_profile_id = caregiver_profile.id
+            profile_invitation_response = client.post("/api/v1/auth/caregiver-profile-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_profile_id": caregiver_profile_id, "permissions": ["read", "write"]})
+            assert profile_invitation_response.status_code == 201, profile_invitation_response.text
+            profile_invitation_token = profile_invitation_response.json()["invitation_token"]
+            profile_linked = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=headers, json={"token": profile_invitation_token})
+            assert profile_linked.status_code == 200, profile_linked.text
+            assert profile_linked.json()["caregiver_profile_id"] == caregiver_profile_id
+            profile_invitation_replay = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=headers, json={"token": profile_invitation_token})
+            assert profile_invitation_replay.status_code == 400, profile_invitation_replay.text
+            linked_profile_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Verified caregiver observation", "observation_type": "direct"})
+            assert linked_profile_observation.status_code == 200, linked_profile_observation.text
             invitation_response = client.post("/api/v1/auth/caregiver-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver.id, "permissions": ["read", "write"]})
             assert invitation_response.status_code == 201, invitation_response.text
             invitation_token = invitation_response.json()["invitation_token"]
@@ -284,5 +298,5 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert after_logout.status_code == 401
     finally:
         app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyEventModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, CaregiverInvitation.__table__, CaregiverAccountLink.__table__, AuthSession.__table__, AuthAccount.__table__, InsightModel.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
+        Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyEventModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, CaregiverProfileInvitation.__table__, CaregiverProfileAccountLink.__table__, CaregiverInvitation.__table__, CaregiverAccountLink.__table__, AuthSession.__table__, AuthAccount.__table__, InsightModel.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
         engine.dispose()
