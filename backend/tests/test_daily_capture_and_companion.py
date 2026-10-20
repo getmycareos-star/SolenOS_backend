@@ -12,6 +12,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.database import get_db
+from app.core.security import AuthenticatedPrincipal, get_current_principal
+from app.core.identity_enums import AccountType
+from app.models.identity import Account
 from app.core.daily_capture_enums import MedicationStatus
 from app.main import app
 from app.models.care import CareEvent, Evidence
@@ -597,7 +600,15 @@ class TestDailyCareMerge:
 
 class TestCaregiverListing:
     def test_the_care_circle_can_list_the_people_on_the_record(self, db, caregiver, client):
-        """The care circle view needs attribution, not just the signed-in user."""
+        """An authorized care-circle member can list caregivers on the record."""
+        principal_account = Account(
+            id="caregiver-listing-test-account",
+            is_active=True,
+            account_type=AccountType.CAREGIVER,
+        )
+        app.dependency_overrides[get_current_principal] = lambda: AuthenticatedPrincipal(
+            principal_account, [caregiver.person_id]
+        )
         response = client.get("/api/v1/caregivers/{0}".format(caregiver.person_id))
         assert response.status_code == 200
         people = response.json()
