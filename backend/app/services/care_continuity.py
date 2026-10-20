@@ -90,7 +90,6 @@ class CareContinuityEngine:
             self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -100,7 +99,7 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         else:
             if label and thread.label != label:
                 thread.label = label
@@ -117,7 +116,6 @@ class CareContinuityEngine:
         self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -127,7 +125,7 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         return thread
 
     def get_thread(self, person_id: str, subject: str) -> Optional[ContinuityThread]:
@@ -178,7 +176,6 @@ class CareContinuityEngine:
         self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -188,7 +185,7 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         return changed
 
     # ------------------------------------------------------------------
@@ -279,7 +276,6 @@ class CareContinuityEngine:
         self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -289,14 +285,13 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         if existing is not None:
             existing.is_active = False
             existing.superseded_by_snapshot_id = snapshot.id
         self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -306,7 +301,7 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         return snapshot
 
     def _events_for(
@@ -561,7 +556,6 @@ class CareContinuityEngine:
         self.db.flush()
         # Send notification for significant thread updates (only for certain observation counts)
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
-            notification_service = create_notification_service(self.db)
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
                 type='care_thread_updated',
@@ -571,7 +565,7 @@ class CareContinuityEngine:
                 related_entity_id=thread.id,
                 priority='low'
             )
-            notification_service.create_notification(notification_data)
+            create_notification_service(self.db, notification_data)
         return handoff
 
     def _deterministic_handoff(
