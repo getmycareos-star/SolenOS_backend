@@ -92,7 +92,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
@@ -118,7 +119,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
@@ -178,7 +180,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
@@ -278,7 +281,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
@@ -294,7 +298,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
@@ -558,7 +563,8 @@ class CareContinuityEngine:
         if thread.observation_count in [1, 5, 10, 25, 50]:  # Notify at milestones
             notification_data = NotificationCreate(
                 recipient_person_id=person_id,
-                type='care_thread_updated',
+                type='care_update',
+                category='clinical',
                 title='Care Activity Recorded',
                 message=f'New observation recorded for {thread.subject}: {thread.observation_count} total observations',
                 related_entity_type='continuity_thread',
