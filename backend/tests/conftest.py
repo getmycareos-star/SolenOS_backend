@@ -6,10 +6,15 @@ get_settings.cache_clear()
 
 from app.main import app, api_limiter, auth_limiter, strict_limiter
 
-# Snapshot the real route table for diagnostics only. The application route
-# table is part of the object under test and must not be replaced by a potentially
-# partial snapshot during test isolation.
-APP_ROUTES_BASELINE = tuple(app.router.routes)
+# Keep a mutable snapshot handle. Pytest imports conftest before it imports
+# all test modules; some test modules import/register application routers during
+# collection. Refresh this snapshot after collection, before tests can mutate
+# process-global app state.
+APP_ROUTES_BASELINE = []
+
+
+def pytest_collection_finish(session):
+    APP_ROUTES_BASELINE[:] = list(app.router.routes)
 
 import pytest
 
@@ -29,14 +34,16 @@ from app.models.identity import Person
 
 @pytest.fixture(autouse=True)
 def reset_app_state():
-    # Dependency overrides and rate counters are process-global. Reset those
-    # between tests, but never replace app.router.routes: doing so can remove
-    # routers registered during application initialization and make route tests
-    # validate the test fixture instead of the running application.
+    # Dependency overrides, route registration and rate counters are
+    # process-global. Restore the route table from the post-collection snapshot
+    # so one test cannot contaminate another, while retaining every router loaded
+    # during application/test-module initialization.
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
     yield
+    app.router.routes[:] = list(APP_ROUTES_BASELINE)
     app.dependency_overrides = {}
     for limiter in (api_limiter, auth_limiter, strict_limiter):
         limiter.requests.clear()
