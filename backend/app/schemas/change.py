@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import ConfigDict, BaseModel, Field
 from datetime import datetime
 from typing import Optional, List, Any
 from app.core.change_enums import (
@@ -42,8 +42,7 @@ class Baseline(BaselineBase):
     superseded_by_baseline_id: Optional[str] = None
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChangeBase(BaseModel):
@@ -83,8 +82,7 @@ class Change(ChangeBase):
     superseded_by_change_id: Optional[str] = None
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PatternBase(BaseModel):
@@ -116,8 +114,7 @@ class Pattern(PatternBase):
     superseded_by_pattern_id: Optional[str] = None
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SituationBase(BaseModel):
@@ -152,8 +149,7 @@ class Situation(SituationBase):
     superseded_by_situation_id: Optional[str] = None
     is_active: bool = True
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SituationResponse(BaseModel):
