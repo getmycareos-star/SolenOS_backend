@@ -311,9 +311,16 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 "mime_type": doc.mime_type,
             }
         source_type = _infer_source_type(source_text, doc)
+        # Preserve the structured form identity in the canonical evidence row
+        # without creating a second duplicate row just to label the form.
+        evidence_type = (
+            "daily_care_entry"
+            if not doc and payload.provenance and payload.provenance.input_type == "daily_care_entry"
+            else ("note" if not doc else "document")
+        )
         evidence = Evidence(
             person_id=payload.person_id,
-            type="note" if not doc else "document",
+            type=evidence_type,
             source_text=source_text,
             original_file_path=doc.name if doc else None,
             extra_metadata=json.dumps(metadata) if metadata else None,
