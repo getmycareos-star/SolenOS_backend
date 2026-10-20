@@ -779,30 +779,58 @@ if settings.debug:
 # mount it now; never duplicate a router that already has any of its expected
 # paths registered.
 def _ensure_critical_router_mounted(router, prefix: str) -> None:
+    """Verify a critical router's *effective* paths, including its own prefix.
+
+    APIRouter stores route paths separately from router.prefix. Omitting that
+    prefix can make an unrelated endpoint look like the router is mounted and
+    leave the real endpoints unreachable.
+    """
+    app_prefix = prefix.rstrip("/")
+    router_prefix = (getattr(router, "prefix", "") or "").rstrip("/")
     expected_paths = {
-        prefix.rstrip("/") + route.path
+        app_prefix + router_prefix + route.path
         for route in router.routes
         if isinstance(route, APIRoute) and getattr(route, "path", None)
     }
     if not expected_paths:
-        logger.error("Critical router has no routes at initialization", extra={"prefix": prefix})
-        return
+        raise RuntimeError(
+            f"Critical router {router!r} has no API routes at initialization"
+        )
+
     registered_paths = {
         route.path for route in app.routes
         if isinstance(route, APIRoute)
     }
-    if expected_paths.isdisjoint(registered_paths):
-        logger.warning(
-            "Critical router was not present after initial registration; mounting it",
-            extra={"prefix": prefix, "route_count": len(expected_paths)},
-        )
-        app.include_router(router, prefix=prefix)
-    elif not expected_paths.issubset(registered_paths):
-        logger.error(
-            "Critical router is only partially mounted",
-            extra={"prefix": prefix, "missing_paths": sorted(expected_paths - registered_paths)},
+    missing_paths = expected_paths - registered_paths
+    if not missing_paths:
+        return
+
+    present_paths = expected_paths & registered_paths
+    if present_paths:
+        # Do not re-include a partly mounted router: that would silently create
+        # duplicate handlers for routes that already exist.
+        raise RuntimeError(
+            f"Critical router {router_prefix or '<no-prefix>'} is only partially "
+            f"mounted; missing paths: {sorted(missing_paths)}"
         )
 
+    logger.warning(
+        "Critical router was not mounted at its expected paths; mounting it",
+        extra={"prefix": prefix, "router_prefix": router_prefix,
+               "route_count": len(expected_paths)},
+    )
+    app.include_router(router, prefix=prefix)
+
+    registered_paths = {
+        route.path for route in app.routes
+        if isinstance(route, APIRoute)
+    }
+    still_missing = expected_paths - registered_paths
+    if still_missing:
+        raise RuntimeError(
+            f"Failed to mount critical router {router_prefix or '<no-prefix>'}: "
+            f"{sorted(still_missing)}"
+        )
 
 _ensure_critical_router_mounted(care_graph_router, "/api/v1")
 _ensure_critical_router_mounted(daily_care_router, "/api/v1")
