@@ -64,6 +64,44 @@ def test_readiness_endpoint_returns_503_when_database_query_fails():
         app.dependency_overrides.pop(get_db, None)
 
 
+def test_health_endpoint_requires_a_successful_database_query():
+    class ReadyDB:
+        def execute(self, statement):
+            return 1
+
+    def override_get_db():
+        yield ReadyDB()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json()["database"] == "ok"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_health_endpoint_returns_503_when_database_query_fails():
+    from sqlalchemy.exc import OperationalError
+
+    class BrokenDB:
+        def execute(self, statement):
+            raise OperationalError("SELECT 1", {}, RuntimeError("database unavailable"))
+
+    def override_get_db():
+        yield BrokenDB()
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            response = client.get("/health")
+        assert response.status_code == 503
+        assert response.json()["detail"] == "Database unavailable"
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, SituationModel.__table__, CareEventModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
