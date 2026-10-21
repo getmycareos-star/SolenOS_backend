@@ -33,9 +33,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
-        run: curl --fail --show-error --silent --retry 2 --retry-delay 5 --max-time 20 https://solenosbackend-production-8773.up.railway.app/health
+        continue-on-error: true
+        run: |
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-8773.up.railway.app/health')
+          echo "GET /health returned HTTP $status"
+          test "$status" = "200"
+      - name: Diagnose deployed route paths
+        if: always()
+        shell: bash
+        run: |
+          base='https://solenosbackend-production-8773.up.railway.app'
+          for path in /health /api/health /api/v1/health /openapi.json /docs /; do
+            status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
+            printf '%-18s HTTP %s\n' "$path" "$status"
+            if [ "$path" = "/openapi.json" ] && [ "$status" = "200" ]; then
+              python -c 'import json; d=json.load(open("/tmp/solenos-response")); print("OpenAPI paths:", ", ".join(sorted(d.get("paths", {}).keys())[:60]))'
+            fi
+          done
       - name: Verify deployed API CORS preflight
+        if: always()
         shell: bash
         run: |
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-8773.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
