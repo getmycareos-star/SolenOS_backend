@@ -142,6 +142,70 @@ jobs:
           print("PostgreSQL migration verified:", unique_columns)
           PY
 
+  postgres-fresh-schema:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: solenos
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: solenos_fresh
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos -d solenos_fresh"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://solenos:ci-test-password@localhost:5432/solenos_fresh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend and migration dependencies
+        run: python -m pip install -e .
+      - name: Apply Alembic migrations to an empty PostgreSQL database
+        run: alembic upgrade head
+      - name: Verify every registered model table and column exists in PostgreSQL
+        run: |
+          python - <<'PY'
+          from sqlalchemy import inspect
+          from app.core.database import Base, engine
+          import app.models.care  # noqa: F401
+          import app.models.uncertainty  # noqa: F401
+          import app.models.temporal  # noqa: F401
+          import app.models.change  # noqa: F401
+          import app.models.significance  # noqa: F401
+          import app.models.action  # noqa: F401
+          import app.models.caregiver_intelligence  # noqa: F401
+          import app.models.causal  # noqa: F401
+          import app.models.memory  # noqa: F401
+          import app.models.time_location  # noqa: F401
+          import app.models.safety  # noqa: F401
+          import app.models.auth_identity  # noqa: F401
+          import app.models.capture  # noqa: F401
+
+          inspector = inspect(engine)
+          missing = []
+          for table_name, table in sorted(Base.metadata.tables.items()):
+              if not inspector.has_table(table_name):
+                  missing.append(f"{table_name}: table missing")
+                  continue
+              actual = {column["name"] for column in inspector.get_columns(table_name)}
+              absent = sorted(column.name for column in table.columns if column.name not in actual)
+              if absent:
+                  missing.append(f"{table_name}: missing columns {', '.join(absent)}")
+          if missing:
+              raise SystemExit("Fresh PostgreSQL schema is incomplete:\n" + "\n".join(missing))
+          print(f"Verified {len(Base.metadata.tables)} model tables and all declared columns in fresh PostgreSQL.")
+          PY
+
   deployed-smoke:
     # Run against the live service only when explicitly requested. A PR build
     # must not be confused with the separately deployed Railway revision.
