@@ -1,5 +1,6 @@
 """Authenticated daily capture and image evidence endpoints."""
 import hashlib
+import json
 import re
 from io import BytesIO
 from datetime import datetime, timezone
@@ -120,6 +121,62 @@ def save_daily_capture(
         care_event_id=event.id,
         recorded_at=capture.recorded_at or recorded_at,
     )
+
+
+@router.post("/daily-care/entries")
+def create_daily_care_entry(
+    payload: dict,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Persist a structured daily-care entry with authenticated attribution."""
+    person_id = payload.get("person_id")
+    caregiver_id = payload.get("caregiver_id") or payload.get("created_by_caregiver_id")
+    if not isinstance(person_id, str) or not person_id.strip():
+        raise HTTPException(status_code=422, detail="person_id is required")
+    if not isinstance(caregiver_id, str) or not caregiver_id.strip():
+        raise HTTPException(status_code=422, detail="caregiver_id is required")
+
+    assert_person_access(db, account.id, person_id, "write")
+    caregiver = _verified_caregiver(db, account, person_id, caregiver_id)
+
+    evidence_ids = payload.get("evidence_ids") or []
+    if not isinstance(evidence_ids, list) or any(not isinstance(item, str) for item in evidence_ids):
+        raise HTTPException(status_code=422, detail="evidence_ids must be a list of evidence IDs")
+    if evidence_ids:
+        found_ids = {
+            row[0]
+            for row in db.query(EvidenceModel.id).filter(
+                EvidenceModel.id.in_(set(evidence_ids)),
+                EvidenceModel.person_id == person_id,
+            ).all()
+        }
+        if found_ids != set(evidence_ids):
+            raise HTTPException(status_code=400, detail="Evidence must belong to this care record")
+
+    # The authenticated caregiver identity is authoritative. Ignore client-supplied
+    # attribution fields and persist the remaining submitted facts without inference.
+    recorded_fields = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"person_id", "caregiver_id", "created_by_caregiver_id", "evidence_ids"}
+    }
+    event = CareEventModel(
+        person_id=person_id,
+        event_type="daily_care_entry",
+        status="recorded",
+        occurred_at=datetime.now(timezone.utc),
+        occurred_at_timezone=caregiver.timezone,
+        title="Daily care entry",
+        description=json.dumps(recorded_fields, ensure_ascii=False, sort_keys=True),
+        evidence_ids=sorted(set(evidence_ids)),
+        created_by_caregiver_id=caregiver.id,
+        tags=["daily_care_entry"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return {"success": True, "id": event.id, "care_event_id": event.id}
 
 
 @router.post("/upload", response_model=UploadOutput, status_code=201)
