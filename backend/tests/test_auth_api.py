@@ -136,18 +136,18 @@ def test_signup_login_current_account_and_logout(monkeypatch):
 
             # A concurrent signup can pass the pre-check but lose the DB unique-key race.
             from sqlalchemy.exc import IntegrityError
-            monkeypatch.setattr(
-                "app.api.authentication.create_account",
-                lambda *args, **kwargs: (_ for _ in ()).throw(
-                    IntegrityError("INSERT", {}, RuntimeError("duplicate email"))
-                ),
-            )
-            concurrent_duplicate = client.post("/api/v1/auth/signup", json={
-                "email": "race@example.com",
-                "password": "a-long-password-2026",
-            })
-            assert concurrent_duplicate.status_code == 409, concurrent_duplicate.text
-            monkeypatch.undo()
+            with monkeypatch.context() as signup_patch:
+                signup_patch.setattr(
+                    "app.api.authentication.create_account",
+                    lambda *args, **kwargs: (_ for _ in ()).throw(
+                        IntegrityError("INSERT", {}, RuntimeError("duplicate email"))
+                    ),
+                )
+                concurrent_duplicate = client.post("/api/v1/auth/signup", json={
+                    "email": "race@example.com",
+                    "password": "a-long-password-2026",
+                })
+                assert concurrent_duplicate.status_code == 409, concurrent_duplicate.text
 
             bad_login = client.post("/api/v1/auth/login", json={
                 "email": "caregiver@example.com",
