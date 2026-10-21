@@ -23,6 +23,18 @@ jobs:
           python-version: "3.11"
       - name: Install package and test dependencies
         run: python -m pip install -e . pytest httpx
+      - name: Validate Railway build and start configuration
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("../railway.json").read_text())
+          assert "pip install -e ./backend" in config["build"]["buildCommand"], config["build"]
+          assert "cd backend && python -m uvicorn app.main:app" in config["deploy"]["startCommand"], config["deploy"]
+          assert config["deploy"]["healthcheckPath"] == "/health", config["deploy"]
+          assert Path("pyproject.toml").is_file()
+          print("Railway build command, ASGI entrypoint, and /health check are configured.")
+          PY
       - name: Compile backend
         run: python -m compileall -q app
       - name: Smoke-test ASGI startup and health
