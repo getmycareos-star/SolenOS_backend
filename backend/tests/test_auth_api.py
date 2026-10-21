@@ -323,17 +323,35 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             profile_invitation_response = client.post("/api/v1/auth/caregiver-profile-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_profile_id": caregiver_profile_id, "permissions": ["read", "write"]})
             assert profile_invitation_response.status_code == 201, profile_invitation_response.text
             profile_invitation_token = profile_invitation_response.json()["invitation_token"]
-            profile_linked = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=headers, json={"token": profile_invitation_token})
+            profile_self_accept = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=headers, json={"token": profile_invitation_token})
+            assert profile_self_accept.status_code == 403, profile_self_accept.text
+
+            invitee_signup = client.post("/api/v1/auth/signup", json={
+                "email": "profile-invitee@example.com",
+                "password": "invitee-long-password-2026",
+                "display_name": "Invited Caregiver",
+            })
+            assert invitee_signup.status_code == 201, invitee_signup.text
+            invitee_login = client.post("/api/v1/auth/login", json={
+                "email": "profile-invitee@example.com",
+                "password": "invitee-long-password-2026",
+            })
+            assert invitee_login.status_code == 200, invitee_login.text
+            invitee_headers = {"Authorization": f"Bearer {invitee_login.json()['access_token']}"}
+
+            profile_linked = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=invitee_headers, json={"token": profile_invitation_token})
             assert profile_linked.status_code == 200, profile_linked.text
             assert profile_linked.json()["caregiver_profile_id"] == caregiver_profile_id
-            profile_invitation_replay = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=headers, json={"token": profile_invitation_token})
+            profile_invitation_replay = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=invitee_headers, json={"token": profile_invitation_token})
             assert profile_invitation_replay.status_code == 400, profile_invitation_replay.text
-            linked_profile_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Verified caregiver observation", "observation_type": "direct"})
+            linked_profile_observation = client.post("/api/v1/caregiver-observations", headers=invitee_headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Verified caregiver observation", "observation_type": "direct"})
             assert linked_profile_observation.status_code == 200, linked_profile_observation.text
             invitation_response = client.post("/api/v1/auth/caregiver-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver.id, "permissions": ["read", "write"]})
             assert invitation_response.status_code == 201, invitation_response.text
             invitation_token = invitation_response.json()["invitation_token"]
-            linked = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
+            caregiver_self_accept = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
+            assert caregiver_self_accept.status_code == 403, caregiver_self_accept.text
+            linked = client.post("/api/v1/auth/caregiver-invitations/accept", headers=invitee_headers, json={"token": invitation_token})
             assert linked.status_code == 200, linked.text
             assert linked.json()["caregiver_id"] == caregiver.id
 
@@ -373,8 +391,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unlinked_versioned_situation_write.status_code == 403, unlinked_versioned_situation_write.text
             my_caregiver_links = client.get("/api/v1/auth/my-caregiver-links", headers=headers, params={"person_id": context["person_id"]})
             assert my_caregiver_links.status_code == 200, my_caregiver_links.text
-            assert {item["caregiver_id"] for item in my_caregiver_links.json()} == {caregiver_id, caregiver.id}
-            replayed_invitation = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
+            assert {item["caregiver_id"] for item in my_caregiver_links.json()} == {caregiver_id}
+            replayed_invitation = client.post("/api/v1/auth/caregiver-invitations/accept", headers=invitee_headers, json={"token": invitation_token})
             assert replayed_invitation.status_code == 400, replayed_invitation.text
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
             own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
