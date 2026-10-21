@@ -182,11 +182,16 @@ def test_appointment_object_id_cannot_cross_care_record_boundary():
             from app.core.authz import assert_person_access
             from fastapi import HTTPException
             try:
-                assert_person_access(db, owner_me.json()["id"], other_person, "write")
+                unexpected_grant = assert_person_access(db, owner_me.json()["id"], other_person, "write")
             except HTTPException as exc:
                 assert exc.status_code == 403
             else:
-                raise AssertionError("Owner account unexpectedly passed direct authorization for the other person's record")
+                raise AssertionError(
+                    "Owner account unexpectedly passed direct authorization: "
+                    f"requested_account={owner_me.json()['id']!r}, requested_person={other_person!r}, "
+                    f"returned_account={unexpected_grant.account_id!r}, returned_person={unexpected_grant.person_id!r}, "
+                    f"all_grants={[(g.account_id, g.person_id, g.permissions) for g in db.query(AccountPersonAccess).all()]!r}"
+                )
             caregiver = db.query(Caregiver).filter_by(person_id=other_person).one()
             appointment = Appointment(
                 person_id=other_person,
