@@ -7,7 +7,7 @@ on:
       - ".github/workflows/auth-foundation-regression.yml"
   push:
     branches:
-      - security/auth-foundation-step1
+      - security/auth-foundation-clean-main
 
 permissions:
   contents: read
