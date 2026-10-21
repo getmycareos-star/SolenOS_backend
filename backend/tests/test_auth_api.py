@@ -436,6 +436,22 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             })
             assert outsider_login.status_code == 200, outsider_login.text
             outsider_headers = {"Authorization": f"Bearer {outsider_login.json()['access_token']}"}
+
+            # Authentication must not grant access to another account's care record.
+            # Exercise separate routers, not just the legacy person endpoint.
+            foreign_record_reads = [
+                client.get(f"/api/v1/persons/{context['person_id']}", headers=outsider_headers),
+                client.get(f"/api/v1/uncertainty/gaps/{context['person_id']}", headers=outsider_headers),
+                client.get(f"/api/v1/change/baselines/{context['person_id']}", headers=outsider_headers),
+                client.get(f"/api/v1/causal/hypotheses/{context['person_id']}", headers=outsider_headers),
+                client.get(f"/api/v1/daily-intelligence/{context['person_id']}", headers=outsider_headers),
+                client.get(f"/api/v1/actions/actions/{context['person_id']}", headers=outsider_headers),
+            ]
+            assert [response.status_code for response in foreign_record_reads] == [403] * len(foreign_record_reads), [
+                (response.request.url.path, response.status_code, response.text)
+                for response in foreign_record_reads
+            ]
+
             outsider_action_read = client.get("/api/v1/actions/actions/detail/" + created_action_id, headers=outsider_headers)
             assert outsider_action_read.status_code == 403, outsider_action_read.text
             outsider_action_update = client.patch("/api/v1/actions/actions/" + created_action_id, headers=outsider_headers, json={"normalized_action": "forged change"})
