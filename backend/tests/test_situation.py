@@ -311,3 +311,43 @@ def test_frontend_caregiver_lookup_then_capture_persists_records():
             db.close()
     finally:
         teardown_db()
+
+def test_post_situation_rejects_caregiver_linked_to_another_person():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person_a = Person(id="person-a", name="Person A")
+        person_b = Person(id="person-b", name="Person B")
+        caregiver_a = Caregiver(
+            id="caregiver-a",
+            name="Caregiver A",
+            email="caregiver-a@example.com",
+            relationship="Family",
+            person_id=person_a.id,
+        )
+        db.add_all([person_a, person_b, caregiver_a])
+        db.commit()
+        db.close()
+
+        response = TestClient(app).post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-a",
+                "person_id": "person-b",
+                "raw_input": "This must not be written to Person B's care record.",
+            },
+        )
+        assert response.status_code == 400
+        assert "Caregiver is not linked" in response.json()["detail"]
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter_by(person_id="person-b").count() == 0
+            assert db.query(CareEvent).filter_by(person_id="person-b").count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown_db()
