@@ -18,7 +18,7 @@ def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> Non
         not secret or secret == "change-me-in-production" or len(secret) < 32
     ):
         raise RuntimeError(
-            "SECRET_KEY must be configured in Railway with at least 32 characters "
+            "SECRET_KEY must be configured in Railway with a unique random value of at least 32 characters "
             "and must not use the development placeholder."
         )
 
