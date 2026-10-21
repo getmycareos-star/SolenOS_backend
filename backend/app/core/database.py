@@ -93,6 +93,43 @@ def ensure_database_schema(bind=None):
                 pass
 
 
+def ensure_caregiver_email_constraint(bind=None):
+    """Allow one account email to identify a caregiver in multiple care records.
+
+    Older PostgreSQL deployments used a global UNIQUE(email) constraint. Replace
+    only that known constraint with per-person uniqueness; existing rows remain
+    untouched. Railway runtime is required to use PostgreSQL.
+    """
+    from sqlalchemy import inspect, text
+
+    target = bind or engine
+    if target.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(target)
+    if not inspector.has_table("caregivers"):
+        return
+
+    with target.begin() as conn:
+        for constraint in inspector.get_unique_constraints("caregivers"):
+            if constraint.get("column_names") == ["email"]:
+                name = target.dialect.identifier_preparer.quote(constraint["name"])
+                conn.execute(text(f"ALTER TABLE caregivers DROP CONSTRAINT IF EXISTS {name}"))
+
+        # If an older deployment used a standalone unique index rather than a
+        # table constraint, remove only the single-column email index.
+        refreshed = inspect(target)
+        for index in refreshed.get_indexes("caregivers"):
+            if index.get("unique") and index.get("column_names") == ["email"]:
+                name = target.dialect.identifier_preparer.quote(index["name"])
+                conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_caregiver_person_email "
+            "ON caregivers (person_id, email)"
+        ))
+
+
 def init_db():
     """Register all models before schema creation; run once per process."""
     global _initialized
@@ -116,6 +153,7 @@ def init_db():
         import app.models.capture  # noqa: F401
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
+        ensure_caregiver_email_constraint()
         _initialized = True
 
 
