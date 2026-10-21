@@ -8,7 +8,7 @@ from jose import JWTError
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.core.database import Base, SessionLocal
+from app.core.database import Base, SessionLocal, get_db
 from app.core.security import decode_access_token
 from app.models.auth import Account, CareMembership
 
@@ -16,6 +16,16 @@ from app.models.auth import Account, CareMembership
 PROTECTED_PREFIXES = ("/api/v1/", "/api/situation")
 PUBLIC_EXACT_PATHS = {"/health"}
 IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,}$")
+AUTHENTICATED_ONLY_PATHS = {
+    "/api/v1/safety/evaluate",
+    "/api/v1/safety/validate-response",
+    "/api/v1/safety/evaluate-benchmark",
+    "/api/v1/safety/adversarial-tests",
+    "/api/v1/safety/blind-spots",
+    "/api/v1/safety/regression-check",
+    "/api/v1/causal/assess",
+    "/api/v1/actions/safety-check",
+}
 CAREGIVER_ID_FIELDS = {
     "caregiver_id",
     "caregiverId",
@@ -57,6 +67,17 @@ def _person_for_identifier(db, identifier: str) -> str | None:
     return None
 
 
+def _open_authorization_db(request: Request):
+    override = request.app.dependency_overrides.get(get_db)
+    if override is not None:
+        resource = override()
+        if hasattr(resource, "__next__"):
+            return next(resource), resource.close
+        return resource, lambda: None
+    db = SessionLocal()
+    return db, db.close
+
+
 async def authorize_api_request(request: Request, call_next):
     path = request.url.path
     if request.method == "OPTIONS" or path in PUBLIC_EXACT_PATHS or path in {"/docs", "/openapi.json", "/redoc"}:
@@ -80,7 +101,7 @@ async def authorize_api_request(request: Request, call_next):
     if not isinstance(account_id, str) or not account_id:
         return JSONResponse(status_code=401, content={"detail": "Session is invalid."})
 
-    db = SessionLocal()
+    db, close_db = _open_authorization_db(request)
     try:
         account = db.query(Account).filter(Account.id == account_id).first()
         if not account or not account.is_active or claims.get("ver") != account.token_version:
@@ -112,6 +133,13 @@ async def authorize_api_request(request: Request, call_next):
             request.state.person_id = None
             request.state.caregiver_id = None
             request.state.care_permissions = {"read", "write"}
+            return await call_next(request)
+
+        if not person_ids and path in AUTHENTICATED_ONLY_PATHS:
+            request.state.account_id = account.id
+            request.state.person_id = None
+            request.state.caregiver_id = None
+            request.state.care_permissions = set()
             return await call_next(request)
 
         if len(person_ids) != 1:
@@ -157,6 +185,6 @@ async def authorize_api_request(request: Request, call_next):
         request.state.caregiver_id = membership.caregiver_id
         request.state.care_permissions = permissions
     finally:
-        db.close()
+        close_db()
 
     return await call_next(request)
