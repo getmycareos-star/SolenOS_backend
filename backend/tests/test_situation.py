@@ -241,14 +241,19 @@ def test_list_caregivers_for_person_returns_real_linked_ids():
         db.commit()
         db.close()
 
-        response = TestClient(app).get(
-            "/api/v1/caregivers/person/person-caregiver-list"
-        )
+        client = TestClient(app)
+        response = client.get("/api/v1/caregivers/person/person-caregiver-list")
         assert response.status_code == 200
         data = response.json()
         assert len(data) == 1
         assert data[0]["id"] == "caregiver-list-1"
         assert data[0]["person_id"] == "person-caregiver-list"
+
+        # Legacy capture screens still call /caregivers/{person_id}; keep that
+        # route compatible while the frontend converges on the canonical path.
+        legacy = client.get("/api/v1/caregivers/person-caregiver-list")
+        assert legacy.status_code == 200
+        assert legacy.json()[0]["id"] == "caregiver-list-1"
     finally:
         teardown_db()
 
