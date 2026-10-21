@@ -266,7 +266,6 @@ def create_caregiver_invitation(
         existing_membership = db.query(CareMembership).filter(
             CareMembership.account_id == existing_account.id,
             CareMembership.person_id == payload.person_id,
-            CareMembership.caregiver_id == caregiver.id,
             CareMembership.status == "active",
         ).first()
         if existing_membership:
@@ -327,7 +326,6 @@ def accept_caregiver_invitation(
     existing = db.query(CareMembership).filter(
         CareMembership.account_id == account.id,
         CareMembership.person_id == invitation.person_id,
-        CareMembership.caregiver_id == caregiver.id,
         CareMembership.status == "active",
     ).first()
     if existing:
