@@ -61,7 +61,7 @@ def token_for(account_id: str) -> str:
 
 def test_protected_person_route_rejects_anonymous_request():
     _, _, person_id, _ = create_account_with_context()
-    response = client.get(f"/api/v1/persons/{person_id}")
+    response = client.get(f"/api/v1/persons/{person_id}", headers={"Authorization": ""})
     assert response.status_code == 401
 
 
