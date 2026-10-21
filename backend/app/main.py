@@ -9,6 +9,7 @@ from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
+from app.api.collaboration import router as collaboration_router
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.care import Caregiver as CaregiverModel, Person as PersonModel
@@ -36,6 +37,7 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+app.include_router(collaboration_router, prefix="/api/v1")
 
 situation_router = APIRouter()
 
