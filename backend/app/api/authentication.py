@@ -154,6 +154,22 @@ def create_care_context(
         raise HTTPException(status_code=422, detail="Name is required")
     db.add(person)
     db.flush()
+
+    # The account that creates a care context is the first caregiver for it.
+    # Create the caregiver identity and an explicit account link together with
+    # the owner grant; otherwise every protected capture write would fail closed
+    # because no verified caregiver identity exists yet.
+    caregiver_name = (account.display_name or account.email.split("@", 1)[0]).strip()
+    caregiver = Caregiver(
+        name=caregiver_name or account.email,
+        email=account.email,
+        relationship="family",
+        person_id=person.id,
+        timezone="UTC",
+    )
+    db.add(caregiver)
+    db.flush()
+
     grant = AccountPersonAccess(
         account_id=account.id,
         person_id=person.id,
@@ -162,7 +178,15 @@ def create_care_context(
         is_active=True,
         granted_by_account_id=account.id,
     )
+    caregiver_link = CaregiverAccountLink(
+        account_id=account.id,
+        caregiver_id=caregiver.id,
+        person_id=person.id,
+        linked_by_account_id=account.id,
+        is_active=True,
+    )
     db.add(grant)
+    db.add(caregiver_link)
     db.commit()
     db.refresh(person)
     return CareContextOutput(
