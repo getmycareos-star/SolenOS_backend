@@ -36,13 +36,16 @@ jobs:
           from pathlib import Path
           config = json.loads(Path("../railway.json").read_text())
           assert "pip install -e ./backend" in config["build"]["buildCommand"], config["build"]
-          assert "cd backend && python -m uvicorn app.main:app" in config["deploy"]["startCommand"], config["deploy"]
+          assert "cd backend && alembic upgrade head" in config["deploy"]["startCommand"], config["deploy"]
+          assert "python -m uvicorn app.main:app" in config["deploy"]["startCommand"], config["deploy"]
           assert config["deploy"]["healthcheckPath"] == "/health", config["deploy"]
           assert Path("pyproject.toml").is_file()
           print("Railway build command, ASGI entrypoint, and /health check are configured.")
           PY
       - name: Compile backend
         run: python -m compileall -q app
+      - name: Apply reviewed Alembic migrations on the CI database
+        run: alembic upgrade head
       - name: Smoke-test ASGI startup and health
         shell: bash
         run: |
