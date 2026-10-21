@@ -29,3 +29,22 @@ def test_allow_postgres_in_railway():
         "postgresql://user:pass@host:5432/db",
         railway_runtime=True,
     ) == "postgresql+psycopg://user:pass@host:5432/db"
+
+
+def test_reject_placeholder_session_secret_in_railway():
+    from app.core.config import validate_deployment_secret
+
+    with pytest.raises(RuntimeError, match="SECRET_KEY must be configured in Railway"):
+        validate_deployment_secret("change-me-in-production", railway_runtime=True)
+
+
+def test_allow_configured_session_secret_in_railway():
+    from app.core.config import validate_deployment_secret
+
+    validate_deployment_secret("a-real-secret-from-the-environment", railway_runtime=True)
+
+
+def test_allow_development_placeholder_outside_railway():
+    from app.core.config import validate_deployment_secret
+
+    validate_deployment_secret("change-me-in-production", railway_runtime=False)
