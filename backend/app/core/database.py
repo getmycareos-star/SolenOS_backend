@@ -61,8 +61,10 @@ def ensure_database_schema(bind=None):
     try:
         insp = inspect(target)
         dialect = target.dialect
-    except Exception:
-        return
+    except Exception as exc:
+        raise RuntimeError(
+            "Unable to inspect the configured database schema; refusing to start with unverified care storage."
+        ) from exc
     for table_name, table in Base.metadata.tables.items():
         if not insp.has_table(table_name):
             continue
@@ -87,10 +89,25 @@ def ensure_database_schema(bind=None):
             try:
                 with target.begin() as conn:
                     conn.execute(stmt)
-            except Exception:
-                # Preserve the existing legacy behavior; schema verification must
-                # surface unresolved missing columns before production rollout.
-                pass
+            except Exception as exc:
+                # A concurrent initializer may have added this column. Otherwise,
+                # fail startup instead of silently serving against an incomplete schema.
+                try:
+                    refreshed = {
+                        column["name"]
+                        for column in inspect(target).get_columns(table_name)
+                    }
+                except Exception as inspect_exc:
+                    raise RuntimeError(
+                        f"Unable to verify database schema after adding {table_name}.{col.name}."
+                    ) from inspect_exc
+                if col.name not in refreshed:
+                    raise RuntimeError(
+                        f"Database schema is missing required column {table_name}.{col.name}; "
+                        "automatic compatibility update failed. Apply a reviewed migration "
+                        "before starting SolenOS."
+                    ) from exc
+                existing = refreshed
 
 
 def init_db():
