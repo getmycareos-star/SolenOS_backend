@@ -330,3 +330,23 @@ def test_stateless_safety_validation_requires_authentication_but_not_a_person_sc
         headers={"Authorization": ""},
     )
     assert anonymous.status_code == 401
+
+
+
+def test_conflicting_person_ids_in_path_and_query_are_rejected():
+    account_id, _, person_id, _ = create_account_with_context()
+    second_person = Person(name="Different care recipient")
+    db = SessionLocal()
+    try:
+        db.add(second_person)
+        db.commit()
+        second_person_id = second_person.id
+    finally:
+        db.close()
+
+    response = client.get(
+        f"/api/v1/persons/{person_id}",
+        params={"person_id": second_person_id},
+        headers={"Authorization": f"Bearer {token_for(account_id)}"},
+    )
+    assert response.status_code == 403
