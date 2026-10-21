@@ -1,14 +1,17 @@
+import hashlib
 import json
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.config import get_settings
 from app.core.security import hash_password, issue_access_token, verify_password
-from app.models.auth import Account, CareMembership
+from app.models.auth import Account, CareInvitation, CareMembership
 from app.models.care import Caregiver, Person
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -27,6 +30,25 @@ class LoginInput(BaseModel):
 
 class CareContextInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
+
+
+class InvitationCreateInput(BaseModel):
+    person_id: str = Field(min_length=1, max_length=128)
+    caregiver_id: str = Field(min_length=1, max_length=128)
+    permissions: list[str] = Field(default_factory=lambda: ["read", "write"])
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, value: list[str]) -> list[str]:
+        allowed = {"read", "write"}
+        normalized = list(dict.fromkeys(value))
+        if not normalized or "read" not in normalized or not set(normalized).issubset(allowed):
+            raise ValueError("Invitation permissions must include read and may include write.")
+        return normalized
+
+
+class InvitationAcceptInput(BaseModel):
+    token: str = Field(min_length=24, max_length=256)
 
 
 def _account_payload(account: Account) -> dict[str, Any]:
@@ -206,3 +228,129 @@ def my_caregiver_links(
         }
         for row in rows
     ]
+
+
+@router.post("/caregiver-invitations", status_code=status.HTTP_201_CREATED)
+def create_caregiver_invitation(
+    payload: InvitationCreateInput,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    inviter_membership = db.query(CareMembership).filter(
+        CareMembership.account_id == account.id,
+        CareMembership.person_id == payload.person_id,
+        CareMembership.status == "active",
+    ).first()
+    if not inviter_membership:
+        raise HTTPException(status_code=403, detail="You are not a member of this care circle.")
+    try:
+        inviter_permissions = set(json.loads(inviter_membership.permissions))
+    except (TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=403, detail="Care-circle permissions are invalid.")
+    if "write" not in inviter_permissions:
+        raise HTTPException(status_code=403, detail="You do not have permission to invite caregivers.")
+    if not set(payload.permissions).issubset(inviter_permissions):
+        raise HTTPException(status_code=403, detail="An invitation cannot grant permissions you do not have.")
+
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == payload.caregiver_id,
+        Caregiver.person_id == payload.person_id,
+    ).first()
+    if not caregiver:
+        raise HTTPException(status_code=404, detail="Caregiver is not linked to this care record.")
+    if not caregiver.email or "@" not in caregiver.email:
+        raise HTTPException(status_code=400, detail="The caregiver must have a valid email address.")
+
+    existing_account = db.query(Account).filter(Account.email == caregiver.email.strip().lower()).first()
+    if existing_account:
+        existing_membership = db.query(CareMembership).filter(
+            CareMembership.account_id == existing_account.id,
+            CareMembership.person_id == payload.person_id,
+            CareMembership.caregiver_id == caregiver.id,
+            CareMembership.status == "active",
+        ).first()
+        if existing_membership:
+            raise HTTPException(status_code=409, detail="This caregiver already has access to the care record.")
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    invitation = CareInvitation(
+        token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
+        email=caregiver.email.strip().lower(),
+        person_id=payload.person_id,
+        caregiver_id=caregiver.id,
+        invited_by_account_id=account.id,
+        permissions=json.dumps(payload.permissions),
+        status="pending",
+        expires_at=expires_at,
+    )
+    db.add(invitation)
+    db.commit()
+    return {
+        "invitation_token": raw_token,
+        "caregiver_id": caregiver.id,
+        "person_id": payload.person_id,
+        "permissions": payload.permissions,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+@router.post("/caregiver-invitations/accept")
+def accept_caregiver_invitation(
+    payload: InvitationAcceptInput,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    invitation = db.query(CareInvitation).filter(CareInvitation.token_hash == token_hash).first()
+    if not invitation or invitation.status != "pending":
+        raise HTTPException(status_code=404, detail="Invitation is invalid or has already been used.")
+
+    expires_at = invitation.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
+        invitation.status = "expired"
+        db.commit()
+        raise HTTPException(status_code=410, detail="Invitation has expired. Ask the care-circle owner to issue a new one.")
+
+    if account.email.strip().lower() != invitation.email.strip().lower():
+        raise HTTPException(status_code=403, detail="This invitation was issued to a different email address.")
+
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == invitation.caregiver_id,
+        Caregiver.person_id == invitation.person_id,
+    ).first()
+    if not caregiver or caregiver.email.strip().lower() != account.email.strip().lower():
+        raise HTTPException(status_code=409, detail="The invitation no longer matches this caregiver record.")
+
+    existing = db.query(CareMembership).filter(
+        CareMembership.account_id == account.id,
+        CareMembership.person_id == invitation.person_id,
+        CareMembership.caregiver_id == caregiver.id,
+        CareMembership.status == "active",
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="This account already has access to the care record.")
+
+    membership = CareMembership(
+        account_id=account.id,
+        person_id=invitation.person_id,
+        caregiver_id=caregiver.id,
+        role="caregiver",
+        permissions=invitation.permissions,
+        status="active",
+    )
+    invitation.status = "accepted"
+    invitation.accepted_at = datetime.now(timezone.utc)
+    db.add(membership)
+    db.add(invitation)
+    db.commit()
+    person = db.query(Person).filter(Person.id == invitation.person_id).first()
+    return {
+        "person_id": invitation.person_id,
+        "caregiver_id": caregiver.id,
+        "name": person.name if person else "Care record",
+        "role": "caregiver",
+        "permissions": json.loads(invitation.permissions),
+    }
