@@ -1,57 +1,46 @@
 import os
 from functools import lru_cache
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
+
+
+RAILWAY_RUNTIME_VARIABLES = (
+    "RAILWAY_PROJECT_ID",
+    "RAILWAY_ENVIRONMENT",
+    "RAILWAY_ENVIRONMENT_NAME",
+)
 
 
 class Settings(BaseSettings):
     app_name: str = "SolenOS"
-    # Debug mode is opt-in; never default production to debug output.
     debug: bool = False
-    # SQLite is a local-development fallback only. Production validation below
-    # rejects it so a missing DATABASE_URL cannot silently create local storage.
     database_url: str = "sqlite:///./solenos.db"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
+    class Config:
+        env_file = ".env"
 
-    @property
-    def is_production(self) -> bool:
-        environment = (
-            os.getenv("RAILWAY_ENVIRONMENT_NAME")
-            or os.getenv("RAILWAY_ENVIRONMENT")
-            or os.getenv("APP_ENV")
-            or os.getenv("ENVIRONMENT")
-            or ""
+
+def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
+    """Fail closed rather than sign production sessions with the committed placeholder."""
+    if railway_runtime and (
+        not secret_key.strip()
+        or secret_key.strip() == "change-me-in-production"
+        or len(secret_key.strip()) < 32
+    ):
+        raise RuntimeError(
+            "SECRET_KEY must be configured in Railway with at least 32 characters before "
+            "starting SolenOS; the development placeholder or a short secret is not safe "
+            "for production sessions."
         )
-        return environment.strip().lower() in {"production", "prod"}
-
-    def validate_production_configuration(self) -> None:
-        if not self.is_production:
-            return
-
-        database_url = self.database_url.strip().lower()
-        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg2://")):
-            raise RuntimeError(
-                "Production requires DATABASE_URL to point to the managed PostgreSQL database; "
-                "SQLite and missing DATABASE_URL values are not allowed."
-            )
-
-        if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:
-            raise RuntimeError(
-                "Production requires SECRET_KEY to be a unique random value of at least 32 characters."
-            )
 
 
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    settings.validate_production_configuration()
+    railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
+    validate_deployment_secret(settings.secret_key, railway_runtime=railway_runtime)
     return settings

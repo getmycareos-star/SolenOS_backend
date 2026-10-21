@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
+from app.api.authentication import current_account
+from app.core.authz import assert_person_access, require_person_access
+from app.models.auth_identity import AuthAccount
 from app.models.care import CareEvent
 from app.models.change import Baseline, Change, Pattern, Situation
 from app.schemas.change import (
@@ -21,7 +24,8 @@ router = APIRouter(prefix="/change", tags=["change"])
 
 
 @router.post("/baselines", response_model=BaselineSchema)
-def create_baseline(baseline: BaselineCreate, db: Session = Depends(get_db)):
+def create_baseline(baseline: BaselineCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
+    assert_person_access(db, account.id, baseline.person_id, "write")
     db_baseline = Baseline(**baseline.model_dump())
     db.add(db_baseline)
     db.commit()
@@ -29,7 +33,7 @@ def create_baseline(baseline: BaselineCreate, db: Session = Depends(get_db)):
     return db_baseline
 
 
-@router.get("/baselines/{person_id}", response_model=List[BaselineSchema])
+@router.get("/baselines/{person_id}", response_model=List[BaselineSchema], dependencies=[Depends(require_person_access("read"))])
 def list_baselines(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Baseline).filter(Baseline.person_id == person_id)
     if subject_type:
@@ -44,13 +48,15 @@ def detect_changes(
     subject_id: Optional[str] = None,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "read")
     ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
     changes = detect_event_changes(db, person_id, event_type, subject_id, ref_time)
     return changes
 
 
-@router.get("/changes/{person_id}", response_model=List[ChangeSchema])
+@router.get("/changes/{person_id}", response_model=List[ChangeSchema], dependencies=[Depends(require_person_access("read"))])
 def list_changes(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Change).filter(Change.person_id == person_id)
     if subject_type:
@@ -65,14 +71,16 @@ def detect_patterns_endpoint(
     subject_id: Optional[str] = None,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "read")
     from app.services.pattern_detection import detect_patterns as _detect_patterns
     ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
     patterns = _detect_patterns(db, person_id, event_type, subject_id, ref_time)
     return patterns
 
 
-@router.get("/patterns/{person_id}", response_model=List[PatternSchema])
+@router.get("/patterns/{person_id}", response_model=List[PatternSchema], dependencies=[Depends(require_person_access("read"))])
 def list_patterns(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Pattern).filter(Pattern.person_id == person_id)
     if subject_type:
@@ -85,7 +93,9 @@ def detect_situations_endpoint(
     person_id: str,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "read")
     ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
     situations = detect_situations(db, person_id, ref_time)
     result = []
@@ -139,7 +149,7 @@ def detect_situations_endpoint(
     return result
 
 
-@router.get("/situations/{person_id}", response_model=List[SituationSchema])
+@router.get("/situations/{person_id}", response_model=List[SituationSchema], dependencies=[Depends(require_person_access("read"))])
 def list_situations(person_id: str, db: Session = Depends(get_db)):
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
 
@@ -150,7 +160,9 @@ def update_situations_endpoint(
     event_id: str,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
 ):
+    assert_person_access(db, account.id, person_id, "write")
     event = db.query(CareEvent).filter(CareEvent.id == event_id, CareEvent.person_id == person_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
