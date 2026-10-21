@@ -18,7 +18,7 @@ def create_account_with_context():
     try:
         suffix = uuid.uuid4().hex
         account = Account(
-            email=f"auth-{suffix}@example.test",
+            email=f"auth-{suffix}@example.com",
             password_hash=hash_password("correct-horse-battery-staple"),
             display_name="Test Caregiver",
         )
