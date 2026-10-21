@@ -18,14 +18,14 @@ PUBLIC_EXACT_PATHS = {"/health"}
 UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 LEGACY_ID_PATTERN = re.compile(r"^(person|caregiver|event|evidence|action|insight|observation|hypothesis|situation|gap|question|contradiction|change|baseline|appointment|document|escalation|handoff|perspective|responsibility|correction|location|memory)-[A-Za-z0-9_-]+$")
 AUTHENTICATED_ONLY_PATHS = {
+    # Stateless safety evaluation endpoints. If a request identifies a person,
+    # the normal care-circle membership checks still apply.
     "/api/v1/evaluate",
+    "/api/v1/validate-response",
+    "/api/v1/evaluate-benchmark",
     "/api/v1/adversarial-tests",
-    "/api/v1/safety/evaluate",
-    "/api/v1/safety/validate-response",
-    "/api/v1/safety/evaluate-benchmark",
-    "/api/v1/safety/adversarial-tests",
-    "/api/v1/safety/blind-spots",
-    "/api/v1/safety/regression-check",
+    "/api/v1/blind-spots",
+    "/api/v1/regression-check",
     "/api/v1/causal/assess",
     "/api/v1/actions/safety-check",
 }
