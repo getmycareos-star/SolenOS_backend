@@ -38,6 +38,14 @@ def test_reject_placeholder_session_secret_in_railway():
         validate_deployment_secret("change-me-in-production", railway_runtime=True)
 
 
+@pytest.mark.parametrize("secret", ["", "short", "   "])
+def test_reject_empty_or_short_session_secret_in_railway(secret):
+    from app.core.config import validate_deployment_secret
+
+    with pytest.raises(RuntimeError, match="at least 32 characters"):
+        validate_deployment_secret(secret, railway_runtime=True)
+
+
 def test_allow_configured_session_secret_in_railway():
     from app.core.config import validate_deployment_secret
 
