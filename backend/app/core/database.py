@@ -7,7 +7,12 @@ settings = get_settings()
 
 # SQLite-specific connection flags must not be passed to PostgreSQL/MySQL
 # drivers. Railway production deployments commonly use a PostgreSQL URL.
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+def _connect_args_for_database(database_url: str) -> dict:
+    """Return driver-specific connection arguments for the configured database."""
+    return {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+
+
+connect_args = _connect_args_for_database(settings.database_url)
 engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
