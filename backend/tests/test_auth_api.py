@@ -8,7 +8,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.core.authz import require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, AuthSession, CaregiverAccountLink, CaregiverInvitation, CaregiverProfileAccountLink, CaregiverProfileInvitation
-from app.models.care import Person, Caregiver as CaregiverModel, Evidence as EvidenceModel, Insight as InsightModel
+from app.models.care import Person, Caregiver as CaregiverModel, CareEvent as CareEventModel, Evidence as EvidenceModel, Insight as InsightModel
 from app.models.change import Baseline
 from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel, CaregiverObservation as CaregiverObservationModel
@@ -28,7 +28,7 @@ def test_cors_allows_deployed_netlify_frontend():
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, CareEventModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
