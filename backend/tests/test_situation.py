@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
-from app.models.care import Person, Caregiver
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -257,3 +257,53 @@ def test_health_endpoint_is_registered():
     response = TestClient(app).get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+
+
+def test_frontend_caregiver_lookup_then_capture_persists_records():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="workflow-person", name="Workflow Person")
+        caregiver = Caregiver(
+            id="workflow-caregiver",
+            name="Workflow Caregiver",
+            email="workflow-caregiver@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        lookup = client.get("/api/v1/caregivers/person/workflow-person")
+        assert lookup.status_code == 200
+        linked = lookup.json()
+        assert len(linked) == 1
+        resolved_caregiver_id = linked[0]["id"]
+
+        capture = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": resolved_caregiver_id,
+                "person_id": "workflow-person",
+                "raw_input": "A new caregiver observation for persistence verification.",
+            },
+        )
+        assert capture.status_code == 200
+        result = capture.json()
+        assert result["ok"] is True
+        assert result["evidence_id"]
+        assert result["care_event_id"]
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter_by(id=result["evidence_id"]).count() == 1
+            assert db.query(CareEvent).filter_by(id=result["care_event_id"]).count() == 1
+        finally:
+            db.close()
+    finally:
+        teardown_db()
