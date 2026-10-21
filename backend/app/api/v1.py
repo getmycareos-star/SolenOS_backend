@@ -228,17 +228,6 @@ def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema], dependencies=[Depends(require_person_access("read"))])
-def list_caregivers_for_person_legacy(person_id: str, db: Session = Depends(get_db)):
-    """Compatibility route for the existing structured daily capture screen."""
-    return (
-        db.query(CaregiverModel)
-        .filter(CaregiverModel.person_id == person_id)
-        .order_by(CaregiverModel.name.asc())
-        .all()
-    )
-
-
 @router.post("/caregivers", response_model=CaregiverSchema)
 def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     assert_person_access(db, account.id, caregiver.person_id, "write")
