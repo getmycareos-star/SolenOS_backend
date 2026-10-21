@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse
 from jose import JWTError
 from sqlalchemy import select
 
-from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, get_db
 from app.core.security import decode_access_token
 from app.models.auth import Account, CareMembership
