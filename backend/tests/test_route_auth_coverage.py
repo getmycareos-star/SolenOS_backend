@@ -1,8 +1,8 @@
 """Guard against accidentally exposing care API routes without session authentication.
 
-Only signup/login/logout, generic time utilities, and FastAPI's public diagnostics/docs
-are intentionally unauthenticated. Person-scoped routes must carry current_account
-directly or through a nested route/dependency guard.
+Only signup/login/logout and FastAPI's public diagnostics/docs are intentionally
+unauthenticated. The time utility routes are mounted under the authenticated API router
+and must retain that dependency unless they are deliberately moved to a public router.
 """
 from fastapi.routing import APIRoute
 
@@ -14,11 +14,6 @@ PUBLIC_ENDPOINTS = {
     ("/api/v1/auth/signup", "POST"),
     ("/api/v1/auth/login", "POST"),
     ("/api/v1/auth/logout", "POST"),
-    ("/api/v1/parse-time", "POST"),
-    ("/api/v1/time/display", "GET"),
-    ("/api/v1/time/now", "GET"),
-    ("/api/v1/time/ago", "POST"),
-    ("/api/v1/time/until", "POST"),
     ("/health", "GET"),
     ("/ready", "GET"),
     ("/openapi.json", "GET"),
