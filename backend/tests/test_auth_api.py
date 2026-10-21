@@ -520,6 +520,34 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             unrelated_hypotheses = client.get("/api/v1/causal/hypotheses/" + unrelated.id, headers=headers)
             assert unrelated_hypotheses.status_code == 403, unrelated_hypotheses.text
 
+            # Revocation must remove the link's attribution authority, while
+            # retaining history and permitting a new invitation to the same identity.
+            caregiver_revoke = client.post(
+                f"/api/v1/auth/caregiver-links/{caregiver.id}/revoke",
+                headers=headers,
+            )
+            assert caregiver_revoke.status_code == 200, caregiver_revoke.text
+            revoked_caregiver_write = client.post(
+                "/api/v1/situation",
+                headers=headers,
+                json={"person_id": context["person_id"], "caregiver_id": caregiver.id,
+                      "raw_input": "Must not write through a revoked caregiver link"},
+            )
+            assert revoked_caregiver_write.status_code == 403, revoked_caregiver_write.text
+            caregiver_reinvite = client.post(
+                "/api/v1/auth/caregiver-invitations",
+                headers=headers,
+                json={"person_id": context["person_id"], "caregiver_id": caregiver.id,
+                      "permissions": ["read", "write"]},
+            )
+            assert caregiver_reinvite.status_code == 201, caregiver_reinvite.text
+            caregiver_relink = client.post(
+                "/api/v1/auth/caregiver-invitations/accept",
+                headers=headers,
+                json={"token": caregiver_reinvite.json()["invitation_token"]},
+            )
+            assert caregiver_relink.status_code == 200, caregiver_relink.text
+
             logout = client.post("/api/v1/auth/logout", headers=headers)
             assert logout.status_code == 204
             after_logout = client.get("/api/v1/auth/me", headers=headers)
