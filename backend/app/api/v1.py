@@ -198,6 +198,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     )
     return db_caregiver
 
+@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema], include_in_schema=False)
 @router.get("/caregivers/person/{person_id}", response_model=List[CaregiverSchema])
 def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
     """List caregivers linked to a person so the UI can use a real caregiver ID."""
