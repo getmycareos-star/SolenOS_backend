@@ -159,6 +159,12 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             caregiver_list = client.get(f"/api/v1/caregivers/{context['person_id']}", headers=headers)
             assert caregiver_list.status_code == 200, caregiver_list.text
             assert len(caregiver_list.json()) == 1
+            caregiver_list_alias = client.get(
+                f"/api/v1/caregivers/person/{context['person_id']}",
+                headers=headers,
+            )
+            assert caregiver_list_alias.status_code == 200, caregiver_list_alias.text
+            assert caregiver_list_alias.json() == caregiver_list.json()
             caregiver_id = caregiver_list.json()[0]["id"]
             with TestingSession() as db:
                 caregiver_link = db.query(CaregiverAccountLink).filter_by(
