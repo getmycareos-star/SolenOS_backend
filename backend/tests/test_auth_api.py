@@ -342,6 +342,13 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             profile_linked = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=invitee_headers, json={"token": profile_invitation_token})
             assert profile_linked.status_code == 200, profile_linked.text
             assert profile_linked.json()["caregiver_profile_id"] == caregiver_profile_id
+            # The invite grants access only to the invited care record, not every
+            # record owned by the inviter.
+            invitee_other_record_read = client.get(
+                f"/api/v1/persons/{second_context['person_id']}",
+                headers=invitee_headers,
+            )
+            assert invitee_other_record_read.status_code == 403, invitee_other_record_read.text
             profile_invitation_replay = client.post("/api/v1/auth/caregiver-profile-invitations/accept", headers=invitee_headers, json={"token": profile_invitation_token})
             assert profile_invitation_replay.status_code == 400, profile_invitation_replay.text
             linked_profile_observation = client.post("/api/v1/caregiver-observations", headers=invitee_headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Verified caregiver observation", "observation_type": "direct"})
