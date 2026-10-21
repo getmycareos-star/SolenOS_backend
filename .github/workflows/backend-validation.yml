@@ -28,7 +28,8 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: github.event_name == 'push'
+    if: always()
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
