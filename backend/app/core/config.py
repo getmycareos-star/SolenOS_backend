@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -17,7 +18,30 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    def validate_production_configuration(self) -> None:
+        environment = (
+            os.getenv("RAILWAY_ENVIRONMENT_NAME")
+            or os.getenv("RAILWAY_ENVIRONMENT")
+            or os.getenv("APP_ENV")
+            or os.getenv("ENVIRONMENT")
+            or ""
+        ).strip().lower()
+        is_production = environment in {"production", "prod"}
+        if not is_production:
+            return
+
+        if not self.database_url.lower().startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
+            raise RuntimeError("Production must use managed PostgreSQL; local SQLite is not durable on Railway.")
+        if (
+            not self.secret_key
+            or self.secret_key == "change-me-in-production"
+            or len(self.secret_key) < 32
+        ):
+            raise RuntimeError("Production SECRET_KEY must be a unique random value of at least 32 characters.")
+
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    settings.validate_production_configuration()
+    return settings
