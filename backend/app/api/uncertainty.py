@@ -16,7 +16,7 @@ from app.schemas.uncertainty import (
 from app.services.uncertainty import UncertaintyEngine
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
 
-router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
+router = APIRouter(prefix="/uncertainty", tags=["uncertainty"], dependencies=[Depends(current_account)])
 
 
 def get_engine(db: Session = Depends(get_db)) -> UncertaintyEngine:
