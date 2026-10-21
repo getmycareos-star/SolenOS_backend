@@ -392,6 +392,27 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 assert stored_capture.caregiver_id == caregiver_id
                 assert stored_capture.recorded_by_account_id == signup.json()["id"]
                 assert stored_capture.notes == "Observed at home; no medication changes reported."
+            daily_care_entry = client.post("/api/v1/daily-care/entries", headers=headers, json={
+                "person_id": context["person_id"],
+                "caregiver_id": caregiver_id,
+                "mood": "Calm",
+                "general_notes": "User-recorded daily care note",
+            })
+            assert daily_care_entry.status_code == 200, daily_care_entry.text
+            with TestingSession() as db:
+                stored_daily_event = db.query(CareEventModel).filter(
+                    CareEventModel.id == daily_care_entry.json()["care_event_id"]
+                ).one()
+                assert stored_daily_event.person_id == context["person_id"]
+                assert stored_daily_event.created_by_caregiver_id == caregiver_id
+                assert "User-recorded daily care note" in stored_daily_event.description
+
+            unlinked_daily_care_entry = client.post("/api/v1/daily-care/entries", headers=headers, json={
+                "person_id": context["person_id"],
+                "caregiver_id": unlinked_caregiver_id,
+                "mood": "Calm",
+            })
+            assert unlinked_daily_care_entry.status_code == 403, unlinked_daily_care_entry.text
             unlinked_situation_write = client.post("/api/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
             assert unlinked_situation_write.status_code == 403, unlinked_situation_write.text
             unlinked_versioned_situation_write = client.post("/api/v1/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
