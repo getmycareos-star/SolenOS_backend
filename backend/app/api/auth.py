@@ -147,8 +147,19 @@ def create_care_context(
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ):
+    # The current caregiver schema requires a unique email per caregiver; until the
+    # invitation/multi-context migration exists, prevent an ambiguous second identity.
+    existing = db.query(CareMembership).filter(CareMembership.account_id == account.id).count()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="This account already has a care record. Join another care circle by invitation.",
+        )
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Care record name cannot be blank.")
     # A care record and its first caregiver membership are created atomically.
-    person = Person(name=payload.name.strip())
+    person = Person(name=name)
     db.add(person)
     db.flush()
     caregiver = Caregiver(
