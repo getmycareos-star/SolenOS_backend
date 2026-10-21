@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+import json
 from app.core.database import get_db
 from app.models.care import (
     Person as PersonModel,
@@ -199,6 +200,19 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     return db_caregiver
 
 
+@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema])
+def list_caregivers(person_id: str, db: Session = Depends(get_db)):
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.person_id == person_id)
+        .order_by(CaregiverModel.created_at.asc())
+        .all()
+    )
+
+
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
     db_evidence = EvidenceModel(**evidence.model_dump())
@@ -220,6 +234,65 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
+
+
+def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Session):
+    person_id = payload.get("person_id")
+    caregiver_id = payload.get("caregiver_id") or payload.get("created_by_caregiver_id")
+    if not isinstance(person_id, str) or not person_id.strip():
+        raise HTTPException(status_code=422, detail="person_id is required")
+    if not isinstance(caregiver_id, str) or not caregiver_id.strip():
+        raise HTTPException(status_code=422, detail="caregiver_id is required")
+
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id)
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+    occurred_at = datetime.now(timezone.utc)
+    # Keep the submitted structured fields intact in the event record. The
+    # existing schema has no separate medication/vitals/scales tables yet.
+    detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
+    event = CareEventModel(
+        person_id=person_id,
+        event_type=event_type,
+        status="recorded",
+        occurred_at=occurred_at,
+        title=title,
+        description=json.dumps(detail, ensure_ascii=False, default=str),
+        created_by_caregiver_id=caregiver_id,
+        time_provenance="server_recorded_at",
+        tags=["daily_capture"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    _log_and_learn(
+        db,
+        person_id,
+        event_type,
+        title,
+        "care_event",
+        source_id=event.id,
+        caregiver_id=caregiver_id,
+    )
+    return {"success": True, "id": event.id, "event_type": event.event_type, "recorded_at": event.recorded_at}
+
+
+@router.post("/daily/log")
+def create_structured_daily_log(payload: dict, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", db)
+
+
+@router.post("/daily-care/entries")
+def create_daily_care_entry(payload: dict, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "daily_care_entry", "Daily care entry", db)
 
 
 @router.post("/events", response_model=CareEventSchema)
