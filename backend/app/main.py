@@ -1,6 +1,9 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
@@ -17,10 +20,10 @@ app = FastAPI(title=settings.app_name, version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
 )
 
 app.include_router(api_v1_router, prefix="/api/v1")
@@ -46,5 +49,9 @@ app.include_router(situation_router, prefix="/api")
 
 
 @app.get("/health")
-def health_check():
-    return {"status": "healthy", "app": settings.app_name}
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Database connection unavailable")
+    return {"status": "healthy", "app": settings.app_name, "database": "connected"}
