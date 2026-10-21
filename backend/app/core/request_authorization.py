@@ -70,7 +70,9 @@ def _person_for_identifier(db, identifier: str) -> str | None:
             if row and row[0]:
                 return str(row[0])
         except Exception:
-            # A malformed/unavailable table must not grant access; continue searching.
+            # PostgreSQL aborts the current transaction after a failed statement.
+            # Roll it back before probing the next table; errors never grant access.
+            db.rollback()
             continue
     return None
 
