@@ -310,3 +310,29 @@ def test_expired_bearer_token_is_rejected():
         headers={"Authorization": f"Bearer {expired_token}"},
     )
     assert response.status_code == 401
+
+
+
+def test_stateless_safety_validation_requires_authentication_but_not_a_person_scope():
+    authenticated = client.post(
+        "/api/v1/validate-response",
+        params={
+            "candidate_response": "The blood pressure was 145/90.",
+            "claims": [],
+            "evidence_ids": [],
+            "risk_class": "informational",
+        },
+    )
+    assert authenticated.status_code == 200, authenticated.text
+
+    anonymous = client.post(
+        "/api/v1/validate-response",
+        params={
+            "candidate_response": "The blood pressure was 145/90.",
+            "claims": [],
+            "evidence_ids": [],
+            "risk_class": "informational",
+        },
+        headers={"Authorization": ""},
+    )
+    assert anonymous.status_code == 401
