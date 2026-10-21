@@ -128,7 +128,7 @@ def test_signup_rejects_short_password_and_login_does_not_return_password_hash()
         "/api/v1/auth/signup",
         json={"email": email, "password": "correct-horse-battery-staple", "display_name": "New User"},
     )
-    assert created.status_code == 201
+    assert created.status_code == 201, created.text
 
     login = client.post(
         "/api/v1/auth/login",
