@@ -102,6 +102,43 @@ def test_community_cannot_be_written_using_an_unrelated_person_id():
         _cleanup(engine, client)
 
 
+def test_community_flag_enters_staff_review_queue_with_audit_reason():
+    engine, Session, client = _client_for_test()
+    try:
+        author_headers, person_id = _account_context(client, Session, "flag-author@example.test")
+        reporter_headers, _reporter_person = _account_context(client, Session, "flag-reporter@example.test")
+        created = client.post("/api/v1/community", headers=author_headers, json={
+            "caregiver_id": person_id,
+            "content": "A user-submitted community post for moderation.",
+            "post_type": "experience",
+            "visibility": "public",
+        })
+        assert created.status_code == 201, created.text
+        post_id = created.json()["post"]["id"]
+
+        flagged = client.post(f"/api/v1/community/{post_id}/flag", headers=reporter_headers, json={
+            "reason": "This post needs a safety review"
+        })
+        assert flagged.status_code == 200, flagged.text
+        assert flagged.json()["status"] == "flagged"
+
+        public_feed = client.get("/api/v1/community", headers=author_headers)
+        assert public_feed.status_code == 200, public_feed.text
+        assert all(post["id"] != post_id for post in public_feed.json()["posts"])
+
+        with Session() as db:
+            reporter = db.query(AuthAccount).filter_by(email="flag-reporter@example.test").one()
+            reporter.is_staff = True
+            db.commit()
+
+        queue = client.get("/api/v1/team/dashboard", headers=reporter_headers)
+        assert queue.status_code == 200, queue.text
+        item = next(item for item in queue.json()["posts_to_review"] if item["id"] == post_id)
+        assert item["reason"] == "This post needs a safety review"
+    finally:
+        _cleanup(engine, client)
+
+
 def test_companion_persists_both_messages_and_does_not_claim_ai_was_used():
     engine, Session, client = _client_for_test()
     try:
@@ -227,6 +264,7 @@ def test_collaboration_routes_are_registered_and_session_protected():
         ("POST", "/api/v1/community"),
         ("POST", "/api/v1/community/experience"),
         ("POST", "/api/v1/community/{post_id}/reactions"),
+        ("POST", "/api/v1/community/{post_id}/flag"),
         ("POST", "/api/v1/conversation/message"),
         ("GET", "/api/v1/conversation/{session_id}"),
         ("GET", "/api/v1/team/dashboard"),
