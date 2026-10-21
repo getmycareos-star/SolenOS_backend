@@ -316,6 +316,34 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert profile_invitation_replay.status_code == 400, profile_invitation_replay.text
             linked_profile_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id, "observation_content": "Verified caregiver observation", "observation_type": "direct"})
             assert linked_profile_observation.status_code == 200, linked_profile_observation.text
+
+            # Owners can revoke an active profile link. Revoked rows remain as
+            # history but must not block a fresh invitation/link for the same profile.
+            profile_revoke = client.post(
+                f"/api/v1/auth/caregiver-profile-links/{caregiver_profile_id}/revoke",
+                headers=headers,
+            )
+            assert profile_revoke.status_code == 200, profile_revoke.text
+            revoked_profile_write = client.post(
+                "/api/v1/caregiver-observations",
+                headers=headers,
+                json={"person_id": context["person_id"], "caregiver_id": caregiver_profile_id,
+                      "observation_content": "Must be denied after revocation", "observation_type": "direct"},
+            )
+            assert revoked_profile_write.status_code == 403, revoked_profile_write.text
+            profile_reinvite = client.post(
+                "/api/v1/auth/caregiver-profile-invitations",
+                headers=headers,
+                json={"person_id": context["person_id"], "caregiver_profile_id": caregiver_profile_id,
+                      "permissions": ["read", "write"]},
+            )
+            assert profile_reinvite.status_code == 201, profile_reinvite.text
+            profile_relink = client.post(
+                "/api/v1/auth/caregiver-profile-invitations/accept",
+                headers=headers,
+                json={"token": profile_reinvite.json()["invitation_token"]},
+            )
+            assert profile_relink.status_code == 200, profile_relink.text
             invitation_response = client.post("/api/v1/auth/caregiver-invitations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": caregiver.id, "permissions": ["read", "write"]})
             assert invitation_response.status_code == 201, invitation_response.text
             invitation_token = invitation_response.json()["invitation_token"]
