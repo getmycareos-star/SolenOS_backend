@@ -1,6 +1,6 @@
 """Authentication identity tables separate from existing care-recipient models."""
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint, text
 from sqlalchemy.sql import func
 from app.core.database import Base
 
@@ -48,14 +48,25 @@ class CaregiverAccountLink(Base):
     __tablename__ = "auth_caregiver_account_links"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False, index=True)
-    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, unique=True, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     linked_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (
-        UniqueConstraint("account_id", "caregiver_id", name="uq_auth_caregiver_account_link"),
+        # A caregiver may have only one active account link, while old revoked
+        # rows remain as history and the same caregiver can be re-invited later.
+        Index(
+            "uq_active_caregiver_link_caregiver", "caregiver_id", unique=True,
+            postgresql_where=text("is_active = true AND revoked_at IS NULL"),
+            sqlite_where=text("is_active = 1 AND revoked_at IS NULL"),
+        ),
+        Index(
+            "uq_active_caregiver_link_account_caregiver", "account_id", "caregiver_id", unique=True,
+            postgresql_where=text("is_active = true AND revoked_at IS NULL"),
+            sqlite_where=text("is_active = 1 AND revoked_at IS NULL"),
+        ),
     )
 
 
@@ -80,14 +91,24 @@ class CaregiverProfileAccountLink(Base):
     __tablename__ = "auth_caregiver_profile_account_links"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False, index=True)
-    caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=False, unique=True, index=True)
+    caregiver_profile_id = Column(String, ForeignKey("caregiver_profiles.id"), nullable=False, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     linked_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     __table_args__ = (
-        UniqueConstraint("account_id", "caregiver_profile_id", name="uq_auth_caregiver_profile_account_link"),
+        # Keep revocation history without permanently blocking re-linking.
+        Index(
+            "uq_active_caregiver_profile_link_profile", "caregiver_profile_id", unique=True,
+            postgresql_where=text("is_active = true AND revoked_at IS NULL"),
+            sqlite_where=text("is_active = 1 AND revoked_at IS NULL"),
+        ),
+        Index(
+            "uq_active_caregiver_profile_link_account_profile", "account_id", "caregiver_profile_id", unique=True,
+            postgresql_where=text("is_active = true AND revoked_at IS NULL"),
+            sqlite_where=text("is_active = 1 AND revoked_at IS NULL"),
+        ),
     )
 
 
