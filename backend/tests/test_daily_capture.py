@@ -87,8 +87,8 @@ def test_daily_capture_rejects_unknown_person():
                 "mood": "Calm",
             },
         )
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Person not found"
+        assert response.status_code == 403
+        assert response.json()["detail"] == "A single authorized care record must be identified for this request."
     finally:
         teardown_db()
 
