@@ -64,7 +64,7 @@ Health checks:
 - `GET /ready` executes a database query and reports database readiness. A successful `/health` response alone does not prove that persistence works.
 
 Authentication:
-- `POST /api/v1/auth/signup` and `POST /api/v1/auth/login` create accounts and issue short-lived bearer sessions.
+- `POST /api/v1/auth/signup` and `POST /api/v1/auth/login` create accounts and issue 24-hour bearer sessions. No refresh token is issued; users sign in again after expiration.
 - `POST /api/v1/auth/logout` revokes issued sessions for the account.
 - Protected care APIs require a valid session and active care-circle membership. The backend checks person scope, read/write permission, and caregiver attribution independently of frontend route guards.
 - Caregiver invitations are hashed at rest, expire after seven days, are bound to the invited email, and can be accepted only once.
