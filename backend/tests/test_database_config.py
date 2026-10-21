@@ -1,6 +1,8 @@
 import pytest
+from sqlalchemy import create_engine, text
 
-from app.core.database import configure_database_url, normalize_database_url
+from app.core.database import configure_database_url, normalize_database_url, validate_database_schema
+from app.models.care import Person
 
 
 def test_normalize_legacy_postgres_scheme():
@@ -63,3 +65,24 @@ def test_schema_inspection_failure_fails_closed():
     with pytest.raises(RuntimeError, match="Unable to inspect the configured database schema"):
         ensure_database_schema(bind=object())
 
+
+
+
+def test_schema_validation_rejects_missing_columns_on_existing_tables():
+    engine = create_engine("sqlite://")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL)"))
+        with pytest.raises(RuntimeError, match=r"persons:.*date_of_birth"):
+            validate_database_schema(engine)
+    finally:
+        engine.dispose()
+
+
+def test_schema_validation_accepts_a_model_complete_existing_table():
+    engine = create_engine("sqlite://")
+    try:
+        Person.__table__.create(engine)
+        validate_database_schema(engine)
+    finally:
+        engine.dispose()
