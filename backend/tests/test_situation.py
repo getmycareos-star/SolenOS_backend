@@ -251,3 +251,9 @@ def test_list_caregivers_for_person_returns_real_linked_ids():
         assert data[0]["person_id"] == "person-caregiver-list"
     finally:
         teardown_db()
+
+
+def test_health_endpoint_is_registered():
+    response = TestClient(app).get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "healthy"
