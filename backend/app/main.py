@@ -193,8 +193,13 @@ async def require_authenticated_care_access(request, call_next):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=403, content={"detail": "Create a care recipient through the protected account-enrollment flow"})
         
+        requested_caregiver_id = request.query_params.get("caregiver_id")
+        if requested_caregiver_id and requested_caregiver_id != account.caregiver_id:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "Caregiver identity must match the authenticated account"})
+
         supplied_caregiver_ids = []
-        for key in ("caregiver_id", "created_by_caregiver_id", "uploaded_by_caregiver_id", "from_caregiver_id", "to_caregiver_id"):
+        for key in ("caregiver_id", "created_by_caregiver_id", "uploaded_by_caregiver_id", "granted_by_caregiver_id", "from_caregiver_id", "to_caregiver_id"):
             value = body.get(key) if isinstance(body, dict) else None
             if isinstance(value, str) and value:
                 supplied_caregiver_ids.append(value)
