@@ -15,7 +15,8 @@ from app.models.auth import Account, CareMembership
 
 PROTECTED_PREFIXES = ("/api/v1/", "/api/situation")
 PUBLIC_EXACT_PATHS = {"/health"}
-IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,}$")
+UUID_PATTERN = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+LEGACY_ID_PATTERN = re.compile(r"^(person|caregiver|event|evidence|action|insight|observation|hypothesis|situation|gap|question|contradiction|change|baseline|appointment|document|escalation|handoff|perspective|responsibility|correction|location|memory)-[A-Za-z0-9_-]+$")
 AUTHENTICATED_ONLY_PATHS = {
     "/api/v1/evaluate",
     "/api/v1/adversarial-tests",
@@ -33,6 +34,11 @@ CAREGIVER_ID_FIELDS = {
     "caregiverId",
     "created_by_caregiver_id",
     "uploaded_by_caregiver_id",
+    "actor_caregiver_id",
+    "accepted_by_caregiver_id",
+    "completed_by_caregiver_id",
+    "reported_by_caregiver_id",
+    "updated_by_caregiver_id",
 }
 
 
@@ -124,7 +130,7 @@ async def authorize_api_request(request: Request, call_next):
                 person_ids.add(value)
 
         # Check every resource ID in the path, not only a client-supplied person_id.
-        path_ids = [part for part in path.split("/") if IDENTIFIER_PATTERN.match(part)]
+        path_ids = [part for part in path.split("/") if UUID_PATTERN.match(part) or LEGACY_ID_PATTERN.match(part)]
         for identifier in path_ids:
             resolved = _person_for_identifier(db, identifier)
             if resolved:
