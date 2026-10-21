@@ -14,6 +14,7 @@ from app.models.causal import CausalHypothesis
 from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel, CaregiverObservation as CaregiverObservationModel
 from app.models.safety import SafetyAuditRecordModel, SafetyEventModel
 from app.models.action import Action as ActionModel
+from app.models.capture import DailyCapture, EvidenceFile
 from app.models.uncertainty import InformationGap
 
 
@@ -27,7 +28,7 @@ def test_cors_allows_deployed_netlify_frontend():
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
@@ -174,6 +175,37 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             linked = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
             assert linked.status_code == 200, linked.text
             assert linked.json()["caregiver_id"] == caregiver.id
+
+            # Capture endpoints must require authentication and bind the actor to
+            # a verified caregiver identity before writing care data.
+            unauthenticated_capture = client.post("/api/v1/daily/log", json={
+                "person_id": context["person_id"],
+                "caregiver_id": caregiver.id,
+                "notes": "Must not be written without a bearer session",
+            })
+            assert unauthenticated_capture.status_code == 401, unauthenticated_capture.text
+            unlinked_capture = client.post("/api/v1/daily/log", headers=headers, json={
+                "person_id": context["person_id"],
+                "caregiver_id": unlinked_caregiver_id,
+                "notes": "Must not be attributed to another caregiver",
+            })
+            assert unlinked_capture.status_code == 403, unlinked_capture.text
+            authorized_capture = client.post("/api/v1/daily/log", headers=headers, json={
+                "person_id": context["person_id"],
+                "caregiver_id": caregiver.id,
+                "notes": "Observed at home; no medication changes reported.",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+            })
+            assert authorized_capture.status_code == 201, authorized_capture.text
+            capture_id = authorized_capture.json()["daily_capture_id"]
+            with TestingSession() as db:
+                stored_capture = db.query(DailyCapture).filter(DailyCapture.id == capture_id).one()
+                assert stored_capture.person_id == context["person_id"]
+                assert stored_capture.caregiver_id == caregiver.id
+                assert stored_capture.recorded_by_account_id == signup.json()["id"]
+                assert stored_capture.notes == "Observed at home; no medication changes reported."
             unlinked_situation_write = client.post("/api/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
             assert unlinked_situation_write.status_code == 403, unlinked_situation_write.text
             unlinked_versioned_situation_write = client.post("/api/v1/situation", headers=headers, json={"person_id": context["person_id"], "caregiver_id": unlinked_caregiver_id, "raw_input": "Must not be attributed to another caregiver"})
