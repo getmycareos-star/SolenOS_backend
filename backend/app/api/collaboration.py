@@ -7,7 +7,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.core.database import get_db
-from app.models.care import Person, Caregiver, CareEvent, Appointment, Insight
+from app.models.care import Person, Caregiver, CareEvent, Insight
+from app.models.time_location import Appointment
 from app.models.collaboration import (
     CommunityPost, CommunityReaction, ConversationSession, ConversationMessage,
     ProfessionalAccessGrant,
