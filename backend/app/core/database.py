@@ -22,10 +22,15 @@ def normalize_database_url(url: str) -> str:
 
 def configure_database_url(url: str, *, railway_runtime: bool) -> str:
     """Reject ephemeral SQLite storage in Railway so care records cannot silently disappear."""
-    normalized = normalize_database_url(url)
-    if railway_runtime and normalized.startswith("sqlite:"):
+    normalized = normalize_database_url(url.strip())
+    if railway_runtime and not normalized:
         raise RuntimeError(
-            "DATABASE_URL must use PostgreSQL in Railway; SQLite storage is not durable across deployments."
+            "DATABASE_URL must be configured in Railway with a PostgreSQL connection string."
+        )
+    if railway_runtime and not normalized.startswith("postgresql+psycopg://"):
+        raise RuntimeError(
+            "DATABASE_URL must use PostgreSQL with the psycopg driver in Railway; "
+            "SQLite and other database drivers are not supported for production care storage."
         )
     return normalized
 
