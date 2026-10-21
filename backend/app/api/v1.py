@@ -198,6 +198,16 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     )
     return db_caregiver
 
+@router.get("/caregivers/person/{person_id}", response_model=List[CaregiverSchema])
+def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
+    """List caregivers linked to a person so the UI can use a real caregiver ID."""
+    return (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.person_id == person_id)
+        .order_by(CaregiverModel.created_at.asc())
+        .all()
+    )
+
 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
