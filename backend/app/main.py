@@ -57,7 +57,9 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
         .filter(PersonModel.id == payload.person_id)
         .first()
     )
-    if caregiver and person and caregiver.person_id != payload.person_id:
+    if person and (
+        caregiver is None or caregiver.person_id != payload.person_id
+    ):
         raise HTTPException(
             status_code=403,
             detail="Caregiver is not linked to this care record",
