@@ -1,0 +1,48 @@
+name: Authentication foundation regression
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/auth-foundation-regression.yml"
+  push:
+    branches:
+      - security/auth-foundation-step1
+
+permissions:
+  contents: read
+
+jobs:
+  auth-foundation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test runner
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest httpx2
+      - name: Run password-hashing primitive regressions
+        run: python -m pytest -q tests/test_auth_service_primitives.py
+      - name: Run account and session lifecycle regressions
+        run: python -m pytest -q tests/test_auth_service_sessions.py
+      - name: Run HTTP authentication lifecycle regression
+        run: python -m pytest -q tests/test_auth_api.py
+      - name: Run daily capture and upload integration tests
+        run: python -m pytest -q tests/test_capture_api.py
+      - name: Run complete backend test suite
+        run: python -m pytest -q tests
+      - name: Verify application imports and routes register
+        run: python -c "from app.main import app; paths=app.openapi()['paths']; assert '/api/v1/auth/me' in paths; assert '/api/v1/situation' in paths; assert '/api/v1/daily/log' in paths; assert '/api/v1/upload' in paths"
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile app/models/auth_identity.py app/models/capture.py app/schemas/capture.py app/api/capture.py app/services/auth_service.py app/api/authentication.py app/core/authz.py app/api/uncertainty.py app/api/change.py app/api/causal.py app/api/v1.py app/api/caregiver_intelligence.py app/api/safety.py app/api/actions.py app/main.py app/core/database.py app/main.py
