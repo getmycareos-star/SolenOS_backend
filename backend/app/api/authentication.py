@@ -108,6 +108,35 @@ class AccountOutput(BaseModel):
     email: str
     display_name: Optional[str] = None
 
+
+def _revoke_person_grant_if_unlinked(db: Session, account_id: str, person_id: str) -> None:
+    """Remove caregiver access only when no active caregiver identity remains linked."""
+    grant = db.query(AccountPersonAccess).filter(
+        AccountPersonAccess.account_id == account_id,
+        AccountPersonAccess.person_id == person_id,
+        AccountPersonAccess.is_active.is_(True),
+        AccountPersonAccess.revoked_at.is_(None),
+    ).first()
+    if grant is None or grant.role == "owner" or "admin" in (grant.permissions or []):
+        return
+
+    active_caregiver_link = db.query(CaregiverAccountLink.id).filter(
+        CaregiverAccountLink.account_id == account_id,
+        CaregiverAccountLink.person_id == person_id,
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
+    ).first()
+    active_profile_link = db.query(CaregiverProfileAccountLink.id).filter(
+        CaregiverProfileAccountLink.account_id == account_id,
+        CaregiverProfileAccountLink.person_id == person_id,
+        CaregiverProfileAccountLink.is_active.is_(True),
+        CaregiverProfileAccountLink.revoked_at.is_(None),
+    ).first()
+    if active_caregiver_link is None and active_profile_link is None:
+        grant.is_active = False
+        grant.revoked_at = datetime.now(timezone.utc)
+
+
 def current_account(credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer), db: Session = Depends(get_db)) -> AuthAccount:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Authentication required", headers={"WWW-Authenticate": "Bearer"})
@@ -461,6 +490,54 @@ def accept_caregiver_profile_invitation(
         account_id=account.id,
         permissions=grant.permissions or [],
     )
+
+
+@router.post("/caregiver-links/{caregiver_id}/revoke")
+def revoke_caregiver_link(
+    caregiver_id: str,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    """Owner/admin revokes an active caregiver identity link and its orphaned access grant."""
+    from app.core.authz import assert_person_access
+
+    link = db.query(CaregiverAccountLink).filter(
+        CaregiverAccountLink.caregiver_id == caregiver_id,
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Active caregiver link not found")
+    assert_person_access(db, account.id, link.person_id, "admin")
+    link.is_active = False
+    link.revoked_at = datetime.now(timezone.utc)
+    _revoke_person_grant_if_unlinked(db, link.account_id, link.person_id)
+    db.commit()
+    return {"revoked": True, "person_id": link.person_id, "caregiver_id": link.caregiver_id}
+
+
+@router.post("/caregiver-profile-links/{caregiver_profile_id}/revoke")
+def revoke_caregiver_profile_link(
+    caregiver_profile_id: str,
+    account: AuthAccount = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    """Owner/admin revokes an active caregiver-profile link and its orphaned access grant."""
+    from app.core.authz import assert_person_access
+
+    link = db.query(CaregiverProfileAccountLink).filter(
+        CaregiverProfileAccountLink.caregiver_profile_id == caregiver_profile_id,
+        CaregiverProfileAccountLink.is_active.is_(True),
+        CaregiverProfileAccountLink.revoked_at.is_(None),
+    ).first()
+    if link is None:
+        raise HTTPException(status_code=404, detail="Active caregiver profile link not found")
+    assert_person_access(db, account.id, link.person_id, "admin")
+    link.is_active = False
+    link.revoked_at = datetime.now(timezone.utc)
+    _revoke_person_grant_if_unlinked(db, link.account_id, link.person_id)
+    db.commit()
+    return {"revoked": True, "person_id": link.person_id, "caregiver_profile_id": link.caregiver_profile_id}
 
 
 @router.get("/my-caregiver-links", response_model=list[CaregiverLinkOutput])
