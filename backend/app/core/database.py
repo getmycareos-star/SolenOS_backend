@@ -35,6 +35,55 @@ import app.models.auth  # noqa: E402, F401
 Base.metadata.create_all(bind=engine)
 
 
+def ensure_additive_schema():
+    """Add only safe, non-FK columns; fail startup on schema changes needing a migration."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    dialect = engine.dialect
+    for table_name, table in Base.metadata.tables.items():
+        if not inspector.has_table(table_name):
+            continue
+        existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            if column.foreign_keys:
+                raise RuntimeError(
+                    "Database migration required before startup: "
+                    + table_name + "." + column.name + " is a missing foreign-key column."
+                )
+            if not column.nullable and column.server_default is None and column.default is None:
+                raise RuntimeError(
+                    "Database migration required before startup: "
+                    + table_name + "." + column.name + " is required and has no safe default."
+                )
+
+            column_type = column.type.compile(dialect=dialect)
+            default_sql = ""
+            if column.server_default is not None:
+                default_sql = " DEFAULT " + str(column.server_default.arg)
+            elif column.default is not None and not callable(column.default.arg):
+                literal_processor = column.type.literal_processor(dialect)
+                if literal_processor is None:
+                    raise RuntimeError(
+                        "Database migration required before startup: cannot safely encode default for "
+                        + table_name + "." + column.name
+                    )
+                default_sql = " DEFAULT " + literal_processor(column.default.arg)
+            nullable_sql = "" if column.nullable else " NOT NULL"
+            quote = dialect.identifier_preparer.quote
+            statement = (
+                "ALTER TABLE " + quote(table_name) + " ADD COLUMN " + quote(column.name)
+                + " " + column_type + default_sql + nullable_sql
+            )
+            with engine.begin() as connection:
+                connection.execute(text(statement))
+
+
+ensure_additive_schema()
+
+
 def apply_postgres_compatibility_migrations():
     """Apply narrowly scoped, idempotent compatibility changes for existing PostgreSQL databases."""
     if engine.dialect.name != "postgresql":
