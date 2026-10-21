@@ -1,11 +1,25 @@
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from app.core.config import get_settings
 
 settings = get_settings()
+database_url = settings.database_url
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# Railway/Supabase commonly provide postgres:// or postgresql:// URLs. Use
+# psycopg 3 explicitly so the connection does not depend on an implicit driver.
+if database_url.startswith("postgres://"):
+    database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+elif database_url.startswith("postgresql://"):
+    database_url = "postgresql+psycopg://" + database_url[len("postgresql://"):]
+
+parsed_url = make_url(database_url)
+engine_options = {"pool_pre_ping": True}
+if parsed_url.get_backend_name() == "sqlite":
+    engine_options["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -36,14 +50,10 @@ def _sqlite_column_type(col, dialect):
 
 
 def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
+    """Add missing nullable/defaulted ORM columns without dropping existing data.
 
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
+    This is a legacy compatibility guard, not a substitute for versioned database
+    migrations. Production schema changes should be delivered through Alembic.
     """
     from sqlalchemy import inspect, text
 
@@ -60,8 +70,11 @@ def ensure_database_schema(bind=None):
         for col in table.columns:
             if col.name in existing:
                 continue
+            # Adding a non-null column without a server-side default can fail for
+            # existing rows. Do not silently attempt an unsafe schema mutation.
+            if not col.nullable and col.server_default is None and col.default is None:
+                continue
             col_type = _sqlite_column_type(col, dialect) or "TEXT"
-            nullable = "" if col.nullable else " NOT NULL"
             default = ""
             if col.server_default is not None:
                 default = f" DEFAULT {col.server_default.arg}"
@@ -72,15 +85,15 @@ def ensure_database_schema(bind=None):
                 elif isinstance(v, (int, float)):
                     default = f" DEFAULT {v}"
                 elif isinstance(v, str):
-                    default = f" DEFAULT '{v}'"
-            stmt = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}{default}{nullable}')
+                    default = " DEFAULT '" + v.replace("'", "''") + "'"
+            stmt = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}{default}')
             try:
                 with target.begin() as conn:
                     conn.execute(stmt)
             except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
-                pass
+                # Keep startup from masking the exact database error; health and
+                # actual workflow checks must still establish readiness.
+                continue
 
 
 ensure_database_schema()
