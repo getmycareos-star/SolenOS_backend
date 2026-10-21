@@ -6,6 +6,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: "Public base URL of the intended Railway backend service"
+        required: true
+        type: string
+        default: "https://solenosbackend-production-8773.up.railway.app"
 
 permissions:
   contents: read
@@ -61,15 +67,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-8773.up.railway.app/health')
-          echo "GET /health returned HTTP $status"
+          case "$RAILWAY_BASE_URL" in
+            https://*) ;;
+            *) echo "deployment_url must be an HTTPS URL"; exit 2 ;;
+          esac
+          base="${RAILWAY_BASE_URL%/}"
+          status=$(curl --silent --show-error --output /tmp/health-response --write-out '%{http_code}' --max-time 20 "$base/health")
+          echo "GET $base/health returned HTTP $status"
+          cat /tmp/health-response
           test "$status" = "200"
       - name: Diagnose deployed route paths
         if: always()
         shell: bash
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
         run: |
-          base='https://solenosbackend-production-8773.up.railway.app'
+          base="${RAILWAY_BASE_URL%/}"
           for path in /health /api/health /api/v1/health /openapi.json /docs /; do
             status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
             printf '%-18s HTTP %s\n' "$path" "$status"
@@ -80,7 +96,11 @@ jobs:
       - name: Verify deployed API CORS preflight
         if: always()
         shell: bash
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-8773.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
-          echo "OPTIONS /api/situation returned HTTP $status"
+          base="${RAILWAY_BASE_URL%/}"
+          status=$(curl --silent --show-error --output /tmp/cors-response --write-out '%{http_code}' --max-time 20 -X OPTIONS "$base/api/situation" -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          echo "OPTIONS $base/api/situation returned HTTP $status"
+          cat /tmp/cors-response
           test "$status" = "200"
