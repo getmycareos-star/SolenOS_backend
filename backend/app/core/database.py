@@ -27,6 +27,7 @@ import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
 import app.models.safety  # noqa: E402, F401
 import app.models.collaboration  # noqa: E402, F401
+import app.models.auth  # noqa: E402, F401
 
 Base.metadata.create_all(bind=engine)
 
