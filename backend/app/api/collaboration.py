@@ -355,6 +355,7 @@ def team_state_report(db: Session = Depends(get_db)):
     }
 
 
+@router.get("/metrics", dependencies=[Depends(require_staff)])
 @team_router.get("/metrics")
 def team_metrics(db: Session = Depends(get_db)):
     return {
