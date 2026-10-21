@@ -90,6 +90,8 @@ def list_community_posts(caregiver_id: Optional[str] = None, limit: int = Query(
 
 @router.post("/community", status_code=201)
 def create_community_post(payload: CommunityPostCreate, db: Session = Depends(get_db)):
+    if payload.author_type != "peer_caregiver":
+        raise HTTPException(status_code=403, detail="Only caregiver-authored Community posts are accepted; verified roles are assigned by the backend")
     caregiver = db.query(Caregiver).filter(Caregiver.id == payload.caregiver_id).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="A valid linked caregiver is required")
