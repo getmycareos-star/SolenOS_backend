@@ -93,3 +93,62 @@ def test_schema_validation_accepts_a_model_complete_existing_table():
         validate_database_schema(engine)
     finally:
         engine.dispose()
+
+def test_revoked_caregiver_link_history_does_not_block_relinking():
+    from datetime import datetime, timezone
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+    from app.core.database import Base
+    from app.models.auth_identity import AuthAccount, CaregiverAccountLink
+    from app.models.care import Person, Caregiver
+
+    engine = create_engine("sqlite://")
+    try:
+        Base.metadata.create_all(bind=engine, tables=[
+            Person.__table__, Caregiver.__table__, AuthAccount.__table__, CaregiverAccountLink.__table__
+        ])
+        with Session(engine) as db:
+            person = Person(name="Care recipient")
+            account_one = AuthAccount(email="one@example.test", password_hash="hash")
+            account_two = AuthAccount(email="two@example.test", password_hash="hash")
+            db.add_all([person, account_one, account_two])
+            db.flush()
+            caregiver = Caregiver(
+                name="Family caregiver", email="caregiver@example.test",
+                relationship="family", person_id=person.id, timezone="UTC"
+            )
+            db.add(caregiver)
+            db.flush()
+            first_link = CaregiverAccountLink(
+                account_id=account_one.id, caregiver_id=caregiver.id, person_id=person.id,
+                linked_by_account_id=account_one.id, is_active=True
+            )
+            db.add(first_link)
+            db.commit()
+
+            # The partial unique index must reject a second active link.
+            db.add(CaregiverAccountLink(
+                account_id=account_two.id, caregiver_id=caregiver.id, person_id=person.id,
+                linked_by_account_id=account_one.id, is_active=True
+            ))
+            with pytest.raises(IntegrityError):
+                db.commit()
+            db.rollback()
+
+            # But once the prior link is revoked, a new account can be linked
+            # while preserving the historical row.
+            first_link = db.query(CaregiverAccountLink).filter_by(account_id=account_one.id).one()
+            first_link.is_active = False
+            first_link.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+            replacement = CaregiverAccountLink(
+                account_id=account_two.id, caregiver_id=caregiver.id, person_id=person.id,
+                linked_by_account_id=account_one.id, is_active=True
+            )
+            db.add(replacement)
+            db.commit()
+            assert db.query(CaregiverAccountLink).count() == 2
+            assert db.query(CaregiverAccountLink).filter_by(is_active=True, revoked_at=None).count() == 1
+    finally:
+        engine.dispose()
+
