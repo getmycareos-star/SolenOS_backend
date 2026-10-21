@@ -36,7 +36,10 @@ app.add_middleware(
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
-app.include_router(caregiver_intelligence_router, prefix="/api/v1")
+# Preserve the established flat API paths used by existing clients while exposing
+# an explicitly namespaced route family for new integrations.
+app.include_router(caregiver_intelligence_router, prefix="/api/v1/caregiver-intelligence")
+app.include_router(caregiver_intelligence_router, prefix="/api/v1", include_in_schema=False)
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
 
