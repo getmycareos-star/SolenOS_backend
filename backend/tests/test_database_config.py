@@ -56,3 +56,10 @@ def test_allow_development_placeholder_outside_railway():
     from app.core.config import validate_deployment_secret
 
     validate_deployment_secret("change-me-in-production", railway_runtime=False)
+
+def test_schema_inspection_failure_fails_closed():
+    from app.core.database import ensure_database_schema
+
+    with pytest.raises(RuntimeError, match="Unable to inspect the configured database schema"):
+        ensure_database_schema(bind=object())
+
