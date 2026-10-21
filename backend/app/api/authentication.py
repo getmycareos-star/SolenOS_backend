@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverInvitation, CaregiverProfileAccountLink, CaregiverProfileInvitation
 from app.models.care import Person, Caregiver
@@ -119,6 +120,11 @@ def current_account(credentials: Optional[HTTPAuthorizationCredentials] = Depend
 def signup(payload: SignupInput, db: Session = Depends(get_db)):
     try:
         return create_account(db, payload.email, payload.password, payload.display_name)
+    except IntegrityError:
+        # A concurrent signup can pass the pre-check and still lose the unique-key race.
+        # Roll back the failed transaction and return a generic conflict, not HTTP 500.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Account could not be created.")
     except ValueError as exc:
         if "already exists" in str(exc):
             raise HTTPException(status_code=409, detail="Account could not be created.")
