@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
@@ -47,4 +48,15 @@ app.include_router(situation_router, prefix="/api")
 
 @app.get("/health")
 def health_check():
+    """Liveness probe: confirms the application process is serving requests."""
     return {"status": "healthy", "app": settings.app_name}
+
+
+@app.get("/health/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    """Readiness probe: verifies the configured database accepts a simple query."""
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database is not ready")
+    return {"status": "ready", "database": "reachable", "app": settings.app_name}
