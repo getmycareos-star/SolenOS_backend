@@ -100,7 +100,7 @@ jobs:
           RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
         run: |
           base="${RAILWAY_BASE_URL%/}"
-          status=$(curl --silent --show-error --output /tmp/cors-response --write-out '%{http_code}' --max-time 20 -X OPTIONS "$base/api/situation" -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
-          echo "OPTIONS $base/api/situation returned HTTP $status"
+          status=$(curl --silent --show-error --output /tmp/cors-response --write-out '%{http_code}' --max-time 20 -X OPTIONS "$base/api/v1/situation" -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          echo "OPTIONS $base/api/v1/situation returned HTTP $status"
           cat /tmp/cors-response
           test "$status" = "200"
