@@ -17,6 +17,8 @@ PROTECTED_PREFIXES = ("/api/v1/", "/api/situation")
 PUBLIC_EXACT_PATHS = {"/health"}
 IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,}$")
 AUTHENTICATED_ONLY_PATHS = {
+    "/api/v1/evaluate",
+    "/api/v1/adversarial-tests",
     "/api/v1/safety/evaluate",
     "/api/v1/safety/validate-response",
     "/api/v1/safety/evaluate-benchmark",
