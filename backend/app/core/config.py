@@ -1,4 +1,5 @@
 import os
+import secrets
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -45,4 +46,15 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     settings = Settings()
     settings.validate_production_configuration()
+    environment_values = [
+        os.getenv("RAILWAY_ENVIRONMENT_NAME", ""),
+        os.getenv("RAILWAY_ENVIRONMENT", ""),
+        os.getenv("APP_ENV", ""),
+        os.getenv("ENVIRONMENT", ""),
+    ]
+    is_production = any(value.strip().lower() in {"production", "prod"} for value in environment_values)
+    if not is_production and settings.secret_key == "change-me-in-production":
+        # A random process-local development key keeps local auth usable without a shared default.
+        # It is intentionally not stable across restarts; production must supply SECRET_KEY.
+        settings.secret_key = secrets.token_urlsafe(48)
     return settings
