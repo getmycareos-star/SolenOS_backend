@@ -3,11 +3,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal, engine
 from app.main import app
 from app.models.care import Person, Caregiver
 from app.models.collaboration import CommunityPost, ConversationMessage
 from app.models.auth import AuthAccount
+import uuid
 from app.api.auth import _hash_password, _verify_password, issue_token, verify_token, settings
 
 engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
@@ -184,3 +185,44 @@ def test_register_and_login_issue_backend_session(monkeypatch):
         assert login.json()["account"]["caregiver_id"] == "collab-caregiver-1"
     finally:
         cleanup()
+
+
+def test_auth_middleware_requires_token_and_isolates_care_recipients(monkeypatch):
+    # Exercise the real middleware and real configured SQLAlchemy session; do not
+    # override get_db because the app intentionally bypasses auth only for isolated
+    # dependency-overridden unit tests.
+    app.dependency_overrides.clear()
+    monkeypatch.setattr(settings, "secret_key", "m" * 64)
+    Base.metadata.create_all(bind=engine)
+    suffix = str(uuid.uuid4())
+    person_id = "auth-person-" + suffix
+    other_person_id = "auth-other-person-" + suffix
+    caregiver_id = "auth-caregiver-" + suffix
+    account_id = "auth-account-" + suffix
+    db = SessionLocal()
+    try:
+        person = Person(id=person_id, name="Authorized Person")
+        other_person = Person(id=other_person_id, name="Other Person")
+        caregiver = Caregiver(id=caregiver_id, name="Authorized Caregiver", email="auth-" + suffix + "@example.com", relationship="Family", person_id=person_id)
+        account = AuthAccount(id=account_id, caregiver_id=caregiver_id, email=caregiver.email, password_hash="unused", role="caregiver", is_active=True)
+        db.add_all([person, other_person, caregiver, account])
+        db.commit()
+
+        token = issue_token(account)
+        client = TestClient(app)
+        missing = client.get("/api/v1/persons/" + person_id)
+        assert missing.status_code == 401
+
+        allowed = client.get("/api/v1/persons/" + person_id, headers={"Authorization": "Bearer " + token})
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["id"] == person_id
+
+        denied = client.get("/api/v1/persons/" + other_person_id, headers={"Authorization": "Bearer " + token})
+        assert denied.status_code == 403, denied.text
+    finally:
+        db.query(AuthAccount).filter_by(id=account_id).delete(synchronize_session=False)
+        db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+        db.query(Person).filter(Person.id.in_([person_id, other_person_id])).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+        app.dependency_overrides.clear()
