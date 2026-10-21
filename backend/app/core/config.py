@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     app_name: str = "SolenOS"
     debug: bool = False
     database_url: str = "sqlite:///./solenos.db"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
@@ -27,7 +27,9 @@ class Settings(BaseSettings):
 def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
     """Fail closed rather than sign production sessions with the committed placeholder."""
     if railway_runtime and (
-        secret_key.strip() == "change-me-in-production" or len(secret_key.strip()) < 32
+        not secret_key.strip()
+        or secret_key.strip() == "change-me-in-production"
+        or len(secret_key.strip()) < 32
     ):
         raise RuntimeError(
             "SECRET_KEY must be configured in Railway with at least 32 characters before "
