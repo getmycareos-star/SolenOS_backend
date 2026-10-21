@@ -180,6 +180,18 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             legacy_created = client.post("/api/v1/persons", headers=headers, json={"name": "Legacy Care Recipient"})
             assert legacy_created.status_code == 200, legacy_created.text
             assert client.get("/api/v1/persons/" + legacy_created.json()["id"], headers=headers).status_code == 200
+            with TestingSession() as db:
+                legacy_caregiver = db.query(CaregiverModel).filter_by(
+                    person_id=legacy_created.json()["id"],
+                    email="caregiver@example.com",
+                ).one()
+                legacy_link = db.query(CaregiverAccountLink).filter_by(
+                    account_id=signup.json()["id"],
+                    caregiver_id=legacy_caregiver.id,
+                    person_id=legacy_created.json()["id"],
+                    is_active=True,
+                ).one()
+                assert legacy_link.linked_by_account_id == signup.json()["id"]
 
             created_context = client.post(
                 "/api/v1/auth/care-contexts",
