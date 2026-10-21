@@ -120,7 +120,7 @@ def test_logout_revokes_previously_issued_tokens():
 
 
 def test_signup_rejects_short_password_and_login_does_not_return_password_hash():
-    email = f"new-{uuid.uuid4().hex}@example.test"
+    email = f"new-{uuid.uuid4().hex}@gmail.com"
     short = client.post("/api/v1/auth/signup", json={"email": email, "password": "short"})
     assert short.status_code == 422
 
