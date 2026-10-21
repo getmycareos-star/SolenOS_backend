@@ -36,6 +36,18 @@ def upgrade():
         # A brand-new database is bootstrapped by the registered model metadata.
         return
 
+    # Refuse the migration before any DDL if existing records already violate
+    # the target uniqueness rule. Never silently delete or merge caregiver rows.
+    duplicate = bind.execute(sa.text(
+        "SELECT person_id, email FROM caregivers "
+        "GROUP BY person_id, email HAVING COUNT(*) > 1 LIMIT 1"
+    )).first()
+    if duplicate:
+        raise RuntimeError(
+            "Cannot scope caregiver email uniqueness: duplicate email values exist "
+            "within a care record. Resolve duplicates explicitly before migration."
+        )
+
     constraints = inspector.get_unique_constraints("caregivers")
     constraint_names = {item.get("name") for item in constraints}
     for constraint in constraints:
