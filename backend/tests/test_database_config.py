@@ -54,10 +54,11 @@ def test_allow_configured_session_secret_in_railway():
     validate_deployment_secret("a-real-secret-from-the-environment", railway_runtime=True)
 
 
-def test_allow_development_placeholder_outside_railway():
-    from app.core.config import validate_deployment_secret
+def test_development_settings_do_not_default_to_a_committed_placeholder():
+    from app.core.config import Settings, validate_deployment_secret
 
-    validate_deployment_secret("change-me-in-production", railway_runtime=False)
+    assert Settings().secret_key == ""
+    validate_deployment_secret("", railway_runtime=False)
 
 def test_schema_inspection_failure_fails_closed():
     from app.core.database import ensure_database_schema
