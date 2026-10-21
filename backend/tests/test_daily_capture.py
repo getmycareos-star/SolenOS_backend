@@ -110,3 +110,61 @@ def test_daily_capture_rejects_unlinked_caregiver():
         assert response.json()["detail"] == "Caregiver is not linked to this care record"
     finally:
         teardown_db()
+
+
+def test_daily_capture_is_retrievable_once_for_selected_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        created = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "mood": "Calm",
+                "general_notes": "Persistence read-back contract",
+            },
+        )
+        assert created.status_code == 200, created.text
+        created_id = created.json()["id"]
+
+        retrieved = client.get("/api/v1/events/person-daily-test")
+        assert retrieved.status_code == 200, retrieved.text
+        matching = [event for event in retrieved.json() if event["id"] == created_id]
+        assert len(matching) == 1
+        assert matching[0]["person_id"] == "person-daily-test"
+        assert matching[0]["created_by_caregiver_id"] == "caregiver-daily-test"
+        assert "Persistence read-back contract" in matching[0]["description"]
+    finally:
+        teardown_db()
+
+
+def test_daily_capture_rejects_caregiver_linked_to_another_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        other_person = Person(id="person-daily-other", name="Other Person")
+        db.add(other_person)
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": "person-daily-other",
+                "caregiver_id": "caregiver-daily-test",
+                "mood": "Calm",
+                "general_notes": "Must not cross care records",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id="person-daily-other").count() == 0
+        db.close()
+    finally:
+        teardown_db()

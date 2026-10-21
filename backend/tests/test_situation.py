@@ -6,7 +6,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
-from app.models.care import Person, Caregiver
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -218,5 +218,84 @@ def test_post_situation_empty_input_and_no_documents():
         )
         assert response.status_code == 400
         assert "No valid evidence provided" in response.json()["detail"]
+    finally:
+        teardown_db()
+
+
+def test_post_situation_rejects_caregiver_linked_to_different_person():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person_a = Person(id="person-isolation-a", name="Person A")
+        person_b = Person(id="person-isolation-b", name="Person B")
+        caregiver_a = Caregiver(
+            id="caregiver-isolation-a",
+            name="Caregiver A",
+            email="caregiver-a@example.com",
+            relationship="Family",
+            person_id=person_a.id,
+        )
+        caregiver_b = Caregiver(
+            id="caregiver-isolation-b",
+            name="Caregiver B",
+            email="caregiver-b@example.com",
+            relationship="Family",
+            person_id=person_b.id,
+        )
+        db.add_all([person_a, person_b, caregiver_a, caregiver_b])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-isolation-a",
+                "person_id": "person-isolation-b",
+                "raw_input": "This must not be saved to Person B.",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 0
+        assert db.query(CareEvent).count() == 0
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_post_situation_rejects_unknown_caregiver_without_persisting():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-unknown-caregiver", name="Person")
+        db.add(person)
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-does-not-exist",
+                "person_id": "person-unknown-caregiver",
+                "raw_input": "This must not be saved.",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 0
+        assert db.query(CareEvent).count() == 0
+        db.close()
     finally:
         teardown_db()
