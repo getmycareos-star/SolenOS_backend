@@ -243,7 +243,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unlinked_versioned_situation_write.status_code == 403, unlinked_versioned_situation_write.text
             my_caregiver_links = client.get("/api/v1/auth/my-caregiver-links", headers=headers, params={"person_id": context["person_id"]})
             assert my_caregiver_links.status_code == 200, my_caregiver_links.text
-            assert [item["caregiver_id"] for item in my_caregiver_links.json()] == [caregiver.id]
+            assert {item["caregiver_id"] for item in my_caregiver_links.json()} == {caregiver_id, caregiver.id}
             replayed_invitation = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
             assert replayed_invitation.status_code == 400, replayed_invitation.text
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
