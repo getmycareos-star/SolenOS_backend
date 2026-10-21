@@ -164,9 +164,19 @@ def test_appointment_object_id_cannot_cross_care_record_boundary():
 
     engine, Session, client = _client_for_test()
     try:
-        owner_headers, _owner_person = _account_context(client, Session, "appointment-owner@example.test")
+        owner_headers, owner_person = _account_context(client, Session, "appointment-owner@example.test")
         other_headers, other_person = _account_context(client, Session, "appointment-other@example.test")
+        assert owner_person != other_person
+        owner_me = client.get("/api/v1/auth/me", headers=owner_headers)
+        other_me = client.get("/api/v1/auth/me", headers=other_headers)
+        assert owner_me.status_code == 200, owner_me.text
+        assert other_me.status_code == 200, other_me.text
+        assert owner_me.json()["id"] != other_me.json()["id"]
         with Session() as db:
+            from app.models.auth_identity import AccountPersonAccess
+            assert db.query(AccountPersonAccess).filter_by(
+                account_id=owner_me.json()["id"], person_id=other_person
+            ).count() == 0
             caregiver = db.query(Caregiver).filter_by(person_id=other_person).one()
             appointment = Appointment(
                 person_id=other_person,
@@ -209,10 +219,16 @@ def test_collaboration_routes_are_registered_and_session_protected():
         ("GET", "/api/v1/metrics"),
         ("GET", "/api/v1/professional-dashboard/"),
     }
+    # FastAPI versions using included-router wrappers do not expose nested
+    # APIRoutes directly in app.routes. OpenAPI is the authoritative registered
+    # route table and avoids a false failure that only sees /health and /ready.
+    schema = app.openapi()
     actual = {
-        (method, route.path)
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        for method in (route.methods or set())
+        (method.upper(), path)
+        for path, operations in schema.get("paths", {}).items()
+        for method in operations
     }
-    assert required <= actual, f"Missing collaboration routes: {sorted(required - actual)}"
+    assert required <= actual, (
+        f"Missing collaboration routes: {sorted(required - actual)}; "
+        f"registered paths: {sorted(schema.get('paths', {}))}"
+    )
