@@ -1,0 +1,106 @@
+name: Backend validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deployment_url:
+        description: "Public base URL of the intended Railway backend service"
+        required: true
+        type: string
+        default: "https://solenosbackend-production-8773.up.railway.app"
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package and test dependencies
+        run: python -m pip install -e . pytest httpx
+      - name: Validate Railway build and start configuration
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          config = json.loads(Path("../railway.json").read_text())
+          assert "pip install -e ./backend" in config["build"]["buildCommand"], config["build"]
+          assert "cd backend && python -m uvicorn app.main:app" in config["deploy"]["startCommand"], config["deploy"]
+          assert config["deploy"]["healthcheckPath"] == "/health", config["deploy"]
+          assert Path("pyproject.toml").is_file()
+          print("Railway build command, ASGI entrypoint, and /health check are configured.")
+          PY
+      - name: Compile backend
+        run: python -m compileall -q app
+      - name: Smoke-test ASGI startup and health
+        shell: bash
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 >/tmp/solenos-uvicorn.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --silent --fail http://127.0.0.1:8011/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/solenos-uvicorn.log
+          exit 1
+      - name: Run backend tests
+        run: pytest -q
+
+  deployed-smoke:
+    # Run against the live service only when explicitly requested. A PR build
+    # must not be confused with the separately deployed Railway revision.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployed health endpoint
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
+        run: |
+          case "$RAILWAY_BASE_URL" in
+            https://*) ;;
+            *) echo "deployment_url must be an HTTPS URL"; exit 2 ;;
+          esac
+          base="${RAILWAY_BASE_URL%/}"
+          status=$(curl --silent --show-error --output /tmp/health-response --write-out '%{http_code}' --max-time 20 "$base/health")
+          echo "GET $base/health returned HTTP $status"
+          cat /tmp/health-response
+          test "$status" = "200"
+      - name: Diagnose deployed route paths
+        if: always()
+        shell: bash
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
+        run: |
+          base="${RAILWAY_BASE_URL%/}"
+          for path in /health /api/health /api/v1/health /openapi.json /docs /; do
+            status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
+            printf '%-18s HTTP %s\n' "$path" "$status"
+            if [ "$path" = "/openapi.json" ] && [ "$status" = "200" ]; then
+              python -c 'import json; d=json.load(open("/tmp/solenos-response")); print("OpenAPI paths:", ", ".join(sorted(d.get("paths", {}).keys())[:60]))'
+            fi
+          done
+      - name: Verify deployed API CORS preflight
+        if: always()
+        shell: bash
+        env:
+          RAILWAY_BASE_URL: ${{ inputs.deployment_url }}
+        run: |
+          base="${RAILWAY_BASE_URL%/}"
+          status=$(curl --silent --show-error --output /tmp/cors-response --write-out '%{http_code}' --max-time 20 -X OPTIONS "$base/api/situation" -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          echo "OPTIONS $base/api/situation returned HTTP $status"
+          cat /tmp/cors-response
+          test "$status" = "200"
