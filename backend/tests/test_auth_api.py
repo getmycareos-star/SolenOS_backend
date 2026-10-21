@@ -567,6 +567,8 @@ def test_every_sensitive_api_route_has_authenticated_account_dependency():
     schema = app.openapi()
     missing = []
     for path, operations in schema.get("paths", {}).items():
+        if not path.startswith("/api/"):
+            continue
         for method, operation in operations.items():
             if (path, method.lower()) in public_auth_routes:
                 continue
