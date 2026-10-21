@@ -19,6 +19,7 @@ import app.models.time_location  # noqa: F401
 import app.models.safety  # noqa: F401
 import app.models.auth_identity  # noqa: F401
 import app.models.capture  # noqa: F401
+import app.models.collaboration  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
