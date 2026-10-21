@@ -190,9 +190,30 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert daily_capture.status_code == 201, daily_capture.text
             assert daily_capture.json()["success"] is True
 
+            # One account can own multiple care records without colliding on
+            # the caregiver email, which is unique only within each record.
+            second_context_response = client.post(
+                "/api/v1/auth/care-contexts",
+                headers=headers,
+                json={"name": "Second Care Recipient"},
+            )
+            assert second_context_response.status_code == 201, second_context_response.text
+            second_context = second_context_response.json()
+            second_caregivers = client.get(
+                f"/api/v1/caregivers/{second_context['person_id']}",
+                headers=headers,
+            )
+            assert second_caregivers.status_code == 200, second_caregivers.text
+            assert len(second_caregivers.json()) == 1
+            assert second_caregivers.json()[0]["email"] == "caregiver@example.com"
+
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
-            assert {item["person_id"] for item in listed.json()} == {context["person_id"], legacy_created.json()["id"]}
+            assert {item["person_id"] for item in listed.json()} == {
+                context["person_id"],
+                second_context["person_id"],
+                legacy_created.json()["id"],
+            }
             own_safety_audits = client.get("/api/v1/safety/audit/" + context["person_id"], headers=headers)
             assert own_safety_audits.status_code == 200, own_safety_audits.text
             assert own_safety_audits.json() == []
