@@ -9,6 +9,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.models.care import Person, Caregiver, CareEvent, Insight
 from app.models.time_location import Appointment
+from app.models.auth import AuthAccount
 from app.models.collaboration import (
     CommunityPost, CommunityReaction, ConversationSession, ConversationMessage,
     ProfessionalAccessGrant,
@@ -92,14 +93,16 @@ def create_community_post(payload: CommunityPostCreate, db: Session = Depends(ge
     caregiver = db.query(Caregiver).filter(Caregiver.id == payload.caregiver_id).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="A valid linked caregiver is required")
+    if payload.author_type != "peer_caregiver":
+        raise HTTPException(status_code=403, detail="Community posts must be authored as a caregiver; verified roles are assigned by SolenOS")
     if payload.visibility not in {"public", "private"}:
         raise HTTPException(status_code=422, detail="visibility must be public or private")
     post = CommunityPost(
-        caregiver_id=caregiver.id, author_type=payload.author_type,
-        author_label="Anonymous caregiver" if payload.author_type == "peer_caregiver" else payload.author_label,
+        caregiver_id=caregiver.id, author_type="peer_caregiver",
+        author_label="Anonymous caregiver",
         post_type=payload.post_type, content=payload.content.strip(),
         care_stage=payload.care_stage, tags_json=json.dumps(payload.tags[:20]),
-        visibility=payload.visibility, moderation_status="published",
+        visibility=payload.visibility, moderation_status="pending",
     )
     db.add(post); db.commit(); db.refresh(post)
     return _post_payload(db, post, caregiver.id)
@@ -284,9 +287,21 @@ def list_conversation_messages(session_id: str, caregiver_id: str, db: Session =
 @router.post("/professional/access-grants")
 def create_professional_access_grant(payload: ProfessionalGrantCreate, db: Session = Depends(get_db)):
     _caregiver_for_person(db, payload.granted_by_caregiver_id, payload.person_id)
+    grantor_account = db.query(AuthAccount).filter_by(
+        caregiver_id=payload.granted_by_caregiver_id, is_active=True
+    ).first()
+    if not grantor_account or grantor_account.role != "caregiver":
+        raise HTTPException(status_code=403, detail="Only an active family caregiver account can grant professional access")
     professional = db.query(Caregiver).filter_by(id=payload.professional_caregiver_id).first()
     if not professional:
         raise HTTPException(status_code=404, detail="Professional account record not found")
+    professional_account = db.query(AuthAccount).filter_by(
+        caregiver_id=payload.professional_caregiver_id, is_active=True
+    ).first()
+    if not professional_account or professional_account.role != "professional":
+        raise HTTPException(status_code=403, detail="Professional access can only be granted to an active, verified professional account")
+    if payload.status not in {"active", "revoked"}:
+        raise HTTPException(status_code=422, detail="Grant status must be active or revoked")
     existing = db.query(ProfessionalAccessGrant).filter_by(professional_caregiver_id=payload.professional_caregiver_id, person_id=payload.person_id).first()
     if existing:
         existing.status = payload.status
