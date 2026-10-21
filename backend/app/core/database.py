@@ -60,11 +60,17 @@ def ensure_database_schema(bind=None):
     target = bind or engine
     # Runtime ALTER TABLE is retained only for the legacy SQLite development
     # database. PostgreSQL schema changes must be applied through Alembic.
-    if target.dialect.name != "sqlite":
+    try:
+        dialect = target.dialect
+        dialect_name = dialect.name
+    except Exception as exc:
+        raise RuntimeError(
+            "Unable to inspect the configured database schema; refusing to start with unverified care storage."
+        ) from exc
+    if dialect_name != "sqlite":
         return
     try:
         insp = inspect(target)
-        dialect = target.dialect
     except Exception as exc:
         raise RuntimeError(
             "Unable to inspect the configured database schema; refusing to start with unverified care storage."
