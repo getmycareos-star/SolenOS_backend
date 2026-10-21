@@ -5,7 +5,10 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# SQLite-specific connection flags must not be passed to PostgreSQL/MySQL
+# drivers. Railway production deployments commonly use a PostgreSQL URL.
+connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -42,8 +45,8 @@ def ensure_database_schema(bind=None):
     create_all creates tables but cannot add columns to tables that already
     exist with an older shape, which previously surfaced as HTTP 500
     ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
+    adds only missing columns and never drops or rewrites data, so it is safe
+    to run at startup against a stale dev database.
     """
     from sqlalchemy import inspect, text
 
