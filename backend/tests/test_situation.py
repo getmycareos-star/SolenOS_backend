@@ -267,3 +267,35 @@ def test_post_situation_rejects_caregiver_linked_to_different_person():
         db.close()
     finally:
         teardown_db()
+
+
+def test_post_situation_rejects_unknown_caregiver_without_persisting():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-unknown-caregiver", name="Person")
+        db.add(person)
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-does-not-exist",
+                "person_id": "person-unknown-caregiver",
+                "raw_input": "This must not be saved.",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 0
+        assert db.query(CareEvent).count() == 0
+        db.close()
+    finally:
+        teardown_db()
