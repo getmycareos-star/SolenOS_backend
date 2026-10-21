@@ -58,6 +58,10 @@ def ensure_database_schema(bind=None):
     """
     from sqlalchemy import inspect, text
     target = bind or engine
+    # Runtime ALTER TABLE is retained only for the legacy SQLite development
+    # database. PostgreSQL schema changes must be applied through Alembic.
+    if target.dialect.name != "sqlite":
+        return
     try:
         insp = inspect(target)
         dialect = target.dialect
@@ -110,6 +114,36 @@ def ensure_database_schema(bind=None):
                 existing = refreshed
 
 
+
+def validate_database_schema(bind=None):
+    """Fail closed when an existing table is missing ORM-declared columns.
+
+    create_all() can create absent tables but cannot migrate columns on tables
+    that already exist. Report that drift explicitly instead of letting the
+    service return a false-positive healthy status and fail later on real care
+    workflows.
+    """
+    from sqlalchemy import inspect
+
+    target = bind or engine
+    inspector = inspect(target)
+    missing = []
+    for table_name, table in Base.metadata.tables.items():
+        if not inspector.has_table(table_name):
+            # Missing tables are handled by create_all() before validation.
+            continue
+        actual = {column["name"] for column in inspector.get_columns(table_name)}
+        absent = sorted(column.name for column in table.columns if column.name not in actual)
+        if absent:
+            missing.append(f"{table_name}: {', '.join(absent)}")
+    if missing:
+        details = "; ".join(missing)
+        raise RuntimeError(
+            "Database schema is behind the application models. Apply reviewed Alembic "
+            f"migrations before serving care workflows. Missing columns: {details}"
+        )
+
+
 def init_db():
     """Register all models before schema creation; run once per process."""
     global _initialized
@@ -133,6 +167,7 @@ def init_db():
         import app.models.capture  # noqa: F401
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
+        validate_database_schema(engine)
         _initialized = True
 
 
