@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from threading import Lock
 from app.core.config import get_settings
 
 settings = get_settings()
@@ -9,18 +10,39 @@ engine = create_engine(settings.database_url, connect_args={"check_same_thread":
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-import app.models.uncertainty  # noqa: E402, F401
-import app.models.temporal  # noqa: E402, F401
-import app.models.change  # noqa: E402, F401
-import app.models.significance  # noqa: E402, F401
-import app.models.action  # noqa: E402, F401
-import app.models.caregiver_intelligence  # noqa: E402, F401
-import app.models.causal  # noqa: E402, F401
+_initialized = False
+_init_lock = Lock()
 
-Base.metadata.create_all(bind=engine)
+
+def init_db():
+    """Register every legacy model before creating tables; initialize once per process."""
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        # The first imported router reaches this module before all model classes
+        # are registered. Import every model here to prevent unresolved foreign
+        # keys and missing tables caused by partial SQLAlchemy metadata.
+        import app.models.care  # noqa: F401
+        import app.models.uncertainty  # noqa: F401
+        import app.models.temporal  # noqa: F401
+        import app.models.change  # noqa: F401
+        import app.models.significance  # noqa: F401
+        import app.models.action  # noqa: F401
+        import app.models.caregiver_intelligence  # noqa: F401
+        import app.models.causal  # noqa: F401
+        import app.models.memory  # noqa: F401
+        import app.models.time_location  # noqa: F401
+        import app.models.safety  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        ensure_database_schema()
+        _initialized = True
 
 
 def get_db():
+    init_db()
     db = SessionLocal()
     try:
         yield db
@@ -82,5 +104,3 @@ def ensure_database_schema(bind=None):
                 # it will raise concretely if actually needed.
                 pass
 
-
-ensure_database_schema()
