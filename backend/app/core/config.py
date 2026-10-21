@@ -19,14 +19,13 @@ class Settings(BaseSettings):
     )
 
     def validate_production_configuration(self) -> None:
-        environment = (
-            os.getenv("RAILWAY_ENVIRONMENT_NAME")
-            or os.getenv("RAILWAY_ENVIRONMENT")
-            or os.getenv("APP_ENV")
-            or os.getenv("ENVIRONMENT")
-            or ""
-        ).strip().lower()
-        is_production = environment in {"production", "prod"}
+        environment_values = [
+            os.getenv("RAILWAY_ENVIRONMENT_NAME", ""),
+            os.getenv("RAILWAY_ENVIRONMENT", ""),
+            os.getenv("APP_ENV", ""),
+            os.getenv("ENVIRONMENT", ""),
+        ]
+        is_production = any(value.strip().lower() in {"production", "prod"} for value in environment_values)
         if not is_production:
             return
 
@@ -38,6 +37,8 @@ class Settings(BaseSettings):
             or len(self.secret_key) < 32
         ):
             raise RuntimeError("Production SECRET_KEY must be a unique random value of at least 32 characters.")
+        if self.debug:
+            raise RuntimeError("Production DEBUG must be false.")
 
 
 @lru_cache
