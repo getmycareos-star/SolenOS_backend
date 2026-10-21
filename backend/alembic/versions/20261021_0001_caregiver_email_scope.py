@@ -1,11 +1,19 @@
-"""Scope caregiver email uniqueness to a care record.
+"""Bootstrap missing model tables and scope caregiver email uniqueness.
 
-Existing PostgreSQL installations may have a legacy UNIQUE(email) constraint.
-This explicit migration replaces that constraint with uniqueness on
-(person_id, email); it is not run implicitly during application startup.
+This is the initial Alembic revision for the current model set. On a fresh
+PostgreSQL database, create the registered model tables before applying the
+caregiver uniqueness rule; Railway runs Alembic before the ASGI application
+starts, so relying on application startup's create_all() is too late.
+
+On an existing database, create_all(checkfirst=True) only creates absent
+tables; it does not alter existing tables or columns. Existing-schema drift
+must still be handled by explicit, reviewed migrations and the application's
+schema validation. No existing care rows are deleted or rewritten.
 """
 from alembic import op
 import sqlalchemy as sa
+
+from app.core.database import Base
 
 revision = "20261021_0001"
 down_revision = None
@@ -31,13 +39,31 @@ def upgrade():
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+
+    # env.py registers the complete model set before Alembic runs revisions.
+    # This creates missing tables on fresh databases and adds newly introduced
+    # tables on existing databases without changing any existing table's data
+    # or columns.
+    Base.metadata.create_all(bind=bind, checkfirst=True)
+
     inspector = sa.inspect(bind)
     if not inspector.has_table("caregivers"):
-        # A brand-new database is bootstrapped by the registered model metadata.
-        return
+        raise RuntimeError(
+            "Required caregivers table was not created by the registered model metadata."
+        )
 
-    # Refuse the migration before any DDL if existing records already violate
-    # the target uniqueness rule. Never silently delete or merge caregiver rows.
+    caregiver_columns = {column["name"] for column in inspector.get_columns("caregivers")}
+    required_columns = {"id", "email", "person_id"}
+    missing_columns = sorted(required_columns - caregiver_columns)
+    if missing_columns:
+        raise RuntimeError(
+            "Cannot migrate caregiver email uniqueness because the existing caregivers "
+            f"table is missing required columns: {', '.join(missing_columns)}. "
+            "Apply a reviewed schema migration before retrying."
+        )
+
+    # Refuse the migration before any uniqueness DDL if existing records already
+    # violate the target rule. Never silently delete or merge caregiver rows.
     duplicate = bind.execute(sa.text(
         "SELECT person_id, email FROM caregivers "
         "GROUP BY person_id, email HAVING COUNT(*) > 1 LIMIT 1"
