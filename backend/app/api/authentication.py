@@ -288,6 +288,8 @@ def accept_caregiver_invitation(
     ).first()
     if invitation is None:
         raise HTTPException(status_code=400, detail="Invitation is invalid, expired, or already used")
+    if invitation.invited_by_account_id == account.id:
+        raise HTTPException(status_code=403, detail="Invitation creator cannot accept their own invitation")
     expires_at = invitation.expires_at
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
