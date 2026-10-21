@@ -23,6 +23,37 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
+    def validate_production_configuration(self) -> None:
+        """Reject ephemeral storage and placeholder session keys in production."""
+        environment_names = (
+            "RAILWAY_ENVIRONMENT_NAME",
+            "RAILWAY_ENVIRONMENT",
+            "APP_ENV",
+            "ENVIRONMENT",
+        )
+        production_markers = {"production", "prod"}
+        is_production = bool(os.getenv("RAILWAY_PROJECT_ID")) or any(
+            os.getenv(name, "").strip().lower() in production_markers
+            for name in environment_names
+        )
+        if not is_production:
+            return
+
+        database_url = self.database_url.strip().lower()
+        if not database_url.startswith(
+            ("postgres://", "postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")
+        ):
+            raise RuntimeError(
+                "Production deployments must use managed PostgreSQL; SQLite is not durable "
+                "enough for Railway production."
+            )
+
+        secret = self.secret_key.strip()
+        if secret == "change-me-in-production" or len(secret) < 32:
+            raise RuntimeError(
+                "Production SECRET_KEY must be a unique random value with at least 32 characters."
+            )
+
 
 def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
     """Fail closed rather than sign production sessions with the committed placeholder."""
@@ -39,6 +70,7 @@ def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> Non
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
+    settings.validate_production_configuration()
     railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
     validate_deployment_secret(settings.secret_key, railway_runtime=railway_runtime)
     return settings
