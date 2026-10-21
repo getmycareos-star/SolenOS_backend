@@ -31,8 +31,11 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 20); do
-            if curl --silent --fail http://127.0.0.1:8011/health; then
-              exit 0
+            if curl --silent --fail http://127.0.0.1:8011/health >/tmp/solenos-health.json; then
+              cat /tmp/solenos-health.json
+              if curl --silent --show-error --fail http://127.0.0.1:8011/health/ready; then
+                exit 0
+              fi
             fi
             sleep 1
           done
