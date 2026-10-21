@@ -11,6 +11,7 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.models.care import Caregiver as CaregiverModel, Person as PersonModel
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
 
