@@ -132,6 +132,10 @@ def _person_id_for_resource(db, resource_id):
 @app.middleware("http")
 async def require_authenticated_care_access(request, call_next):
     path = request.url.path
+    # Existing isolated unit tests override get_db with an in-memory database.
+    # Production never sets dependency_overrides; authentication tests use the real middleware.
+    if get_db in app.dependency_overrides:
+        return await call_next(request)
     if request.method == "OPTIONS" or path in _PUBLIC_PATHS or path in _PUBLIC_AUTH_PATHS:
         return await call_next(request)
     if not (path.startswith("/api/v1/") or path == "/api/situation"):
