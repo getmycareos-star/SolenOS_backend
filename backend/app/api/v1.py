@@ -217,6 +217,7 @@ def get_person(person_id: str, db: Session = Depends(get_db)):
     return person
 
 
+@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema], dependencies=[Depends(require_person_access("read"))])
 @router.get("/caregivers/person/{person_id}", response_model=List[CaregiverSchema], dependencies=[Depends(require_person_access("read"))])
 def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
     """List caregiver identities for a care record after enforcing explicit read access."""
