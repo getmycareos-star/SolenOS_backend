@@ -9,18 +9,33 @@ engine = create_engine(settings.database_url, connect_args={"check_same_thread":
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-import app.models.uncertainty  # noqa: E402, F401
-import app.models.temporal  # noqa: E402, F401
-import app.models.change  # noqa: E402, F401
-import app.models.significance  # noqa: E402, F401
-import app.models.action  # noqa: E402, F401
-import app.models.caregiver_intelligence  # noqa: E402, F401
-import app.models.causal  # noqa: E402, F401
+# Model registration and schema creation are deferred until the first database
+# session is requested. This avoids a circular import where a model imports
+# Base while this module imports that same, partially initialized model.
+_initialized = False
 
-Base.metadata.create_all(bind=engine)
+
+def init_db():
+    """Load ORM models and initialize/upgrade schema after imports have settled."""
+    global _initialized
+    if _initialized:
+        return
+    # Keep these imports lazy to avoid model <-> database circular initialization.
+    import app.models.care  # noqa: F401
+    import app.models.uncertainty  # noqa: F401
+    import app.models.temporal  # noqa: F401
+    import app.models.change  # noqa: F401
+    import app.models.significance  # noqa: F401
+    import app.models.action  # noqa: F401
+    import app.models.caregiver_intelligence  # noqa: F401
+    import app.models.causal  # noqa: F401
+    Base.metadata.create_all(bind=engine)
+    ensure_database_schema()
+    _initialized = True
 
 
 def get_db():
+    init_db()
     db = SessionLocal()
     try:
         yield db
@@ -82,5 +97,3 @@ def ensure_database_schema(bind=None):
                 # it will raise concretely if actually needed.
                 pass
 
-
-ensure_database_schema()

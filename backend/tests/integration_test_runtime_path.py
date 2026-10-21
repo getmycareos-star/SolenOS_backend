@@ -126,6 +126,34 @@ def test_idempotent_identical_input():
     assert events == 2
 
 
+
+def test_situation_rejects_caregiver_for_different_person_without_writes():
+    """A caregiver must not write evidence/events to an unrelated person's record."""
+    import uuid
+
+    db = next(get_db())
+    suffix = "_" + uuid.uuid4().hex
+    try:
+        person_a, caregiver_a = setup_person_and_caregiver(db, suffix + "_a")
+        person_b, _caregiver_b = setup_person_and_caregiver(db, suffix + "_b")
+    except Exception:
+        db.rollback()
+        raise
+
+    payload = SituationInput(
+        caregiver_id=caregiver_a.id,
+        person_id=person_b.id,
+        raw_input="This must not be written to another person's record.",
+        timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+    response = client.post("/api/situation", json=payload.model_dump(mode="json"))
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Caregiver is not linked to this person"
+    assert db.query(Evidence).filter(Evidence.person_id == person_b.id).count() == 0
+    assert db.query(CareEvent).filter(CareEvent.person_id == person_b.id).count() == 0
+
+
 def test_empty_input_returns_400():
     db = next(get_db())
     try:
