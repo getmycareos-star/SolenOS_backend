@@ -48,7 +48,7 @@ def setup_records():
     db.add_all([person, caregiver, professional_person, professional])
     db.commit()
     db.close()
-    return person_id, caregiver_id, professional_id
+    return "person-collab-test", "caregiver-collab-test", "professional-collab-test"
 
 
 def teardown_records():
