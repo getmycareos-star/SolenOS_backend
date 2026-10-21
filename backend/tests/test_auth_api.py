@@ -415,15 +415,15 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_safety_escalation.status_code == 400, foreign_safety_escalation.text
             foreign_uploader_write = client.post("/api/v1/evidence", headers=headers, json={"person_id": context["person_id"], "type": "note", "source_text": "forged uploader", "uploaded_by_caregiver_id": foreign_caregiver_id})
             assert foreign_uploader_write.status_code == 400, foreign_uploader_write.text
-            foreign_evidence_event = client.post("/api/v1/events", headers=headers, json={"person_id": context["person_id"], "event_type": "observation", "occurred_at": "2026-10-20T09:00:00Z", "title": "Cross-record evidence attempt", "evidence_ids": [foreign_evidence_id], "created_by_caregiver_id": caregiver.id})
+            foreign_evidence_event = client.post("/api/v1/events", headers=headers, json={"person_id": context["person_id"], "event_type": "observation", "occurred_at": "2026-10-20T09:00:00Z", "title": "Cross-record evidence attempt", "evidence_ids": [foreign_evidence_id], "created_by_caregiver_id": caregiver_id})
             assert foreign_evidence_event.status_code == 400, foreign_evidence_event.text
             foreign_evidence_insight = client.post("/api/v1/insights", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record insight attempt", "description": "test", "insight_type": "observation", "confidence": 0.5, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_insight.status_code == 400, foreign_evidence_insight.text
             foreign_caregiver_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": foreign_caregiver_id})
             assert foreign_caregiver_correction.status_code == 400, foreign_caregiver_correction.text
-            foreign_insight_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": caregiver.id})
+            foreign_insight_correction = client.post("/api/v1/corrections", headers=headers, json={"person_id": context["person_id"], "target_type": "insight", "target_id": foreign_insight_id, "original_text": "old", "corrected_text": "new", "caregiver_id": caregiver_id})
             assert foreign_insight_correction.status_code == 400, foreign_insight_correction.text
-            foreign_evidence_observation = client.post("/api/v1/observations", headers=headers, json={"person_id": context["person_id"], "observed_at": "2026-10-20T09:00:00Z", "original_text": "Cross-record observation", "caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            foreign_evidence_observation = client.post("/api/v1/observations", headers=headers, json={"person_id": context["person_id"], "observed_at": "2026-10-20T09:00:00Z", "original_text": "Cross-record observation", "caregiver_id": caregiver_id, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_observation.status_code == 400, foreign_evidence_observation.text
             foreign_intelligence_observation = client.post("/api/v1/caregiver-observations", headers=headers, json={"person_id": context["person_id"], "caregiver_id": foreign_caregiver_id, "observation_content": "Forged caregiver observation", "observation_type": "direct"})
             assert foreign_intelligence_observation.status_code == 400, foreign_intelligence_observation.text
@@ -431,9 +431,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_promoter_observation.status_code == 400, foreign_promoter_observation.text
             foreign_evidence_memory = client.post("/api/v1/reasoning-memory", headers=headers, json={"person_id": context["person_id"], "memory_type": "fact", "key": "test", "value": ["cross-record"], "confidence": 0.5, "source_evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_memory.status_code == 400, foreign_evidence_memory.text
-            foreign_evidence_appointment = client.post("/api/v1/appointments", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record appointment", "scheduled_at": "2026-10-21T09:00:00Z", "created_by_caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            foreign_evidence_appointment = client.post("/api/v1/appointments", headers=headers, json={"person_id": context["person_id"], "title": "Cross-record appointment", "scheduled_at": "2026-10-21T09:00:00Z", "created_by_caregiver_id": caregiver_id, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_appointment.status_code == 400, foreign_evidence_appointment.text
-            foreign_evidence_transition = client.post("/api/v1/transitions", headers=headers, json={"person_id": context["person_id"], "to_location": "Clinic", "transition_type": "visit", "occurred_at": "2026-10-20T09:00:00Z", "created_by_caregiver_id": caregiver.id, "evidence_ids": [foreign_evidence_id]})
+            foreign_evidence_transition = client.post("/api/v1/transitions", headers=headers, json={"person_id": context["person_id"], "to_location": "Clinic", "transition_type": "visit", "occurred_at": "2026-10-20T09:00:00Z", "created_by_caregiver_id": caregiver_id, "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_transition.status_code == 400, foreign_evidence_transition.text
             foreign_evidence_temporal_fact = client.post("/api/v1/temporal/facts", headers=headers, json={"person_id": context["person_id"], "subject_type": "person", "subject_id": context["person_id"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_temporal_fact.status_code == 400, foreign_evidence_temporal_fact.text
@@ -443,9 +443,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                 "source_passage": "Call the clinic tomorrow.",
                 "normalized_action": "call the clinic",
                 "original_text": "Call the clinic tomorrow.",
-                "created_by_caregiver_id": caregiver.id,
+                "created_by_caregiver_id": caregiver_id,
                 "actor_type": "caregiver",
-                "actor_id": caregiver.id,
+                "actor_id": caregiver_id,
             })
             assert action_create.status_code == 200, action_create.text
             created_action_id = action_create.json()["id"]
