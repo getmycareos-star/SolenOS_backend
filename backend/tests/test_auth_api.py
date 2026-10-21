@@ -487,3 +487,40 @@ def test_signup_login_current_account_and_logout(monkeypatch):
         app.dependency_overrides.pop(get_db, None)
         Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyEventModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, CaregiverProfileInvitation.__table__, CaregiverProfileAccountLink.__table__, CaregiverObservationModel.__table__, CaregiverInvitation.__table__, CaregiverAccountLink.__table__, AuthSession.__table__, AuthAccount.__table__, InsightModel.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
         engine.dispose()
+
+def test_all_api_routes_expose_authentication_dependency_except_public_auth_and_health():
+    """Fail closed if a newly registered API route bypasses the account dependency."""
+    from fastapi.routing import APIRoute
+    from app.api.authentication import current_account
+    from app.main import app
+
+    public_paths = {
+        "/api/v1/auth/signup",
+        "/api/v1/auth/login",
+        "/api/v1/auth/logout",  # idempotent revoke; no token means no state change
+        "/health",
+        "/ready",
+    }
+
+    def has_current_account(dependant, visited=None):
+        visited = visited or set()
+        marker = id(dependant)
+        if marker in visited:
+            return False
+        visited.add(marker)
+        if getattr(dependant, "call", None) is current_account:
+            return True
+        return any(has_current_account(child, visited) for child in dependant.dependencies)
+
+    missing = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute):
+            continue
+        if not (route.path.startswith("/api/") or route.path.startswith("/api/v1/")):
+            continue
+        if route.path in public_paths:
+            continue
+        if not has_current_account(route.dependant):
+            missing.append(f"{','.join(sorted(route.methods or []))} {route.path}")
+
+    assert not missing, "API routes missing an authentication dependency: " + "; ".join(sorted(missing))
