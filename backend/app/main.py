@@ -1,8 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from app.api.auth import router as auth_router
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
@@ -11,24 +10,28 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.core.request_authorization import authorize_api_request
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+app = FastAPI(title=settings.app_name, version="0.2.0")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://solenosai.netlify.app",
         "http://localhost:5173",
         "http://localhost:3000",
-        "https://solenosai.netlify.app",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
+app.middleware("http")(authorize_api_request)
+
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
@@ -53,15 +56,13 @@ app.include_router(situation_router, prefix="/api")
 
 @app.get("/health")
 def health_check():
-    # Liveness only: confirms the ASGI process is responding.
+    # Liveness only. Database readiness is checked separately by /ready.
     return {"status": "healthy", "app": settings.app_name}
 
 
 @app.get("/ready")
 def readiness_check(db: Session = Depends(get_db)):
-    # Readiness verifies the dependency needed to persist care records.
-    try:
-        db.execute(text("SELECT 1"))
-    except SQLAlchemyError as exc:
-        raise HTTPException(status_code=503, detail="Database is not ready") from exc
-    return {"status": "ready", "database": "reachable", "app": settings.app_name}
+    from sqlalchemy import text
+
+    db.execute(text("SELECT 1"))
+    return {"status": "ready", "app": settings.app_name, "database": "reachable"}
