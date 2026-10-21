@@ -49,7 +49,14 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
         .filter(CaregiverModel.id == payload.caregiver_id)
         .first()
     )
-    if caregiver and caregiver.person_id != payload.person_id:
+    # Preserve the existing not-found behavior: if the person does not exist,
+    # let the service return its specific validation error before checking links.
+    person = (
+        db.query(PersonModel)
+        .filter(PersonModel.id == payload.person_id)
+        .first()
+    )
+    if caregiver and person and caregiver.person_id != payload.person_id:
         raise HTTPException(
             status_code=403,
             detail="Caregiver is not linked to this care record",
