@@ -12,6 +12,23 @@ permissions:
 jobs:
   tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: solenos_test
+          POSTGRES_USER: solenos
+          POSTGRES_PASSWORD: solenos-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos -d solenos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://solenos:solenos-test-password@127.0.0.1:5432/solenos_test
+      SECRET_KEY: ci-only-secret-that-is-long-enough-for-auth-tests
     defaults:
       run:
         working-directory: backend
