@@ -24,9 +24,15 @@ def upgrade():
         sa.Column("care_stage", sa.String(length=24), nullable=False),
         sa.Column("tags", sa.JSON(), nullable=False),
         sa.Column("status", sa.String(length=24), nullable=False),
+        sa.Column("flagged_by_account_id", sa.String(), nullable=True),
+        sa.Column("moderated_by_account_id", sa.String(), nullable=True),
+        sa.Column("moderation_reason", sa.Text(), nullable=True),
+        sa.Column("moderated_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["author_account_id"], ["auth_accounts.id"]),
+        sa.ForeignKeyConstraint(["flagged_by_account_id"], ["auth_accounts.id"]),
+        sa.ForeignKeyConstraint(["moderated_by_account_id"], ["auth_accounts.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_community_posts_author_account_id", "community_posts", ["author_account_id"])
