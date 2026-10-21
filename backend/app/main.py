@@ -15,9 +15,15 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
+allowed_origins = [
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
