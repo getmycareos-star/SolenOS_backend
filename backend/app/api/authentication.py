@@ -100,11 +100,6 @@ class CaregiverLinkOutput(BaseModel):
     account_id: str
     permissions: list[str]
 
-class MyCaregiverLinkOutput(BaseModel):
-    person_id: str
-    caregiver_id: str
-    caregiver_name: str
-    timezone: str
 
 class AccountOutput(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -226,33 +221,6 @@ def list_care_contexts(
             permissions=grant.permissions or [],
         )
         for grant, person in rows
-    ]
-
-
-@router.get("/my-caregiver-links", response_model=list[MyCaregiverLinkOutput])
-def my_caregiver_links(
-    account: AuthAccount = Depends(current_account),
-    db: Session = Depends(get_db),
-):
-    """Return only caregiver identities explicitly linked to the authenticated account."""
-    rows = (
-        db.query(CaregiverAccountLink, Caregiver)
-        .join(Caregiver, Caregiver.id == CaregiverAccountLink.caregiver_id)
-        .filter(
-            CaregiverAccountLink.account_id == account.id,
-            CaregiverAccountLink.is_active.is_(True),
-            CaregiverAccountLink.revoked_at.is_(None),
-        )
-        .all()
-    )
-    return [
-        MyCaregiverLinkOutput(
-            person_id=link.person_id,
-            caregiver_id=caregiver.id,
-            caregiver_name=caregiver.name,
-            timezone=caregiver.timezone or "UTC",
-        )
-        for link, caregiver in rows
     ]
 
 
