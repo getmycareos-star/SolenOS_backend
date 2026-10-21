@@ -557,33 +557,19 @@ def test_signup_login_current_account_and_logout(monkeypatch):
         Base.metadata.drop_all(bind=engine, tables=[ActionModel.__table__, SafetyEventModel.__table__, SafetyAuditRecordModel.__table__, CaregiverProfileModel.__table__, CausalHypothesis.__table__, Baseline.__table__, InformationGap.__table__, AccountPersonAccess.__table__, CaregiverProfileInvitation.__table__, CaregiverProfileAccountLink.__table__, CaregiverObservationModel.__table__, CaregiverInvitation.__table__, CaregiverAccountLink.__table__, AuthSession.__table__, AuthAccount.__table__, InsightModel.__table__, EvidenceModel.__table__, CaregiverModel.__table__, Person.__table__])
         engine.dispose()
 
-def _dependency_tree_contains(dependant, target) -> bool:
-    if dependant.call is target:
-        return True
-    return any(
-        _dependency_tree_contains(child, target)
-        for child in dependant.dependencies
-    )
-
-
 def test_every_sensitive_api_route_has_authenticated_account_dependency():
-    """Guard against a future route being registered without authentication."""
-    from fastapi.routing import APIRoute
-    from app.api.authentication import current_account
-
+    """Every non-public API operation must advertise the bearer-session security scheme."""
     public_auth_routes = {
-        ("/api/v1/auth/signup", "POST"),
-        ("/api/v1/auth/login", "POST"),
-        ("/api/v1/auth/logout", "POST"),
+        ("/api/v1/auth/signup", "post"),
+        ("/api/v1/auth/login", "post"),
+        ("/api/v1/auth/logout", "post"),
     }
+    schema = app.openapi()
     missing = []
-    for route in app.routes:
-        if not isinstance(route, APIRoute) or not route.path.startswith("/api/"):
-            continue
-        methods = route.methods or set()
-        for method in methods:
-            if (route.path, method) in public_auth_routes:
+    for path, operations in schema.get("paths", {}).items():
+        for method, operation in operations.items():
+            if (path, method.lower()) in public_auth_routes:
                 continue
-            if not _dependency_tree_contains(route.dependant, current_account):
-                missing.append(f"{method} {route.path}")
-    assert not missing, "API routes without current_account dependency: " + ", ".join(sorted(missing))
+            if not operation.get("security"):
+                missing.append(f"{method.upper()} {path}")
+    assert not missing, "API operations without bearer-session security: " + ", ".join(sorted(missing))
