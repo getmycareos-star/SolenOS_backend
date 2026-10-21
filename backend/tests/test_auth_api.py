@@ -492,7 +492,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             own_profiles = client.get("/api/v1/caregiver-profiles/" + context["person_id"], headers=headers)
             assert own_profiles.status_code == 200, own_profiles.text
             assert len(own_profiles.json()) == 2
-            email_lookup = client.get("/api/v1/caregivers/by-email", headers=headers, params={"person_id": context["person_id"], "email": "second@example.com"})
+            email_lookup = client.get("/api/v1/caregiver-intelligence/caregivers/by-email", headers=headers, params={"person_id": context["person_id"], "email": "second@example.com"})
             assert email_lookup.status_code == 200, email_lookup.text
             caregiver_list = client.get("/api/v1/caregivers/" + context["person_id"], headers=headers)
             assert caregiver_list.status_code == 200, caregiver_list.text
