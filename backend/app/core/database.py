@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -33,6 +33,31 @@ import app.models.causal  # noqa: E402, F401
 import app.models.auth  # noqa: E402, F401
 
 Base.metadata.create_all(bind=engine)
+
+
+def apply_postgres_compatibility_migrations():
+    """Apply narrowly scoped, idempotent compatibility changes for existing PostgreSQL databases."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        # Caregivers can support the same person across multiple care records.
+        # Older deployments may have the former UNIQUE(email) constraint.
+        constraints = connection.execute(text("""
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('caregivers')
+              AND contype = 'u'
+              AND pg_get_constraintdef(oid) = 'UNIQUE (email)'
+        """)).scalars().all()
+        for constraint_name in constraints:
+            quoted_name = engine.dialect.identifier_preparer.quote(constraint_name)
+            connection.execute(text(f"ALTER TABLE caregivers DROP CONSTRAINT {quoted_name}"))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_caregivers_email ON caregivers (email)"
+        ))
+
+
+apply_postgres_compatibility_migrations()
 
 
 def get_db():
