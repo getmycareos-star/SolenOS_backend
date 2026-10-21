@@ -22,8 +22,14 @@ def test_preserve_sqlite_scheme_outside_railway():
 
 
 def test_reject_ephemeral_sqlite_in_railway():
-    with pytest.raises(RuntimeError, match="must use PostgreSQL in Railway"):
+    with pytest.raises(RuntimeError, match="must use PostgreSQL"):
         configure_database_url("sqlite:///./solenos.db", railway_runtime=True)
+
+
+@pytest.mark.parametrize("url", ["", "   ", "mysql://user:pass@host/db"])
+def test_reject_missing_or_unsupported_production_database_url(url):
+    with pytest.raises(RuntimeError, match="DATABASE_URL"):
+        configure_database_url(url, railway_runtime=True)
 
 
 def test_allow_postgres_in_railway():
