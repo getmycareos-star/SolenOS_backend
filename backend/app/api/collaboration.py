@@ -350,7 +350,11 @@ def get_conversation_history(
 
 @team_router.get("/dashboard")
 def team_dashboard(db: Session = Depends(get_db)):
-    linked_caregivers = db.query(func.count(func.distinct(CommunityPost.author_account_id))).scalar() or 0
+    active_caregiver_accounts = db.query(func.count(func.distinct(AccountPersonAccess.account_id))).filter(
+        AccountPersonAccess.role.in_(["owner", "caregiver"]),
+        AccountPersonAccess.is_active.is_(True),
+        AccountPersonAccess.revoked_at.is_(None),
+    ).scalar() or 0
     flagged = db.query(CommunityPost).filter(CommunityPost.status == "flagged").order_by(CommunityPost.created_at.desc()).limit(100).all()
     return {
         "caregivers_at_risk": [],
@@ -360,7 +364,7 @@ def team_dashboard(db: Session = Depends(get_db)):
         } for post in flagged],
         "metrics": {"published_posts": db.query(func.count(CommunityPost.id)).filter(CommunityPost.status == "published").scalar() or 0,
                     "active_conversation_sessions": db.query(func.count(ConversationSession.id)).filter(ConversationSession.is_active.is_(True)).scalar() or 0,
-                    "caregiver_accounts_with_posts": linked_caregivers},
+                    "active_caregiver_accounts": active_caregiver_accounts},
         "risk_model_status": "not_configured",
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -375,7 +379,11 @@ def team_state_report(db: Session = Depends(get_db)):
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
     top = sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
     return {
-        "total_caregivers": db.query(func.count(func.distinct(CommunityPost.author_account_id))).scalar() or 0,
+        "total_caregivers": db.query(func.count(func.distinct(AccountPersonAccess.account_id))).filter(
+            AccountPersonAccess.role.in_(["owner", "caregiver"]),
+            AccountPersonAccess.is_active.is_(True),
+            AccountPersonAccess.revoked_at.is_(None),
+        ).scalar() or 0,
         "avg_helpfulness": None,
         "top_concerns": [tag for tag, _count in top[:5]],
         "trending_tags": [{"tag": tag, "count": count, "growth": None} for tag, count in top],
