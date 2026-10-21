@@ -1,0 +1,77 @@
+name: Backend validation
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package and test dependencies
+        run: python -m pip install -e . pytest httpx
+      - name: Compile backend
+        run: python -m compileall -q app
+      - name: Smoke-test ASGI startup and health
+        shell: bash
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 >/tmp/solenos-uvicorn.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --silent --fail http://127.0.0.1:8011/health; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/solenos-uvicorn.log
+          exit 1
+      - name: Run backend tests
+        run: pytest -q
+
+  deployed-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployed health, route registration, and CORS
+        shell: bash
+        run: |
+          set -u
+          base='https://solenosbackend-production-8773.up.railway.app'
+          failed=0
+          for path in /health /openapi.json /api/v1/caregivers/person/workflow-person; do
+            response_file="$(mktemp)"
+            status=$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
+            printf '%-48s HTTP %s\n' "$path" "$status"
+            if [ "$path" = "/health" ]; then
+              cat "$response_file"
+              echo
+              if [ "$status" != "200" ]; then failed=1; fi
+              if ! grep -q '"status"[[:space:]]*:[[:space:]]*"healthy"' "$response_file"; then failed=1; fi
+            fi
+            if [ "$path" = "/openapi.json" ]; then
+              if [ "$status" != "200" ]; then failed=1; else
+                python -c 'import json,sys; d=json.load(open(sys.argv[1])); p=d.get("paths",{}); required={"/api/v1/caregivers/person/{person_id}","/api/v1/daily/log","/api/v1/upload","/api/situation"}; missing=required-set(p); print("Missing required API paths:", sorted(missing)); sys.exit(1 if missing else 0)' "$response_file" || failed=1
+              fi
+            fi
+            rm -f "$response_file"
+          done
+
+          headers_file="$(mktemp)"
+          status=$(curl --silent --show-error --dump-header "$headers_file" --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS "${base}/api/situation" -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' || true)
+          echo "OPTIONS /api/situation returned HTTP $status"
+          if [ "$status" != "200" ]; then failed=1; fi
+          if ! grep -qi '^access-control-allow-origin: https://solenosai.netlify.app' "$headers_file"; then failed=1; fi
+          rm -f "$headers_file"
+          exit "$failed"
