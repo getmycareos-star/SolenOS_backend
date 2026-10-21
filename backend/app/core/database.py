@@ -93,47 +93,6 @@ def ensure_database_schema(bind=None):
                 pass
 
 
-def ensure_caregiver_email_constraint(bind=None):
-    """Scope caregiver email uniqueness to a care record on existing PostgreSQL databases.
-
-    Older PostgreSQL deployments used a global UNIQUE(email) constraint. Replace
-    only that known constraint or standalone index with per-person uniqueness;
-    existing rows are preserved. Railway runtime is required to use PostgreSQL.
-    """
-    from sqlalchemy import inspect, text
-
-    target = bind or engine
-    if target.dialect.name != "postgresql":
-        return
-
-    inspector = inspect(target)
-    if not inspector.has_table("caregivers"):
-        return
-
-    constraints = inspector.get_unique_constraints("caregivers")
-    constraint_names = {item.get("name") for item in constraints}
-    global_email_constraints = [
-        item for item in constraints if item.get("column_names") == ["email"]
-    ]
-    standalone_email_indexes = [
-        item for item in inspector.get_indexes("caregivers")
-        if item.get("unique")
-        and item.get("column_names") == ["email"]
-        and item.get("name") not in constraint_names
-    ]
-
-    with target.begin() as conn:
-        for constraint in global_email_constraints:
-            name = target.dialect.identifier_preparer.quote(constraint["name"])
-            conn.execute(text(f"ALTER TABLE caregivers DROP CONSTRAINT IF EXISTS {name}"))
-        for index in standalone_email_indexes:
-            name = target.dialect.identifier_preparer.quote(index["name"])
-            conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
-        conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_caregiver_person_email "
-            "ON caregivers (person_id, email)"
-        ))
-
 def init_db():
     """Register all models before schema creation; run once per process."""
     global _initialized
@@ -157,7 +116,6 @@ def init_db():
         import app.models.capture  # noqa: F401
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
-        ensure_caregiver_email_constraint()
         _initialized = True
 
 
