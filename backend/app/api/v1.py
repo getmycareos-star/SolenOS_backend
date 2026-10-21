@@ -279,6 +279,43 @@ def get_person(person_id: str, db: Session = Depends(get_db)):
     return person
 
 
+@router.get("/caregivers/by-email", response_model=CaregiverSchema)
+def get_caregiver_by_email(
+    person_id: str,
+    email: str,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Find a caregiver by email only within a care record the account can read."""
+    assert_person_access(db, account.id, person_id, "read")
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(
+            CaregiverModel.person_id == person_id,
+            CaregiverModel.email.ilike(email.strip()),
+        )
+        .first()
+    )
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="Caregiver not found")
+    return caregiver
+
+
+@router.get(
+    "/caregivers/{person_id}",
+    response_model=List[CaregiverSchema],
+    dependencies=[Depends(require_person_access("read"))],
+)
+def list_caregivers_legacy(person_id: str, db: Session = Depends(get_db)):
+    """Legacy path retained for the deployed frontend."""
+    return (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.person_id == person_id)
+        .order_by(CaregiverModel.name.asc())
+        .all()
+    )
+
+
 @router.get("/caregivers/person/{person_id}", response_model=List[CaregiverSchema], dependencies=[Depends(require_person_access("read"))])
 def list_caregivers_for_person(person_id: str, db: Session = Depends(get_db)):
     """List caregiver identities for a care record after enforcing explicit read access."""
