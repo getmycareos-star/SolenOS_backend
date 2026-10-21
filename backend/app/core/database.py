@@ -134,6 +134,39 @@ def ensure_caregiver_email_constraint(bind=None):
             "ON caregivers (person_id, email)"
         ))
 
+
+def verify_database_schema(bind=None):
+    """Fail closed when registered ORM tables or columns are absent after initialization.
+
+    create_all() does not add columns to pre-existing tables. The legacy compatibility
+    helper attempts safe additions, but it intentionally cannot guarantee every DDL
+    change succeeded. Verify the resulting schema instead of reporting the app ready
+    while later care-record queries would fail with missing-table/column errors.
+    """
+    from sqlalchemy import inspect
+
+    target = bind or engine
+    inspector = inspect(target)
+    missing = []
+    existing_tables = set(inspector.get_table_names())
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in existing_tables:
+            missing.append(f"{table_name} (table missing)")
+            continue
+        existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        for column in table.columns:
+            if column.name not in existing_columns:
+                missing.append(f"{table_name}.{column.name}")
+    if missing:
+        preview = ", ".join(missing[:20])
+        remainder = len(missing) - min(len(missing), 20)
+        suffix = f" (and {remainder} more)" if remainder else ""
+        raise RuntimeError(
+            "Database schema is incomplete after initialization: "
+            f"{preview}{suffix}. Apply a reviewed database migration before serving requests."
+        )
+
+
 def init_db():
     """Register all models before schema creation; run once per process."""
     global _initialized
@@ -158,6 +191,7 @@ def init_db():
         Base.metadata.create_all(bind=engine)
         ensure_database_schema()
         ensure_caregiver_email_constraint()
+        verify_database_schema()
         _initialized = True
 
 
