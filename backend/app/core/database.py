@@ -1,5 +1,6 @@
 """Database setup with model registration deferred until first use."""
 from threading import Lock
+import os
 
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -19,7 +20,21 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
-database_url = normalize_database_url(settings.database_url)
+def configure_database_url(url: str, *, railway_runtime: bool) -> str:
+    """Reject ephemeral SQLite storage in Railway so care records cannot silently disappear."""
+    normalized = normalize_database_url(url)
+    if railway_runtime and normalized.startswith("sqlite:"):
+        raise RuntimeError(
+            "DATABASE_URL must use PostgreSQL in Railway; SQLite storage is not durable across deployments."
+        )
+    return normalized
+
+
+railway_runtime = any(
+    os.getenv(name)
+    for name in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME")
+)
+database_url = configure_database_url(settings.database_url, railway_runtime=railway_runtime)
 connect_args = {"check_same_thread": False} if database_url.startswith("sqlite:") else {}
 engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
