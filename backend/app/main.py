@@ -1,5 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
@@ -63,6 +65,16 @@ def post_situation(payload: SituationInput, db: Session = Depends(get_db), accou
 app.include_router(situation_router, prefix="/api")
 app.include_router(situation_router, prefix="/api/v1")
 
+
+
+@app.get("/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    """Report readiness only when the configured database can execute a query."""
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    return {"status": "ready", "database": "connected"}
 
 @app.get("/health")
 def health_check():
