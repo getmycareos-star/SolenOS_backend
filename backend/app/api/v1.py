@@ -937,3 +937,6 @@ def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = N
 
 
 router.include_router(actions_router, prefix="/actions", tags=["actions"])
+
+from app.api.daily_care import router as daily_care_router  # noqa: E402
+router.include_router(daily_care_router)
