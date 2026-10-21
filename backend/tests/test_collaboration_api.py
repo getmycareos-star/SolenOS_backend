@@ -172,11 +172,21 @@ def test_appointment_object_id_cannot_cross_care_record_boundary():
         assert owner_me.status_code == 200, owner_me.text
         assert other_me.status_code == 200, other_me.text
         assert owner_me.json()["id"] != other_me.json()["id"]
+        assert owner_me.json()["email"] == "appointment-owner@example.test"
+        assert other_me.json()["email"] == "appointment-other@example.test"
         with Session() as db:
             from app.models.auth_identity import AccountPersonAccess
             assert db.query(AccountPersonAccess).filter_by(
                 account_id=owner_me.json()["id"], person_id=other_person
             ).count() == 0
+            from app.core.authz import assert_person_access
+            from fastapi import HTTPException
+            try:
+                assert_person_access(db, owner_me.json()["id"], other_person, "write")
+            except HTTPException as exc:
+                assert exc.status_code == 403
+            else:
+                raise AssertionError("Owner account unexpectedly passed direct authorization for the other person's record")
             caregiver = db.query(Caregiver).filter_by(person_id=other_person).one()
             appointment = Appointment(
                 person_id=other_person,
