@@ -1,6 +1,4 @@
 import json
-import re
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -8,6 +6,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.config import get_settings
 from app.core.security import hash_password, issue_access_token, verify_password
 from app.models.auth import Account, CareMembership
 from app.models.care import Caregiver, Person
@@ -64,6 +63,9 @@ def current_account(request: Request, db: Session = Depends(get_db)) -> Account:
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 def signup(payload: SignupInput, db: Session = Depends(get_db)):
+    settings = get_settings()
+    if not settings.secret_key or settings.secret_key == "change-me-in-production":
+        raise HTTPException(status_code=503, detail="Authentication is disabled until a unique SECRET_KEY is configured.")
     email = str(payload.email).strip().lower()
     if db.query(Account).filter(Account.email == email).first():
         # Avoid disclosing whether an account exists.
