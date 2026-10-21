@@ -29,7 +29,9 @@ def seed():
     p2 = Person(id="collab-person-2", name="Care Recipient Two")
     c1 = Caregiver(id="collab-caregiver-1", name="Caregiver One", email="one@example.com", relationship="Family", person_id=p1.id)
     c2 = Caregiver(id="collab-caregiver-2", name="Caregiver Two", email="two@example.com", relationship="Family", person_id=p2.id)
-    db.add_all([p1, p2, c1, c2]); db.commit(); db.close()
+    a1 = AuthAccount(caregiver_id=c1.id, email=c1.email, password_hash="test-hash", role="caregiver", is_active=True)
+    a2 = AuthAccount(caregiver_id=c2.id, email=c2.email, password_hash="test-hash", role="professional", is_active=True)
+    db.add_all([p1, p2, c1, c2, a1, a2]); db.commit(); db.close()
     app.dependency_overrides[get_db] = override_db
 
 
