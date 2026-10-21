@@ -7,6 +7,8 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.care import Caregiver, CareEvent, Person
 from app.models.daily_care import DailyCareEntry
+from app.models.uploads import StoredUpload
+from app.models.care import Evidence
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -129,3 +131,51 @@ def test_daily_care_rejects_caregiver_linked_to_another_person():
         json={"person_id": "daily-person", "caregiver_id": "daily-caregiver", "general_notes": "should fail"},
     )
     assert response.status_code == 400
+
+def test_image_upload_persists_bytes_and_evidence_record():
+    seed_person_and_caregiver()
+    client = TestClient(app)
+    image_bytes = b"test-png-bytes"
+    response = client.post(
+        "/api/v1/upload",
+        data={"person_id": "daily-person", "caregiver_id": "daily-caregiver"},
+        files={"file": ("medication.png", image_bytes, "image/png")},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["evidence_id"]
+    assert result["file_id"]
+    assert result["size_bytes"] == len(image_bytes)
+
+    db = TestingSessionLocal()
+    try:
+        upload = db.query(StoredUpload).filter_by(id=result["file_id"]).one()
+        evidence = db.query(Evidence).filter_by(id=result["evidence_id"]).one()
+        assert upload.content == image_bytes
+        assert upload.evidence_id == evidence.id
+        assert evidence.person_id == "daily-person"
+    finally:
+        db.close()
+
+    download = client.get(f"/api/v1/upload/{result['file_id']}")
+    assert download.status_code == 200
+    assert download.content == image_bytes
+    assert download.headers["content-type"] == "image/png"
+
+
+def test_image_upload_rejects_non_image_and_unlinked_caregiver():
+    seed_person_and_caregiver()
+    client = TestClient(app)
+    unsupported = client.post(
+        "/api/v1/upload",
+        data={"person_id": "daily-person", "caregiver_id": "daily-caregiver"},
+        files={"file": ("notes.txt", b"not an image", "text/plain")},
+    )
+    assert unsupported.status_code == 415
+
+    unlinked = client.post(
+        "/api/v1/upload",
+        data={"person_id": "unknown-person", "caregiver_id": "daily-caregiver"},
+        files={"file": ("image.png", b"png", "image/png")},
+    )
+    assert unlinked.status_code == 404
