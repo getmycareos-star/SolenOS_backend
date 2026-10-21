@@ -1,6 +1,7 @@
 import pytest
+from sqlalchemy import create_engine
 
-from app.core.database import configure_database_url, normalize_database_url
+from app.core.database import configure_database_url, normalize_database_url, verify_database_schema
 
 
 def test_normalize_legacy_postgres_scheme():
@@ -56,3 +57,12 @@ def test_allow_development_placeholder_outside_railway():
     from app.core.config import validate_deployment_secret
 
     validate_deployment_secret("change-me-in-production", railway_runtime=False)
+
+
+def test_schema_verification_fails_closed_when_database_tables_are_missing():
+    engine = create_engine("sqlite://")
+    try:
+        with pytest.raises(RuntimeError, match="Database schema is incomplete"):
+            verify_database_schema(bind=engine)
+    finally:
+        engine.dispose()
