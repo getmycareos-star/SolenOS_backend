@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
+from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
 from app.models.change import Situation as SituationModel
 from app.models.care import (
     Person as PersonModel,
@@ -35,6 +36,7 @@ from app.models.temporal import (
     TemporalReferenceFrame as TemporalReferenceFrameModel,
     TemporalContradiction as TemporalContradictionModel,
 )
+from app.schemas.caregiver_intelligence import CaregiverProfileCreate, CaregiverProfile as CaregiverProfileSchema
 from app.schemas.care import (
     PersonCreate,
     Person,
@@ -86,6 +88,7 @@ from app.schemas.temporal import (
     TemporalViewAtPoint,
     SubjectTemporalView,
 )
+from app.services.caregiver_intelligence import CaregiverIntelligenceService
 from app.services.learning import LearningEngine, SavePipelineEvent
 from app.services.time_intelligence import (
     parse_natural_language_time,
@@ -174,6 +177,37 @@ def _log_and_learn(
         person_id, event_type, detail, source_type, source_id, caregiver_id
     )
     engine.after_save(person_id)
+
+
+# Legacy aliases retained because the deployed frontend still calls these paths.
+# Keep authorization identical to the canonical caregiver-intelligence routes.
+@router.post("/caregiver-profiles", response_model=CaregiverProfileSchema)
+def create_caregiver_profile_legacy(
+    profile: CaregiverProfileCreate,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    assert_person_access(db, account.id, profile.person_id, "write")
+    db_profile = CaregiverIntelligenceService(db).create_caregiver_profile(profile)
+    _log_and_learn(
+        db,
+        db_profile.person_id,
+        "caregiver_profile_created",
+        f"Created caregiver profile for {db_profile.name}",
+        "caregiver_profile",
+        source_id=db_profile.id,
+        caregiver_id=db_profile.id,
+    )
+    return db_profile
+
+
+@router.get(
+    "/caregiver-profiles/{person_id}",
+    response_model=List[CaregiverProfileSchema],
+    dependencies=[Depends(require_person_access("read"))],
+)
+def list_caregiver_profiles_legacy(person_id: str, db: Session = Depends(get_db)):
+    return CaregiverIntelligenceService(db).list_caregiver_profiles(person_id)
 
 
 @router.post("/persons", response_model=Person)
