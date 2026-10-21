@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime, timedelta, timezone
+from jose import jwt
 
 from fastapi.testclient import TestClient
 
@@ -288,3 +290,23 @@ def test_cors_preflight_and_unauthorized_response_keep_cors_headers():
     )
     assert denied.status_code == 401
     assert denied.headers.get("access-control-allow-origin") == "https://solenosai.netlify.app"
+
+
+
+def test_expired_bearer_token_is_rejected():
+    account_id, _, person_id, _ = create_account_with_context()
+    expired_token = jwt.encode(
+        {
+            "sub": account_id,
+            "ver": "0",
+            "iat": datetime.now(timezone.utc) - timedelta(hours=2),
+            "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+        },
+        get_settings().secret_key,
+        algorithm="HS256",
+    )
+    response = client.get(
+        f"/api/v1/persons/{person_id}",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert response.status_code == 401
