@@ -60,6 +60,8 @@ def test_allow_development_placeholder_outside_railway():
 
 
 def test_schema_verification_fails_closed_when_database_tables_are_missing():
+    import app.models.care  # noqa: F401 - ensure the metadata includes a required care table
+
     engine = create_engine("sqlite://")
     try:
         with pytest.raises(RuntimeError, match="Database schema is incomplete"):
