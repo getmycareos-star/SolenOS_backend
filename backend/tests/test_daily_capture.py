@@ -9,6 +9,9 @@ from app.models.care import CareEvent, Caregiver
 
 
 def make_environment():
+    # This module shares the FastAPI app with other tests; clear any dependency
+    # overrides left by prior tests before installing this test's database.
+    app.dependency_overrides.clear()
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
