@@ -253,10 +253,11 @@ def test_list_caregivers_for_person_returns_real_linked_ids():
         teardown_db()
 
 
-def test_health_endpoint_is_registered():
+def test_health_endpoint_is_registered_and_checks_database_readiness():
     response = TestClient(app).get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "healthy"
+    assert response.json()["database"] == "ok"
 
 
 def test_frontend_caregiver_lookup_then_capture_persists_records():
