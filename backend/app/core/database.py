@@ -62,7 +62,17 @@ def ensure_additive_schema():
             column_type = column.type.compile(dialect=dialect)
             default_sql = ""
             if column.server_default is not None:
-                default_sql = " DEFAULT " + str(column.server_default.arg)
+                server_default = column.server_default.arg
+                if isinstance(server_default, str) and server_default.lower() not in {"true", "false", "null"} and not server_default.startswith(("'", "(", "CURRENT_")):
+                    literal_processor = column.type.literal_processor(dialect)
+                    if literal_processor is None:
+                        raise RuntimeError(
+                            "Database migration required before startup: cannot safely encode server default for "
+                            + table_name + "." + column.name
+                        )
+                    default_sql = " DEFAULT " + literal_processor(server_default)
+                else:
+                    default_sql = " DEFAULT " + str(server_default)
             elif column.default is not None and not callable(column.default.arg):
                 literal_processor = column.type.literal_processor(dialect)
                 if literal_processor is None:
