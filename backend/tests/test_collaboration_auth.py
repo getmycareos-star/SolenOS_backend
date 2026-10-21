@@ -30,9 +30,7 @@ def seed():
     p2 = Person(id="collab-person-2", name="Care Recipient Two")
     c1 = Caregiver(id="collab-caregiver-1", name="Caregiver One", email="one@example.com", relationship="Family", person_id=p1.id)
     c2 = Caregiver(id="collab-caregiver-2", name="Caregiver Two", email="two@example.com", relationship="Family", person_id=p2.id)
-    a1 = AuthAccount(caregiver_id=c1.id, email=c1.email, password_hash="test-hash", role="caregiver", is_active=True)
-    a2 = AuthAccount(caregiver_id=c2.id, email=c2.email, password_hash="test-hash", role="professional", is_active=True)
-    db.add_all([p1, p2, c1, c2, a1, a2]); db.commit(); db.close()
+    db.add_all([p1, p2, c1, c2]); db.commit(); db.close()
     app.dependency_overrides[get_db] = override_db
 
 
@@ -106,6 +104,12 @@ def test_companion_messages_persist_and_cannot_cross_care_recipients():
 def test_professional_dashboard_only_lists_active_grants():
     seed()
     try:
+        db = TestingSessionLocal()
+        db.add_all([
+            AuthAccount(caregiver_id="collab-caregiver-1", email="one@example.com", password_hash="test-hash", role="caregiver", is_active=True),
+            AuthAccount(caregiver_id="collab-caregiver-2", email="two@example.com", password_hash="test-hash", role="professional", is_active=True),
+        ])
+        db.commit(); db.close()
         client = TestClient(app)
         granted = client.post("/api/v1/professional/access-grants", json={
             "professional_caregiver_id": "collab-caregiver-2",
