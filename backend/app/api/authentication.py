@@ -367,7 +367,13 @@ def accept_caregiver_invitation(
     db.add(link)
     invitation.accepted_by_account_id = account.id
     invitation.accepted_at = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent acceptance can race past the read checks; active-link partial
+        # unique indexes are the final arbiter and this must not surface as HTTP 500.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Invitation was already accepted or the caregiver is already linked")
     return CaregiverLinkOutput(
         person_id=invitation.person_id,
         caregiver_id=caregiver.id,
@@ -483,7 +489,12 @@ def accept_caregiver_profile_invitation(
     db.add(link)
     invitation.accepted_by_account_id = account.id
     invitation.accepted_at = datetime.now(timezone.utc)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A simultaneous acceptance must fail closed and leave a clean transaction.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Invitation was already accepted or the caregiver profile is already linked")
     return CaregiverProfileLinkOutput(
         person_id=invitation.person_id,
         caregiver_profile_id=profile.id,
