@@ -26,3 +26,15 @@ jobs:
         run: python -m compileall -q app
       - name: Run backend tests
         run: pytest -q
+
+  deployed-smoke:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployed health endpoint
+        run: curl --fail --show-error --silent --retry 2 --retry-delay 5 --max-time 20 https://solenosbackend-production-8773.up.railway.app/health
+      - name: Verify deployed API CORS preflight
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-8773.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          test "$status" = "200"
