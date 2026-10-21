@@ -21,6 +21,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     if not person:
         raise ValueError("Person not found")
 
+    # A valid caregiver ID is not enough: prevent writing observations against
+    # a different person's care record by pairing unrelated IDs in the request.
+    if caregiver.person_id != person.id:
+        raise ValueError("Caregiver is not linked to the specified person")
+
     timestamp = payload.timestamp
     if timestamp:
         try:
