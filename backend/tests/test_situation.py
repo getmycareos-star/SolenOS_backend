@@ -220,3 +220,34 @@ def test_post_situation_empty_input_and_no_documents():
         assert "No valid evidence provided" in response.json()["detail"]
     finally:
         teardown_db()
+
+
+def test_list_caregivers_for_person_returns_real_linked_ids():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-caregiver-list", name="Test Person")
+        caregiver = Caregiver(
+            id="caregiver-list-1",
+            name="Test Caregiver",
+            email="caregiver-list@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        response = TestClient(app).get(
+            "/api/v1/caregivers/person/person-caregiver-list"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["id"] == "caregiver-list-1"
+        assert data[0]["person_id"] == "person-caregiver-list"
+    finally:
+        teardown_db()
