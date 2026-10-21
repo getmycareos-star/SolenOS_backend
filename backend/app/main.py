@@ -17,6 +17,8 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.2.0")
 
+app.middleware("http")(authorize_api_request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -28,8 +30,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept"],
 )
-
-app.middleware("http")(authorize_api_request)
 
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
