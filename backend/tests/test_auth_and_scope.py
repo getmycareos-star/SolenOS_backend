@@ -267,3 +267,24 @@ def test_account_can_create_and_select_multiple_care_contexts():
         first.json()["person_id"],
         second.json()["person_id"],
     }
+
+
+
+def test_cors_preflight_and_unauthorized_response_keep_cors_headers():
+    preflight = client.options(
+        "/api/situation",
+        headers={
+            "Origin": "https://solenosai.netlify.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == "https://solenosai.netlify.app"
+
+    denied = client.get(
+        "/api/v1/persons",
+        headers={"Authorization": "", "Origin": "https://solenosai.netlify.app"},
+    )
+    assert denied.status_code == 401
+    assert denied.headers.get("access-control-allow-origin") == "https://solenosai.netlify.app"
