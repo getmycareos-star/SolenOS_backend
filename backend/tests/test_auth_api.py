@@ -134,6 +134,19 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             })
             assert duplicate.status_code == 409
 
+            # Simulate a concurrent request winning the unique-email insert after
+            # this request's pre-check. The API must roll back and return 409.
+            from sqlalchemy.exc import IntegrityError
+            with monkeypatch.context() as signup_patch:
+                def raise_unique_conflict(*args, **kwargs):
+                    raise IntegrityError("INSERT auth_accounts", {}, RuntimeError("unique violation"))
+                signup_patch.setattr("app.api.authentication.create_account", raise_unique_conflict)
+                raced_signup = client.post("/api/v1/auth/signup", json={
+                    "email": "race@example.com",
+                    "password": "a-long-password-2026",
+                })
+                assert raced_signup.status_code == 409, raced_signup.text
+
             bad_login = client.post("/api/v1/auth/login", json={
                 "email": "caregiver@example.com",
                 "password": "incorrect-password-2026",
