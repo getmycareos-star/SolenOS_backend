@@ -95,6 +95,17 @@ def test_community_post_cannot_claim_a_verified_role_or_publish_immediately():
 
 def test_professional_grant_rejects_caregiver_without_verified_professional_account():
     person_id, caregiver_id, professional_id = setup_records()
+    db = TestingSessionLocal()
+    db.add(AuthAccount(
+        id="account-family-test",
+        caregiver_id=caregiver_id,
+        email="family@example.invalid",
+        password_hash="test-only-hash",
+        role="caregiver",
+        is_active=True,
+    ))
+    db.commit()
+    db.close()
     try:
         client = TestClient(app)
         response = client.post(
