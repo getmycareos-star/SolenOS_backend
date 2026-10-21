@@ -115,6 +115,37 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert context["name"] == "Care Recipient"
             assert context["role"] == "owner"
             assert set(context["permissions"]) == {"read", "write", "admin"}
+
+            # Creating the first care context must create a usable caregiver
+            # identity linked to the authenticated owner, not just a person row.
+            caregiver_list = client.get(f"/api/v1/caregivers/{context['person_id']}", headers=headers)
+            assert caregiver_list.status_code == 200, caregiver_list.text
+            assert len(caregiver_list.json()) == 1
+            caregiver_id = caregiver_list.json()[0]["id"]
+            with TestingSession() as db:
+                caregiver_link = db.query(CaregiverAccountLink).filter_by(
+                    account_id=signup.json()["id"],
+                    caregiver_id=caregiver_id,
+                    person_id=context["person_id"],
+                    is_active=True,
+                ).one()
+                assert caregiver_link.linked_by_account_id == signup.json()["id"]
+
+            daily_capture = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": context["person_id"],
+                    "caregiver_id": caregiver_id,
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": "First authenticated daily capture",
+                },
+            )
+            assert daily_capture.status_code == 201, daily_capture.text
+            assert daily_capture.json()["success"] is True
+
             listed = client.get("/api/v1/auth/care-contexts", headers=headers)
             assert listed.status_code == 200
             assert {item["person_id"] for item in listed.json()} == {context["person_id"], legacy_created.json()["id"]}
