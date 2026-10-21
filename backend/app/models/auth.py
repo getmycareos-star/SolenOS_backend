@@ -12,8 +12,8 @@ class Account(Base):
     email = Column(String, nullable=False, unique=True, index=True)
     password_hash = Column(String, nullable=False)
     display_name = Column(String, nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True, server_default="1")
-    token_version = Column(String, nullable=False, default="0", server_default="0")
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    token_version = Column(String, nullable=False, default="0", server_default="'0'")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
