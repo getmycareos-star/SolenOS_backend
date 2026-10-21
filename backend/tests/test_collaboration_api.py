@@ -186,6 +186,29 @@ def test_professional_dashboard_requires_explicit_professional_grant():
         _cleanup(engine, client)
 
 
+def test_professional_dashboard_returns_only_people_with_explicit_professional_grants():
+    engine, Session, client = _client_for_test()
+    try:
+        professional_headers, professional_person = _account_context(
+            client, Session, "verified-professional@example.test", role="professional"
+        )
+        _unrelated_headers, unrelated_person = _account_context(
+            client, Session, "unrelated-caregiver@example.test"
+        )
+        response = client.get(
+            "/api/v1/professional-dashboard/?timeframe_days=7",
+            headers=professional_headers,
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["total_patients"] == 1
+        assert [item["person_id"] for item in payload["patients"]] == [professional_person]
+        assert unrelated_person not in [item["person_id"] for item in payload["patients"]]
+        assert payload["professional_role"] == "professional"
+    finally:
+        _cleanup(engine, client)
+
+
 def test_team_routes_require_staff_role():
     engine, Session, client = _client_for_test()
     try:
