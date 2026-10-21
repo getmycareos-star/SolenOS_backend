@@ -177,7 +177,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unauthenticated_causal_read.status_code == 401
             unauthenticated_legacy_read = client.get("/api/v1/persons/not-authorized")
             assert unauthenticated_legacy_read.status_code == 401
-            unauthenticated_caregiver_read = client.get("/api/v1/caregiver-profiles/not-authorized")
+            unauthenticated_caregiver_read = client.get("/api/v1/caregiver-intelligence/caregiver-profiles/not-authorized")
             assert unauthenticated_caregiver_read.status_code == 401
             unauthenticated_safety_read = client.get("/api/v1/safety/audit/not-authorized")
             assert unauthenticated_safety_read.status_code == 401
