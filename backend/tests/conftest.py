@@ -61,6 +61,9 @@ class AuthenticatedTestClient(_OriginalTestClient):
                 if key in {"person_id", "personId"} and isinstance(value, str) and value
             }
             person_ids.update(value for value in parse_qs(parsed.query).get("person_id", []) if value)
+            request_params = kwargs.get("params") or {}
+            if isinstance(request_params, dict) and request_params.get("person_id"):
+                person_ids.add(str(request_params["person_id"]))
             for part in (segment for segment in path.split("/") if segment):
                 if len(part) >= 6:
                     resolved = _person_for_identifier(db, part)
@@ -157,6 +160,7 @@ def _ensure_membership(db, account_id: str, person_id: str, caregiver_id: str):
             permissions='["read","write"]',
             status="active",
         ))
+        db.flush()
 
 
 fastapi.testclient.TestClient = AuthenticatedTestClient
