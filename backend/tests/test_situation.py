@@ -279,6 +279,10 @@ def test_frontend_caregiver_lookup_then_capture_persists_records():
         db.close()
 
         client = TestClient(app)
+        health = client.get("/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "healthy"
+
         lookup = client.get("/api/v1/caregivers/person/workflow-person")
         assert lookup.status_code == 200
         linked = lookup.json()
