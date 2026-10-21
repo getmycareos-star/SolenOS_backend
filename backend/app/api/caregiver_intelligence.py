@@ -60,7 +60,7 @@ from app.core.caregiver_enums import (
     CaregiverActivityType,
 )
 
-router = APIRouter(dependencies=[Depends(current_account)])
+router = APIRouter(prefix="/caregiver-intelligence", tags=["caregiver-intelligence"], dependencies=[Depends(current_account)])
 
 
 def _assert_profile_in_person(db: Session, caregiver_id: Optional[str], person_id: str):
