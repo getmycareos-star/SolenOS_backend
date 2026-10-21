@@ -77,5 +77,10 @@ def readiness_check(db: Session = Depends(get_db)):
     return {"status": "ready", "database": "connected"}
 
 @app.get("/health")
-def health_check():
-    return {"status": "healthy", "app": settings.app_name}
+def health_check(db: Session = Depends(get_db)):
+    """Return healthy only when the database can answer a lightweight query."""
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    return {"status": "healthy", "app": settings.app_name, "database": "ok"}
