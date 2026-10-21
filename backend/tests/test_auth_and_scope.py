@@ -318,8 +318,8 @@ def test_stateless_safety_validation_requires_authentication_but_not_a_person_sc
         "/api/v1/validate-response",
         params={
             "candidate_response": "The blood pressure was 145/90.",
-            "claims": [],
-            "evidence_ids": [],
+            "claims": ["blood pressure was 145/90"],
+            "evidence_ids": ["evidence-1"],
             "risk_class": "informational",
         },
     )
