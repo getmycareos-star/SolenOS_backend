@@ -21,7 +21,7 @@ from app.schemas.causal import (
 )
 from app.services.causal_reasoning import CausalReasoningEngine
 
-router = APIRouter(prefix="/causal", tags=["causal"])
+router = APIRouter(prefix="/causal", tags=["causal"], dependencies=[Depends(current_account)])
 
 
 def get_engine(db: Session = Depends(get_db)) -> CausalReasoningEngine:
