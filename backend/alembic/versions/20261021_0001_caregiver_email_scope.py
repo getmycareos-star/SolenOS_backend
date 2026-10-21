@@ -40,11 +40,21 @@ def upgrade():
     if bind.dialect.name != "postgresql":
         return
 
-    # env.py registers the complete model set before Alembic runs revisions.
-    # This creates missing tables on fresh databases and adds newly introduced
-    # tables on existing databases without changing any existing table's data
-    # or columns.
-    Base.metadata.create_all(bind=bind, checkfirst=True)
+    # This bootstrap revision predates collaboration models. Keep its table
+    # set fixed so later numbered revisions remain the sole owners of newly
+    # introduced tables. Otherwise a fresh database would create collaboration
+    # tables here and revision 0003 would fail with DuplicateTable.
+    later_revision_tables = {
+        "community_posts",
+        "community_reactions",
+        "conversation_sessions",
+        "conversation_messages",
+    }
+    bootstrap_tables = [
+        table for table in Base.metadata.sorted_tables
+        if table.name not in later_revision_tables
+    ]
+    Base.metadata.create_all(bind=bind, tables=bootstrap_tables, checkfirst=True)
 
     inspector = sa.inspect(bind)
     if not inspector.has_table("caregivers"):
