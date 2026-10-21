@@ -292,6 +292,12 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert len(own_profiles.json()) == 2
             email_lookup = client.get("/api/v1/caregivers/by-email", headers=headers, params={"person_id": context["person_id"], "email": "second@example.com"})
             assert email_lookup.status_code == 200, email_lookup.text
+            caregiver_list = client.get("/api/v1/caregivers/" + context["person_id"], headers=headers)
+            assert caregiver_list.status_code == 200, caregiver_list.text
+            listed_caregiver_ids = {item["id"] for item in caregiver_list.json()}
+            assert caregiver.id in listed_caregiver_ids
+            assert unlinked_caregiver.id in listed_caregiver_ids
+            assert foreign_caregiver.id not in listed_caregiver_ids
             own_gaps = client.get("/api/v1/uncertainty/gaps/" + context["person_id"], headers=headers)
             assert own_gaps.status_code == 200, own_gaps.text
             assert own_gaps.json() == []
@@ -324,6 +330,8 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unrelated_situation_write.status_code == 403, unrelated_situation_write.text
             unrelated_caregiver_read = client.get("/api/v1/caregiver-profiles/" + unrelated.id, headers=headers)
             assert unrelated_caregiver_read.status_code == 403, unrelated_caregiver_read.text
+            unrelated_caregiver_list = client.get("/api/v1/caregivers/" + unrelated.id, headers=headers)
+            assert unrelated_caregiver_list.status_code == 403, unrelated_caregiver_list.text
             unrelated_safety_read = client.get("/api/v1/safety/audit/" + unrelated.id, headers=headers)
             assert unrelated_safety_read.status_code == 403, unrelated_safety_read.text
             unrelated_email_lookup = client.get("/api/v1/caregivers/by-email", headers=headers, params={"person_id": unrelated.id, "email": "second@example.com"})

@@ -7,6 +7,7 @@ from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver_profile, require_person_access
 from app.models.auth_identity import AuthAccount
 from app.models.care import Caregiver as CaregiverModel
+from app.schemas.care import Caregiver as CaregiverSchema
 from app.models.caregiver_intelligence import (
     CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
@@ -523,6 +524,17 @@ def get_caregiver_by_email(email: str, person_id: str, db: Session = Depends(get
     if not profile:
         raise HTTPException(status_code=404, detail="Caregiver not found")
     return {"id": profile.id, "name": profile.name, "person_id": profile.person_id}
+
+
+@router.get("/caregivers/{person_id}", response_model=List[CaregiverSchema], dependencies=[Depends(require_person_access("read"))])
+def list_caregivers(person_id: str, db: Session = Depends(get_db)):
+    """List caregiver identities attached to a care record the account may read."""
+    return (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.person_id == person_id)
+        .order_by(CaregiverModel.created_at.asc())
+        .all()
+    )
 
 
 @router.get("/caregivers/by-name/{person_id}", dependencies=[Depends(require_person_access("read"))])
