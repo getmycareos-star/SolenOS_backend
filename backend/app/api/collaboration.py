@@ -60,6 +60,10 @@ class ModerationInput(BaseModel):
     status: Literal["approved", "rejected"]
 
 
+class FlagInput(BaseModel):
+    reason: str = Field(default="Reported by a community member", min_length=3, max_length=500)
+
+
 class ConversationInput(BaseModel):
     person_id: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=8000)
@@ -223,6 +227,29 @@ def react_to_community_post(
     return {"success": True, "user_reaction": result, "post_id": post_id}
 
 
+@community_router.post("/{post_id}/flag")
+def flag_community_post(
+    post_id: str,
+    payload: FlagInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    post = db.query(CommunityPost).filter(
+        CommunityPost.id == post_id,
+        CommunityPost.status == "published",
+    ).first()
+    if post is None:
+        raise HTTPException(status_code=404, detail="Published community post not found")
+    if post.author_account_id == account.id:
+        raise HTTPException(status_code=403, detail="You cannot report your own post")
+    post.status = "flagged"
+    post.flagged_by_account_id = account.id
+    post.moderation_reason = payload.reason.strip()
+    post.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"success": True, "post_id": post.id, "status": post.status}
+
+
 @community_router.post("/{post_id}/moderate")
 def moderate_community_post(
     post_id: str,
@@ -234,6 +261,8 @@ def moderate_community_post(
     if post is None:
         raise HTTPException(status_code=404, detail="Community post not found")
     post.status = "published" if payload.status == "approved" else "rejected"
+    post.moderated_by_account_id = account.id
+    post.moderated_at = datetime.now(timezone.utc)
     post.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"success": True, "post_id": post.id, "status": post.status}
@@ -326,7 +355,7 @@ def team_dashboard(db: Session = Depends(get_db)):
         "caregivers_at_risk": [],
         "posts_to_review": [{
             "id": post.id, "content": post.body, "author_label": "Anonymous caregiver",
-            "reason": "flagged_for_review", "tags": post.tags or [],
+            "reason": post.moderation_reason or "flagged_for_review", "tags": post.tags or [],
         } for post in flagged],
         "metrics": {"published_posts": db.query(func.count(CommunityPost.id)).filter(CommunityPost.status == "published").scalar() or 0,
                     "active_conversation_sessions": db.query(func.count(ConversationSession.id)).filter(ConversationSession.is_active.is_(True)).scalar() or 0,
