@@ -1,31 +1,46 @@
+"""Database setup with model registration deferred until first use."""
+from threading import Lock
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+
+def normalize_database_url(url: str) -> str:
+    """Normalize Railway/Heroku PostgreSQL URLs to the installed psycopg 3 driver."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
+def configure_database_url(url: str, *, railway_runtime: bool) -> str:
+    """Reject ephemeral SQLite storage in Railway so care records cannot silently disappear."""
+    normalized = normalize_database_url(url)
+    if railway_runtime and normalized.startswith("sqlite:"):
+        raise RuntimeError(
+            "DATABASE_URL must use PostgreSQL in Railway; SQLite storage is not durable across deployments."
+        )
+    return normalized
+
+
+railway_runtime = any(
+    os.getenv(name)
+    for name in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME")
+)
+database_url = configure_database_url(settings.database_url, railway_runtime=railway_runtime)
+connect_args = {"check_same_thread": False} if database_url.startswith("sqlite:") else {}
+engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
-
-import app.models.uncertainty  # noqa: E402, F401
-import app.models.temporal  # noqa: E402, F401
-import app.models.change  # noqa: E402, F401
-import app.models.significance  # noqa: E402, F401
-import app.models.action  # noqa: E402, F401
-import app.models.caregiver_intelligence  # noqa: E402, F401
-import app.models.causal  # noqa: E402, F401
-
-Base.metadata.create_all(bind=engine)
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+_initialized = False
+_init_lock = Lock()
 
 
 def _sqlite_column_type(col, dialect):
@@ -36,17 +51,12 @@ def _sqlite_column_type(col, dialect):
 
 
 def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
+    """Add only missing nullable/defaulted columns to legacy SQLite tables.
 
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
+    This legacy compatibility helper is not a substitute for reviewed migrations.
+    It does not drop or rewrite existing data.
     """
     from sqlalchemy import inspect, text
-
     target = bind or engine
     try:
         insp = inspect(target)
@@ -78,9 +88,83 @@ def ensure_database_schema(bind=None):
                 with target.begin() as conn:
                     conn.execute(stmt)
             except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
+                # Preserve the existing legacy behavior; schema verification must
+                # surface unresolved missing columns before production rollout.
                 pass
 
 
-ensure_database_schema()
+def ensure_caregiver_email_constraint(bind=None):
+    """Scope caregiver email uniqueness to a care record on existing PostgreSQL databases.
+
+    Older PostgreSQL deployments used a global UNIQUE(email) constraint. Replace
+    only that known constraint or standalone index with per-person uniqueness;
+    existing rows are preserved. Railway runtime is required to use PostgreSQL.
+    """
+    from sqlalchemy import inspect, text
+
+    target = bind or engine
+    if target.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(target)
+    if not inspector.has_table("caregivers"):
+        return
+
+    constraints = inspector.get_unique_constraints("caregivers")
+    constraint_names = {item.get("name") for item in constraints}
+    global_email_constraints = [
+        item for item in constraints if item.get("column_names") == ["email"]
+    ]
+    standalone_email_indexes = [
+        item for item in inspector.get_indexes("caregivers")
+        if item.get("unique")
+        and item.get("column_names") == ["email"]
+        and item.get("name") not in constraint_names
+    ]
+
+    with target.begin() as conn:
+        for constraint in global_email_constraints:
+            name = target.dialect.identifier_preparer.quote(constraint["name"])
+            conn.execute(text(f"ALTER TABLE caregivers DROP CONSTRAINT IF EXISTS {name}"))
+        for index in standalone_email_indexes:
+            name = target.dialect.identifier_preparer.quote(index["name"])
+            conn.execute(text(f"DROP INDEX IF EXISTS {name}"))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_caregiver_person_email "
+            "ON caregivers (person_id, email)"
+        ))
+
+def init_db():
+    """Register all models before schema creation; run once per process."""
+    global _initialized
+    if _initialized:
+        return
+    with _init_lock:
+        if _initialized:
+            return
+        import app.models.care  # noqa: F401
+        import app.models.uncertainty  # noqa: F401
+        import app.models.temporal  # noqa: F401
+        import app.models.change  # noqa: F401
+        import app.models.significance  # noqa: F401
+        import app.models.action  # noqa: F401
+        import app.models.caregiver_intelligence  # noqa: F401
+        import app.models.causal  # noqa: F401
+        import app.models.memory  # noqa: F401
+        import app.models.time_location  # noqa: F401
+        import app.models.safety  # noqa: F401
+        import app.models.auth_identity  # noqa: F401
+        import app.models.capture  # noqa: F401
+        Base.metadata.create_all(bind=engine)
+        ensure_database_schema()
+        ensure_caregiver_email_constraint()
+        _initialized = True
+
+
+def get_db():
+    init_db()
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
