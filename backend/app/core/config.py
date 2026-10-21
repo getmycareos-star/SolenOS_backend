@@ -11,6 +11,17 @@ RAILWAY_RUNTIME_VARIABLES = (
 )
 
 
+def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
+    """Reject missing, short, or placeholder session secrets on Railway."""
+    secret = secret_key.strip()
+    if railway_runtime and (
+        not secret or secret == "change-me-in-production" or len(secret) < 32
+    ):
+        raise RuntimeError(
+            "SECRET_KEY must be configured in Railway with at least 32 characters "
+            "and must not use the development placeholder."
+        )
+
 class Settings(BaseSettings):
     app_name: str = "SolenOS"
     debug: bool = False
@@ -50,6 +61,7 @@ class Settings(BaseSettings):
             )
 
         secret = self.secret_key.strip()
+        validate_deployment_secret(secret, railway_runtime=True)
         if not secret or secret == "change-me-in-production" or len(secret) < 32:
             raise RuntimeError(
                 "SECRET_KEY must be a unique random value of at least 32 characters "
