@@ -139,7 +139,25 @@ jobs:
                   unique_columns.append(index.get("column_names"))
           assert ["email"] not in unique_columns, unique_columns
           assert ["person_id", "email"] in unique_columns, unique_columns
-          print("PostgreSQL migration verified:", unique_columns)
+
+          expected_active_indexes = {
+              "auth_caregiver_account_links": {
+                  "uq_active_caregiver_link_caregiver",
+                  "uq_active_caregiver_link_account_caregiver",
+              },
+              "auth_caregiver_profile_account_links": {
+                  "uq_active_caregiver_profile_link_profile",
+                  "uq_active_caregiver_profile_link_account_profile",
+              },
+          }
+          for table, expected_names in expected_active_indexes.items():
+              actual_indexes = {item.get("name"): item for item in inspector.get_indexes(table)}
+              assert expected_names <= set(actual_indexes), (table, actual_indexes)
+              for name in expected_names:
+                  assert actual_indexes[name].get("unique") is True, (table, name, actual_indexes[name])
+                  predicate = actual_indexes[name].get("dialect_options", {}).get("postgresql_where")
+                  assert predicate is not None, (table, name, actual_indexes[name])
+          print("PostgreSQL migration verified caregiver email scope and active-only caregiver-link uniqueness:", unique_columns)
           PY
 
   postgres-fresh-schema:
