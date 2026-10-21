@@ -22,6 +22,10 @@ class CommunityPost(Base):
     care_stage = Column(String(24), nullable=False, default="unspecified")
     tags = Column(JSON, nullable=False, default=list)
     status = Column(String(24), nullable=False, default="published", index=True)
+    flagged_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=True)
+    moderated_by_account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=True)
+    moderation_reason = Column(Text, nullable=True)
+    moderated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), nullable=True)
 
