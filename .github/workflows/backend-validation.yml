@@ -63,6 +63,85 @@ jobs:
       - name: Run backend tests
         run: pytest -q
 
+
+  postgres-migration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: solenos
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: solenos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos -d solenos_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: postgresql+psycopg://solenos:ci-test-password@localhost:5432/solenos_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend and migration dependencies
+        run: python -m pip install -e .
+      - name: Create a legacy-shaped PostgreSQL schema
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text("""
+                  CREATE TABLE persons (
+                      id VARCHAR PRIMARY KEY,
+                      name VARCHAR NOT NULL,
+                      date_of_birth DATE NULL,
+                      created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                      updated_at TIMESTAMP WITH TIME ZONE NULL
+                  )
+              """))
+              connection.execute(text("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      name VARCHAR NOT NULL,
+                      email VARCHAR NOT NULL,
+                      relationship VARCHAR NOT NULL,
+                      person_id VARCHAR NOT NULL REFERENCES persons(id),
+                      timezone VARCHAR NOT NULL,
+                      created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                      CONSTRAINT uq_caregivers_email UNIQUE (email)
+                  )
+              """))
+          print("Created legacy schema with global caregiver-email uniqueness.")
+          PY
+      - name: Apply Alembic migration to PostgreSQL
+        run: alembic upgrade head
+      - name: Verify uniqueness was safely scoped to each care record
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          unique_columns = []
+          for constraint in inspector.get_unique_constraints("caregivers"):
+              unique_columns.append(constraint.get("column_names"))
+          for index in inspector.get_indexes("caregivers"):
+              if index.get("unique"):
+                  unique_columns.append(index.get("column_names"))
+          assert ["email"] not in unique_columns, unique_columns
+          assert ["person_id", "email"] in unique_columns, unique_columns
+          print("PostgreSQL migration verified:", unique_columns)
+          PY
+
   deployed-smoke:
     # Run against the live service only when explicitly requested. A PR build
     # must not be confused with the separately deployed Railway revision.
