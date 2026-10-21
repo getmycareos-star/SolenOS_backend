@@ -149,16 +149,10 @@ def _log_and_learn(
 @router.post("/persons", response_model=Person)
 def create_person(
     person: PersonCreate,
-    request: Request,
     account: Account = Depends(current_account),
     db: Session = Depends(get_db),
 ):
-    # Creating a person also establishes the creator's first verified care-circle membership.
-    if db.query(CareMembership).filter(CareMembership.account_id == account.id).count():
-        raise HTTPException(
-            status_code=409,
-            detail="This account already has a care record. Use an invitation to join another care circle.",
-        )
+    # Creating a person also establishes a verified care-circle membership.
     dob = person.date_of_birth
     if isinstance(dob, str) and dob:
         try:
