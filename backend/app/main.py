@@ -1,5 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
@@ -51,4 +53,15 @@ app.include_router(situation_router, prefix="/api")
 
 @app.get("/health")
 def health_check():
+    # Liveness only: confirms the ASGI process is responding.
     return {"status": "healthy", "app": settings.app_name}
+
+
+@app.get("/ready")
+def readiness_check(db: Session = Depends(get_db)):
+    # Readiness verifies the dependency needed to persist care records.
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return {"status": "ready", "database": "reachable", "app": settings.app_name}
