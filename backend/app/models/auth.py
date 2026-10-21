@@ -20,7 +20,7 @@ class Account(Base):
 class CareMembership(Base):
     __tablename__ = "care_memberships"
     __table_args__ = (
-        UniqueConstraint("account_id", "person_id", name="uq_care_membership_account_person"),
+        UniqueConstraint("account_id", "person_id", "caregiver_id", name="uq_care_membership_account_person_caregiver"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
