@@ -5,17 +5,27 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# SQLite needs check_same_thread=False; PostgreSQL drivers do not accept that
+# SQLite-only connection argument.
+connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-import app.models.uncertainty  # noqa: E402, F401
+# Register every ORM model before create_all. Importing app.api.v1 imports this
+# module before it imports app.models.care, so omitting care here left foreign
+# keys such as information_gaps.created_by_caregiver_id unresolved at startup.
+import app.models.care  # noqa: E402, F401
+import app.models.memory  # noqa: E402, F401
+import app.models.time_location  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
+import app.models.uncertainty  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
 import app.models.significance  # noqa: E402, F401
 import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
+import app.models.safety  # noqa: E402, F401
 
 Base.metadata.create_all(bind=engine)
 
