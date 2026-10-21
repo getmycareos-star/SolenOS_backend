@@ -100,6 +100,7 @@ def _post_output(db: Session, post: CommunityPost, account_id: str) -> dict:
         "author_type": "peer_caregiver",
         "author_label": "Anonymous caregiver",
         "author_avatar_seed": "caregiver",
+        "is_own_post": post.author_account_id == account_id,
         "title": post.title,
         "body": post.body,
         "media": [],
