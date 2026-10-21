@@ -107,6 +107,6 @@ def test_daily_capture_rejects_unlinked_caregiver():
             },
         )
         assert response.status_code == 403
-        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+        assert response.json()["detail"] == "You are not a member of this care circle."
     finally:
         teardown_db()
