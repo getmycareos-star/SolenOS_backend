@@ -19,6 +19,7 @@ Base = declarative_base()
 
 import app.models.care  # noqa: E402, F401
 import app.models.daily_care  # noqa: E402, F401
+import app.models.uploads  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
 import app.models.time_location  # noqa: E402, F401
 import app.models.safety  # noqa: E402, F401
