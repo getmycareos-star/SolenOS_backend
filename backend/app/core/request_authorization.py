@@ -162,6 +162,12 @@ async def authorize_api_request(request: Request, call_next):
             for key, value in _walk_values(payload)
             if key in CAREGIVER_ID_FIELDS and isinstance(value, str) and value
         }
+        requested_caregiver_ids.update(
+            value
+            for key in CAREGIVER_ID_FIELDS
+            for value in request.query_params.getlist(key)
+            if value
+        )
         membership_query = db.query(CareMembership).filter(
             CareMembership.account_id == account.id,
             CareMembership.person_id == person_id,
