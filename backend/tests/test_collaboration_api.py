@@ -155,3 +155,64 @@ def test_team_routes_require_staff_role():
         assert response.status_code == 403, response.text
     finally:
         _cleanup(engine, client)
+
+
+def test_appointment_object_id_cannot_cross_care_record_boundary():
+    from datetime import datetime, timezone
+    from app.models.care import Caregiver
+    from app.models.time_location import Appointment
+
+    engine, Session, client = _client_for_test()
+    try:
+        owner_headers, _owner_person = _account_context(client, Session, "appointment-owner@example.test")
+        other_headers, other_person = _account_context(client, Session, "appointment-other@example.test")
+        with Session() as db:
+            caregiver = db.query(Caregiver).filter_by(person_id=other_person).one()
+            appointment = Appointment(
+                person_id=other_person,
+                title="Private appointment",
+                scheduled_at=datetime.now(timezone.utc),
+                status="scheduled",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(appointment)
+            db.commit()
+            db.refresh(appointment)
+            appointment_id = appointment.id
+
+        denied = client.patch(
+            f"/api/v1/appointments/{appointment_id}/lifecycle",
+            headers=owner_headers,
+        )
+        assert denied.status_code == 403, denied.text
+
+        allowed = client.patch(
+            f"/api/v1/appointments/{appointment_id}/lifecycle",
+            headers=other_headers,
+        )
+        assert allowed.status_code == 200, allowed.text
+    finally:
+        _cleanup(engine, client)
+
+
+def test_collaboration_routes_are_registered_and_session_protected():
+    from fastapi.routing import APIRoute
+    required = {
+        ("GET", "/api/v1/community"),
+        ("POST", "/api/v1/community"),
+        ("POST", "/api/v1/community/experience"),
+        ("POST", "/api/v1/community/{post_id}/reactions"),
+        ("POST", "/api/v1/conversation/message"),
+        ("GET", "/api/v1/conversation/{session_id}"),
+        ("GET", "/api/v1/team/dashboard"),
+        ("GET", "/api/v1/team/state-report"),
+        ("GET", "/api/v1/metrics"),
+        ("GET", "/api/v1/professional-dashboard/"),
+    }
+    actual = {
+        (method, route.path)
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        for method in (route.methods or set())
+    }
+    assert required <= actual, f"Missing collaboration routes: {sorted(required - actual)}"
