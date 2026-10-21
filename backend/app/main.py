@@ -250,6 +250,14 @@ async def require_authenticated_care_access(request, call_next):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "Community actions must use the authenticated caregiver"})
 
+        # Community posting/reactions are caregiver actions; professionals can
+        # only read the public feed unless separately granted another capability.
+        if path == "/api/v1/community" and request.method == "POST" and account.role != "caregiver":
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "Caregiver role required to publish a community post"})
+        if path.startswith("/api/v1/community/") and request.method in {"POST", "DELETE"} and account.role != "caregiver":
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=403, content={"detail": "Caregiver role required to react to community posts"})
         # Community posts are authored as the authenticated caregiver. Only team accounts
         # can moderate posts or view the moderation queue.
         if path.startswith("/api/v1/team/moderation") and account.role != "team":
