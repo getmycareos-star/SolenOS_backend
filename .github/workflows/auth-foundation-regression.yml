@@ -30,7 +30,7 @@ jobs:
       - name: Install backend and test runner
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e . pytest httpx2
+          python -m pip install -e . pytest httpx
       - name: Run password-hashing primitive regressions
         run: python -m pytest -q tests/test_auth_service_primitives.py
       - name: Run account and session lifecycle regressions
