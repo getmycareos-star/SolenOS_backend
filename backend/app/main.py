@@ -41,6 +41,19 @@ situation_router = APIRouter()
 
 @situation_router.post("/situation", response_model=SituationResponse)
 def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
+    # A caller-supplied caregiver ID must belong to the same care recipient.
+    # Daily-care capture already enforces this relationship; situation capture
+    # must not allow a mismatched caregiver/person pair to create records.
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.id == payload.caregiver_id)
+        .first()
+    )
+    if caregiver and caregiver.person_id != payload.person_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Caregiver is not linked to this care record",
+        )
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
