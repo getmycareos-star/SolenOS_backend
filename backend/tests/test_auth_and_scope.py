@@ -212,3 +212,58 @@ def test_invitation_is_email_bound_and_single_use():
         json={"token": token},
     )
     assert replay.status_code == 404
+
+
+
+def test_read_only_membership_cannot_write_care_data():
+    account_id, _, person_id, caregiver_id = create_account_with_context()
+    db = SessionLocal()
+    try:
+        membership = db.query(CareMembership).filter(
+            CareMembership.account_id == account_id,
+            CareMembership.person_id == person_id,
+            CareMembership.caregiver_id == caregiver_id,
+        ).one()
+        membership.permissions = '["read"]'
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {token_for(account_id)}"},
+        json={
+            "caregiver_id": caregiver_id,
+            "person_id": person_id,
+            "raw_input": "This write must be denied for a read-only member.",
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Your care-circle membership does not permit this action."
+
+
+def test_account_can_create_and_select_multiple_care_contexts():
+    account = Account(
+        email=f"multi-context-{uuid.uuid4().hex}@gmail.com",
+        password_hash=hash_password("correct-horse-battery-staple"),
+        display_name="Multi Context User",
+    )
+    db = SessionLocal()
+    try:
+        db.add(account)
+        db.commit()
+        account_id = account.id
+    finally:
+        db.close()
+    headers = {"Authorization": f"Bearer {token_for(account_id)}"}
+
+    first = client.post("/api/v1/auth/care-contexts", headers=headers, json={"name": "First care record"})
+    second = client.post("/api/v1/auth/care-contexts", headers=headers, json={"name": "Second care record"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    contexts = client.get("/api/v1/auth/care-contexts", headers=headers)
+    assert contexts.status_code == 200
+    assert {item["person_id"] for item in contexts.json()} == {
+        first.json()["person_id"],
+        second.json()["person_id"],
+    }
