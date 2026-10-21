@@ -5,6 +5,7 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,12 +43,12 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: always()
-    continue-on-error: true
+    # Run against the live service only when explicitly requested. A PR build
+    # must not be confused with the separately deployed Railway revision.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
-        continue-on-error: true
         run: |
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-8773.up.railway.app/health')
           echo "GET /health returned HTTP $status"
