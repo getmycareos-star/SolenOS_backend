@@ -5,7 +5,7 @@ from datetime import datetime, date
 from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
-from app.models.auth_identity import AccountPersonAccess, AuthAccount
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
 from app.models.change import Situation as SituationModel
 from app.models.care import (
     Person as PersonModel,
@@ -195,7 +195,35 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db), account: 
     db_person = PersonModel(name=person.name, date_of_birth=dob)
     db.add(db_person)
     db.flush()
-    db.add(AccountPersonAccess(account_id=account.id, person_id=db_person.id, role="owner", permissions=["read", "write", "admin"], is_active=True, granted_by_account_id=account.id))
+
+    # Keep the legacy person-creation endpoint consistent with /auth/care-contexts:
+    # the owner must have an attributable caregiver identity before capture writes.
+    caregiver_name = (account.display_name or account.email.split("@", 1)[0]).strip()
+    caregiver = CaregiverModel(
+        name=caregiver_name or account.email,
+        email=account.email,
+        relationship="family",
+        person_id=db_person.id,
+        timezone="UTC",
+    )
+    db.add(caregiver)
+    db.flush()
+
+    db.add(AccountPersonAccess(
+        account_id=account.id,
+        person_id=db_person.id,
+        role="owner",
+        permissions=["read", "write", "admin"],
+        is_active=True,
+        granted_by_account_id=account.id,
+    ))
+    db.add(CaregiverAccountLink(
+        account_id=account.id,
+        caregiver_id=caregiver.id,
+        person_id=db_person.id,
+        linked_by_account_id=account.id,
+        is_active=True,
+    ))
     db.commit()
     db.refresh(db_person)
     _log_and_learn(
@@ -204,7 +232,7 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db), account: 
         "person_created",
         f"Created person {db_person.name}",
         "api",
-        caregiver_id=None,
+        caregiver_id=caregiver.id,
     )
     return db_person
 
