@@ -15,7 +15,7 @@ from app.models.auth import Account, CareMembership
 
 PROTECTED_PREFIXES = ("/api/v1/", "/api/situation")
 PUBLIC_EXACT_PATHS = {"/health"}
-UUID_PATTERN = re.compile(r"^[0-9a-fA-F-]{16,}$")
+IDENTIFIER_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{8,}$")
 CAREGIVER_ID_FIELDS = {
     "caregiver_id",
     "caregiverId",
@@ -101,11 +101,18 @@ async def authorize_api_request(request: Request, call_next):
                 person_ids.add(value)
 
         # Check every resource ID in the path, not only a client-supplied person_id.
-        path_ids = [part for part in path.split("/") if UUID_PATTERN.match(part)]
+        path_ids = [part for part in path.split("/") if IDENTIFIER_PATTERN.match(part)]
         for identifier in path_ids:
             resolved = _person_for_identifier(db, identifier)
             if resolved:
                 person_ids.add(resolved)
+
+        if not person_ids and request.method == "POST" and path.rstrip("/") == "/api/v1/persons":
+            request.state.account_id = account.id
+            request.state.person_id = None
+            request.state.caregiver_id = None
+            request.state.care_permissions = {"read", "write"}
+            return await call_next(request)
 
         if len(person_ids) != 1:
             return JSONResponse(
@@ -113,15 +120,23 @@ async def authorize_api_request(request: Request, call_next):
                 content={"detail": "A single authorized care record must be identified for this request."},
             )
         person_id = next(iter(person_ids))
-        membership = (
-            db.query(CareMembership)
-            .filter(
-                CareMembership.account_id == account.id,
-                CareMembership.person_id == person_id,
-                CareMembership.status == "active",
-            )
-            .first()
+        requested_caregiver_ids = {
+            str(value)
+            for key, value in _walk_values(payload)
+            if key in CAREGIVER_ID_FIELDS and isinstance(value, str) and value
+        }
+        membership_query = db.query(CareMembership).filter(
+            CareMembership.account_id == account.id,
+            CareMembership.person_id == person_id,
+            CareMembership.status == "active",
         )
+        if requested_caregiver_ids:
+            if len(requested_caregiver_ids) != 1:
+                return JSONResponse(status_code=403, content={"detail": "A single caregiver identity must be used for this action."})
+            membership_query = membership_query.filter(
+                CareMembership.caregiver_id == next(iter(requested_caregiver_ids))
+            )
+        membership = membership_query.first()
         if not membership:
             return JSONResponse(status_code=403, content={"detail": "You are not a member of this care circle."})
 
