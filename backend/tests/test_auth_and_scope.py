@@ -139,3 +139,76 @@ def test_signup_rejects_short_password_and_login_does_not_return_password_hash()
     assert payload["access_token"]
     assert payload["account"]["email"] == email
     assert "password_hash" not in payload["account"]
+
+
+
+def test_invitation_is_email_bound_and_single_use():
+    inviter_id, _, person_id, _ = create_account_with_context()
+    invitee_email = f"invitee-{uuid.uuid4().hex}@gmail.com"
+    invitee = Account(
+        email=invitee_email,
+        password_hash=hash_password("correct-horse-battery-staple"),
+        display_name="Invited Caregiver",
+    )
+    caregiver_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(invitee)
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id,
+            name="Invited Caregiver",
+            email=invitee_email,
+            relationship="family caregiver",
+            person_id=person_id,
+            timezone="UTC",
+        ))
+        db.commit()
+        invitee_id = invitee.id
+    finally:
+        db.close()
+
+    client = TestClient(app)
+    invitation_response = client.post(
+        "/api/v1/auth/caregiver-invitations",
+        headers={"Authorization": f"Bearer {token_for(inviter_id)}"},
+        json={"person_id": person_id, "caregiver_id": caregiver_id, "permissions": ["read", "write"]},
+    )
+    assert invitation_response.status_code == 201, invitation_response.text
+    token = invitation_response.json()["invitation_token"]
+
+    wrong_account = Account(
+        email=f"wrong-{uuid.uuid4().hex}@gmail.com",
+        password_hash=hash_password("correct-horse-battery-staple"),
+        display_name="Wrong Recipient",
+    )
+    db = SessionLocal()
+    try:
+        db.add(wrong_account)
+        db.commit()
+        wrong_id = wrong_account.id
+    finally:
+        db.close()
+
+    wrong_accept = client.post(
+        "/api/v1/auth/caregiver-invitations/accept",
+        headers={"Authorization": f"Bearer {token_for(wrong_id)}"},
+        json={"token": token},
+    )
+    assert wrong_accept.status_code == 403
+
+    accepted = client.post(
+        "/api/v1/auth/caregiver-invitations/accept",
+        headers={"Authorization": f"Bearer {token_for(invitee_id)}"},
+        json={"token": token},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["person_id"] == person_id
+    assert accepted.json()["caregiver_id"] == caregiver_id
+
+    replay = client.post(
+        "/api/v1/auth/caregiver-invitations/accept",
+        headers={"Authorization": f"Bearer {token_for(invitee_id)}"},
+        json={"token": token},
+    )
+    assert replay.status_code == 404
