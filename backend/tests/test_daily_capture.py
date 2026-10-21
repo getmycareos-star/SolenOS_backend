@@ -101,15 +101,19 @@ def test_daily_care_entry_persists_with_server_verified_caregiver_attribution():
 
 
 def test_daily_care_entry_rejects_missing_authentication():
-    engine, _, client, _, person_id, caregiver_id, _ = make_environment()
+    engine, _, _, _, person_id, caregiver_id, _ = make_environment()
+    # Use a separate client with an empty cookie jar and no default headers so
+    # this is an actual unauthenticated request, not a reused authenticated session.
+    unauthenticated_client = TestClient(app)
     try:
-        response = client.post(
+        response = unauthenticated_client.post(
             "/api/v1/daily-care/entries",
+            headers={"Authorization": ""},
             json={"person_id": person_id, "caregiver_id": caregiver_id, "mood": "Calm"},
         )
         assert response.status_code == 401, response.text
     finally:
-        client.close()
+        unauthenticated_client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
