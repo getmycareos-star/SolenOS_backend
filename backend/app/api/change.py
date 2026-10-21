@@ -20,7 +20,7 @@ from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
 
-router = APIRouter(prefix="/change", tags=["change"])
+router = APIRouter(prefix="/change", tags=["change"], dependencies=[Depends(current_account)])
 
 
 @router.post("/baselines", response_model=BaselineSchema)
