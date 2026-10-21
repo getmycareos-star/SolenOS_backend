@@ -23,6 +23,11 @@ engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
+# Import every model module before create_all so all application tables are
+# registered in Base.metadata, regardless of import order.
+import app.models.care  # noqa: E402, F401
+import app.models.memory  # noqa: E402, F401
+import app.models.time_location  # noqa: E402, F401
 import app.models.uncertainty  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
