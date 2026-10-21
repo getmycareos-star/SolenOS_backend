@@ -23,24 +23,42 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
 
+    def validate_production_configuration(self) -> None:
+        """Reject unsafe storage or session-signing configuration before serving requests.
 
-def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
-    """Fail closed rather than sign production sessions with the committed placeholder."""
-    if railway_runtime and (
-        not secret_key.strip()
-        or secret_key.strip() == "change-me-in-production"
-        or len(secret_key.strip()) < 32
-    ):
-        raise RuntimeError(
-            "SECRET_KEY must be configured in Railway with at least 32 characters before "
-            "starting SolenOS; the development placeholder or a short secret is not safe "
-            "for production sessions."
-        )
+        Local development may use SQLite and a development-only secret. Production
+        (including Railway deployments) must use PostgreSQL and a unique secret.
+        """
+        railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
+        environment = (
+            os.getenv("APP_ENV")
+            or os.getenv("ENVIRONMENT")
+            or os.getenv("RAILWAY_ENVIRONMENT_NAME")
+            or os.getenv("RAILWAY_ENVIRONMENT")
+            or ""
+        ).strip().lower()
+        production = railway_runtime or environment in {"production", "prod"}
+
+        if not production:
+            return
+
+        database_url = self.database_url.strip().lower()
+        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
+            raise RuntimeError(
+                "Production must use managed PostgreSQL for persistent care records; "
+                "SQLite is supported only for local development and tests."
+            )
+
+        secret = self.secret_key.strip()
+        if not secret or secret == "change-me-in-production" or len(secret) < 32:
+            raise RuntimeError(
+                "SECRET_KEY must be a unique random value of at least 32 characters "
+                "before starting SolenOS in production."
+            )
 
 
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
-    railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
-    validate_deployment_secret(settings.secret_key, railway_runtime=railway_runtime)
+    settings.validate_production_configuration()
     return settings
