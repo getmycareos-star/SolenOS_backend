@@ -138,3 +138,33 @@ def test_daily_capture_is_retrievable_once_for_selected_person():
         assert "Persistence read-back contract" in matching[0]["description"]
     finally:
         teardown_db()
+
+
+def test_daily_capture_rejects_caregiver_linked_to_another_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        db = TestingSessionLocal()
+        other_person = Person(id="person-daily-other", name="Other Person")
+        db.add(other_person)
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily-care/entries",
+            json={
+                "person_id": "person-daily-other",
+                "caregiver_id": "caregiver-daily-test",
+                "mood": "Calm",
+                "general_notes": "Must not cross care records",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id="person-daily-other").count() == 0
+        db.close()
+    finally:
+        teardown_db()
