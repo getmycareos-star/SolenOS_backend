@@ -236,6 +236,15 @@ async def require_authenticated_care_access(request, call_next):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "This account is not authorized for the selected care recipient"})
 
+        # DELETE reaction requests carry the actor ID in the query string, not JSON.
+        # Bind that identifier to the signed-in account to prevent removing another
+        # caregiver's reaction by guessing their caregiver ID.
+        if path.startswith("/api/v1/community/") and request.method == "DELETE":
+            requested_caregiver_id = request.query_params.get("caregiver_id")
+            if requested_caregiver_id != account.caregiver_id:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(status_code=403, content={"detail": "Community actions must use the authenticated caregiver"})
+
         # Community posts are authored as the authenticated caregiver. Only team accounts
         # can moderate posts or view the moderation queue.
         if path.startswith("/api/v1/team/moderation") and account.role != "team":
