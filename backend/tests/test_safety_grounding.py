@@ -500,7 +500,6 @@ class TestSafetyAPI:
                 "risk_classification": "informational",
                 "proposed_action_level": "informational",
                 "user_role": "caregiver",
-                "person_id": "test_person",
             },
         )
         assert response.status_code == 200
