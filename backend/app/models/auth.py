@@ -31,3 +31,19 @@ class CareMembership(Base):
     permissions = Column(Text, nullable=False, default='["read","write"]', server_default='["read","write"]')
     status = Column(String, nullable=False, default="active", server_default="active")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CareInvitation(Base):
+    __tablename__ = "care_invitations"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    token_hash = Column(String, nullable=False, unique=True, index=True)
+    email = Column(String, nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    invited_by_account_id = Column(String, ForeignKey("accounts.id"), nullable=False, index=True)
+    permissions = Column(Text, nullable=False, default='["read"]', server_default='["read"]')
+    status = Column(String, nullable=False, default="pending", server_default="pending")
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
