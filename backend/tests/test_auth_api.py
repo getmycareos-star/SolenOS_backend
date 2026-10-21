@@ -458,7 +458,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                     assert exc.status_code == 403
             unrelated_legacy_person = client.get("/api/v1/persons/" + unrelated.id, headers=headers)
             assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
-            unrelated_action_read = client.get("/api/v1/actions/actions/" + unrelated.id, headers=headers)
+            unrelated_action_read = client.get("/api/v1/actions/" + unrelated.id, headers=headers)
             assert unrelated_action_read.status_code == 403, unrelated_action_read.text
             unrelated_situation_write = client.post("/api/situation", headers=headers, json={"person_id": unrelated.id, "caregiver_id": "not-a-real-caregiver", "raw_input": "test"})
             assert unrelated_situation_write.status_code == 403, unrelated_situation_write.text
