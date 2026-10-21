@@ -31,7 +31,7 @@ jobs:
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
           for attempt in $(seq 1 20); do
-            if curl --silent --fail http://127.0.0.1:8011/health; then
+            if curl --silent --fail http://127.0.0.1:8011/health && curl --silent --fail http://127.0.0.1:8011/ready; then
               exit 0
             fi
             sleep 1
@@ -43,11 +43,9 @@ jobs:
 
   deployed-smoke:
     if: always()
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
-        continue-on-error: true
         run: |
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-8773.up.railway.app/health')
           echo "GET /health returned HTTP $status"
@@ -57,7 +55,7 @@ jobs:
         shell: bash
         run: |
           base='https://solenosbackend-production-8773.up.railway.app'
-          for path in /health /api/health /api/v1/health /openapi.json /docs /; do
+          for path in /health /ready /api/health /api/v1/health /openapi.json /docs /; do
             status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
             printf '%-18s HTTP %s\n' "$path" "$status"
             if [ "$path" = "/openapi.json" ] && [ "$status" = "200" ]; then
