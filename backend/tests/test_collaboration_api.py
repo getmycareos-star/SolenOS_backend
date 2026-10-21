@@ -135,6 +135,10 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
         assert queue.status_code == 200, queue.text
         item = next(item for item in queue.json()["posts_to_review"] if item["id"] == post_id)
         assert item["reason"] == "This post needs a safety review"
+        assert queue.json()["metrics"]["active_caregiver_accounts"] == 2
+        report = client.get("/api/v1/team/state-report", headers=reporter_headers)
+        assert report.status_code == 200, report.text
+        assert report.json()["total_caregivers"] == 2
     finally:
         _cleanup(engine, client)
 
