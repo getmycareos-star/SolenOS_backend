@@ -1,6 +1,6 @@
 from sqlalchemy.engine import make_url
 
-from app.core.database import normalize_database_url
+from app.core.database import ensure_database_schema, normalize_database_url
 
 
 def test_supabase_postgres_url_uses_installed_driver():
@@ -43,3 +43,15 @@ def test_nonproduction_preserves_explicit_sslmode():
     parsed = make_url(normalized)
 
     assert parsed.query["sslmode"] == "disable"
+
+
+
+def test_legacy_schema_repair_does_not_run_on_postgresql():
+    class FakeDialect:
+        name = "postgresql"
+
+    class FakePostgresBind:
+        dialect = FakeDialect()
+
+    # A PostgreSQL bind must return before inspection or any best-effort DDL.
+    ensure_database_schema(bind=FakePostgresBind())
