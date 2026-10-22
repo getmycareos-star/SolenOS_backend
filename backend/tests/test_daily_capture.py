@@ -63,7 +63,7 @@ def create_authenticated_owner(client: TestClient):
     )
     assert context.status_code == 201, context.text
     caregivers = client.get(
-        f"/api/v1/caregivers/{context.json()['person_id']}",
+        f"/api/v1/caregivers/person/{context.json()['person_id']}",
         headers=headers,
     )
     assert caregivers.status_code == 200, caregivers.text
@@ -158,5 +158,35 @@ def test_daily_capture_rejects_caregiver_identity_not_linked_to_account():
             assert response.json()["detail"] == "Authenticated account is not linked to this caregiver identity"
             with TestingSessionLocal() as db:
                 assert db.query(DailyCapture).count() == 0
+    finally:
+        teardown_db()
+
+
+def test_daily_care_entry_runs_shared_analysis_and_persists_evidence():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, context, caregiver_id = create_authenticated_owner(client)
+            response = client.post(
+                "/api/v1/daily-care/entries",
+                headers=headers,
+                json={
+                    "person_id": context["person_id"],
+                    "caregiver_id": caregiver_id,
+                    "mood": "Restless",
+                    "behavior_notes": "Caregiver-reported restlessness after lunch",
+                },
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            assert body["success"] is True
+            assert body["id"]
+            assert body["evidence_ids"]
+            assert body["analysis_status"] in {"complete", "failed"}
+            with TestingSessionLocal() as db:
+                event = db.query(CareEvent).filter_by(id=body["id"]).one()
+                assert event.person_id == context["person_id"]
+                assert event.created_by_caregiver_id == caregiver_id
+                assert event.evidence_ids == body["evidence_ids"]
     finally:
         teardown_db()
