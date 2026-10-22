@@ -467,6 +467,15 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     assert reviewed.status_code == 200, reviewed.text
     assert reviewed.json()["updated_by_caregiver_id"] == caregiver_id
 
+    freshness = client.get(
+        f"/api/v1/care-continuity/freshness/{person_id}",
+        headers=headers,
+    )
+    assert freshness.status_code == 200, freshness.text
+    freshness_by_id = {item["assertion_id"]: item for item in freshness.json()}
+    assert freshness_by_id[first.json()["id"]]["status"] == "needs_confirmation"
+    assert "competing report" in freshness_by_id[first.json()["id"]]["explanation"].lower()
+
     contradictions = client.get(
         f"/api/v1/care-continuity/contradictions/{person_id}",
         headers=headers,
