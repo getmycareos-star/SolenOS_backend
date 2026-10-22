@@ -241,6 +241,23 @@ async def require_authenticated_care_access(request, call_next):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "This account is not authorized for the selected care recipient"})
 
+        else:
+            # Fail closed for authenticated routes that do not identify a care recipient.
+            # Only explicitly global or role-scoped endpoints may omit person scope.
+            scope_exempt = (
+                path == "/api/v1/auth/me"
+                or path == "/api/v1/community"
+                or path.startswith("/api/v1/community/")
+                or (path == "/api/v1/professional/dashboard" and account.role == "professional")
+                or ((path.startswith("/api/v1/team/") or path == "/api/v1/metrics") and account.role == "team")
+            )
+            if not scope_exempt:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Care recipient scope is required for this endpoint"},
+                )
+
         # DELETE reaction requests carry the actor ID in the query string, not JSON.
         # Bind that identifier to the signed-in account to prevent removing another
         # caregiver's reaction by guessing their caregiver ID.
