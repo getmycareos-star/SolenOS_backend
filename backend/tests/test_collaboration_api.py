@@ -158,6 +158,24 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
         with Session() as db:
             reporter = db.query(AuthAccount).filter_by(email="flag-reporter@example.test").one()
             reporter.is_staff = True
+
+            # A caregiver-role grant alone must not be counted as an active
+            # caregiver account unless a verified caregiver identity link exists.
+            grant_only_account = AuthAccount(
+                email="grant-only@example.test",
+                password_hash="test-only-hash",
+                display_name="Grant only",
+            )
+            db.add(grant_only_account)
+            db.flush()
+            db.add(AccountPersonAccess(
+                account_id=grant_only_account.id,
+                person_id=person_id,
+                role="caregiver",
+                permissions=["read"],
+                is_active=True,
+                granted_by_account_id=reporter.id,
+            ))
             db.commit()
 
         queue = client.get("/api/v1/team/dashboard", headers=reporter_headers)
