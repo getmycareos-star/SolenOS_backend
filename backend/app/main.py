@@ -414,13 +414,30 @@ def post_situation(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    scoped_person_id = getattr(request.state, "scoped_person_id", None)
-    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not scoped_person_id or not scoped_caregiver_id:
+    # Revalidate the bearer capability at the route boundary instead of relying
+    # solely on middleware request.state propagation. This also protects this
+    # write path if middleware behavior changes in a future framework upgrade.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid anonymous session is required")
-    if str(payload.person_id) != str(scoped_person_id):
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = (
+        db.query(AnonymousSession)
+        .filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    scoped_person_id = str(authorized_session.person_id)
+    scoped_caregiver_id = str(authorized_session.caregiver_id)
+    if str(payload.person_id) != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
-    if str(payload.caregiver_id) != str(scoped_caregiver_id):
+    if str(payload.caregiver_id) != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
 
     if payload.action == "pause_active_care_situation":
