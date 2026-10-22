@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 
 
 class SituationProvenance(BaseModel):
@@ -50,3 +50,5 @@ class SituationResponse(BaseModel):
     attention_candidate: bool = False
     follow_up_candidate: bool = False
     what_changed: Optional[str] = None
+    intelligence_status: Literal["available", "unavailable"] = "available"
+    intelligence_message: Optional[str] = None
