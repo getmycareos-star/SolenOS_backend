@@ -30,6 +30,8 @@ class LoginInput(BaseModel):
 
 class CareContextInput(BaseModel):
     name: str = Field(min_length=1, max_length=160)
+    caregiver_name: str | None = Field(default=None, max_length=120)
+    relationship: str = Field(default="family caregiver", min_length=1, max_length=120)
 
 
 class InvitationCreateInput(BaseModel):
@@ -176,10 +178,14 @@ def create_care_context(
     person = Person(name=name)
     db.add(person)
     db.flush()
+    caregiver_name = (payload.caregiver_name or account.display_name or account.email.split("@")[0]).strip()
+    relationship = payload.relationship.strip()
+    if not caregiver_name or not relationship:
+        raise HTTPException(status_code=422, detail="Caregiver name and relationship cannot be blank.")
     caregiver = Caregiver(
-        name=(account.display_name or account.email.split("@")[0]),
+        name=caregiver_name,
         email=account.email,
-        relationship="family caregiver",
+        relationship=relationship,
         person_id=person.id,
         timezone="UTC",
     )
