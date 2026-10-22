@@ -30,9 +30,15 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         if text.strip()
     ]
     settings = get_settings()
-    record = db.query(CaptureAnalysis).filter(
-        CaptureAnalysis.care_event_id == event.id
-    ).first()
+    try:
+        record = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.care_event_id == event.id
+        ).first()
+    except Exception:
+        # Some isolated unit-test schemas omit optional analysis tables. Preserve the
+        # saved report and expose that extraction could not run; never fabricate output.
+        db.rollback()
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None}
     if record is None:
         record = CaptureAnalysis(
             care_event_id=event.id,
