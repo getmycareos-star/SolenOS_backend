@@ -72,6 +72,7 @@ class NextQuestionResponse(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     source_kind: str
     source_id: str
+    source_ids: List[str] = Field(default_factory=list)
     persisted_question_id: Optional[str] = None
 
 
