@@ -110,3 +110,62 @@ def test_daily_capture_rejects_unlinked_caregiver():
         assert response.json()["detail"] == "Caregiver is not linked to this care record"
     finally:
         teardown_db()
+
+
+
+def seed_second_person_and_caregiver():
+    db = TestingSessionLocal()
+    person = Person(id="person-other-test", name="Other Test Person")
+    caregiver = Caregiver(
+        id="caregiver-other-test",
+        name="Other Test Caregiver",
+        email="other-test-caregiver@example.invalid",
+        relationship="Family",
+        person_id=person.id,
+    )
+    db.add_all([person, caregiver])
+    db.commit()
+    db.close()
+
+
+def test_event_write_rejects_caregiver_from_another_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/events",
+            json={
+                "person_id": "person-daily-test",
+                "event_type": "observation",
+                "occurred_at": "2026-10-22T00:00:00Z",
+                "title": "Ownership test",
+                "created_by_caregiver_id": "caregiver-other-test",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+    finally:
+        teardown_db()
+
+
+def test_appointment_write_rejects_caregiver_from_another_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/appointments",
+            json={
+                "person_id": "person-daily-test",
+                "title": "Ownership test appointment",
+                "scheduled_at": "2026-10-23T10:00:00Z",
+                "created_by_caregiver_id": "caregiver-other-test",
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+    finally:
+        teardown_db()
