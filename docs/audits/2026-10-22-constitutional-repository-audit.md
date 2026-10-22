@@ -122,7 +122,16 @@ Implemented in source:
 - Added tests for anonymous bootstrap, token storage, missing-token denial, cross-person read denial, and caregiver-attribution spoofing.
 
 Not yet verified:
-- The test suite has not been executed in this environment. Existing API tests that call care routes without bearer tokens will need authenticated test fixtures; CI may expose these and other integration failures.
-- The frontend has not yet been wired to persist and send the bearer token, so current frontend requests will be rejected until that client integration is implemented.
+- The test suite has not been executed in this environment. Legacy route-behavior tests explicitly bypass the session middleware through a pytest fixture; the dedicated anonymous-session tests keep the middleware enabled and exercise bootstrap, missing-token denial, cross-person denial, attribution spoofing, situation-write binding, and token rotation.
+- The frontend now creates the anonymous session on first care capture, stores the bearer capability separately from its client-generated care key, sends the token through the shared API client, and authenticates the primary POST /api/situation capture. The existing GET /api/situation hydration path is still not implemented in backend/app/main.py, and other direct fetch call sites have not all been migrated; end-to-end frontend continuity is therefore not complete.
 - The production Railway database migration and live endpoints have not been exercised. SQLite databases created before this change cannot have the email nullability changed by the PostgreSQL migration; they need an explicit SQLite migration before using anonymous caregiver creation.
 - The guard is deliberately fail-closed for routes that cannot be tied to a person scope; some legacy routes may require route-specific ownership handling rather than being available immediately.
+
+
+## Follow-up implementation commits
+
+- Anonymous session model and bootstrap: `755f9f1c904ebf87917fdc49c8d4d40989d7db14`, `029436bb7e46f983048954a26cf5b6683e3e821c`.
+- Database registration and scoped enforcement: `072b254917fffaa57dd8376a73e54dbbf073291f`, `3d102f52cb673880abfe56744e3ff520044938d5`, `a0367ae3e7ceae49356d7bed5f1a46b89cae4a72`, `faa6674490734ff3af33fd02ac3bd15a3288a375`, `1c5d67f3301877bf7a83339f60f5702675111e46`, `60e178f912451720c976891679553d2573745ed6`.
+- Anonymous identity and schema compatibility: `00f46dc2967865aa303b66bcff360f592d2d7eeb`, `c55c80180304ceae7b84b89d5b792bf2758117d4`, `1dacb996ef11230ee736b4a4ca62aefec6e264f2`, `79c1e091ef159718576e1e8499448eca970aa2f7`, `862db155954f2e6edd9cc3b809486a281bceaea0`, `705f2d92115c6575648c5d655cd227d362c1af62`.
+- Security tests and legacy test isolation: `f88e0b4985c90603f5757d4d3300bea7ebc39dc6`, `b4858a41a06963cbf9b57a680ac25d342f6f08c9`, `0c58abc23a18ac81f3fb83407f6c501a570003dd`, `e8854d809c959fde27416f9e166f5c18ea132a90`, `de00e9ac398d2c83d2d5411eaf94e21e24b08277`, `d6e6283ba4a3cc8f5119f4ccb89738cccb840987`.
+- Frontend anonymous-session client and first-capture integration: `1fca01141c933cc25d30f0c3e962bcce3e7486c6`, `15566c58381e42af490d77924e65684d5626f097`, `9f23a2209f2bc3c406db981029637d83a945d076`, `0e0cf907e75189329239a2e27cd5192078118b2e`.
