@@ -16,7 +16,7 @@ SESSION_TTL_DAYS = 30
 
 
 class AnonymousSessionCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=120)
+    name: str = Field(default="Care recipient", min_length=1, max_length=120)
     caregiver_name: str = Field(default="Caregiver", min_length=1, max_length=120)
     date_of_birth: Optional[date] = None
 
