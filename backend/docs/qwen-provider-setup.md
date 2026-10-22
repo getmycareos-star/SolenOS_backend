@@ -1,6 +1,6 @@
 # Qwen provider configuration
 
-SolenOS Companion uses a server-side OpenAI-compatible chat-completions interface for Qwen. The browser never receives the provider API key. Qwen is called only after the backend authorizes the account's access to the selected care record and retrieves record context scoped to that person.
+SolenOS Companion and the care-capture extraction step use a server-side OpenAI-compatible chat-completions interface for Qwen. The browser never receives the provider API key. Qwen is called only after the backend authorizes access to the selected care record and retrieves evidence scoped to that person.
 
 Configure these variables in the backend runtime (Railway), never in Vite/Netlify frontend variables and never in committed source files:
 
@@ -17,10 +17,12 @@ The provider URL may be a managed Qwen endpoint or a separately hosted Qwen infe
 - If the provider times out, is unreachable, or returns invalid output, the API returns `provider_status=error`; it does not substitute an invented answer.
 - Potential emergency language bypasses Qwen and returns the emergency override.
 - The model receives only the authorized care recipient's recent events, linked evidence, active insights, appointments, and the current conversation history.
-- Model-returned evidence IDs are filtered against the IDs actually supplied in the authorized context.
+- Model-returned Companion evidence IDs are filtered against the IDs actually supplied in the authorized context.
+- Capture extraction is stored in `capture_analyses` with status `pending_review`; candidate observations are accepted only when their quoted source text matches stored evidence verbatim.
+- Qwen candidates are never auto-written as authoritative Living Care Record facts. Caregivers must treat them as unverified suggestions; the raw report and its provenance remain authoritative.
 - Companion messages are persisted as conversation history only. They do not write to the Living Care Record.
 - Qwen output is not a diagnosis, medication instruction, or substitute for clinician judgment.
 
 ## Release verification
 
-After setting variables, verify a signed-in test account through `POST /api/v1/conversation/message`. Confirm `provider_status=connected`, `ai_generated=true`, valid JSON output, and citations restricted to evidence IDs returned by the authorized context. Then test missing/invalid credentials, timeouts, emergency wording, and cross-account access. A code change or passing CI alone does not prove the deployed Qwen endpoint is reachable.
+After setting variables, verify a signed-in test account through `POST /api/v1/conversation/message` and a test care capture through `POST /api/situation` or `POST /api/v1/daily/log`. Confirm Companion returns `provider_status=connected`, capture returns `qwen_extraction_status=pending_review`, and candidate citations are derived only from verbatim matching source quotes. Then test missing/invalid credentials, timeouts, emergency wording, and cross-account access. A code change or passing CI alone does not prove the deployed Qwen endpoint is reachable.
