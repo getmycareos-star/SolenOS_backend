@@ -232,6 +232,7 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
         if has_conflict:
             continue
         freshness = get_freshness(item, now)
+        if freshness["status"] == "needs_confirmation":
             candidates.append({
                 "question": f"Can you confirm whether the reported information about {item.field} is still accurate? The record does not establish that it is current.",
                 "subject_type": item.subject_type, "subject_id": item.subject_id,
