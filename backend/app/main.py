@@ -92,6 +92,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 headers={"WWW-Authenticate": "Bearer"},
             )
         scoped_person_id = session.person_id
+        scoped_caregiver_id = session.caregiver_id
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved
@@ -154,6 +155,27 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 target_person_id = owners.pop()
             elif len(owners) > 1:
                 return JSONResponse(status_code=403, content={"detail": "Ambiguous care-record scope"})
+
+        # Caller-supplied caregiver IDs are attribution fields, not credentials.
+        # If present, they must match the caregiver identity bound to this token.
+        body_payload = {}
+        if body:
+            try:
+                parsed_body = json.loads(body.decode("utf-8"))
+                if isinstance(parsed_body, dict):
+                    body_payload = parsed_body
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                pass
+        claimed_caregiver_id = (
+            body_payload.get("caregiver_id")
+            or body_payload.get("created_by_caregiver_id")
+            or body_payload.get("uploaded_by_caregiver_id")
+        )
+        if claimed_caregiver_id and str(claimed_caregiver_id) != str(scoped_caregiver_id):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Caregiver attribution does not match this session"},
+            )
 
         if not target_person_id:
             return JSONResponse(
