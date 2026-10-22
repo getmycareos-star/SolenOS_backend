@@ -35,6 +35,7 @@ class CareAssertionResponse(BaseModel):
     observed_at: Optional[datetime] = None
     review_after_days: Optional[int] = None
     created_by_caregiver_id: Optional[str] = None
+    updated_by_caregiver_id: Optional[str] = None
     recorded_at: datetime
 
     class Config:
