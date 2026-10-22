@@ -13,11 +13,11 @@ def test_manual_demo_seed_script_is_not_shipped():
 def test_application_source_contains_no_demo_care_recipient_identity():
     """Demo IDs and named seed personas must never become runtime fallbacks."""
     forbidden_literals = (
-        "demo-person-id",
-        "demo-caregiver",
-        "Alex Johnson",
-        "Sam Johnson",
-        "sam@example.com",
+        "-".join(("demo", "person", "id")),
+        "-".join(("demo", "caregiver")),
+        " ".join(("Alex", "Johnson")),
+        " ".join(("Sam", "Johnson")),
+        "@".join(("sam", "example.com")),
     )
     for path in APPLICATION_ROOT.rglob("*.py"):
         source = path.read_text(encoding="utf-8")
