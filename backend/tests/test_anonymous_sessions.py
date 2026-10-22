@@ -198,6 +198,21 @@ def test_situation_hydration_returns_only_persisted_records_for_session_scope():
     assert observation["event_ids"] == [write.json()["care_event_id"]]
     assert data["active_care_situation_turn"] == {"situation": data["active_care_situation"]}
 
+    refreshed_response = client.post(
+        "/api/v1/sessions/refresh",
+        headers=token_headers,
+    )
+    assert refreshed_response.status_code == 200, refreshed_response.text
+    refreshed = refreshed_response.json()
+    rehydrated = client.get(
+        "/api/situation?caregiver_id=client-durable-care-key&care_session_id=interaction-session&offer_return_invite=0",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    assert rehydrated.status_code == 200, rehydrated.text
+    after_refresh = rehydrated.json()
+    assert after_refresh["care_recipient_id"] == data["care_recipient_id"]
+    assert after_refresh["active_care_situation"]["observations"] == data["active_care_situation"]["observations"]
+
 
 def test_situation_hydration_requires_session_and_ignores_spoofed_person_query():
     client = TestClient(app)
