@@ -13,7 +13,7 @@ from app.models.uncertainty import Contradiction, OpenQuestion
 from app.core.uncertainty_enums import Priority
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.services.care_continuity import (
-    create_assertion, create_action_outcome, get_freshness, next_best_questions,
+    create_assertion, create_action_outcome, get_freshness, next_best_questions, set_assertion_status,
 )
 
 
@@ -187,3 +187,23 @@ def test_revision_log_is_append_only(db: OrmSession):
     with pytest.raises(ValueError, match="append-only"):
         db.flush()
     db.rollback()
+
+
+def test_current_state_acceptance_requires_explicit_review_window(db: OrmSession):
+    from fastapi import HTTPException
+
+    assertion = create_assertion(db, CareAssertionCreate(
+        person_id="person-1", subject_type="medication", subject_id="med-1",
+        field="dose", asserted_value="500 mg", source_label="caregiver report",
+        evidence_ids=["ev-1"], review_after_days=None,
+    ))
+    with pytest.raises(HTTPException) as error:
+        set_assertion_status(db, assertion.id, "person-1", "accepted", "caregiver-1")
+    assert error.value.status_code == 422
+
+    accepted = set_assertion_status(
+        db, assertion.id, "person-1", "accepted", "caregiver-1", review_after_days=30
+    )
+    assert accepted.assertion_status == "accepted"
+    assert accepted.updated_by_caregiver_id == "caregiver-1"
+    assert get_freshness(accepted)["status"] == "within_review_window"
