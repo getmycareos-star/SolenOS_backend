@@ -207,3 +207,40 @@ def test_current_state_acceptance_requires_explicit_review_window(db: OrmSession
     assert accepted.assertion_status == "accepted"
     assert accepted.updated_by_caregiver_id == "caregiver-1"
     assert get_freshness(accepted)["status"] == "within_review_window"
+
+
+def test_additive_care_continuity_migration_creates_tables_and_provenance_column():
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import Column, MetaData, String, Table, inspect
+
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    Table("persons", metadata, Column("id", String, primary_key=True))
+    Table("care_events", metadata, Column("id", String, primary_key=True))
+    Table(
+        "contradictions", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+    )
+    metadata.create_all(engine)
+    migration_path = Path(__file__).parents[1] / "alembic" / "versions" / "20261022_03_care_continuity.py"
+    spec = importlib.util.spec_from_file_location("care_continuity_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            migration.upgrade()
+
+    inspector = inspect(engine)
+    assert inspector.has_table("care_state_revisions")
+    assert inspector.has_table("care_assertions")
+    assert inspector.has_table("care_action_outcomes")
+    assert "source_assertion_ids" in {column["name"] for column in inspector.get_columns("contradictions")}
+    assert "source_event_id" in {column["name"] for column in inspector.get_columns("care_assertions")}
+    engine.dispose()
