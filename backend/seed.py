@@ -19,9 +19,29 @@ from app.models.time_location import (
 from app.services.time_intelligence import calculate_care_windows
 from datetime import datetime, timedelta, date
 import uuid
+import os
+
+
+def _assert_demo_seed_allowed() -> None:
+    """Synthetic care records are opt-in for local development only."""
+    environment = (
+        os.getenv("RAILWAY_ENVIRONMENT_NAME")
+        or os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("APP_ENV")
+        or os.getenv("ENVIRONMENT")
+        or ""
+    ).strip().lower()
+    if environment in {"production", "prod"}:
+        raise RuntimeError("Demo care records must never be seeded in production.")
+    if os.getenv("SOLENOS_ENABLE_DEMO_SEED", "").strip().lower() != "true":
+        raise RuntimeError(
+            "Demo seeding is disabled by default. Set SOLENOS_ENABLE_DEMO_SEED=true "
+            "only in a local development environment."
+        )
 
 
 def seed():
+    _assert_demo_seed_allowed()
     CareBase.metadata.create_all(bind=engine)
     MemoryBase.metadata.create_all(bind=engine)
     TimeLocationBase.metadata.create_all(bind=engine)
