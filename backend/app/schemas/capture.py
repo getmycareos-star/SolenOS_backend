@@ -69,6 +69,7 @@ class DailyCaptureOutput(BaseModel):
     situations: list[dict] = Field(default_factory=list)
     qwen_extraction_status: str = "not_configured"
     qwen_candidates: Optional[dict] = None
+    qwen_analysis_id: Optional[str] = None
 
 
 class DailyCaptureRecordOutput(BaseModel):
