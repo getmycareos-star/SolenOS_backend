@@ -215,7 +215,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     person = db.query(PersonModel).filter(PersonModel.id == caregiver.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-    existing = db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first()
+    existing = (db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first() if caregiver.email else None)
     if existing:
         raise HTTPException(status_code=409, detail="A caregiver with this email already exists")
     db_caregiver = CaregiverModel(**caregiver.model_dump())
