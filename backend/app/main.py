@@ -337,7 +337,12 @@ def get_situation(
         }
         # This is a projection of persisted evidence/events, not a persisted ACS/CRS
         # object. Make that limitation explicit and do not synthesize a clinical assessment.
-        active_turn = {"situation": active_situation}
+        active_turn = {
+            "situation": active_situation,
+            # No supported synthesis exists in this hydration-only path; keep
+            # the field explicit rather than inventing a conclusion.
+            "what_seems_happening": None,
+        }
 
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
     return {
