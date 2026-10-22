@@ -10,7 +10,7 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import Base, get_db
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
 
@@ -59,9 +59,27 @@ def health_check():
 
 @app.get("/ready")
 def readiness_check(db: Session = Depends(get_db)):
-    # Readiness verifies the dependency needed to persist care records.
+    # A successful SELECT 1 proves connectivity only. Also verify that every
+    # ORM-managed table is present before advertising the service as ready.
     try:
         db.execute(text("SELECT 1"))
+        from sqlalchemy import inspect
+
+        inspector = inspect(db.get_bind())
+        existing_tables = set(inspector.get_table_names())
+        required_tables = set(Base.metadata.tables.keys())
+        missing_tables = required_tables - existing_tables
     except SQLAlchemyError as exc:
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
-    return {"status": "ready", "database": "reachable", "app": settings.app_name}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
+
+    if missing_tables:
+        raise HTTPException(status_code=503, detail="Database schema is incomplete")
+
+    return {
+        "status": "ready",
+        "database": "reachable",
+        "schema": "verified",
+        "app": settings.app_name,
+    }
