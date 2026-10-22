@@ -20,7 +20,7 @@ def test_qwen_unconfigured_is_explicit_and_not_generative():
         ollama_configured=False,
         ollama_base_url="",
         ollama_model="",
-                ollama_timeout_seconds=20,
+        ollama_timeout_seconds=20,
     )
     with patch.object(conversation_service, "get_settings", return_value=settings):
         result = conversation_service._call_qwen("What changed?", "No records", [], [])
@@ -34,7 +34,7 @@ def test_qwen_citations_are_restricted_to_authorized_evidence_ids():
         ollama_configured=True,
         ollama_base_url="http://127.0.0.1:11434",
         ollama_model="qwen-test",
-                ollama_timeout_seconds=3,
+        ollama_timeout_seconds=3,
     )
     model_content = json.dumps({
         "reply": "The record notes a sleep change.",
@@ -66,7 +66,7 @@ def test_qwen_provider_failure_does_not_fabricate_substitute_answer():
         ollama_configured=True,
         ollama_base_url="http://127.0.0.1:11434",
         ollama_model="qwen-test",
-                ollama_timeout_seconds=3,
+        ollama_timeout_seconds=3,
     )
     with patch.object(conversation_service, "get_settings", return_value=settings), patch.object(
         conversation_service, "urlopen", side_effect=OSError("network unavailable")
