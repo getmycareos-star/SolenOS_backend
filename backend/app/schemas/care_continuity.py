@@ -114,3 +114,11 @@ class CareActionOutcomeResponse(BaseModel):
 class CareAssertionStatusUpdate(BaseModel):
     person_id: str
     assertion_status: Literal["reported", "review_required", "accepted", "rejected", "superseded"]
+
+
+
+class ContradictionResolutionRequest(BaseModel):
+    person_id: str
+    resolution_status: Literal["resolved", "qualified", "superseded"]
+    resolution_notes: str = Field(min_length=3, max_length=4000)
+    resolved_by_caregiver_id: Optional[str] = None
