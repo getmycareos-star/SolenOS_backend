@@ -249,3 +249,30 @@ def test_care_recipient_name_update_is_scoped_to_session():
         assert db.query(Person).filter_by(id=second["person"]["id"]).one().name == "Second person"
     finally:
         db.close()
+
+
+def test_situation_hydration_never_returns_another_session_records():
+    client = TestClient(app)
+    first = create_session(client, "First person")
+    second = create_session(client, "Second person")
+    write = client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json={
+            "raw_input": "Private observation for first person only.",
+            "caregiver_id": "first-client-key",
+        },
+    )
+    assert write.status_code == 200, write.text
+
+    read = client.get(
+        "/api/situation?caregiver_id=first-client-key",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert read.status_code == 200, read.text
+    data = read.json()
+    assert data["care_recipient_id"] == second["person"]["id"]
+    assert data["total_events"] == 0
+    assert data["active_care_situation"] is None
+    assert data["active_care_situation_turn"] is None
+    assert "Private observation for first person only." not in str(data)
