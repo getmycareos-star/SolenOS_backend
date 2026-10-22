@@ -162,7 +162,12 @@ def test_post_situation_rejects_ungranted_person():
                     "raw_input": "Some input",
                 },
             )
-            assert response.status_code == 403
+            # Unknown or ungranted care-record identifiers must be rejected before any write.
+            assert response.status_code in {400, 403}
+            with TestingSessionLocal() as db:
+                from app.models.care import CareEvent, Evidence
+                assert db.query(CareEvent).filter_by(person_id="person-not-granted-to-this-account").count() == 0
+                assert db.query(Evidence).filter_by(person_id="person-not-granted-to-this-account").count() == 0
     finally:
         teardown_db()
 
