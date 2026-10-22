@@ -1,4 +1,3 @@
-import io
 import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -122,13 +121,12 @@ def test_capture_extraction_only_keeps_candidates_with_verbatim_source_quotes(mo
                 "open_questions": ["Was this different from the usual sleep pattern?"],
                 "possible_safety_flags": [],
             }
-            body = json.dumps({"message": {"content": json.dumps(model_result)}}).encode()
-            with patch.object(capture_analysis, "urlopen", return_value=io.BytesIO(body)) as ollama_call:
+            with patch.object(
+                capture_analysis, "call_qwen_json", return_value=(model_result, "connected")
+            ) as qwen_call:
                 result = capture_analysis.analyze_capture_with_qwen(db, "capture-event")
-            request = ollama_call.call_args.args[0]
-            assert request.full_url == "http://127.0.0.1:11434/api/chat"
-            assert request.get_header("Authorization") is None
-            assert json.loads(request.data)["format"] == "json"
+            qwen_call.assert_called_once()
+            assert "Slept only two hours last night." in qwen_call.call_args.kwargs["user_prompt"]
             assert result["qwen_extraction_status"] == "pending_review"
             candidates = result["qwen_candidates"]["observations"]
             assert len(candidates) == 1
