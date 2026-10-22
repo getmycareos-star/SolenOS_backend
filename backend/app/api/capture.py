@@ -18,6 +18,7 @@ from app.core.database import get_db
 from app.models.auth_identity import AuthAccount
 from app.models.care import CareEvent as CareEventModel, Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.models.capture import DailyCapture, EvidenceFile
+from app.models.capture_analysis import CaptureAnalysis
 from app.services.situation import analyze_saved_care_event
 from app.schemas.capture import DailyCaptureInput, DailyCaptureOutput, DailyCaptureRecordOutput, UploadOutput
 
@@ -155,6 +156,40 @@ def save_daily_capture(
         qwen_extraction_status=analysis["qwen_extraction_status"],
         qwen_candidates=analysis["qwen_candidates"],
     )
+
+
+@router.get("/capture/analyses/{person_id}")
+def list_capture_analyses(
+    person_id: str,
+    limit: int = Query(default=10, ge=1, le=30),
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Return persisted Qwen extraction candidates only to accounts with record access."""
+    assert_person_access(db, account.id, person_id, "read")
+    rows = (
+        db.query(CaptureAnalysis)
+        .filter(CaptureAnalysis.person_id == person_id)
+        .order_by(CaptureAnalysis.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "care_event_id": row.care_event_id,
+                "person_id": row.person_id,
+                "status": row.status,
+                "provider_status": row.provider_status,
+                "model_name": row.model_name,
+                "candidate_data": row.candidate_data,
+                "source_evidence_ids": row.source_evidence_ids or [],
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+    }
 
 
 @router.get("/daily/log/{person_id}", response_model=list[DailyCaptureRecordOutput])
