@@ -87,9 +87,14 @@ def ensure_database_schema(bind=None):
     adds only missing columns and never drops or rewrites data, so it is safe to
     run at startup against a stale dev database.
     """
+    target = bind or engine
+    if target.dialect.name != "sqlite":
+        # PostgreSQL schema changes must use explicit migrations. Do not run
+        # best-effort ALTER TABLE statements during application import.
+        return
+
     from sqlalchemy import inspect, text
 
-    target = bind or engine
     try:
         insp = inspect(target)
         dialect = target.dialect
