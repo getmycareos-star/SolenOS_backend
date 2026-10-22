@@ -36,7 +36,7 @@ def test_allow_postgres_in_railway():
     assert configure_database_url(
         "postgresql://user:pass@host:5432/db",
         railway_runtime=True,
-    ) == "postgresql+psycopg://user:pass@host:5432/db"
+    ) == "postgresql+psycopg://user:pass@host:5432/db?sslmode=require"
 
 
 def test_reject_placeholder_session_secret_in_railway():
@@ -152,3 +152,20 @@ def test_revoked_caregiver_link_history_does_not_block_relinking():
     finally:
         engine.dispose()
 
+
+
+
+def test_railway_postgres_url_requires_tls_and_overrides_insecure_mode():
+    configured = configure_database_url(
+        "postgresql://user:pass@host:5432/db?sslmode=disable",
+        railway_runtime=True,
+    )
+    assert configured == "postgresql+psycopg://user:pass@host:5432/db?sslmode=require"
+
+
+def test_local_postgres_url_does_not_force_tls():
+    configured = configure_database_url(
+        "postgresql://user:pass@host:5432/db",
+        railway_runtime=False,
+    )
+    assert configured == "postgresql+psycopg://user:pass@host:5432/db"
