@@ -84,7 +84,7 @@ class CareActionOutcome(Base):
 
 
 TRACKED_TABLES = {
-    "care_events", "temporal_facts", "insights", "information_gaps",
+    "care_events", "temporal_facts", "insights", "information_gaps", "care_assertions",
     "open_questions", "contradictions", "uncertainty_assessments",
     "baselines", "changes", "situations", "corrections",
 }
