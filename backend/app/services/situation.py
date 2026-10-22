@@ -91,6 +91,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     attention_candidate = False
     follow_up_candidate = False
     what_changed = None
+    intelligence_status = "available"
+    intelligence_message = None
 
     try:
         changes = detect_event_changes(db, payload.person_id, care_event.event_type, None, occurred_at)
@@ -123,10 +125,14 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         db.commit()
         db.refresh(care_event)
     except Exception:
+        # The raw care event was committed before derived analysis. Preserve that
+        # record, but report analysis as unavailable rather than implying success.
         db.rollback()
         db.add(care_event)
         db.flush()
         db.commit()
+        intelligence_status = "unavailable"
+        intelligence_message = "Care input was saved, but derived analysis is unavailable. No conclusion was inferred from the failed analysis."
 
     events = [
         SituationEvent(
@@ -166,4 +172,6 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         attention_candidate=attention_candidate,
         follow_up_candidate=follow_up_candidate,
         what_changed=what_changed,
+        intelligence_status=intelligence_status,
+        intelligence_message=intelligence_message,
     )
