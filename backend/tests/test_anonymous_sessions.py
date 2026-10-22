@@ -476,6 +476,30 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
         item for item in contradictions.json()
         if item["subject_id"] == "medication-actor-test" and item["field"] == "dose"
     )
+
+    questions = client.post(
+        f"/api/v1/care-continuity/next-questions/{person_id}",
+        headers=headers,
+        json={},
+    )
+    assert questions.status_code == 200, questions.text
+    conflict_question = next(
+        item for item in questions.json() if item["source_kind"] == "contradiction"
+    )
+    outcome = client.post(
+        "/api/v1/care-continuity/outcomes",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "action_id": conflict_question["persisted_question_id"],
+            "action_type": "next_best_question",
+            "outcome_status": "useful",
+            # Intentionally omit created_by_caregiver_id.
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+    assert outcome.json()["created_by_caregiver_id"] == caregiver_id
+
     resolved = client.patch(
         f"/api/v1/care-continuity/contradictions/{conflict['id']}/resolution",
         headers=headers,
