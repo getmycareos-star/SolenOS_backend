@@ -62,3 +62,5 @@ class SituationResponse(BaseModel):
     attention_candidate: bool = False
     follow_up_candidate: bool = False
     what_changed: Optional[str] = None
+    analysis_status: Literal["complete", "partial"] = "complete"
+    analysis_warning: Optional[str] = None

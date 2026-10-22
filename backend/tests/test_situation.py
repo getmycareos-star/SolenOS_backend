@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.care import Person, Caregiver
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
 
@@ -80,6 +80,8 @@ def test_post_situation_creates_evidence_and_event():
         assert data["care_key"] == caregiver_id
         assert data["person_id"] == person_id
         assert data["message"] == "Care input recorded successfully."
+        assert data["analysis_status"] == "complete"
+        assert data["analysis_warning"] is None
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
         assert data["evidence_id"] is not None
@@ -197,5 +199,80 @@ def test_post_situation_empty_input_and_no_documents():
         )
         assert response.status_code == 400, response.text
         assert "No valid evidence provided" in response.json()["detail"]
+    finally:
+        teardown_db()
+
+
+
+def test_analysis_failure_is_reported_as_partial_after_evidence_is_saved(monkeypatch):
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="partial-person", name="Partial Person")
+        caregiver = Caregiver(
+            id="partial-caregiver",
+            name="Partial Caregiver",
+            email="partial@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        def fail_analysis(*args, **kwargs):
+            raise RuntimeError("internal analysis failure")
+
+        monkeypatch.setattr("app.services.situation.detect_event_changes", fail_analysis)
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                raw_input="Breakfast was mostly uneaten.",
+            ),
+        )
+
+        assert response.ok is True
+        assert response.analysis_status == "partial"
+        assert response.message == "Care input recorded; analysis is incomplete."
+        assert response.analysis_warning
+        assert "internal analysis failure" not in response.analysis_warning
+        assert db.query(Evidence).filter_by(person_id=person.id).count() == 1
+        assert db.query(CareEvent).filter_by(person_id=person.id).count() == 1
+        assert response.situations is None
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_invalid_observation_timestamp_is_rejected_not_replaced_with_now():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="invalid-time-person", name="Invalid Time Person")
+        caregiver = Caregiver(
+            id="invalid-time-caregiver",
+            name="Invalid Time Caregiver",
+            email="invalid-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        with pytest.raises(ValueError, match="Invalid timestamp"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id=caregiver.id,
+                    person_id=person.id,
+                    raw_input="A reported care observation.",
+                    timestamp="not-a-timestamp",
+                ),
+            )
+
+        assert db.query(Evidence).filter_by(person_id=person.id).count() == 0
+        assert db.query(CareEvent).filter_by(person_id=person.id).count() == 0
+        db.close()
     finally:
         teardown_db()

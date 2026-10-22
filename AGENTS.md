@@ -27,5 +27,4 @@
 Read `docs/SOLENOS_MASTER_VALUES.md` before implementation. Its V01–V40 and acceptance gates are binding. Documentation does not establish compliance: enforce the applicable values in production code, data contracts, server-side authorization, persistence behavior and executable tests. Report gaps as gaps. In particular, do not silently fall back to in-memory storage after a database failure, do not trust client-supplied IDs for authorization, and do not claim persistence or deployment without direct evidence.
 
 
-## Master Values enforcement
-Read `docs/SOLENOS_MASTER_VALUES.md` before implementation. Its V01–V40 and acceptance gates are binding. Documentation does not establish compliance: enforce the applicable values in production code, data contracts, server-side authorization, persistence behavior and executable tests. Report gaps as gaps. In particular, do not silently fall back to in-memory storage after a database failure, do not trust client-supplied IDs for authorization, and do not claim persistence or deployment without direct evidence.
+
