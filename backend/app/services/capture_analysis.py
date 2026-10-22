@@ -61,18 +61,18 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
     db.commit()
     db.refresh(record)
 
-    if not settings.qwen_configured:
+    if not settings.ollama_configured:
         record.provider_status = "not_configured"
         record.status = "not_configured"
         record.model_name = None
-        record.error_message = "Qwen provider is not configured."
+        record.error_message = "Local Ollama Qwen is not configured."
         db.commit()
         return {"qwen_extraction_status": record.status, "qwen_candidates": None}
 
     if not sources:
         record.provider_status = "skipped"
         record.status = "no_source_evidence"
-        record.model_name = settings.qwen_model.strip()
+        record.model_name = settings.ollama_model.strip()
         record.error_message = "No text-bearing source evidence was available for extraction."
         db.commit()
         return {"qwen_extraction_status": record.status, "qwen_candidates": None}
@@ -94,32 +94,29 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         "source_evidence": sources,
     }, ensure_ascii=False)
-    endpoint = settings.qwen_base_url.strip().rstrip("/")
-    if not endpoint.endswith("/chat/completions"):
-        endpoint += "/chat/completions"
+    endpoint = f"{settings.ollama_base_url.strip().rstrip('/')}/api/chat"
     request = Request(
         endpoint,
         data=json.dumps({
-            "model": settings.qwen_model.strip(),
+            "model": settings.ollama_model.strip(),
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.0,
             "stream": False,
-            "response_format": {"type": "json_object"},
+            "format": "json",
         }).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {settings.qwen_api_key.strip()}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
         method="POST",
     )
     try:
-        with urlopen(request, timeout=max(3.0, min(settings.qwen_timeout_seconds, 60.0))) as response:
+        with urlopen(request, timeout=max(3.0, min(settings.ollama_timeout_seconds, 120.0))) as response:
             provider_body = json.loads(response.read().decode("utf-8"))
-        parsed = json.loads(provider_body["choices"][0]["message"]["content"])
+        parsed = json.loads(provider_body["message"]["content"])
         if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
             raise ValueError("Invalid extraction schema")
 
