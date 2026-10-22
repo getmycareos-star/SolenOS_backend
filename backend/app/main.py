@@ -235,6 +235,24 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 content={"detail": "Caregiver attribution does not match this session"},
             )
 
+        # Care-continuity audit actors are always derived from the verified
+        # bearer session. Reject spoofed IDs above; also fill omitted/null actor
+        # fields so the persisted review history never silently loses authorship.
+        if path.startswith("/api/v1/care-continuity/") and isinstance(body_payload, dict):
+            actor_field = None
+            if method == "POST" and path.endswith("/assertions"):
+                actor_field = "created_by_caregiver_id"
+            elif method == "POST" and path.endswith("/outcomes"):
+                actor_field = "created_by_caregiver_id"
+            elif method == "PATCH" and path.endswith("/status") and "/assertions/" in path:
+                actor_field = "updated_by_caregiver_id"
+            elif method == "PATCH" and path.endswith("/resolution") and "/contradictions/" in path:
+                actor_field = "resolved_by_caregiver_id"
+            if actor_field:
+                body_payload[actor_field] = scoped_caregiver_id
+                body = json.dumps(body_payload).encode("utf-8")
+                request._body = body
+
         if not target_person_id:
             return JSONResponse(
                 status_code=403,
