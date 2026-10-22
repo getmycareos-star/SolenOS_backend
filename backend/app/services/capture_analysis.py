@@ -12,7 +12,7 @@ from app.models.capture_analysis import CaptureAnalysis
 def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
     event = db.query(CareEvent).filter(CareEvent.id == care_event_id).first()
     if event is None:
-        return {"qwen_extraction_status": "failed", "qwen_candidates": None}
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": record.id if record is not None else None}
 
     evidence_ids = sorted({
         item for item in (event.evidence_ids or []) if isinstance(item, str)
@@ -38,7 +38,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         # Some isolated unit-test schemas omit optional analysis tables. Preserve the
         # saved report and expose that extraction could not run; never fabricate output.
         db.rollback()
-        return {"qwen_extraction_status": "failed", "qwen_candidates": None}
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": None}
     if record is None:
         record = CaptureAnalysis(
             care_event_id=event.id,
@@ -67,7 +67,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         record.model_name = None
         record.error_message = "Railway-hosted Qwen is not configured."
         db.commit()
-        return {"qwen_extraction_status": record.status, "qwen_candidates": None}
+        return {"qwen_extraction_status": record.status, "qwen_candidates": None, "qwen_analysis_id": record.id}
 
     if not sources:
         record.provider_status = "skipped"
@@ -75,7 +75,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         record.model_name = settings.ollama_model.strip()
         record.error_message = "No text-bearing source evidence was available for extraction."
         db.commit()
-        return {"qwen_extraction_status": record.status, "qwen_candidates": None}
+        return {"qwen_extraction_status": record.status, "qwen_candidates": None, "qwen_analysis_id": record.id}
 
     system_prompt = (
         "You extract candidate observations for SolenOS from caregiver-reported source evidence. "
@@ -160,6 +160,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         return {
             "qwen_extraction_status": record.status,
             "qwen_candidates": record.candidate_data,
+            "qwen_analysis_id": record.id,
         }
     except Exception:
         db.rollback()
@@ -173,4 +174,4 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
             record.candidate_data = None
             record.error_message = "Qwen extraction failed or returned invalid output."
             db.commit()
-        return {"qwen_extraction_status": "failed", "qwen_candidates": None}
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": None}
