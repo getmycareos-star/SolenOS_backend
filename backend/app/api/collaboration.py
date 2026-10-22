@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, require_staff
 from app.core.database import get_db
-from app.models.auth_identity import AccountPersonAccess, AuthAccount
+from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.collaboration import (
     CommunityPost,
@@ -353,7 +353,18 @@ def get_conversation_history(
 
 @team_router.get("/dashboard")
 def team_dashboard(db: Session = Depends(get_db)):
-    active_caregiver_accounts = db.query(func.count(func.distinct(AccountPersonAccess.account_id))).filter(
+    # Count verified, active caregiver-account links, not every account that
+    # happens to have a caregiver/owner access grant. A grant alone is not proof
+    # that the account is linked to a caregiver identity.
+    active_caregiver_accounts = db.query(
+        func.count(func.distinct(CaregiverAccountLink.account_id))
+    ).join(
+        AccountPersonAccess,
+        (AccountPersonAccess.account_id == CaregiverAccountLink.account_id)
+        & (AccountPersonAccess.person_id == CaregiverAccountLink.person_id),
+    ).filter(
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
         AccountPersonAccess.role.in_(["owner", "caregiver"]),
         AccountPersonAccess.is_active.is_(True),
         AccountPersonAccess.revoked_at.is_(None),
@@ -382,7 +393,15 @@ def team_state_report(db: Session = Depends(get_db)):
             tag_counts[tag] = tag_counts.get(tag, 0) + 1
     top = sorted(tag_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
     return {
-        "total_caregivers": db.query(func.count(func.distinct(AccountPersonAccess.account_id))).filter(
+        "total_caregivers": db.query(
+            func.count(func.distinct(CaregiverAccountLink.caregiver_id))
+        ).join(
+            AccountPersonAccess,
+            (AccountPersonAccess.account_id == CaregiverAccountLink.account_id)
+            & (AccountPersonAccess.person_id == CaregiverAccountLink.person_id),
+        ).filter(
+            CaregiverAccountLink.is_active.is_(True),
+            CaregiverAccountLink.revoked_at.is_(None),
             AccountPersonAccess.role.in_(["owner", "caregiver"]),
             AccountPersonAccess.is_active.is_(True),
             AccountPersonAccess.revoked_at.is_(None),
