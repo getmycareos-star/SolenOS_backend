@@ -96,3 +96,13 @@ class UploadOutput(BaseModel):
     message: str
 
 
+
+
+class CaptureCandidateReviewInput(BaseModel):
+    """Explicit caregiver review of an extracted candidate; never an LCR write."""
+
+    candidate_index: int = Field(ge=0, le=29)
+    decision: Literal["accept", "correct", "reject"]
+    corrected_subject: Optional[str] = Field(default=None, max_length=160)
+    corrected_observation: Optional[str] = Field(default=None, max_length=1200)
+    note: Optional[str] = Field(default=None, max_length=1000)
