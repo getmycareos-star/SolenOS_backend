@@ -31,6 +31,16 @@ def test_railway_accepts_private_ollama_service_url(monkeypatch):
     assert settings.ollama_configured is True
 
 
+def test_railway_rejects_public_ollama_url(monkeypatch):
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "test-project")
+    settings = Settings(
+        ollama_base_url="https://ollama.example.com",
+        ollama_model="qwen2.5:1.5b",
+    )
+
+    assert settings.ollama_configured is False
+
+
 def test_local_development_can_use_loopback_ollama(monkeypatch):
     monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
