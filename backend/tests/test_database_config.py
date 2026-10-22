@@ -86,11 +86,27 @@ def test_schema_validation_rejects_missing_columns_on_existing_tables():
         engine.dispose()
 
 
-def test_schema_validation_accepts_a_model_complete_existing_table():
+def test_schema_validation_accepts_a_model_complete_existing_schema():
+    from app.core.database import Base, _register_all_models
+
     engine = create_engine("sqlite://")
     try:
-        Person.__table__.create(engine)
+        _register_all_models()
+        Base.metadata.create_all(bind=engine)
         validate_database_schema(engine)
+    finally:
+        engine.dispose()
+
+
+def test_schema_validation_rejects_missing_registered_table():
+    from app.core.database import Base, _register_all_models
+
+    engine = create_engine("sqlite://")
+    try:
+        _register_all_models()
+        Person.__table__.create(engine)
+        with pytest.raises(RuntimeError, match=r"\(table missing\)"):
+            validate_database_schema(engine)
     finally:
         engine.dispose()
 
