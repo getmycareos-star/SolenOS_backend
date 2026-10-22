@@ -87,9 +87,12 @@ class CareActionOutcome(Base):
 
 
 TRACKED_TABLES = {
-    "care_events", "temporal_facts", "insights", "information_gaps", "care_assertions",
+    "persons", "caregivers", "evidence", "care_events", "temporal_facts", "temporal_reference_frames",
+    "temporal_relations", "temporal_contradictions", "observations", "reasoning_memories",
+    "care_windows", "appointments", "care_transitions", "locations", "daily_intelligence",
+    "timezone_contexts", "temporal_relationships", "insights", "information_gaps", "care_assertions",
     "open_questions", "contradictions", "uncertainty_assessments",
-    "baselines", "changes", "situations", "corrections",
+    "baselines", "changes", "patterns", "situations", "corrections",
 }
 
 
@@ -131,11 +134,11 @@ def _version_care_state(session, flush_context, instances):
         state = inspect(obj)
         if obj in session.dirty and not session.is_modified(obj, include_collections=True):
             continue
-        person_id = getattr(obj, "person_id", None)
-        if not person_id:
-            continue
         if not getattr(obj, "id", None):
             obj.id = str(uuid.uuid4())
+        person_id = getattr(obj, "person_id", None) or (obj.id if table == "persons" else None)
+        if not person_id:
+            continue
         target_id = str(obj.id)
         # Avoid creating two revisions for the same object in one flush.
         marker = (table, target_id)
