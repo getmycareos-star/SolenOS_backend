@@ -65,9 +65,11 @@ def _caregiver_for_person(db: Session, caregiver_id: str, person_id: str) -> Car
 
 def _post_payload(db: Session, post: CommunityPost, actor_id: Optional[str] = None):
     reactions = db.query(CommunityReaction).filter(CommunityReaction.post_id == post.id).all()
-    counts = {}
+    counts = {reaction_type: 0 for reaction_type in ("support", "helpful", "relate", "heart")}
     for reaction in reactions:
-        counts[reaction.reaction_type] = counts.get(reaction.reaction_type, 0) + 1
+        if reaction.reaction_type not in counts:
+            raise HTTPException(status_code=500, detail="Stored Community reaction has an unsupported type")
+        counts[reaction.reaction_type] += 1
     return {
         "id": post.id, "caregiver_id": post.caregiver_id,
         "author_type": post.author_type, "author_label": post.author_label,
