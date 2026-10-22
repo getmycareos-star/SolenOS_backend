@@ -205,6 +205,24 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
             "_weight": _priority_weight(priority),
         })
 
+    # Collapse identical questions from repeated stale assertions while retaining every source.
+    deduplicated: Dict[tuple, Dict[str, Any]] = {}
+    for item in candidates:
+        key = (item["question"], item["subject_type"], item["subject_id"])
+        if key not in deduplicated:
+            item["source_ids"] = [item["source_id"]]
+            deduplicated[key] = item
+            continue
+        prior = deduplicated[key]
+        prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
+        prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + [item["source_id"]]))
+        if item["_weight"] > prior["_weight"]:
+            prior["priority"] = item["priority"]
+            prior["_weight"] = item["_weight"]
+            prior["reason"] = item["reason"]
+            prior["source_kind"] = item["source_kind"]
+            prior["source_id"] = item["source_id"]
+    candidates = list(deduplicated.values())
     candidates.sort(key=lambda item: (-item["_weight"], item["question"].casefold(), item["source_id"]))
     output = []
     for item in candidates[:50]:
