@@ -14,7 +14,7 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
-from app.core.database import Base, get_db, SessionLocal
+from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import SituationInput, SituationResponse
@@ -260,6 +260,16 @@ def readiness_check(db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
+        raise HTTPException(status_code=503, detail="Database schema is incomplete")
+
+    # Table presence is not enough: existing PostgreSQL tables can be stale
+    # because SQLAlchemy create_all() does not add columns to existing tables.
+    # Return no schema names or care data in the public readiness response.
+    try:
+        schema_differences = database_schema_differences(db.get_bind())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
+    if schema_differences:
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     return {
