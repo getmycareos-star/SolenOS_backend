@@ -1,5 +1,7 @@
+import ipaddress
 import os
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings
 
@@ -9,6 +11,22 @@ RAILWAY_RUNTIME_VARIABLES = (
     "RAILWAY_ENVIRONMENT",
     "RAILWAY_ENVIRONMENT_NAME",
 )
+
+
+def is_loopback_ollama_url(url: str) -> bool:
+    """Return true when the configured endpoint points back at this container."""
+    try:
+        host = urlparse(url.strip()).hostname
+    except ValueError:
+        return True
+    if not host:
+        return True
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
@@ -32,10 +50,10 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
 
-    # Local Qwen inference through Ollama. No hosted Qwen API or API key is used.
-    # The Ollama process must be reachable from this backend runtime.
+    # Local development default only. Railway must set OLLAMA_BASE_URL to the
+    # private URL of a separate Ollama service; localhost is a different container.
     ollama_base_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen2.5:1.5b"
     ollama_timeout_seconds: float = 60.0
 
     class Config:
@@ -44,7 +62,17 @@ class Settings(BaseSettings):
 
     @property
     def ollama_configured(self) -> bool:
-        return bool(self.ollama_base_url.strip() and self.ollama_model.strip())
+        url = self.ollama_base_url.strip()
+        model = self.ollama_model.strip()
+        if not url or not model:
+            return False
+
+        # A loopback endpoint is valid for local development but can never reach
+        # a separate Ollama service from a Railway backend container.
+        railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
+        if railway_runtime and is_loopback_ollama_url(url):
+            return False
+        return True
 
     def validate_production_configuration(self) -> None:
         """Reject unsafe storage or session-signing configuration before serving requests.
