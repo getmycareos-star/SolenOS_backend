@@ -104,3 +104,8 @@ class CareActionOutcomeResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class CareAssertionStatusUpdate(BaseModel):
+    person_id: str
+    assertion_status: Literal["reported", "review_required", "accepted", "rejected", "superseded"]
