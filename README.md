@@ -20,7 +20,7 @@ See `docs/philosophy.md` for the full product philosophy.
 
 - **Backend**: FastAPI + SQLAlchemy (Python)
 - **Frontend**: React + Vite (TypeScript)
-- **Database**: SQLite (default), upgradeable to PostgreSQL
+- **Database**: SQLite for local development; production requires managed PostgreSQL (for example, Supabase). Production startup rejects SQLite and missing database configuration.
 
 ## Getting Started
 
