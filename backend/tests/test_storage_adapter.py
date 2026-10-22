@@ -2,8 +2,18 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 import app.services.storage as storage
+import app.api.v1 as api_v1
+from app.core.database import Base, get_db
+from app.api.authentication import current_account
+from app.main import app
+from app.models.auth_identity import AuthAccount, AccountPersonAccess, CaregiverAccountLink
+from app.models.care import Caregiver, Evidence, Person
 
 
 def test_storage_fails_closed_when_private_bucket_is_not_configured(monkeypatch):
@@ -104,3 +114,105 @@ def test_signed_url_includes_supabase_storage_api_prefix(monkeypatch):
         "https://project.supabase.co/storage/v1/object/sign/"
         "care-evidence/opaque-photo.jpg?token=short-lived"
     )
+
+
+
+def test_photo_upload_requires_access_and_persists_evidence(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    testing_session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    uploaded = {}
+
+    def fake_upload(object_path, content_type, data):
+        uploaded.update(path=object_path, content_type=content_type, data=data)
+
+    monkeypatch.setattr(api_v1, "upload_private_object", fake_upload)
+    monkeypatch.setattr(api_v1, "delete_private_object", lambda _path: None)
+
+    db = testing_session()
+    try:
+        person = Person(id="storage-route-person", name="Storage Route Person")
+        caregiver = Caregiver(
+            id="storage-route-caregiver",
+            name="Storage Route Caregiver",
+            email="storage-route@example.invalid",
+            relationship="Family",
+            person_id=person.id,
+            timezone="UTC",
+        )
+        account = AuthAccount(
+            id="storage-route-account",
+            email="storage-route@example.invalid",
+            password_hash="test-only",
+            is_active=True,
+        )
+        db.add_all([person, caregiver, account])
+        db.flush()
+        db.add(
+            AccountPersonAccess(
+                account_id=account.id,
+                person_id=person.id,
+                role="owner",
+                permissions=["read", "write", "admin"],
+                is_active=True,
+                granted_by_account_id=account.id,
+            )
+        )
+        db.add(
+            CaregiverAccountLink(
+                account_id=account.id,
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                linked_by_account_id=account.id,
+                is_active=True,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    def override_db():
+        session = testing_session()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[current_account] = lambda: account
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/api/v1/upload",
+            data={
+                "person_id": "storage-route-person",
+                "caregiver_id": "storage-route-caregiver",
+            },
+            files={"file": ("medication.jpg", b"\\xff\\xd8\\xffimage-bytes", "image/jpeg")},
+        )
+        assert response.status_code == 201, response.text
+        evidence_id = response.json()["evidence_id"]
+        assert uploaded["content_type"] == "image/jpeg"
+        assert uploaded["data"] == b"\\xff\\xd8\\xffimage-bytes"
+        assert "/" not in uploaded["path"]
+
+        db = testing_session()
+        try:
+            evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+            assert evidence.person_id == "storage-route-person"
+            assert evidence.uploaded_by_caregiver_id == "storage-route-caregiver"
+            assert evidence.original_file_path == uploaded["path"]
+            assert evidence.source_type == "caregiver_uploaded_image"
+            assert evidence.evidence_status == "reported"
+            assert evidence.confidence is None
+        finally:
+            db.close()
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
