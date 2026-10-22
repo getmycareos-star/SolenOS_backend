@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -88,6 +90,14 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             status="active",
             granted_by_caregiver_id=caregiver_a.id,
         )
+        expired_grant_b = ProfessionalAccessGrant(
+            id="isolation-grant-expired-b",
+            professional_caregiver_id=caregiver_b.id,
+            person_id=person_b.id,
+            status="active",
+            granted_by_caregiver_id=caregiver_a.id,
+            expires_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+        )
         pending_post = CommunityPost(
             id="isolation-community-post",
             caregiver_id=caregiver_a.id,
@@ -99,7 +109,7 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             visibility="public",
             moderation_status="pending",
         )
-        db.add_all([account_a, account_b, account_team, grant_a, pending_post])
+        db.add_all([account_a, account_b, account_team, grant_a, expired_grant_b, pending_post])
         db.commit()
         db.refresh(account_a)
         db.refresh(account_b)
@@ -213,11 +223,13 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             headers=professional_headers,
         )
         assert granted_person.status_code == 200, granted_person.text
-        ungranted_person = client.get(
+        # A grant whose status still says active but whose expiry is in the past
+        # must not authorize access at the middleware boundary.
+        expired_grant_person = client.get(
             "/api/v1/persons/isolation-person-b",
             headers=professional_headers,
         )
-        assert ungranted_person.status_code == 403, ungranted_person.text
+        assert expired_grant_person.status_code == 403, expired_grant_person.text
         professional_dashboard = client.get(
             "/api/v1/professional/dashboard",
             params={"professional_caregiver_id": "isolation-caregiver-b"},
