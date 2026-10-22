@@ -1,4 +1,3 @@
-import io
 import json
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -36,21 +35,19 @@ def test_qwen_citations_are_restricted_to_authorized_evidence_ids():
         ollama_model="qwen-test",
         ollama_timeout_seconds=3,
     )
-    model_content = json.dumps({
+    model_result = {
         "reply": "The record notes a sleep change.",
         "evidence_ids": ["real-evidence", "invented-evidence"],
         "safety_note": None,
-    })
-    provider_body = json.dumps({
-        "message": {"content": model_content}
-    }).encode("utf-8")
-    fake_response = io.BytesIO(provider_body)
+    }
     with patch.object(conversation_service, "get_settings", return_value=settings), patch.object(
-        conversation_service, "urlopen", return_value=fake_response
-    ) as ollama_call:
+        conversation_service, "call_qwen_json", return_value=(model_result, "connected")
+    ) as qwen_call:
         result = conversation_service._call_qwen(
             "What changed?", "EVIDENCE real-evidence: sleep notes", ["real-evidence"], []
         )
+    qwen_call.assert_called_once()
+    assert "real-evidence" in qwen_call.call_args.kwargs["user_prompt"]
     assert result.ai_generated is True
     assert result.provider_status == "connected"
     assert result.evidence_ids == ["real-evidence"]
@@ -69,7 +66,7 @@ def test_qwen_provider_failure_does_not_fabricate_substitute_answer():
         ollama_timeout_seconds=3,
     )
     with patch.object(conversation_service, "get_settings", return_value=settings), patch.object(
-        conversation_service, "urlopen", side_effect=OSError("network unavailable")
+        conversation_service, "call_qwen_json", return_value=(None, "error")
     ):
         result = conversation_service._call_qwen("What changed?", "No records", [], [])
     assert result.provider_status == "error"
