@@ -67,6 +67,8 @@ class DailyCaptureOutput(BaseModel):
     attention_candidate: bool = False
     follow_up_candidate: bool = False
     situations: list[dict] = Field(default_factory=list)
+    qwen_extraction_status: str = "not_configured"
+    qwen_candidates: Optional[dict] = None
 
 
 class DailyCaptureRecordOutput(BaseModel):
