@@ -217,6 +217,33 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert caregiver_list_alias.status_code == 200, caregiver_list_alias.text
             assert caregiver_list_alias.json() == caregiver_list.json()
             caregiver_id = caregiver_list.json()[0]["id"]
+
+            # A caregiver record can exist without this account being linked to
+            # it. Such an ID must not be accepted as actor attribution on a
+            # care-record write, even when the account owns the care record.
+            with TestingSession() as db:
+                unlinked_caregiver = CaregiverModel(
+                    name="Unlinked caregiver",
+                    email="unlinked-caregiver@example.test",
+                    relationship="family",
+                    person_id=context["person_id"],
+                    timezone="UTC",
+                )
+                db.add(unlinked_caregiver)
+                db.commit()
+                unlinked_caregiver_id = unlinked_caregiver.id
+
+            unlinked_timezone = client.post(
+                "/api/v1/timezones",
+                headers=headers,
+                params={
+                    "person_id": context["person_id"],
+                    "caregiver_id": unlinked_caregiver_id,
+                    "timezone_id": "UTC",
+                    "is_primary": "false",
+                },
+            )
+            assert unlinked_timezone.status_code == 403, unlinked_timezone.text
             with TestingSession() as db:
                 caregiver_link = db.query(CaregiverAccountLink).filter_by(
                     account_id=signup.json()["id"],
