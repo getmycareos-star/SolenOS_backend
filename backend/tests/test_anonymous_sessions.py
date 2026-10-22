@@ -196,7 +196,7 @@ def test_situation_hydration_returns_only_persisted_records_for_session_scope():
     assert observation["raw_text"] == "Caregiver reports that breakfast was left mostly uneaten."
     assert observation["human_fact"] == observation["raw_text"]
     assert observation["event_ids"] == [write.json()["care_event_id"]]
-    assert data["active_care_situation_turn"]["what_seems_happening"] is None
+    assert data["active_care_situation_turn"] == {"situation": data["active_care_situation"]}
 
 
 def test_situation_hydration_requires_session_and_ignores_spoofed_person_query():
