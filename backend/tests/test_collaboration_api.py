@@ -117,7 +117,7 @@ def test_community_post_reaction_and_literal_experience_search_persist():
 
         # Same reaction toggles off instead of creating duplicate rows.
         client.post(f"/api/v1/community/{post_id}/reactions", headers=headers, json={
-            "caregiver_id": person_id, "reaction_type": "support"
+            "caregiver_id": caregiver_id, "reaction_type": "support"
         })
         with Session() as db:
             from app.models.collaboration import CommunityReaction, CommunityPost
