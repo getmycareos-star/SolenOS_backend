@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 
 engine = create_engine(
@@ -31,6 +31,7 @@ def setup_function():
 
 def teardown_function():
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
     Base.metadata.drop_all(bind=engine)
 
 
