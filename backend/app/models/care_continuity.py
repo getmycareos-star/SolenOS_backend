@@ -120,6 +120,7 @@ def _snapshot(obj, *, before=False):
 def _version_care_state(session, flush_context, instances):
     """Create immutable before/after revisions in the same transaction as each write."""
     candidates = list(session.new) + list(session.dirty) + list(session.deleted)
+    seen = set()
     for obj in candidates:
         table = getattr(getattr(obj, "__table__", None), "name", None)
         if table not in TRACKED_TABLES or isinstance(obj, CareStateRevision):
@@ -135,7 +136,6 @@ def _version_care_state(session, flush_context, instances):
         target_id = str(obj.id)
         # Avoid creating two revisions for the same object in one flush.
         marker = (table, target_id)
-        seen = session.info.setdefault("_care_revision_seen", set())
         if marker in seen:
             continue
         seen.add(marker)
