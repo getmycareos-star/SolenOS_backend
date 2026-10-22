@@ -8,6 +8,7 @@ class CareAssertionCreate(BaseModel):
     subject_type: str = Field(min_length=1, max_length=80)
     subject_id: str = Field(min_length=1, max_length=160)
     field: str = Field(min_length=1, max_length=120)
+    assertion_kind: Literal["current_state", "time_bound_observation"] = "current_state"
     asserted_value: str = Field(min_length=1, max_length=4000)
     source_label: str = Field(min_length=1, max_length=160)
     source_text: Optional[str] = Field(default=None, max_length=12000)
@@ -23,6 +24,7 @@ class CareAssertionResponse(BaseModel):
     subject_type: str
     subject_id: str
     field: str
+    assertion_kind: Literal["current_state", "time_bound_observation"] = "current_state"
     asserted_value: str
     source_label: str
     source_text: Optional[str] = None
@@ -54,7 +56,7 @@ class CareStateRevisionResponse(BaseModel):
 class FreshnessResponse(BaseModel):
     assertion_id: str
     field: str
-    status: Literal["within_review_window", "needs_confirmation", "historical"]
+    status: Literal["within_review_window", "needs_confirmation", "historical", "time_bound_observation"]
     age_days: Optional[int]
     review_after_days: int
     assertion_status: str
