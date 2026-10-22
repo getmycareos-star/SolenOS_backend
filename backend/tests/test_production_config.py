@@ -49,3 +49,31 @@ def test_production_accepts_postgres_and_long_secret(monkeypatch):
     )
 
     settings.validate_production_configuration()
+
+
+
+def test_any_production_environment_indicator_enables_production_validation(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "staging")
+    monkeypatch.setenv("APP_ENV", "production")
+
+    settings = Settings(
+        database_url="sqlite:///./solenos.db",
+        secret_key="a-unique-random-secret-value-with-more-than-32-characters",
+    )
+    assert settings.is_production is True
+    with pytest.raises(RuntimeError, match="managed PostgreSQL"):
+        settings.validate_production_configuration()
+
+
+def test_production_rejects_debug_mode(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    settings = Settings(
+        database_url="postgresql://db.example.test/solenos",
+        secret_key="a-unique-random-secret-value-with-more-than-32-characters",
+        debug=True,
+    )
+
+    with pytest.raises(RuntimeError, match="DEBUG must be false"):
+        settings.validate_production_configuration()
