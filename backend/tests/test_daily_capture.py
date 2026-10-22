@@ -37,11 +37,12 @@ def teardown_db():
     Base.metadata.drop_all(bind=engine)
 
 
-def create_authenticated_owner(client: TestClient):
+def create_authenticated_owner(client: TestClient, suffix: str = "daily-capture"):
+    email = f"{suffix}-owner@example.com"
     signup = client.post(
         "/api/v1/auth/signup",
         json={
-            "email": "daily-capture-owner@example.com",
+            "email": email,
             "password": "a-long-test-password-2026",
             "display_name": "Daily Capture Owner",
         },
@@ -50,7 +51,7 @@ def create_authenticated_owner(client: TestClient):
     login = client.post(
         "/api/v1/auth/login",
         json={
-            "email": "daily-capture-owner@example.com",
+            "email": email,
             "password": "a-long-test-password-2026",
         },
     )
@@ -188,5 +189,39 @@ def test_daily_care_entry_runs_shared_analysis_and_persists_evidence():
                 assert event.person_id == context["person_id"]
                 assert event.created_by_caregiver_id == caregiver_id
                 assert event.evidence_ids == body["evidence_ids"]
+    finally:
+        teardown_db()
+
+
+def test_capture_analysis_history_is_scoped_to_authorized_person():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            owner_a_headers, context_a, caregiver_a = create_authenticated_owner(client, "analysis-a")
+            owner_b_headers, context_b, _ = create_authenticated_owner(client, "analysis-b")
+            saved = client.post(
+                "/api/v1/daily/log",
+                headers=owner_a_headers,
+                json={
+                    "person_id": context_a["person_id"],
+                    "caregiver_id": caregiver_a,
+                    "medications": [],
+                    "vitals": [],
+                    "scales": [],
+                    "notes": "Caregiver-reported quiet afternoon",
+                },
+            )
+            assert saved.status_code == 201, saved.text
+            allowed = client.get(
+                f"/api/v1/capture/analyses/{context_a['person_id']}",
+                headers=owner_a_headers,
+            )
+            assert allowed.status_code == 200, allowed.text
+            assert allowed.json()["items"]
+            denied = client.get(
+                f"/api/v1/capture/analyses/{context_a['person_id']}",
+                headers=owner_b_headers,
+            )
+            assert denied.status_code == 403
     finally:
         teardown_db()
