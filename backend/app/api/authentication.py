@@ -655,12 +655,12 @@ def create_anonymous_session(payload: AnonymousSessionInput, db: Session = Depen
         is_active=True,
     )
     db.add_all([grant, caregiver_link])
-    db.commit()
+    # create_session commits the pending account, person, caregiver, grants,
+    # and session together, avoiding an orphaned empty record if session creation fails.
+    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
     db.refresh(account)
     db.refresh(person)
     db.refresh(caregiver)
-
-    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
     return _anonymous_session_payload(account, person, caregiver, raw_token, session)
 
 
@@ -678,17 +678,21 @@ def refresh_anonymous_session(
     if not account.is_anonymous:
         raise HTTPException(status_code=403, detail="This refresh endpoint is only for anonymous care sessions")
 
-    grant = db.query(AccountPersonAccess).filter(
+    grants = db.query(AccountPersonAccess).filter(
         AccountPersonAccess.account_id == account.id,
         AccountPersonAccess.is_active.is_(True),
         AccountPersonAccess.revoked_at.is_(None),
-    ).one_or_none()
-    caregiver_link = db.query(CaregiverAccountLink).filter(
+    ).all()
+    caregiver_links = db.query(CaregiverAccountLink).filter(
         CaregiverAccountLink.account_id == account.id,
         CaregiverAccountLink.is_active.is_(True),
         CaregiverAccountLink.revoked_at.is_(None),
-    ).one_or_none()
-    if grant is None or caregiver_link is None or grant.person_id != caregiver_link.person_id:
+    ).all()
+    if len(grants) != 1 or len(caregiver_links) != 1:
+        raise HTTPException(status_code=409, detail="Anonymous care-session ownership could not be restored safely")
+    grant = grants[0]
+    caregiver_link = caregiver_links[0]
+    if grant.person_id != caregiver_link.person_id:
         raise HTTPException(status_code=409, detail="Anonymous care-session ownership could not be restored safely")
 
     person = db.query(Person).filter(Person.id == grant.person_id).first()
@@ -699,6 +703,8 @@ def refresh_anonymous_session(
     if person is None or caregiver is None:
         raise HTTPException(status_code=409, detail="Anonymous care record is incomplete; no replacement record was created")
 
-    revoke_session(db, credentials.credentials)
+    # Create the replacement first; if session issuance fails, the existing token
+    # remains valid instead of stranding the caregiver.
     raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
+    revoke_session(db, credentials.credentials)
     return _anonymous_session_payload(account, person, caregiver, raw_token, session)
