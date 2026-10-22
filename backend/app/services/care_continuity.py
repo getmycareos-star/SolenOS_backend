@@ -115,7 +115,7 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
     ).first()
     if assertion is None:
         raise HTTPException(status_code=404, detail="Assertion not found")
-    if status == "accepted" and review_after_days is None and assertion.review_after_days is None:
+    if status == "accepted" and assertion.assertion_kind == "current_state" and review_after_days is None and assertion.review_after_days is None:
         raise HTTPException(status_code=422, detail="Set a review window before marking a current-state assertion as accepted")
     if review_after_days is not None:
         assertion.review_after_days = review_after_days
