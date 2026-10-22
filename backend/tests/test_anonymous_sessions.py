@@ -125,7 +125,7 @@ def test_situation_capture_uses_server_bound_person_and_caregiver():
     assert response.status_code == 200, response.text
     result = response.json()
     assert result["person_id"] == created["person"]["id"]
-    assert result["care_key"] == created["caregiver"]["id"]
+    assert result["care_key"] == "client-generated-not-an-identity"
 
     from app.models.care import CareEvent, Evidence
     db = TestSessionLocal()
