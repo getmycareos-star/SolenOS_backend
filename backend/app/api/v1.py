@@ -810,9 +810,12 @@ def create_timezone_context(
 ):
     assert_person_access(db, account.id, person_id, "write")
     if caregiver_id:
-        caregiver = db.query(CaregiverModel).filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id).first()
-        if not caregiver:
-            raise HTTPException(status_code=404, detail="Caregiver not found for this care record")
+        # A matching caregiver row is not proof that the signed-in account may
+        # attribute this timezone context to that caregiver. Require the active
+        # account-to-caregiver link just as other attributed care writes do.
+        _require_caregiver_in_person(
+            db, caregiver_id, person_id, account.id, "caregiver_id"
+        )
     if not validate_timezone(timezone_id):
         raise HTTPException(status_code=400, detail="Invalid or unsupported timezone")
 
