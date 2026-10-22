@@ -24,16 +24,22 @@ import os
 
 def _assert_demo_seed_allowed() -> None:
     """Synthetic care records are opt-in for local development only."""
-    environment = (
-        os.getenv("RAILWAY_ENVIRONMENT_NAME")
-        or os.getenv("RAILWAY_ENVIRONMENT")
-        or os.getenv("APP_ENV")
-        or os.getenv("ENVIRONMENT")
-        or ""
-    ).strip().lower()
-    if environment in {"production", "prod"}:
+    # Inspect every configured environment label. A lower-priority "development"
+    # value must never override a production/staging value supplied by the host.
+    environment_keys = (
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_ENVIRONMENT",
+        "APP_ENV",
+        "ENVIRONMENT",
+    )
+    environments = {
+        os.getenv(key, "").strip().lower()
+        for key in environment_keys
+        if os.getenv(key, "").strip()
+    }
+    if environments.intersection({"production", "prod"}):
         raise RuntimeError("Demo care records must never be seeded in production.")
-    if environment not in {"development", "dev", "local", "test"}:
+    if not environments or not environments.issubset({"development", "dev", "local", "test"}):
         raise RuntimeError("Demo care records may only be seeded in an explicitly named local development environment.")
     if os.getenv("SOLENOS_ENABLE_DEMO_SEED", "").strip().lower() != "true":
         raise RuntimeError(
