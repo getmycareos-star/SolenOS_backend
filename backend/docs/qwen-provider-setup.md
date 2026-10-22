@@ -25,4 +25,13 @@ The provider URL may be a managed Qwen endpoint or a separately hosted Qwen infe
 
 ## Release verification
 
+Apply the reviewed database migration before serving production traffic:
+
+```powershell
+cd backend
+python -m alembic upgrade head
+```
+
+Run this against the intended PostgreSQL database with the correct production `DATABASE_URL`; do not run it against a developer database by accident. Then restart the backend and confirm `/ready` reports the database as connected.
+
 After setting variables, verify a signed-in test account through `POST /api/v1/conversation/message` and a test care capture through `POST /api/situation` or `POST /api/v1/daily/log`. Confirm Companion returns `provider_status=connected`, capture returns `qwen_extraction_status=pending_review`, and candidate citations are derived only from verbatim matching source quotes. Then test missing/invalid credentials, timeouts, emergency wording, and cross-account access. A code change or passing CI alone does not prove the deployed Qwen endpoint is reachable.
