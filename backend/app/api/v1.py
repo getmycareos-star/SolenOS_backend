@@ -276,8 +276,8 @@ def list_evidence(person_id: str, db: Session = Depends(get_db)):
 
 _MAX_EVIDENCE_IMAGE_BYTES = 5 * 1024 * 1024
 _EVIDENCE_IMAGE_TYPES = {
-    "image/jpeg": ("jpg", lambda data: data.startswith(b"\\xff\\xd8\\xff")),
-    "image/png": ("png", lambda data: data.startswith(b"\\x89PNG\\r\\n\\x1a\\n")),
+    "image/jpeg": ("jpg", lambda data: data.startswith(b"\xff\xd8\xff")),
+    "image/png": ("png", lambda data: data.startswith(b"\x89PNG\r\n\x1a\n")),
     "image/webp": ("webp", lambda data: len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"),
 }
 
