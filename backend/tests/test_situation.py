@@ -185,6 +185,55 @@ def test_post_situation_with_documents():
         teardown_db()
 
 
+
+def test_post_situation_reports_analysis_unavailable_when_derived_pipeline_fails(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        import app.services.situation as situation_service
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-analysis-unavailable", name="Test Person")
+        caregiver = Caregiver(
+            id="caregiver-analysis-unavailable",
+            name="Test Caregiver",
+            email="analysis-unavailable@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        def fail_analysis(*args, **kwargs):
+            raise RuntimeError("test-only derived analysis failure")
+
+        monkeypatch.setattr(situation_service, "detect_event_changes", fail_analysis)
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-analysis-unavailable",
+                "person_id": "person-analysis-unavailable",
+                "raw_input": "Caregiver-reported note for analysis failure test.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ok"] is True
+        assert data["intelligence_status"] == "unavailable"
+        assert "derived analysis is unavailable" in data["intelligence_message"]
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 1
+        assert db.query(CareEvent).count() == 1
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_post_situation_missing_caregiver():
     setup_db()
     try:
