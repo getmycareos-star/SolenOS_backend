@@ -23,7 +23,7 @@ def _value_key(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def create_assertion(db: Session, payload: CareAssertionCreate) -> CareAssertion:
+def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
     assertion = CareAssertion(**payload.model_dump())
     assertion.assertion_status = "reported"
@@ -79,7 +79,10 @@ def create_assertion(db: Session, payload: CareAssertionCreate) -> CareAssertion
                 resolution_status="unresolved",
             )
             db.add(contradiction)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(assertion)
     return assertion
 
@@ -134,9 +137,9 @@ def get_freshness(assertion: CareAssertion, now: Optional[datetime] = None) -> D
     elif assertion.assertion_status in {"rejected", "superseded"}:
         status = "historical"
         explanation = "This assertion was explicitly rejected or superseded; it must not be presented as current."
-    elif age_days is None or age_days > assertion.review_after_days:
+    elif assertion.review_after_days is None or age_days is None or age_days > assertion.review_after_days:
         status = "needs_confirmation"
-        explanation = "The review window has elapsed or the observation time is unavailable; confirm before treating this report as current."
+        explanation = "The review window is missing/elapsed or the observation time is unavailable; confirm before treating this report as current."
     elif assertion.assertion_status != "accepted":
         status = "needs_confirmation"
         explanation = "This is a reported assertion, not an accepted current fact."
