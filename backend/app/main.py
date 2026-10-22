@@ -137,6 +137,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 if path == "/api/situation" and method == "POST":
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
+                    if payload.get("caregiver_id"):
+                        payload["client_care_key"] = payload["caregiver_id"]
                     payload["person_id"] = scoped_person_id
                     payload["caregiver_id"] = scoped_caregiver_id
                     target_person_id = scoped_person_id
