@@ -162,7 +162,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
 
         record.provider_status = "connected"
         record.status = "pending_review"
-        record.model_name = settings.qwen_model.strip()
+        record.model_name = settings.ollama_model.strip()
         record.candidate_data = {
             "observations": candidates,
             "open_questions": open_questions,
@@ -184,7 +184,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         if record is not None:
             record.provider_status = "error"
             record.status = "failed"
-            record.model_name = settings.qwen_model.strip()
+            record.model_name = settings.ollama_model.strip()
             record.candidate_data = None
             record.error_message = "Qwen extraction failed or returned invalid output."
             db.commit()
