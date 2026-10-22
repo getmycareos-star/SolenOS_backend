@@ -146,7 +146,7 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         assert team_metrics["caregiver_count"] == 3
         assert team_metrics["community_post_count"] == 1
         assert team_metrics["pending_moderation_count"] == 1
-        assert team_metrics["data_source"] == "database"
+        assert team_metrics["data_source"] == "database aggregates"
 
         state_report = client.get("/api/v1/team/state-report", headers=team_headers)
         assert state_report.status_code == 200, state_report.text
