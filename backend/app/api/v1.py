@@ -933,7 +933,6 @@ def create_temporal_relationship(
         event_b_id=event_b_id,
         relationship_type=relationship["relationship"],
         time_difference_seconds=str(relationship["time_difference_seconds"]),
-        confidence="0.9",
     )
     db.add(db_rel)
     db.commit()
