@@ -125,6 +125,32 @@ from app.api.actions import router as actions_router
 router = APIRouter()
 
 
+def _require_person_and_linked_caregiver(
+    db: Session, person_id: str, caregiver_id: Optional[str], *, caregiver_required: bool = True
+) -> None:
+    """Validate record references before persisting caregiver-attributed data.
+
+    This is an integrity check, not authentication: API session/auth enforcement
+    remains a separate production requirement.
+    """
+    if not person_id:
+        raise HTTPException(status_code=422, detail="person_id is required")
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    if not caregiver_id:
+        if caregiver_required:
+            raise HTTPException(status_code=422, detail="caregiver_id is required")
+        return
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.id == caregiver_id, CaregiverModel.person_id == person_id)
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+
 def _log_and_learn(
     db: Session,
     person_id: str,
@@ -215,6 +241,9 @@ def list_caregivers(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
+    _require_person_and_linked_caregiver(
+        db, evidence.person_id, evidence.uploaded_by_caregiver_id
+    )
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
     db.commit()
@@ -297,6 +326,9 @@ def create_daily_care_entry(payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/events", response_model=CareEventSchema)
 def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
+    _require_person_and_linked_caregiver(
+        db, event.person_id, event.created_by_caregiver_id
+    )
     db_event = CareEventModel(**event.model_dump())
     db.add(db_event)
     db.commit()
@@ -356,6 +388,7 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/corrections", response_model=CorrectionSchema)
 def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db)):
+    _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
     db.commit()
@@ -557,6 +590,9 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 
 @router.post("/appointments", response_model=AppointmentSchema)
 def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
+    _require_person_and_linked_caregiver(
+        db, appointment.person_id, appointment.created_by_caregiver_id
+    )
     db_appt = AppointmentModel(**appointment.model_dump())
     db.add(db_appt)
     db.commit()
@@ -614,6 +650,9 @@ def update_appointment_lifecycle_endpoint(
 
 @router.post("/transitions", response_model=CareTransitionSchema)
 def create_care_transition(transition: CareTransitionCreate, db: Session = Depends(get_db)):
+    _require_person_and_linked_caregiver(
+        db, transition.person_id, transition.created_by_caregiver_id, caregiver_required=False
+    )
     if not transition.transition_type or transition.transition_type == "unknown":
         inferred = infer_transition_type(transition.from_location, transition.to_location)
         transition.transition_type = inferred
