@@ -57,7 +57,7 @@ PUBLIC_V1_ENDPOINTS = {
 async def enforce_scoped_anonymous_session(request: Request, call_next):
     path = request.url.path
     method = request.method.upper()
-    if not path.startswith("/api/v1/"):
+    if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
