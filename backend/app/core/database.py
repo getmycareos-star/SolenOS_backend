@@ -64,6 +64,15 @@ def ensure_database_schema(bind=None):
         dialect = target.dialect
     except Exception:
         return
+    # Existing PostgreSQL deployments may retain the pre-anonymous NOT NULL
+    # constraint. Remove only that constraint; never invent a placeholder email.
+    if dialect.name == "postgresql" and insp.has_table("caregivers"):
+        caregiver_columns = {c["name"]: c for c in (insp.get_columns("caregivers") or [])}
+        email_column = caregiver_columns.get("email")
+        if email_column and not email_column.get("nullable", True):
+            with target.begin() as conn:
+                conn.execute(text('ALTER TABLE "caregivers" ALTER COLUMN "email" DROP NOT NULL'))
+
     for table_name, table in Base.metadata.tables.items():
         if not insp.has_table(table_name):
             continue
