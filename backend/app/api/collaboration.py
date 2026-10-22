@@ -232,6 +232,8 @@ def summarize_shared_experiences(
         if matched:
             matches.append({
                 "post_id": post.id,
+                "author_label": "Anonymous caregiver",
+                "author_type": "peer_caregiver",
                 "content": post.body[:3000],
                 "tags": post.tags or ["general"],
             })
