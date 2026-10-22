@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, date
 from typing import Optional, List, Any
 
@@ -47,6 +47,19 @@ class EvidenceBase(BaseModel):
     source_text: str
     original_file_path: Optional[str] = None
     extra_metadata: Optional[dict[str, Any]] = None
+
+    @field_validator("extra_metadata", mode="before")
+    @classmethod
+    def parse_extra_metadata(cls, value):
+        # Legacy Evidence rows store JSON metadata in a TEXT column. Normalize it
+        # at the API boundary instead of allowing a valid document to break LCR reads.
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (TypeError, ValueError):
+                return None
+            return parsed if isinstance(parsed, dict) else None
+        return value
     time_provenance: Optional[str] = None
     location: Optional[str] = None
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
