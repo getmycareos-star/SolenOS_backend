@@ -169,3 +169,21 @@ def test_outcome_feedback_is_persisted_without_implying_resolution(db: OrmSessio
     assert saved.outcome_status == "unresolved"
     assert saved.notes == "Still waiting for confirmation"
     assert saved.evidence_ids == ["ev-1"]
+
+
+def test_revision_log_is_append_only(db: OrmSession):
+    event = CareEvent(
+        id="event-append-only", person_id="person-1", event_type="observation",
+        occurred_at=datetime(2026, 10, 20, tzinfo=timezone.utc),
+        title="Original", description="Original source",
+        created_by_caregiver_id="caregiver-1",
+    )
+    db.add(event)
+    db.commit()
+    revision = db.query(CareStateRevision).filter_by(
+        target_type="care_events", target_id="event-append-only"
+    ).one()
+    revision.after_state = "{}"
+    with pytest.raises(ValueError, match="append-only"):
+        db.flush()
+    db.rollback()
