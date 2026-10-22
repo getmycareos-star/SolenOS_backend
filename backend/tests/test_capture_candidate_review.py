@@ -129,6 +129,8 @@ def test_caregiver_correction_persists_and_preserves_original_candidate():
                 assert data["observations"][0]["observation"] == "Caregiver reports approximately two hours of sleep."
                 assert data["review_history"][0]["original_candidate"]["observation"] == "Caregiver reports reduced sleep."
                 assert data["review_history"][0]["note"] == "Corrected wording to match the source report."
+    finally:
+        teardown_db()
 
 
 def test_candidate_review_rejects_correction_without_corrected_content():
