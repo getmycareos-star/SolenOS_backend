@@ -1,6 +1,7 @@
 """Authenticated daily capture and image evidence endpoints."""
 import hashlib
 import re
+import json
 from io import BytesIO
 from datetime import datetime, timezone
 from typing import Optional
@@ -87,6 +88,27 @@ def save_daily_capture(
     db.add(capture)
     db.flush()
 
+    structured_source = {
+        "medications": [item.model_dump(mode="json") for item in payload.medications],
+        "vitals": [item.model_dump(mode="json") for item in payload.vitals],
+        "scales": [item.model_dump(mode="json") for item in payload.scales],
+        "notes": payload.notes,
+        "location": payload.location.model_dump(mode="json") if payload.location else None,
+        "location_provenance": payload.location_provenance if payload.location else None,
+    }
+    structured_evidence = EvidenceModel(
+        person_id=payload.person_id,
+        type="structured_daily_capture",
+        source_text=json.dumps(structured_source, ensure_ascii=False, default=str),
+        uploaded_by_caregiver_id=caregiver.id,
+        time_provenance=recorded_at.isoformat(),
+        confidence=None,
+        evidence_status="reported",
+        source_type="caregiver_structured_capture",
+    )
+    db.add(structured_evidence)
+    db.flush()
+
     summary = (
         f"Daily capture recorded: {len(payload.medications)} medication entries, "
         f"{len(payload.vitals)} vital measurements, and {len(payload.scales)} wellbeing scores."
@@ -102,7 +124,7 @@ def save_daily_capture(
         occurred_at_timezone=caregiver.timezone,
         title="Daily care capture",
         description=description,
-        evidence_ids=sorted(photo_ids),
+        evidence_ids=sorted(photo_ids | {structured_evidence.id}),
         created_by_caregiver_id=caregiver.id,
         tags=[
             f"daily_capture_id:{capture.id}",
