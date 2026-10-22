@@ -65,10 +65,6 @@ class LCRExplanationInput(BaseModel):
     question: str = Field(default="Explain the current recorded care situation, what is known, what remains uncertain, and what useful question to ask next.", min_length=5, max_length=2000)
 
 
-class CommunitySummaryInput(BaseModel):
-    observation: str = Field(min_length=2, max_length=500)
-
-
 class ModerationInput(BaseModel):
     status: Literal["approved", "rejected"]
 
@@ -240,7 +236,7 @@ def summarize_shared_experiences(
         if len(matches) >= 10:
             break
     if not matches:
-        return {"summary": None, "post_ids": [], "provider_status": "not_needed",
+        return {"summary": None, "post_ids": [], "matches": [], "provider_status": "not_needed",
                 "ai_generated": False, "notice": "No matching published peer experiences were found."}
     parsed, status = call_qwen_json(
         system_prompt=(
