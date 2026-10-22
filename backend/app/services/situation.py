@@ -27,8 +27,10 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError:
-            occurred_at = _utc_now()
+        except ValueError as exc:
+            raise ValueError(
+                "Invalid timestamp; provide a valid ISO-8601 timestamp or omit it."
+            ) from exc
     else:
         occurred_at = _utc_now()
 
@@ -91,6 +93,9 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     attention_candidate = False
     follow_up_candidate = False
     what_changed = None
+    sig_changes: List = []
+    analysis_status = "complete"
+    analysis_warning = None
 
     try:
         changes = detect_event_changes(db, payload.person_id, care_event.event_type, None, occurred_at)
@@ -123,10 +128,21 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         db.commit()
         db.refresh(care_event)
     except Exception:
+        # The evidence and event were committed before optional derived analysis.
+        # Do not pretend the analysis succeeded, and do not re-add/recommit the
+        # already-persisted event as if this were a fresh capture.
         db.rollback()
-        db.add(care_event)
-        db.flush()
-        db.commit()
+        analysis_status = "partial"
+        analysis_warning = (
+            "Care input was saved, but change and situation analysis could not "
+            "be completed. The recorded evidence remains available."
+        )
+        changes = []
+        sig_changes = []
+        situations = []
+        attention_candidate = False
+        follow_up_candidate = False
+        what_changed = None
 
     events = [
         SituationEvent(
@@ -160,10 +176,16 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         person_id=payload.person_id,
         evidence_id=evidence_ids[0],
         care_event_id=care_event.id,
-        message="Care input recorded successfully.",
+        message=(
+            "Care input recorded successfully."
+            if analysis_status == "complete"
+            else "Care input recorded; analysis is incomplete."
+        ),
         events=events,
         situations=situation_responses or None,
         attention_candidate=attention_candidate,
         follow_up_candidate=follow_up_candidate,
         what_changed=what_changed,
+        analysis_status=analysis_status,
+        analysis_warning=analysis_warning,
     )
