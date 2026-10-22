@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.auth_identity import AuthAccount, AccountPersonAccess
-from app.models.care import Person
+from app.models.care import Person, Caregiver
 
 
 def _client_for_test():
@@ -51,6 +51,13 @@ def _account_context(client, session_factory, email, role="owner"):
     return headers, person_id
 
 
+
+
+def _caregiver_id_for_person(session_factory, person_id):
+    with session_factory() as db:
+        return db.query(Caregiver).filter_by(person_id=person_id).one().id
+
+
 def _cleanup(engine, client):
     client.close()
     app.dependency_overrides.clear()
@@ -62,17 +69,18 @@ def test_community_post_reaction_and_literal_experience_search_persist():
     engine, Session, client = _client_for_test()
     try:
         headers, person_id = _account_context(client, Session, "community@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
         created = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": person_id, "content": "Our bedtime routine #sleep helped us settle.",
+            "caregiver_id": caregiver_id, "content": "Our bedtime routine #sleep helped us settle.",
             "post_type": "experience", "visibility": "public",
         })
         assert created.status_code == 201, created.text
         post_id = created.json()["post"]["id"]
-        listed = client.get(f"/api/v1/community?caregiver_id={person_id}", headers=headers)
+        listed = client.get(f"/api/v1/community?caregiver_id={caregiver_id}", headers=headers)
         assert listed.status_code == 200, listed.text
         assert any(item["id"] == post_id for item in listed.json()["posts"])
         reaction = client.post(f"/api/v1/community/{post_id}/reactions", headers=headers, json={
-            "caregiver_id": person_id, "reaction_type": "support"
+            "caregiver_id": caregiver_id, "reaction_type": "support"
         })
         assert reaction.status_code == 200, reaction.text
         search = client.post("/api/v1/community/experience", headers=headers, json={"observation": "bedtime routine"})
@@ -123,8 +131,10 @@ def test_community_cannot_be_written_using_an_unrelated_person_id():
     engine, Session, client = _client_for_test()
     try:
         headers, _person_id = _account_context(client, Session, "community-scope@example.test")
+        _other_headers, other_person_id = _account_context(client, Session, "community-scope-other@example.test")
+        other_caregiver_id = _caregiver_id_for_person(Session, other_person_id)
         response = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": "another-account-person", "content": "A post"
+            "caregiver_id": other_caregiver_id, "content": "A post"
         })
         assert response.status_code == 403, response.text
     finally:
@@ -135,9 +145,10 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
     engine, Session, client = _client_for_test()
     try:
         author_headers, person_id = _account_context(client, Session, "flag-author@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
         reporter_headers, _reporter_person = _account_context(client, Session, "flag-reporter@example.test")
         created = client.post("/api/v1/community", headers=author_headers, json={
-            "caregiver_id": person_id,
+            "caregiver_id": caregiver_id,
             "content": "A user-submitted community post for moderation.",
             "post_type": "experience",
             "visibility": "public",
@@ -380,8 +391,9 @@ def test_community_qwen_summary_uses_only_published_peer_posts_and_never_writes_
     engine, Session, client = _client_for_test()
     try:
         headers, person_id = _account_context(client, Session, "community-qwen@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
         created = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": person_id,
+            "caregiver_id": caregiver_id,
             "content": "Our quiet bedtime routine helped us settle.",
             "post_type": "experience",
             "visibility": "public",
