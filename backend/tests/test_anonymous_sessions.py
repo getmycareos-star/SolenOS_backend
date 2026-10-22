@@ -105,3 +105,32 @@ def test_session_cannot_spoof_another_caregiver_attribution():
         },
     )
     assert response.status_code == 403, response.text
+
+
+def test_situation_capture_uses_server_bound_person_and_caregiver():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient")
+    response = client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "raw_input": "Caregiver-reported observation",
+            "caregiver_id": "client-generated-not-an-identity",
+            "care_session_id": "client-generated-session",
+        },
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["person_id"] == created["person"]["id"]
+    assert result["care_key"] == created["caregiver"]["id"]
+
+    from app.models.care import CareEvent, Evidence
+    db = TestSessionLocal()
+    try:
+        event = db.query(CareEvent).filter_by(id=result["care_event_id"]).one()
+        evidence = db.query(Evidence).filter_by(id=result["evidence_id"]).one()
+        assert event.person_id == created["person"]["id"]
+        assert event.created_by_caregiver_id == created["caregiver"]["id"]
+        assert evidence.uploaded_by_caregiver_id == created["caregiver"]["id"]
+    finally:
+        db.close()
