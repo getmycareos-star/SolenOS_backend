@@ -418,3 +418,73 @@ def test_care_continuity_contradiction_keeps_both_reports_and_links_sources():
     )
     assert questions.status_code == 200, questions.text
     assert any(item["source_kind"] == "contradiction" for item in questions.json())
+
+
+
+def test_care_continuity_audit_actors_default_to_authenticated_session():
+    client = TestClient(app)
+    created = create_session(client, "Actor attribution recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+
+    def report(value):
+        return client.post(
+            "/api/v1/care-continuity/assertions",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "subject_type": "medication",
+                "subject_id": "medication-actor-test",
+                "field": "dose",
+                "assertion_kind": "current_state",
+                "asserted_value": value,
+                "source_label": "caregiver report",
+                "evidence_ids": [],
+                "review_after_days": 30,
+                # Intentionally omit created_by_caregiver_id.
+            },
+        )
+
+    first = report("5 mg")
+    second = report("10 mg")
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["created_by_caregiver_id"] == caregiver_id
+    assert second.json()["created_by_caregiver_id"] == caregiver_id
+
+    assertion_id = first.json()["id"]
+    reviewed = client.patch(
+        f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "assertion_status": "accepted",
+            "review_after_days": 30,
+            # Intentionally omit updated_by_caregiver_id.
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["updated_by_caregiver_id"] == caregiver_id
+
+    contradictions = client.get(
+        f"/api/v1/care-continuity/contradictions/{person_id}",
+        headers=headers,
+    )
+    assert contradictions.status_code == 200, contradictions.text
+    conflict = next(
+        item for item in contradictions.json()
+        if item["subject_id"] == "medication-actor-test" and item["field"] == "dose"
+    )
+    resolved = client.patch(
+        f"/api/v1/care-continuity/contradictions/{conflict['id']}/resolution",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "resolution_status": "qualified",
+            "resolution_notes": "Reports remain competing; no source independently confirms either value.",
+            # Intentionally omit resolved_by_caregiver_id.
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["resolved_by_caregiver_id"] == caregiver_id
