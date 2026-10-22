@@ -5,7 +5,7 @@ from sqlalchemy import text
 import hashlib
 import json
 from datetime import datetime, timezone
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
@@ -473,9 +473,32 @@ def post_situation(
         try:
             db.commit()
             db.refresh(row)
-        except Exception:
+        except IntegrityError:
+            # Concurrent idempotent pause requests may race on the scoped unique
+            # key. Re-read the winner and preserve its original pause timestamp.
             db.rollback()
-            raise HTTPException(status_code=503, detail="The interaction pause could not be persisted")
+            row = (
+                db.query(InteractionSession)
+                .filter(
+                    InteractionSession.interaction_session_id == interaction_session_id,
+                    InteractionSession.person_id == scoped_person_id,
+                    InteractionSession.caregiver_id == scoped_caregiver_id,
+                )
+                .first()
+            )
+            if row is None:
+                raise HTTPException(status_code=503, detail="The interaction pause could not be persisted")
+            if row.paused_at is None:
+                row.paused_at = now
+                try:
+                    db.commit()
+                    db.refresh(row)
+                except Exception as exc:
+                    db.rollback()
+                    raise HTTPException(status_code=503, detail="The interaction pause could not be persisted") from exc
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="The interaction pause could not be persisted") from exc
         return {
             "ok": True,
             "action": "pause_active_care_situation",
