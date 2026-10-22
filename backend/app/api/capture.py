@@ -155,6 +155,7 @@ def save_daily_capture(
         situations=analysis["situations"],
         qwen_extraction_status=analysis["qwen_extraction_status"],
         qwen_candidates=analysis["qwen_candidates"],
+        qwen_analysis_id=analysis.get("qwen_analysis_id"),
     )
 
 
@@ -191,6 +192,7 @@ def analyze_text_document_in_care_event(
         "document_evidence_ids": [item.id for item in document_rows],
         "qwen_extraction_status": analysis["qwen_extraction_status"],
         "qwen_candidates": analysis["qwen_candidates"],
+        "qwen_analysis_id": analysis.get("qwen_analysis_id"),
         "analysis_status": analysis["analysis_status"],
         "read_only_to_lcr": True,
         "review_required": True,
