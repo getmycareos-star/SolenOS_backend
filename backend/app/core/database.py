@@ -25,8 +25,10 @@ def normalize_database_url(raw_url: str, *, require_ssl: bool = False) -> str:
         value = "postgresql+psycopg2://" + value[len("postgresql+psycopg://"):]
 
     parsed = make_url(value)
-    if parsed.get_backend_name() == "postgresql" and require_ssl and "sslmode" not in parsed.query:
-        parsed = parsed.update_query_dict({"sslmode": "require"})
+    if parsed.get_backend_name() == "postgresql" and require_ssl:
+        sslmode = parsed.query.get("sslmode")
+        if sslmode not in {"require", "verify-ca", "verify-full"}:
+            parsed = parsed.update_query_dict({"sslmode": "require"})
     return parsed.render_as_string(hide_password=False)
 
 
