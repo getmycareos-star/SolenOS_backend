@@ -192,7 +192,21 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert current.json()["email"] == "caregiver@example.com"
             legacy_created = client.post("/api/v1/persons", headers=headers, json={"name": "Legacy Care Recipient"})
             assert legacy_created.status_code == 200, legacy_created.text
-            assert client.get("/api/v1/persons/" + legacy_created.json()["id"], headers=headers).status_code == 200
+            legacy_person_id = legacy_created.json()["id"]
+            assert client.get("/api/v1/persons/" + legacy_person_id, headers=headers).status_code == 200
+            legacy_caregivers = client.get(
+                f"/api/v1/caregivers/person/{legacy_person_id}",
+                headers=headers,
+            )
+            assert legacy_caregivers.status_code == 200, legacy_caregivers.text
+            assert len(legacy_caregivers.json()) == 1
+            legacy_links = client.get(
+                f"/api/v1/auth/my-caregiver-links?person_id={legacy_person_id}",
+                headers=headers,
+            )
+            assert legacy_links.status_code == 200, legacy_links.text
+            assert len(legacy_links.json()) == 1
+            assert legacy_links.json()[0]["caregiver_id"] == legacy_caregivers.json()[0]["id"]
 
             created_context = client.post(
                 "/api/v1/auth/care-contexts",
