@@ -96,6 +96,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
         request.state.anonymous_session_id = session.id
+        # A refresh request is authorized by the validated, unexpired bearer
+        # token above. It has no resource ID in its URL/body, so do not send it
+        # through resource-ID extraction; the refresh handler rotates this same
+        # session and returns its bound person/caregiver IDs.
+        if method == "POST" and path.rstrip("/").endswith("sessions/refresh"):
+            return await call_next(request)
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved
         # against ORM models carrying a person_id column. Unknown/unscoped
