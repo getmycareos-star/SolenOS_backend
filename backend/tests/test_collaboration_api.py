@@ -349,6 +349,7 @@ def test_collaboration_routes_are_registered_and_session_protected():
         ("POST", "/api/v1/community/experience"),
         ("POST", "/api/v1/community/experience/summary"),
         ("POST", "/api/v1/lcr/explain"),
+        ("POST", "/api/v1/documents/{care_event_id}/analyze"),
         ("POST", "/api/v1/community/{post_id}/reactions"),
         ("POST", "/api/v1/community/{post_id}/flag"),
         ("POST", "/api/v1/conversation/message"),
