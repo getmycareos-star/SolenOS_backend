@@ -221,17 +221,37 @@ async def require_authenticated_care_access(request, call_next):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "Caregiver identity must match the authenticated account"})
 
-        person_id = None
-        if isinstance(body, dict) and isinstance(body.get("person_id"), str):
-            person_id = body.get("person_id")
-        elif request.query_params.get("person_id"):
-            person_id = request.query_params.get("person_id")
-        if not person_id:
-            segments = [segment for segment in path.split("/") if segment]
-            for segment in reversed(segments):
-                person_id = _person_id_for_resource(db, segment)
-                if person_id:
-                    break
+        body_person_id = (
+            body.get("person_id")
+            if isinstance(body, dict) and isinstance(body.get("person_id"), str)
+            else None
+        )
+        query_person_id = request.query_params.get("person_id")
+        if body_person_id and query_person_id and body_person_id != query_person_id:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Conflicting care-recipient scopes are not allowed"},
+            )
+
+        requested_person_id = body_person_id or query_person_id
+        path_person_id = None
+        segments = [segment for segment in path.split("/") if segment]
+        for segment in reversed(segments):
+            path_person_id = _person_id_for_resource(db, segment)
+            if path_person_id:
+                break
+
+        # A caller cannot authorize one recipient in the query/body while targeting
+        # a different recipient or child record in the URL.
+        if path_person_id and requested_person_id and path_person_id != requested_person_id:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Care-recipient scope does not match the requested resource"},
+            )
+
+        person_id = requested_person_id or path_person_id
         # Protect private care records using the identity attached to the signed token.
         # A professional may access only care recipients with an active grant.
         if person_id:
