@@ -115,15 +115,33 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
         body = b""
+        payload = {}
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
             body = await request.body()
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}
-                if not target_person_id and isinstance(payload, dict):
-                    target_person_id = payload.get("person_id")
             except (UnicodeDecodeError, json.JSONDecodeError):
                 payload = {}
-            # Re-feed consumed bytes to FastAPI's endpoint/body validation.
+
+            if isinstance(payload, dict):
+                supplied_person_id = payload.get("person_id")
+                if target_person_id and supplied_person_id and str(supplied_person_id) != str(target_person_id):
+                    return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
+
+                # The legacy situation-capture UI has no server person ID yet.
+                # Bind its write to the authenticated session rather than
+                # trusting the client-generated caregiver key as identity.
+                if path == "/api/situation" and method == "POST":
+                    if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
+                        return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
+                    payload["person_id"] = scoped_person_id
+                    payload["caregiver_id"] = scoped_caregiver_id
+                    target_person_id = scoped_person_id
+                    body = json.dumps(payload).encode("utf-8")
+                elif not target_person_id:
+                    target_person_id = supplied_person_id
+
+            # Re-feed the original or server-scoped JSON to FastAPI's body parser.
             sent = False
             async def receive_body():
                 nonlocal sent
