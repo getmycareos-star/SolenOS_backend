@@ -249,3 +249,72 @@ def test_care_recipient_name_update_is_scoped_to_session():
         assert db.query(Person).filter_by(id=second["person"]["id"]).one().name == "Second person"
     finally:
         db.close()
+
+
+def test_done_for_now_pauses_interaction_without_resolving_or_deleting_care_reality():
+    client = TestClient(app)
+    created = create_session(client, "Pause verification recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    interaction_id = "interaction-pause-verification"
+
+    write = client.post(
+        "/api/situation",
+        headers=headers,
+        json={
+            "raw_input": "Caregiver reports breakfast was mostly uneaten.",
+            "caregiver_id": created["caregiver"]["id"],
+            "care_session_id": interaction_id,
+        },
+    )
+    assert write.status_code == 200, write.text
+
+    before = client.get(
+        f"/api/situation?caregiver_id={created['caregiver']['id']}&care_session_id={interaction_id}&offer_return_invite=0",
+        headers=headers,
+    )
+    assert before.status_code == 200, before.text
+    before_data = before.json()
+
+    pause = client.post(
+        "/api/situation",
+        headers=headers,
+        json={
+            "action": "pause_active_care_situation",
+            "caregiver_id": created["caregiver"]["id"],
+            "care_session_id": interaction_id,
+        },
+    )
+    assert pause.status_code == 200, pause.text
+    pause_data = pause.json()
+    assert pause_data["action"] == "pause_active_care_situation"
+    assert pause_data["interaction_session_id"] == interaction_id
+    assert pause_data["paused_at"]
+    assert pause_data["care_reality_preserved"] is True
+
+    after = client.get(
+        f"/api/situation?caregiver_id={created['caregiver']['id']}&care_session_id={interaction_id}&offer_return_invite=0",
+        headers=headers,
+    )
+    assert after.status_code == 200, after.text
+    after_data = after.json()
+    assert after_data["care_recipient_id"] == before_data["care_recipient_id"]
+    assert after_data["total_events"] == before_data["total_events"] == 1
+    assert after_data["active_care_situation"]["observations"] == before_data["active_care_situation"]["observations"]
+
+
+def test_done_for_now_cannot_pause_another_session_scope():
+    client = TestClient(app)
+    first = create_session(client, "First pause recipient")
+    second = create_session(client, "Second pause recipient")
+
+    denied = client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json={
+            "action": "pause_active_care_situation",
+            "person_id": second["person"]["id"],
+            "caregiver_id": second["caregiver"]["id"],
+            "care_session_id": "interaction-spoofed-pause",
+        },
+    )
+    assert denied.status_code == 403, denied.text
