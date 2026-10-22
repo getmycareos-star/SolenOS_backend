@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy.orm import Session
@@ -17,7 +17,7 @@ from app.core.database import get_db
 from app.models.auth_identity import AuthAccount
 from app.models.care import CareEvent as CareEventModel, Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.models.capture import DailyCapture, EvidenceFile
-from app.schemas.capture import DailyCaptureInput, DailyCaptureOutput, UploadOutput
+from app.schemas.capture import DailyCaptureInput, DailyCaptureOutput, DailyCaptureRecordOutput, UploadOutput
 
 router = APIRouter(tags=["daily-capture"], dependencies=[Depends(current_account)])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -119,6 +119,24 @@ def save_daily_capture(
         daily_capture_id=capture.id,
         care_event_id=event.id,
         recorded_at=capture.recorded_at or recorded_at,
+    )
+
+
+@router.get("/daily/log/{person_id}", response_model=list[DailyCaptureRecordOutput])
+def list_daily_captures(
+    person_id: str,
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Read persisted daily captures only for a care record the account may access."""
+    assert_person_access(db, account.id, person_id, "read")
+    return (
+        db.query(DailyCapture)
+        .filter(DailyCapture.person_id == person_id)
+        .order_by(DailyCapture.recorded_at.desc())
+        .limit(limit)
+        .all()
     )
 
 
