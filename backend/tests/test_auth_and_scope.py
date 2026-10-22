@@ -282,6 +282,7 @@ def test_account_can_create_and_select_multiple_care_contexts():
         )
         assert saved_caregiver.name == "Test Caregiver Name"
         assert saved_caregiver.relationship == "Daughter"
+        assert first.json()["caregiver_id"] == saved_caregiver.id
     finally:
         db.close()
 
