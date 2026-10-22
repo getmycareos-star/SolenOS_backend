@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.care import Person
+from app.models.care import Person, Caregiver
 from app.models.anonymous_session import AnonymousSession
 
 router = APIRouter(prefix="/sessions", tags=["anonymous sessions"])
@@ -18,6 +18,7 @@ SESSION_TTL_DAYS = 30
 class AnonymousSessionCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     date_of_birth: Optional[date] = None
+    caregiver_name: str = Field(default="Caregiver", min_length=1, max_length=120)
 
 
 @router.post("/anonymous", status_code=201)
@@ -31,6 +32,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
     if not name:
         raise HTTPException(status_code=422, detail="name must not be blank")
 
+    caregiver_name = payload.caregiver_name.strip() or "Caregiver"
     person = Person(name=name, date_of_birth=payload.date_of_birth)
     raw_token = secrets.token_urlsafe(32)
     now = datetime.now(timezone.utc)
@@ -55,7 +57,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
             "date_of_birth": person.date_of_birth.isoformat() if person.date_of_birth else None,
             "created_at": person.created_at.isoformat() if person.created_at else None,
         },
-        "access_token": raw_token,
+        "caregiver": {"id": caregiver.id, "name": caregiver.name, "relationship": caregiver.relationship},\n        "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
         "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
