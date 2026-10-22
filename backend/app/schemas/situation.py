@@ -41,6 +41,14 @@ class SituationEvent(BaseModel):
     evidence_ids: Optional[List[str]] = None
 
 
+class InteractionPauseResponse(BaseModel):
+    ok: bool
+    action: Literal["pause_active_care_situation"]
+    interaction_session_id: str
+    paused_at: datetime
+    care_reality_preserved: bool = True
+
+
 class SituationResponse(BaseModel):
     ok: bool
     situation_id: str
