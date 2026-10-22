@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -6,6 +7,8 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
+
+pytestmark = pytest.mark.session_security
 
 engine = create_engine(
     "sqlite:///:memory:",
