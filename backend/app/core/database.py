@@ -133,59 +133,75 @@ def ensure_database_schema(bind=None):
 
 
 
-def validate_database_schema(bind=None):
-    """Fail closed when an existing table is missing ORM-declared columns.
+def _register_all_models():
+    """Ensure schema checks include every model, independent of import order."""
+    import app.models.care  # noqa: F401
+    import app.models.uncertainty  # noqa: F401
+    import app.models.temporal  # noqa: F401
+    import app.models.change  # noqa: F401
+    import app.models.significance  # noqa: F401
+    import app.models.action  # noqa: F401
+    import app.models.caregiver_intelligence  # noqa: F401
+    import app.models.causal  # noqa: F401
+    import app.models.memory  # noqa: F401
+    import app.models.time_location  # noqa: F401
+    import app.models.safety  # noqa: F401
+    import app.models.auth_identity  # noqa: F401
+    import app.models.capture  # noqa: F401
+    import app.models.collaboration  # noqa: F401
 
-    create_all() can create absent tables but cannot migrate columns on tables
-    that already exist. Report that drift explicitly instead of letting the
-    service return a false-positive healthy status and fail later on real care
-    workflows.
+
+def validate_database_schema(bind=None):
+    """Fail closed when any registered ORM table or column is missing.
+
+    PostgreSQL production schema is migration-owned: this check must not
+    silently treat a missing table as healthy or let startup create it outside
+    Alembic. SQLite development retains create_all() for local convenience.
     """
     from sqlalchemy import inspect
 
+    _register_all_models()
     target = bind or engine
     inspector = inspect(target)
     missing = []
+    existing_tables = set(inspector.get_table_names())
     for table_name, table in Base.metadata.tables.items():
-        if not inspector.has_table(table_name):
-            # Missing tables are handled by create_all() before validation.
+        if table_name not in existing_tables:
+            missing.append(f"{table_name} (table missing)")
             continue
         actual = {column["name"] for column in inspector.get_columns(table_name)}
         absent = sorted(column.name for column in table.columns if column.name not in actual)
         if absent:
             missing.append(f"{table_name}: {', '.join(absent)}")
     if missing:
-        details = "; ".join(missing)
+        details = "; ".join(missing[:30])
+        if len(missing) > 30:
+            details += f"; and {len(missing) - 30} additional schema differences"
         raise RuntimeError(
             "Database schema is behind the application models. Apply reviewed Alembic "
-            f"migrations before serving care workflows. Missing columns: {details}"
+            f"migrations before serving care workflows. Missing schema elements: {details}"
         )
 
 
 def init_db():
-    """Register all models before schema creation; run once per process."""
+    """Validate production schemas against migrations; create local SQLite schema once."""
     global _initialized
     if _initialized:
         return
     with _init_lock:
         if _initialized:
             return
-        import app.models.care  # noqa: F401
-        import app.models.uncertainty  # noqa: F401
-        import app.models.temporal  # noqa: F401
-        import app.models.change  # noqa: F401
-        import app.models.significance  # noqa: F401
-        import app.models.action  # noqa: F401
-        import app.models.caregiver_intelligence  # noqa: F401
-        import app.models.causal  # noqa: F401
-        import app.models.memory  # noqa: F401
-        import app.models.time_location  # noqa: F401
-        import app.models.safety  # noqa: F401
-        import app.models.auth_identity  # noqa: F401
-        import app.models.capture  # noqa: F401
-        import app.models.collaboration  # noqa: F401
-        Base.metadata.create_all(bind=engine)
-        ensure_database_schema()
+        _register_all_models()
+        if engine.dialect.name == "sqlite":
+            Base.metadata.create_all(bind=engine)
+            ensure_database_schema()
+        elif engine.dialect.name != "postgresql":
+            raise RuntimeError(
+                f"Unsupported database dialect '{engine.dialect.name}'; "
+                "SolenOS supports PostgreSQL in production and SQLite for local development."
+            )
+        # Do not run create_all() against PostgreSQL: schema changes there must
+        # be owned by reviewed Alembic migrations, not silently created at request time.
         validate_database_schema(engine)
         _initialized = True
 
