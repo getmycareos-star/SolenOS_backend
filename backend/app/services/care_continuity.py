@@ -44,6 +44,8 @@ def create_assertion(db: Session, payload: CareAssertionCreate) -> CareAssertion
         .order_by(CareAssertion.recorded_at.asc())
         .all()
     )
+    if assertion.assertion_kind != "current_state":
+        peers = []
     conflicts = [peer for peer in peers if _value_key(peer.asserted_value) != _value_key(assertion.asserted_value)]
     if conflicts:
         evidence_ids = list(dict.fromkeys(
