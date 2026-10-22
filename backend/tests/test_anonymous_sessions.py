@@ -318,3 +318,21 @@ def test_done_for_now_cannot_pause_another_session_scope():
         },
     )
     assert denied.status_code == 403, denied.text
+
+
+def test_event_collection_is_scoped_to_session_person():
+    client = TestClient(app)
+    first = create_session(client, "First event owner")
+    second = create_session(client, "Second event owner")
+
+    allowed = client.get(
+        f"/api/v1/events/{first['person']['id']}",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+    denied = client.get(
+        f"/api/v1/events/{first['person']['id']}",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert denied.status_code == 403, denied.text
