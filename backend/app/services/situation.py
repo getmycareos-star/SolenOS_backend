@@ -13,6 +13,7 @@ from app.schemas.situation import (
 )
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
+from app.services.capture_analysis import analyze_capture_with_qwen
 
 
 def _utc_now() -> datetime:
@@ -78,7 +79,7 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
         if detected:
             care_event.situation_id = detected[0].id
         db.commit()
-        return {
+        result = {
             "analysis_status": "complete",
             "analysis_error": None,
             "what_changed": what_changed,
@@ -98,11 +99,13 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
                 for item in detected
             ],
         }
+        result.update(analyze_capture_with_qwen(db, care_event_id))
+        return result
     except Exception:
         # The original event was committed before analysis. Roll back only derived work,
         # reload the source event, and return an explicit partial-success state.
         db.rollback()
-        return {
+        result = {
             "analysis_status": "failed",
             "analysis_error": "The report was saved, but derived analysis could not be completed.",
             "what_changed": None,
@@ -110,6 +113,8 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
             "follow_up_candidate": False,
             "situations": [],
         }
+        result.update(analyze_capture_with_qwen(db, care_event_id))
+        return result
 
 
 def process_situation_input(db: Session, payload: SituationInput) -> SituationResponse:
