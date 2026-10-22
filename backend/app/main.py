@@ -12,7 +12,6 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router
 from app.api.auth import router as auth_router, verify_token
-from app.api.team import router as team_router
 from app.core.database import SessionLocal
 from app.models.auth import AuthAccount
 from app.models.collaboration import ProfessionalAccessGrant
@@ -45,7 +44,6 @@ app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
 app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
-app.include_router(team_router, prefix="/api/v1")
 
 situation_router = APIRouter()
 
