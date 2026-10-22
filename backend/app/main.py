@@ -1,6 +1,7 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 from app.api.auth import router as auth_router
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
@@ -64,5 +65,8 @@ def health_check():
 def readiness_check(db: Session = Depends(get_db)):
     from sqlalchemy import text
 
-    db.execute(text("SELECT 1"))
+    try:
+        db.execute(text("SELECT 1"))
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
     return {"status": "ready", "app": settings.app_name, "database": "reachable"}
