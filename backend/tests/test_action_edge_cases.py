@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -10,7 +11,7 @@ from app.models.action import Action as ActionModel
 from app.services.action_extraction import ActionExtractionEngine
 from app.services.action_normalization import ActionNormalizationService
 from app.services.action_lifecycle import ActionLifecycleService, ActionIdentityService
-from app.schemas.action import ActionCandidate
+from app.schemas.action import ActionCandidate, ActionCompletionEvidence
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -418,3 +419,129 @@ def test_document_date_vs_action_date():
     for c in candidates:
         if c.deadline:
             assert c.deadline.year == 2026
+
+
+
+def _completion_fixture(db):
+    person_a = Person(id="completion-person-a", name="Completion Person A")
+    person_b = Person(id="completion-person-b", name="Completion Person B")
+    caregiver_a = Caregiver(
+        id="completion-caregiver-a",
+        name="Completion Caregiver A",
+        email="completion-a@example.invalid",
+        relationship="Family",
+        person_id=person_a.id,
+        timezone="UTC",
+    )
+    caregiver_b = Caregiver(
+        id="completion-caregiver-b",
+        name="Completion Caregiver B",
+        email="completion-b@example.invalid",
+        relationship="Family",
+        person_id=person_b.id,
+        timezone="UTC",
+    )
+    source_a = Evidence(
+        id="completion-source-a",
+        person_id=person_a.id,
+        type="note",
+        source_text="Original care note",
+        uploaded_by_caregiver_id=caregiver_a.id,
+    )
+    source_b = Evidence(
+        id="completion-source-b",
+        person_id=person_b.id,
+        type="note",
+        source_text="Other care recipient note",
+        uploaded_by_caregiver_id=caregiver_b.id,
+    )
+    action = ActionModel(
+        id="completion-action-a",
+        person_id=person_a.id,
+        status="active",
+        normalized_action="Arrange transport to appointment",
+        source_evidence_id=source_a.id,
+        source_passage="Arrange transport to appointment",
+        original_text="Arrange transport to appointment",
+        created_by_caregiver_id=caregiver_a.id,
+    )
+    db.add_all([person_a, person_b, caregiver_a, caregiver_b, source_a, source_b, action])
+    db.commit()
+    return action, caregiver_a, source_b
+
+
+def test_action_completion_persists_caregiver_report_without_claiming_verified_confidence():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        action, caregiver, _ = _completion_fixture(db)
+
+        result = ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(
+                evidence_ids=[],
+                notes="Transport was arranged by phone.",
+            ),
+            db,
+            caregiver_id=caregiver.id,
+        )
+
+        assert result.status == "completed"
+        assert result.completion_confidence is None
+        assert len(result.completion_evidence_ids) == 1
+        report = db.query(Evidence).filter_by(id=result.completion_evidence_ids[0]).one()
+        assert report.type == "caregiver_report"
+        assert report.source_type == "caregiver_completion"
+        assert report.evidence_status == "reported"
+        assert report.uploaded_by_caregiver_id == caregiver.id
+        assert "Transport was arranged by phone." in report.source_text
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_action_completion_rejects_evidence_from_another_care_recipient():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        action, caregiver, foreign_evidence = _completion_fixture(db)
+
+        with pytest.raises(ValueError, match="same care recipient"):
+            ActionLifecycleService().record_completion(
+                action,
+                ActionCompletionEvidence(
+                    evidence_ids=[foreign_evidence.id],
+                    completion_confidence=0.8,
+                ),
+                db,
+                caregiver_id=caregiver.id,
+            )
+
+        db.refresh(action)
+        assert action.status == "active"
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_action_completion_rejects_non_active_actions():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        action, caregiver, _ = _completion_fixture(db)
+        action.status = "pending_confirmation"
+        db.commit()
+
+        with pytest.raises(ValueError, match="Only active actions"):
+            ActionLifecycleService().record_completion(
+                action,
+                ActionCompletionEvidence(evidence_ids=[], notes="Attempted completion"),
+                db,
+                caregiver_id=caregiver.id,
+            )
+
+        db.refresh(action)
+        assert action.status == "pending_confirmation"
+        db.close()
+    finally:
+        teardown_db()
