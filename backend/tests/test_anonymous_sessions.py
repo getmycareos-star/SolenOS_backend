@@ -409,3 +409,12 @@ def test_care_continuity_contradiction_keeps_both_reports_and_links_sources():
     conflict = next(item for item in conflicts.json() if item["field"] == "dose")
     assert conflict["resolution_status"] == "unresolved"
     assert set(conflict["source_assertion_ids"]) == {item["id"] for item in reports.json()}
+
+    for route in ("revisions", "freshness", "outcomes", "assertions", "contradictions"):
+        response = client.get(f"/api/v1/care-continuity/{route}/{person_id}", headers=headers)
+        assert response.status_code == 200, f"{route}: {response.text}"
+    questions = client.post(
+        f"/api/v1/care-continuity/next-questions/{person_id}", headers=headers, json={}
+    )
+    assert questions.status_code == 200, questions.text
+    assert any(item["source_kind"] == "contradiction" for item in questions.json())
