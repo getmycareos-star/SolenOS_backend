@@ -20,7 +20,7 @@ from app.models.care import CareEvent as CareEventModel, Caregiver as CaregiverM
 from app.models.capture import DailyCapture, EvidenceFile
 from app.models.capture_analysis import CaptureAnalysis
 from app.services.situation import analyze_saved_care_event
-from app.schemas.capture import DailyCaptureInput, DailyCaptureOutput, DailyCaptureRecordOutput, UploadOutput
+from app.schemas.capture import CaptureCandidateReviewInput, DailyCaptureInput, DailyCaptureOutput, DailyCaptureRecordOutput, UploadOutput
 
 router = APIRouter(tags=["daily-capture"], dependencies=[Depends(current_account)])
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -341,3 +341,88 @@ def download_image_evidence(
             "Cache-Control": "private, no-store",
         },
     )
+
+
+
+@router.post("/capture/analyses/{analysis_id}/review")
+def review_capture_candidate(
+    analysis_id: str,
+    payload: CaptureCandidateReviewInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Persist an explicit caregiver review decision while preserving the original candidate.
+
+    This endpoint does not promote extracted content into authoritative LCR facts.
+    """
+    analysis = db.query(CaptureAnalysis).filter(CaptureAnalysis.id == analysis_id).first()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Capture analysis not found")
+    assert_person_access(db, account.id, analysis.person_id, "write")
+
+    data = analysis.candidate_data
+    if not isinstance(data, dict) or not isinstance(data.get("observations"), list):
+        raise HTTPException(status_code=409, detail="This analysis has no reviewable candidates")
+    observations = list(data["observations"])
+    if payload.candidate_index >= len(observations):
+        raise HTTPException(status_code=404, detail="Candidate index not found")
+    candidate = observations[payload.candidate_index]
+    if not isinstance(candidate, dict):
+        raise HTTPException(status_code=409, detail="Candidate data is invalid")
+    if payload.decision == "correct" and not (
+        (payload.corrected_observation or "").strip()
+        or (payload.corrected_subject or "").strip()
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Provide a corrected subject or observation when choosing correct",
+        )
+
+    from copy import deepcopy
+    from datetime import datetime, timezone
+
+    original = deepcopy(candidate)
+    now = datetime.now(timezone.utc).isoformat()
+    if payload.decision == "accept":
+        candidate["review_status"] = "accepted_by_caregiver"
+    elif payload.decision == "reject":
+        candidate["review_status"] = "rejected_by_caregiver"
+    else:
+        candidate["review_status"] = "corrected_by_caregiver"
+        if payload.corrected_subject is not None and payload.corrected_subject.strip():
+            candidate["subject"] = payload.corrected_subject.strip()
+        if payload.corrected_observation is not None and payload.corrected_observation.strip():
+            candidate["observation"] = payload.corrected_observation.strip()
+
+    candidate["reviewed_at"] = now
+    candidate["reviewed_by_account_id"] = account.id
+    observations[payload.candidate_index] = candidate
+    history = list(data.get("review_history") or [])
+    history.append({
+        "candidate_index": payload.candidate_index,
+        "decision": payload.decision,
+        "reviewed_at": now,
+        "reviewed_by_account_id": account.id,
+        "original_candidate": original,
+        "corrected_subject": payload.corrected_subject,
+        "corrected_observation": payload.corrected_observation,
+        "note": payload.note.strip() if payload.note else None,
+    })
+    updated_data = dict(data)
+    updated_data["observations"] = observations
+    updated_data["review_history"] = history
+    updated_data["review_notice"] = (
+        "Caregiver review is preserved as a review decision. It does not independently verify "
+        "the underlying report or write an authoritative Living Care Record fact."
+    )
+    analysis.candidate_data = updated_data
+    db.commit()
+    db.refresh(analysis)
+    return {
+        "analysis_id": analysis.id,
+        "candidate_index": payload.candidate_index,
+        "candidate": observations[payload.candidate_index],
+        "review_history": history,
+        "authoritative_lcr_write": False,
+        "message": "Review decision saved with the original candidate preserved. The Living Care Record was not changed.",
+    }
