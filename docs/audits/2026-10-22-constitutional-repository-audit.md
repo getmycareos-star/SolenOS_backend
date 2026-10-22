@@ -177,3 +177,16 @@ Relevant commits:
 - Several older frontend direct fetches target legacy `/api/*` paths such as telemetry, policy/consent, extraction, TTS, and ops/devtools APIs. They are not routes mounted by the current FastAPI `main.py`; they must not be considered operational merely because the UI code exists. Their active-build usage and replacement/removal still require a separate endpoint-by-endpoint audit.
 - The new GET projection reconstructs the visible note timeline from persisted relational `Evidence` and `CareEvent` rows. It does not make the legacy file-based ACS/CRS persistence durable in this FastAPI backend. Open questions, synthesis, and prior reasoning are not stored by this route and are not reconstructed.
 - Live Railway migration, authentication, persistence-after-restart, and browser end-to-end behavior remain unverified.
+
+
+## Active Vite app session gate
+
+Follow-up inspection of the actual Vite entrypoint (`src/main.tsx` → `src/App.tsx`) showed that the deployed React Router app uses `CareCapture.tsx` and the shared `src/api/client.ts`, rather than the older Next-style workspace being the only live path. Added an app-level anonymous-session gate before route rendering so the active pages receive server-issued person/caregiver IDs and bearer headers before calling the protected `/api/v1/*` endpoints. Session bootstrap/refresh is single-flight to avoid duplicate anonymous records from concurrent components or React Strict Mode.
+
+- Frontend app gate: `415859c852f96b38eebae548a84a60c5e41f3c3f`
+- Concurrent bootstrap/refresh deduplication: `e5a3af547a6e14e0e55af8e75f7ec7ed8dfcdd67`
+- Backend hydration projection transparency: `ba1dda79f3d732a616cb07ee0a853a79bd1ae2a2`
+- Frontend direct-fetch audit: `b9f50298a58f719565982e4c76455ac758165d92`
+- Capture messaging aligned with anonymous sessions: `147b5b788f019c269b4c6b12776e583948a5ac72`
+
+The frontend direct-fetch audit is documented at `docs/audits/2026-10-22-anonymous-session-frontend-fetch-audit.md` in the frontend repository. It explicitly records remaining legacy `/api/*` calls that are not mounted by the inspected FastAPI application; those endpoints remain unsupported and must not be considered functional.
