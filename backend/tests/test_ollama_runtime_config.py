@@ -41,7 +41,7 @@ def test_railway_rejects_public_ollama_url(monkeypatch):
     assert settings.ollama_configured is False
 
 
-def test_local_development_can_use_loopback_ollama(monkeypatch):
+def test_local_development_also_rejects_desktop_loopback_ollama(monkeypatch):
     monkeypatch.delenv("RAILWAY_PROJECT_ID", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
@@ -50,4 +50,10 @@ def test_local_development_can_use_loopback_ollama(monkeypatch):
         ollama_model="qwen2.5:1.5b",
     )
 
-    assert settings.ollama_configured is True
+    assert settings.ollama_configured is False
+
+
+def test_empty_default_never_connects_to_desktop_ollama():
+    settings = Settings()
+    assert settings.ollama_base_url == ""
+    assert settings.ollama_configured is False
