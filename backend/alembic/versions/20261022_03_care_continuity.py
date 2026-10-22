@@ -44,6 +44,12 @@ def upgrade():
     if "ix_care_state_revisions_person_id" not in revision_indexes:
         op.create_index("ix_care_state_revisions_person_id", "care_state_revisions", ["person_id"])
 
+    # Existing uncertainty records gain a link to the source assertions that conflict.
+    if inspector.has_table("contradictions"):
+        contradiction_columns = {column["name"] for column in inspector.get_columns("contradictions")}
+        if "source_assertion_ids" not in contradiction_columns:
+            op.add_column("contradictions", sa.Column("source_assertion_ids", sa.Text(), nullable=True))
+
     if not inspector.has_table("care_assertions"):
         op.create_table(
             "care_assertions",
