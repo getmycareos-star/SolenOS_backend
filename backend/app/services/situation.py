@@ -35,6 +35,8 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
             "attention_candidate": False,
             "follow_up_candidate": False,
             "situations": [],
+            "qwen_extraction_status": "skipped",
+            "qwen_candidates": None,
         }
 
     person_id = care_event.person_id
