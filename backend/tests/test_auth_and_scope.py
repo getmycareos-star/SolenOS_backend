@@ -259,10 +259,32 @@ def test_account_can_create_and_select_multiple_care_contexts():
         db.close()
     headers = {"Authorization": f"Bearer {token_for(account_id)}"}
 
-    first = client.post("/api/v1/auth/care-contexts", headers=headers, json={"name": "First care record"})
+    first = client.post(
+        "/api/v1/auth/care-contexts",
+        headers=headers,
+        json={
+            "name": "First care record",
+            "caregiver_name": "Test Caregiver Name",
+            "relationship": "Daughter",
+        },
+    )
     second = client.post("/api/v1/auth/care-contexts", headers=headers, json={"name": "Second care record"})
     assert first.status_code == 201, first.text
     assert second.status_code == 201, second.text
+
+    # Confirm caregiver details are actually persisted, not just accepted by the API.
+    db = SessionLocal()
+    try:
+        saved_caregiver = (
+            db.query(Caregiver)
+            .filter(Caregiver.person_id == first.json()["person_id"])
+            .one()
+        )
+        assert saved_caregiver.name == "Test Caregiver Name"
+        assert saved_caregiver.relationship == "Daughter"
+    finally:
+        db.close()
+
     contexts = client.get("/api/v1/auth/care-contexts", headers=headers)
     assert contexts.status_code == 200
     assert {item["person_id"] for item in contexts.json()} == {
