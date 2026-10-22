@@ -46,3 +46,16 @@ npm run dev
 4. **Uncertainty Is a Feature** - Never hide what is not known.
 5. **Calm Over Clever** - Reduce caregiver anxiety, don't impress.
 6. **Build for the Worst Day** - Hospital discharges, late-night confusion, exhaustion.
+
+
+## Production configuration
+
+Configure these as backend service environment variables (for Railway, use the backend service's Variables panel). Never commit secret values or expose them to the frontend.
+
+- `DATABASE_URL`: Supabase PostgreSQL connection URL. Use the database connection string, not a browser-facing URL.
+- `SECRET_KEY`: a unique random value of at least 32 characters.
+- `SUPABASE_URL`: the Supabase project URL.
+- `SUPABASE_SERVICE_ROLE_KEY`: the private service-role key; backend only.
+- `SUPABASE_STORAGE_BUCKET`: the name of a **private** Supabase Storage bucket, for example `care-evidence`.
+
+The caregiver photo-upload endpoint remains unavailable until all three Supabase Storage variables are configured and the private bucket exists. The backend stores an opaque object path in the evidence record and creates short-lived signed viewing URLs; it does not store uploaded photos on Railway's ephemeral filesystem. Rotate any database password that has been exposed and update `DATABASE_URL` with the new value.
