@@ -60,8 +60,6 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     # ASGI scope path excludes query parameters and is the canonical route path.
     path = str(request.scope.get("path") or request.url.path).rstrip("/")
     method = request.method.upper()
-    # Temporary CI diagnostic: request path and method only.
-    print("SolenOS middleware entry", repr(path), repr(method))
     if method == "OPTIONS":
         return await call_next(request)
     if not path.startswith("/api/v1/") and path != "/api/situation":
@@ -127,7 +125,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # The legacy evidence-list route uses the care-recipient ID as its final
         # path segment. Resolve that explicit contract directly if Starlette's
         # route matcher does not expose the expected parameter name.
-        if not target_person_id and path.startswith("/api/v1/evidence/"):
+        if not target_person_id and (
+            path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
+        ):
+            # These legacy list endpoints name their path parameter inconsistently,
+            # but the final segment is the requested person ID. Resolve it explicitly
+            # so the following scope comparison can reject cross-person requests.
             target_person_id = path.rsplit("/", 1)[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
@@ -226,8 +229,6 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             )
 
         if not target_person_id:
-            # Temporary CI diagnostic: path/method only, never care data or tokens.
-            print("SolenOS scope guard diagnostic", repr(path), repr(method))
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Request must identify a care record in the session scope"},
