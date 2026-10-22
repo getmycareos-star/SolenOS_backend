@@ -68,6 +68,7 @@ def upgrade():
             sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("review_after_days", sa.Integer(), nullable=True),
             sa.Column("created_by_caregiver_id", sa.String(), nullable=True),
+            sa.Column("updated_by_caregiver_id", sa.String(), nullable=True),
             sa.Column("recorded_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         )
     inspector = inspect(bind)
@@ -76,6 +77,12 @@ def upgrade():
         op.create_index("ix_care_assertions_subject_field", "care_assertions", ["person_id", "subject_type", "subject_id", "field"])
     if "ix_care_assertions_person_id" not in assertion_indexes:
         op.create_index("ix_care_assertions_person_id", "care_assertions", ["person_id"])
+
+    inspector = inspect(bind)
+    if inspector.has_table("care_assertions"):
+        assertion_columns = {column["name"] for column in inspector.get_columns("care_assertions")}
+        if "updated_by_caregiver_id" not in assertion_columns:
+            op.add_column("care_assertions", sa.Column("updated_by_caregiver_id", sa.String(), nullable=True))
 
     if not inspector.has_table("care_action_outcomes"):
         op.create_table(
