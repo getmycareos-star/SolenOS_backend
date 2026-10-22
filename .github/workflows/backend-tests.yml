@@ -30,7 +30,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install backend and test dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
 
       - name: Run backend tests
         run: python -m pytest backend/tests -q
