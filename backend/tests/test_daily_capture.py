@@ -235,3 +235,31 @@ def test_insight_rejects_evidence_from_another_person():
         assert response.json()["detail"] == "Every evidence item must exist and belong to the same care record"
     finally:
         teardown_db()
+
+
+def test_readiness_rejects_incomplete_schema():
+    incomplete_engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.tables["persons"].create(bind=incomplete_engine)
+    IncompleteSessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=incomplete_engine
+    )
+
+    def override_incomplete_db():
+        db = IncompleteSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_incomplete_db
+    try:
+        response = TestClient(app).get("/ready")
+        assert response.status_code == 503, response.text
+        assert response.json()["detail"] == "Database schema is incomplete"
+    finally:
+        app.dependency_overrides.clear()
+        incomplete_engine.dispose()
