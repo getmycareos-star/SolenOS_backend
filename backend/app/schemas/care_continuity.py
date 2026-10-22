@@ -33,7 +33,7 @@ class CareAssertionResponse(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     assertion_status: str
     observed_at: Optional[datetime] = None
-    review_after_days: int
+    review_after_days: Optional[int] = None
     created_by_caregiver_id: Optional[str] = None
     recorded_at: datetime
 
