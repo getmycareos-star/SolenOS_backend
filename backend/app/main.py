@@ -16,6 +16,7 @@ from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
+from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
@@ -96,6 +97,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
         request.state.anonymous_session_id = session.id
+        request.state.scoped_person_id = scoped_person_id
+        request.state.scoped_caregiver_id = scoped_caregiver_id
         if path == "/api/v1/sessions/refresh" and method == "POST":
             return await call_next(request)
 
@@ -117,6 +120,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        if path == "/api/situation" and method == "GET":
+            target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
@@ -194,7 +199,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     body_payload = parsed_body
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
-        claimed_caregiver_id = (
+        claimed_caregiver_id = None if path == "/api/situation" and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
@@ -222,6 +227,155 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
 
 situation_router = APIRouter()
+
+
+@situation_router.get("/situation")
+def get_situation(
+    request: Request,
+    caregiver_id: str = "",
+    care_session_id: str = "",
+    offer_return_invite: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Hydrate a care record from persisted evidence and events only.
+
+    The bearer session determines the person scope. Legacy caregiver/session
+    query values are UI continuity keys only and never authorize data access.
+    This endpoint does not synthesize clinical interpretation or sample data.
+    """
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_scope_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_scope_id:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+
+    person = db.query(Person).filter(Person.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Care recipient not found")
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_scope_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Session caregiver is not linked to this care record")
+
+    evidence_rows = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id)
+        .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+        .all()
+    )
+    events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id)
+        .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
+        .all()
+    )
+    observations = []
+    for evidence in evidence_rows:
+        linked_event_ids = [
+            event.id for event in events
+            if evidence.id in (event.evidence_ids or [])
+        ]
+        observations.append({
+            "id": evidence.id,
+            "raw_text": evidence.source_text,
+            "human_fact": evidence.source_text,
+            "kind": "mixed",
+            "captured_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else "",
+            "event_ids": linked_event_ids,
+            "epistemic_kind": "mixed",
+            "contributor_id": evidence.uploaded_by_caregiver_id,
+        })
+
+    event_payload = [{
+        "id": event.id,
+        "event_type": event.event_type,
+        "title": event.title,
+        "description": event.description,
+        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "evidence_ids": event.evidence_ids or [],
+    } for event in events]
+
+    active_situation = None
+    active_turn = None
+    if observations:
+        first_timestamp = observations[0]["captured_at"]
+        last_timestamp = observations[-1]["captured_at"]
+        root_event_id = events[0].id if events else None
+        active_situation = {
+            "id": events[-1].situation_id or root_event_id or observations[0]["id"],
+            "care_recipient_id": person_id,
+            "caregiver_id": caregiver_scope_id,
+            "opened_at": first_timestamp,
+            "updated_at": last_timestamp,
+            "root_event_id": root_event_id,
+            "subject_label": person.name,
+            "theme": "mixed",
+            "observations": observations,
+            "open_questions": [],
+            "asked_questions": [],
+            "understanding_stage": "gathering",
+            "connection_note": None,
+            "synthesis": None,
+            "what_matters_now": None,
+            "lifecycle_status": "active",
+        }
+        active_turn = {
+            "relation": "updates_active",
+            "situation": active_situation,
+            "confirmation_title": "Saved care notes",
+            "confirmation_body": "These are observations previously recorded in this care record.",
+            "understanding_heading": "What has been recorded",
+            "understanding_stage": "gathering",
+            "current_understanding": [item["raw_text"] for item in observations],
+            "insufficiency_note": "These notes are caregiver-reported records. This view does not independently verify them or infer a diagnosis.",
+            "connection_note": None,
+            "what_needs_context": [],
+            "what_will_be_remembered": [item["raw_text"] for item in observations],
+            "what_seems_happening": None,
+            "what_matters_now": None,
+            "show_attention_sections": False,
+            "what_changed_in_understanding": None,
+            "understanding_effect": None,
+            "resolved_uncertainties": [],
+            "pattern_label": None,
+            "what_can_wait": None,
+            "what_may_become_serious": None,
+            "care_reality_state_id": None,
+            "crs_observation_count": len(observations),
+            "crs_revision": 0,
+            "disclosure_stage": "orientation",
+            "disclosure_plan": {},
+            "response_evolution": {},
+            "primary_screen_question": "What has been recorded?",
+        }
+
+    client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
+    return {
+        "ok": True,
+        "has_context_root": bool(observations),
+        "care_key": client_care_key,
+        "care_recipient_id": person_id,
+        "care_recipient_display_name": person.name,
+        "total_events": len(events),
+        "events": event_payload,
+        "situations": [],
+        "ui_situations": [],
+        "context": {
+            "caregiver_id": client_care_key,
+            "care_recipient_id": person_id,
+            "events": event_payload,
+        },
+        "active_care_situation": active_situation,
+        "active_care_situation_turn": active_turn,
+        "return_continuity": {
+            "soft_invite": {"offered_now": False, "text": None},
+            "is_long_absence": False,
+            "recent_relevant_changes": [],
+            "important_unresolved": [],
+            "suppress_first_time_ux": bool(observations),
+        },
+    }
 
 
 @situation_router.post("/situation", response_model=SituationResponse)
