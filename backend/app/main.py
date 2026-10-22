@@ -1,6 +1,10 @@
-from fastapi import FastAPI, APIRouter, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
+import hashlib
+import json
+from datetime import datetime, timezone
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
@@ -10,7 +14,9 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal
+from app.models.anonymous_session import AnonymousSession
+from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import SituationInput, SituationResponse
 from app.services.situation import process_situation_input
 
@@ -29,12 +35,139 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+
+# All care-data APIs require a server-issued bearer capability scoped to one
+# person. The anonymous bootstrap is the only way to obtain a new capability;
+# caller-supplied person/caregiver IDs are never accepted as credentials.
+PUBLIC_V1_ENDPOINTS = {
+    ("/api/v1/time/now", "GET"),
+    ("/api/v1/time/ago", "POST"),
+    ("/api/v1/time/until", "POST"),
+}
+
+
+@app.middleware("http")
+async def enforce_scoped_anonymous_session(request: Request, call_next):
+    path = request.url.path
+    method = request.method.upper()
+    if not path.startswith("/api/v1/"):
+        return await call_next(request)
+    if path == "/api/v1/sessions/anonymous" and method == "POST":
+        return await call_next(request)
+    if (path, method) in PUBLIC_V1_ENDPOINTS:
+        return await call_next(request)
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "A valid SolenOS anonymous session is required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        session = (
+            db.query(AnonymousSession)
+            .filter(
+                AnonymousSession.token_hash == token_hash,
+                AnonymousSession.revoked_at.is_(None),
+                AnonymousSession.expires_at > now,
+            )
+            .first()
+        )
+        if session is None:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Anonymous session is invalid or expired"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        scoped_person_id = session.person_id
+
+        # Resolve FastAPI path parameters before executing the endpoint. Explicit
+        # person_id parameters take precedence; record-specific IDs are resolved
+        # against ORM models carrying a person_id column. Unknown/unscoped
+        # operations fail closed rather than silently accepting an arbitrary ID.
+        path_params = {}
+        for route in request.app.routes:
+            matcher = getattr(route, "matches", None)
+            if matcher is None:
+                continue
+            try:
+                match, child_scope = matcher(request.scope)
+                if getattr(match, "value", None) == 2:
+                    path_params = child_scope.get("path_params", {}) or {}
+                    break
+            except Exception:
+                continue
+
+        target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        body = b""
+        if not target_person_id:
+            try:
+                body = await request.body()
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                if isinstance(payload, dict):
+                    target_person_id = payload.get("person_id")
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                payload = {}
+            # Re-feed consumed bytes to FastAPI's endpoint/body validation.
+            sent = False
+            async def receive_body():
+                nonlocal sent
+                if sent:
+                    return {"type": "http.request", "body": b"", "more_body": False}
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            request._receive = receive_body
+
+        if not target_person_id:
+            # For routes addressing a child resource by its own ID, look up the
+            # owner only through mapped tables with both id and person_id.
+            candidate_ids = [str(value) for value in path_params.values() if value]
+            owners = set()
+            for mapper in Base.registry.mappers:
+                model = mapper.class_
+                if not hasattr(model, "id") or not hasattr(model, "person_id"):
+                    continue
+                for candidate_id in candidate_ids:
+                    try:
+                        owner = (
+                            db.query(model.person_id)
+                            .filter(model.id == candidate_id)
+                            .scalar()
+                        )
+                    except Exception:
+                        continue
+                    if owner:
+                        owners.add(str(owner))
+            if len(owners) == 1:
+                target_person_id = owners.pop()
+            elif len(owners) > 1:
+                return JSONResponse(status_code=403, content={"detail": "Ambiguous care-record scope"})
+
+        if not target_person_id:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Request must identify a care record in the session scope"},
+            )
+        if str(target_person_id) != str(scoped_person_id):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "This session is not authorised for that care record"},
+            )
+
+    return await call_next(request)
+
 
 situation_router = APIRouter()
 
