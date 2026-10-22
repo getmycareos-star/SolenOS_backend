@@ -23,11 +23,6 @@ def _generated_at() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _group_counts(db: Session, model, field) -> list[dict]:
-    rows = db.query(field, func.count(model.id)).group_by(field).order_by(field.asc()).all()
-    return [{"status" if field.key == "status" else field.key: key, "count": count} for key, count in rows]
-
-
 @router.get("/team/dashboard")
 def team_dashboard(db: Session = Depends(get_db)):
     """Database-backed aggregate counts; never substitute demo metrics."""
