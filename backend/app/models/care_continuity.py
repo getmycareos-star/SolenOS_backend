@@ -54,6 +54,7 @@ class CareAssertion(Base):
     subject_type = Column(String, nullable=False)
     subject_id = Column(String, nullable=False)
     field = Column(String, nullable=False)
+    assertion_kind = Column(String, nullable=False, default="current_state")
     asserted_value = Column(Text, nullable=False)
     source_label = Column(String, nullable=False)
     source_text = Column(Text, nullable=True)
