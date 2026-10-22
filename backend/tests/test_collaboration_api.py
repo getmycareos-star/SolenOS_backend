@@ -190,7 +190,17 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
         _cleanup(engine, client)
 
 
-def test_companion_persists_both_messages_and_does_not_claim_ai_was_used():
+def test_companion_persists_both_messages_and_does_not_claim_ai_was_used(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import conversation_service
+
+    # Keep this integration test deterministic; it must not depend on a developer's
+    # local Ollama process being available in the CI runner.
+    monkeypatch.setattr(
+        conversation_service,
+        "get_settings",
+        lambda: SimpleNamespace(ollama_configured=False),
+    )
     engine, Session, client = _client_for_test()
     try:
         headers, person_id = _account_context(client, Session, "companion@example.test")
