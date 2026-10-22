@@ -37,6 +37,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate) -> CareAssertion
             CareAssertion.subject_type == payload.subject_type,
             CareAssertion.subject_id == payload.subject_id,
             CareAssertion.field == payload.field,
+            CareAssertion.assertion_kind == "current_state",
             CareAssertion.id != assertion.id,
             CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
         )
@@ -125,7 +126,10 @@ def get_freshness(assertion: CareAssertion, now: Optional[datetime] = None) -> D
     now = _utc(now or datetime.now(timezone.utc))
     reference = _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
-    if assertion.assertion_status in {"rejected", "superseded"}:
+    if assertion.assertion_kind == "time_bound_observation":
+        status = "time_bound_observation"
+        explanation = "This is a time-bound observation, not a claim about the current state."
+    elif assertion.assertion_status in {"rejected", "superseded"}:
         status = "historical"
         explanation = "This assertion was explicitly rejected or superseded; it must not be presented as current."
     elif age_days is None or age_days > assertion.review_after_days:
