@@ -38,7 +38,7 @@ class Settings(BaseSettings):
             return
 
         database_url = self.database_url.strip().lower()
-        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg2://")):
+        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
             raise RuntimeError(
                 "Production requires DATABASE_URL to point to the managed PostgreSQL database; "
                 "SQLite and missing DATABASE_URL values are not allowed."
