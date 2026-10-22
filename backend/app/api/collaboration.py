@@ -177,7 +177,10 @@ def search_shared_experiences(
     # Literal search over published, user-submitted posts. This is not AI advice
     # and does not claim that another caregiver's experience is medically valid.
     terms = [term.lower() for term in re.findall(r"[a-zA-Z0-9]{3,}", payload.observation)][:8]
-    posts = db.query(CommunityPost).filter(CommunityPost.status == "published").order_by(CommunityPost.created_at.desc()).limit(200).all()
+    posts = db.query(CommunityPost).filter(
+        CommunityPost.status == "published",
+        CommunityPost.visibility.in_(["public", "anonymous"]),
+    ).order_by(CommunityPost.created_at.desc()).limit(200).all()
     matches = []
     for post in posts:
         haystack = f"{post.title or ''} {post.body} {' '.join(post.tags or [])}".lower()
