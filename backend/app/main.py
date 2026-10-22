@@ -100,7 +100,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
         request.state.scoped_caregiver_id = scoped_caregiver_id
-        if path == "/api/v1/sessions/refresh" and method == "POST":
+        if path.endswith("/sessions/refresh") and method == "POST":
             return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
