@@ -40,6 +40,17 @@ def test_production_rejects_default_or_short_secret(monkeypatch):
         settings.validate_production_configuration()
 
 
+def test_production_rejects_empty_key(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("APP_ENV", "production")
+    settings = Settings(
+        database_url="postgresql://db.example.test/solenos",
+        secret_key="",
+    )
+    with pytest.raises(RuntimeError, match="unique random value"):
+        settings.validate_production_configuration()
+
+
 def test_production_accepts_postgres_and_long_secret(monkeypatch):
     clear_environment(monkeypatch)
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
