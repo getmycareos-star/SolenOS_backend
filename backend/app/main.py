@@ -96,9 +96,6 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
         request.state.anonymous_session_id = session.id
-        if path.rstrip("/").endswith("/sessions/refresh") and method == "POST":
-            return await call_next(request)
-
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved
         # against ORM models carrying a person_id column. Unknown/unscoped
@@ -117,6 +114,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        # Refresh requests do not carry a person_id in their body or URL. Bind
+        # the request to the already authenticated session scope so the standard
+        # deny-by-default scope checks still apply.
+        if method == "POST" and path.rstrip("/") == "/api/v1/sessions/refresh":
+            target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
