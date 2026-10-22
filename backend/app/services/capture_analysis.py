@@ -12,7 +12,7 @@ from app.models.capture_analysis import CaptureAnalysis
 def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
     event = db.query(CareEvent).filter(CareEvent.id == care_event_id).first()
     if event is None:
-        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": record.id if record is not None else None}
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": None}
 
     evidence_ids = sorted({
         item for item in (event.evidence_ids or []) if isinstance(item, str)
@@ -174,4 +174,4 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
             record.candidate_data = None
             record.error_message = "Qwen extraction failed or returned invalid output."
             db.commit()
-        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": None}
+        return {"qwen_extraction_status": "failed", "qwen_candidates": None, "qwen_analysis_id": record.id if record is not None else None}
