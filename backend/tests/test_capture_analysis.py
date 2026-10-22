@@ -75,7 +75,7 @@ def test_capture_extraction_records_not_configured_without_fabricating_candidate
             monkeypatch.setattr(
                 capture_analysis,
                 "get_settings",
-                lambda: SimpleNamespace(qwen_configured=False, qwen_model="", qwen_base_url="", qwen_api_key="", qwen_timeout_seconds=20),
+                lambda: SimpleNamespace(ollama_configured=False, ollama_model="", ollama_base_url="", ollama_timeout_seconds=20),
             )
             result = capture_analysis.analyze_capture_with_qwen(db, "capture-event")
             assert result["qwen_extraction_status"] == "not_configured"
@@ -96,11 +96,10 @@ def test_capture_extraction_only_keeps_candidates_with_verbatim_source_quotes(mo
                 capture_analysis,
                 "get_settings",
                 lambda: SimpleNamespace(
-                    qwen_configured=True,
-                    qwen_base_url="https://qwen.example/v1",
-                    qwen_model="qwen-test",
-                    qwen_api_key="test-key",
-                    qwen_timeout_seconds=3,
+                    ollama_configured=True,
+                    ollama_base_url="http://127.0.0.1:11434",
+                    ollama_model="qwen-test",
+                                        ollama_timeout_seconds=3,
                 ),
             )
             model_result = {
@@ -123,7 +122,7 @@ def test_capture_extraction_only_keeps_candidates_with_verbatim_source_quotes(mo
                 "open_questions": ["Was this different from the usual sleep pattern?"],
                 "possible_safety_flags": [],
             }
-            body = json.dumps({"choices": [{"message": {"content": json.dumps(model_result)}}]}).encode()
+            body = json.dumps({"message": {"content": json.dumps(model_result)}}).encode()
             with patch.object(capture_analysis, "urlopen", return_value=io.BytesIO(body)):
                 result = capture_analysis.analyze_capture_with_qwen(db, "capture-event")
             assert result["qwen_extraction_status"] == "pending_review"
