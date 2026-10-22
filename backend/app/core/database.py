@@ -1,33 +1,123 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import declarative_base, sessionmaker
+
 from app.core.config import get_settings
 
 settings = get_settings()
+database_url = settings.database_url.strip()
+if database_url.startswith("postgres://"):
+    database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+elif database_url.startswith("postgresql://"):
+    database_url = "postgresql+psycopg://" + database_url[len("postgresql://"):]
 
-# SQLite needs check_same_thread=False; PostgreSQL drivers do not accept that
-# SQLite-only connection argument.
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+parsed_url = make_url(database_url)
+engine_options = {"pool_pre_ping": True}
+if parsed_url.get_backend_name() == "sqlite":
+    engine_options["connect_args"] = {"check_same_thread": False}
+engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Register every ORM model before create_all. Importing app.api.v1 imports this
-# module before it imports app.models.care, so omitting care here left foreign
-# keys such as information_gaps.created_by_caregiver_id unresolved at startup.
+# Import every model before create_all so SQLAlchemy sees all foreign-key targets.
 import app.models.care  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
 import app.models.time_location  # noqa: E402, F401
-import app.models.temporal  # noqa: E402, F401
 import app.models.uncertainty  # noqa: E402, F401
+import app.models.temporal  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
 import app.models.significance  # noqa: E402, F401
+import app.models.safety  # noqa: E402, F401
 import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
-import app.models.safety  # noqa: E402, F401
+import app.models.auth  # noqa: E402, F401
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_additive_schema():
+    """Add only safe, non-FK columns; fail startup on schema changes needing a migration."""
+    from sqlalchemy import inspect
+
+    inspector = inspect(engine)
+    dialect = engine.dialect
+    for table_name, table in Base.metadata.tables.items():
+        if not inspector.has_table(table_name):
+            continue
+        existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            if column.foreign_keys:
+                raise RuntimeError(
+                    "Database migration required before startup: "
+                    + table_name + "." + column.name + " is a missing foreign-key column."
+                )
+            if not column.nullable and column.server_default is None and column.default is None:
+                raise RuntimeError(
+                    "Database migration required before startup: "
+                    + table_name + "." + column.name + " is required and has no safe default."
+                )
+
+            column_type = column.type.compile(dialect=dialect)
+            default_sql = ""
+            if column.server_default is not None:
+                server_default = column.server_default.arg
+                if isinstance(server_default, str) and server_default.lower() not in {"true", "false", "null"} and not server_default.startswith(("'", "(", "CURRENT_")):
+                    literal_processor = column.type.literal_processor(dialect)
+                    if literal_processor is None:
+                        raise RuntimeError(
+                            "Database migration required before startup: cannot safely encode server default for "
+                            + table_name + "." + column.name
+                        )
+                    default_sql = " DEFAULT " + literal_processor(server_default)
+                else:
+                    default_sql = " DEFAULT " + str(server_default)
+            elif column.default is not None and not callable(column.default.arg):
+                literal_processor = column.type.literal_processor(dialect)
+                if literal_processor is None:
+                    raise RuntimeError(
+                        "Database migration required before startup: cannot safely encode default for "
+                        + table_name + "." + column.name
+                    )
+                default_sql = " DEFAULT " + literal_processor(column.default.arg)
+            nullable_sql = "" if column.nullable else " NOT NULL"
+            quote = dialect.identifier_preparer.quote
+            statement = (
+                "ALTER TABLE " + quote(table_name) + " ADD COLUMN " + quote(column.name)
+                + " " + column_type + default_sql + nullable_sql
+            )
+            with engine.begin() as connection:
+                connection.execute(text(statement))
+
+
+ensure_additive_schema()
+
+
+def apply_postgres_compatibility_migrations():
+    """Apply narrowly scoped, idempotent compatibility changes for existing PostgreSQL databases."""
+    if engine.dialect.name != "postgresql":
+        return
+    with engine.begin() as connection:
+        # Caregivers can support the same person across multiple care records.
+        # Older deployments may have the former UNIQUE(email) constraint.
+        constraints = connection.execute(text("""
+            SELECT conname
+            FROM pg_constraint
+            WHERE conrelid = to_regclass('caregivers')
+              AND contype = 'u'
+              AND pg_get_constraintdef(oid) = 'UNIQUE (email)'
+        """)).scalars().all()
+        for constraint_name in constraints:
+            quoted_name = engine.dialect.identifier_preparer.quote(constraint_name)
+            connection.execute(text(f"ALTER TABLE caregivers DROP CONSTRAINT {quoted_name}"))
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_caregivers_email ON caregivers (email)"
+        ))
+
+
+apply_postgres_compatibility_migrations()
 
 
 def get_db():
@@ -36,61 +126,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-def _sqlite_column_type(col, dialect):
-    try:
-        return str(col.type.compile(dialect=dialect))
-    except Exception:
-        return "TEXT"
-
-
-def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
-
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
-    """
-    from sqlalchemy import inspect, text
-
-    target = bind or engine
-    try:
-        insp = inspect(target)
-        dialect = target.dialect
-    except Exception:
-        return
-    for table_name, table in Base.metadata.tables.items():
-        if not insp.has_table(table_name):
-            continue
-        existing = {c["name"] for c in (insp.get_columns(table_name) or [])}
-        for col in table.columns:
-            if col.name in existing:
-                continue
-            col_type = _sqlite_column_type(col, dialect) or "TEXT"
-            nullable = "" if col.nullable else " NOT NULL"
-            default = ""
-            if col.server_default is not None:
-                default = f" DEFAULT {col.server_default.arg}"
-            elif col.default is not None and not callable(col.default):
-                v = col.default
-                if isinstance(v, bool):
-                    default = f" DEFAULT {1 if v else 0}"
-                elif isinstance(v, (int, float)):
-                    default = f" DEFAULT {v}"
-                elif isinstance(v, str):
-                    default = f" DEFAULT '{v}'"
-            stmt = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}{default}{nullable}')
-            try:
-                with target.begin() as conn:
-                    conn.execute(stmt)
-            except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
-                pass
-
-
-ensure_database_schema()

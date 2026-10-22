@@ -5,6 +5,8 @@ from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
 from app.core.database import get_db
+from app.api.auth import current_account
+from app.models.auth import Account, CareMembership
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -172,7 +174,12 @@ def _log_and_learn(
 
 
 @router.post("/persons", response_model=Person)
-def create_person(person: PersonCreate, db: Session = Depends(get_db)):
+def create_person(
+    person: PersonCreate,
+    account: Account = Depends(current_account),
+    db: Session = Depends(get_db),
+):
+    # Creating a person also establishes a verified care-circle membership.
     dob = person.date_of_birth
     if isinstance(dob, str) and dob:
         try:
@@ -187,8 +194,27 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
                 )
     elif dob is None:
         dob = None
+
     db_person = PersonModel(name=person.name, date_of_birth=dob)
     db.add(db_person)
+    db.flush()
+    caregiver = CaregiverModel(
+        name=(account.display_name or account.email.split("@")[0]),
+        email=account.email,
+        relationship="family caregiver",
+        person_id=db_person.id,
+        timezone="UTC",
+    )
+    db.add(caregiver)
+    db.flush()
+    db.add(CareMembership(
+        account_id=account.id,
+        person_id=db_person.id,
+        caregiver_id=caregiver.id,
+        role="caregiver",
+        permissions='["read","write"]',
+        status="active",
+    ))
     db.commit()
     db.refresh(db_person)
     _log_and_learn(
@@ -197,7 +223,7 @@ def create_person(person: PersonCreate, db: Session = Depends(get_db)):
         "person_created",
         f"Created person {db_person.name}",
         "api",
-        caregiver_id=None,
+        caregiver_id=caregiver.id,
     )
     return db_person
 

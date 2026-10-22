@@ -4,8 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.database import Base, get_db
 from app.main import app
+from app.models.care import Person, Caregiver
 from app.services.safety import SafetyEngine
 from app.services.claim_extraction import ClaimExtractionEngine, EvidenceMatcher, SourceQualityEvaluator
 from app.services.risk_escalation import RiskClassifier, EscalationEngine
@@ -484,7 +485,21 @@ class TestClaimStrengthMatcher:
 class TestSafetyAPI:
     def setup_method(self):
         setup_db()
-        app.dependency_overrides[override_get_db] = override_get_db
+        db = TestingSessionLocal()
+        if not db.query(Person).filter(Person.id == "test_person").first():
+            person = Person(id="test_person", name="Safety API Test Person")
+            caregiver = Caregiver(
+                id="test-caregiver-safety",
+                name="Safety API Test Caregiver",
+                email="safety-api-test@example.com",
+                relationship="family caregiver",
+                person_id="test_person",
+                timezone="UTC",
+            )
+            db.add_all([person, caregiver])
+            db.commit()
+        db.close()
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
 
     def teardown_method(self):

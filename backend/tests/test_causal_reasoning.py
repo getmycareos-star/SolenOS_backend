@@ -607,6 +607,9 @@ def test_identify_temporal_associations():
 def test_api_assess_does_not_assert_causation():
     setup_db()
     try:
+        db = TestingSessionLocal()
+        seed_person(db, person_id="person-20")
+        db.close()
         client = TestClient(app)
         response = client.post(
             "/api/v1/causal/assess",
@@ -625,9 +628,6 @@ def test_api_assess_does_not_assert_causation():
         assert data["evidence_strength"] == "weak"
         assert data["causal_confidence"] == "insufficient"
         assert "does not establish" in data["what_is_uncertain"]
-        db = TestingSessionLocal()
-        seed_person(db, person_id="person-20")
-        db.close()
     finally:
         teardown_db()
 

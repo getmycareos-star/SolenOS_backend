@@ -87,8 +87,8 @@ def test_daily_capture_rejects_unknown_person():
                 "mood": "Calm",
             },
         )
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Person not found"
+        assert response.status_code == 403
+        assert response.json()["detail"] == "You are not a member of this care circle."
     finally:
         teardown_db()
 
@@ -107,7 +107,7 @@ def test_daily_capture_rejects_unlinked_caregiver():
             },
         )
         assert response.status_code == 403
-        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+        assert response.json()["detail"] == "You are not a member of this care circle."
     finally:
         teardown_db()
 

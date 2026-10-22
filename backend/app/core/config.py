@@ -1,15 +1,12 @@
 import os
+import secrets
 from functools import lru_cache
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     app_name: str = "SolenOS"
-    # Debug mode is opt-in; never default production to debug output.
     debug: bool = False
-    # SQLite is a local-development fallback only. Production validation below
-    # rejects it so a missing DATABASE_URL cannot silently create local storage.
     database_url: str = "sqlite:///./solenos.db"
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
@@ -22,36 +19,42 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    @property
-    def is_production(self) -> bool:
-        environment = (
-            os.getenv("RAILWAY_ENVIRONMENT_NAME")
-            or os.getenv("RAILWAY_ENVIRONMENT")
-            or os.getenv("APP_ENV")
-            or os.getenv("ENVIRONMENT")
-            or ""
-        )
-        return environment.strip().lower() in {"production", "prod"}
-
     def validate_production_configuration(self) -> None:
-        if not self.is_production:
+        environment_values = [
+            os.getenv("RAILWAY_ENVIRONMENT_NAME", ""),
+            os.getenv("RAILWAY_ENVIRONMENT", ""),
+            os.getenv("APP_ENV", ""),
+            os.getenv("ENVIRONMENT", ""),
+        ]
+        is_production = any(value.strip().lower() in {"production", "prod"} for value in environment_values)
+        if not is_production:
             return
 
-        database_url = self.database_url.strip().lower()
-        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg2://")):
-            raise RuntimeError(
-                "Production requires DATABASE_URL to point to the managed PostgreSQL database; "
-                "SQLite and missing DATABASE_URL values are not allowed."
-            )
-
-        if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:
-            raise RuntimeError(
-                "Production requires SECRET_KEY to be a unique random value of at least 32 characters."
-            )
+        if not self.database_url.lower().startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
+            raise RuntimeError("Production must use managed PostgreSQL; local SQLite is not durable on Railway.")
+        if (
+            not self.secret_key
+            or self.secret_key == "change-me-in-production"
+            or len(self.secret_key) < 32
+        ):
+            raise RuntimeError("Production SECRET_KEY must be a unique random value of at least 32 characters.")
+        if self.debug:
+            raise RuntimeError("Production DEBUG must be false.")
 
 
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()
     settings.validate_production_configuration()
+    environment_values = [
+        os.getenv("RAILWAY_ENVIRONMENT_NAME", ""),
+        os.getenv("RAILWAY_ENVIRONMENT", ""),
+        os.getenv("APP_ENV", ""),
+        os.getenv("ENVIRONMENT", ""),
+    ]
+    is_production = any(value.strip().lower() in {"production", "prod"} for value in environment_values)
+    if not is_production and settings.secret_key == "change-me-in-production":
+        # A random process-local development key keeps local auth usable without a shared default.
+        # It is intentionally not stable across restarts; production must supply SECRET_KEY.
+        settings.secret_key = secrets.token_urlsafe(48)
     return settings

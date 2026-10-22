@@ -148,8 +148,7 @@ def test_post_situation_missing_caregiver():
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["detail"]
+        assert response.status_code == 403
     finally:
         teardown_db()
 
@@ -181,8 +180,7 @@ def test_post_situation_missing_person():
                 "raw_input": "Some input",
             },
         )
-        assert response.status_code == 400
-        assert "Person not found" in response.json()["detail"]
+        assert response.status_code == 403
     finally:
         teardown_db()
 
