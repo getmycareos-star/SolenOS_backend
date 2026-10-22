@@ -1,9 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date
 from app.core.database import get_db
-from app.services.storage import upload_private_object, delete_private_object, create_signed_object_url
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
 from app.models.auth_identity import AccountPersonAccess, AuthAccount
@@ -272,87 +271,6 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db), acc
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema], dependencies=[Depends(require_person_access("read"))])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
-
-
-_MAX_EVIDENCE_IMAGE_BYTES = 5 * 1024 * 1024
-_EVIDENCE_IMAGE_TYPES = {
-    "image/jpeg": ("jpg", lambda data: data.startswith(b"\xff\xd8\xff")),
-    "image/png": ("png", lambda data: data.startswith(b"\x89PNG\r\n\x1a\n")),
-    "image/webp": ("webp", lambda data: len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"),
-}
-
-
-@router.post("/upload", status_code=201)
-async def upload_evidence_photo(
-    file: UploadFile = File(...),
-    person_id: str = Form(...),
-    caregiver_id: str = Form(...),
-    db: Session = Depends(get_db),
-    account: AuthAccount = Depends(current_account),
-):
-    assert_person_access(db, account.id, person_id, "write")
-    caregiver = _require_caregiver_in_person(
-        db, caregiver_id, person_id, account.id, "caregiver_id"
-    )
-
-    content_type = (file.content_type or "").lower()
-    image_spec = _EVIDENCE_IMAGE_TYPES.get(content_type)
-    if not image_spec:
-        raise HTTPException(status_code=415, detail="Only JPEG, PNG, and WebP images are accepted")
-    data = await file.read(_MAX_EVIDENCE_IMAGE_BYTES + 1)
-    if not data:
-        raise HTTPException(status_code=422, detail="The uploaded image is empty")
-    if len(data) > _MAX_EVIDENCE_IMAGE_BYTES:
-        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
-    extension, signature_check = image_spec
-    if not signature_check(data):
-        raise HTTPException(status_code=415, detail="Image content does not match its declared file type")
-
-    object_path = f"{uuid4().hex}.{extension}"
-    upload_private_object(object_path, content_type, data)
-    evidence = EvidenceModel(
-        person_id=person_id,
-        type="medication_photo",
-        source_text="Caregiver-uploaded medication photo; image contents have not been clinically interpreted.",
-        original_file_path=object_path,
-        uploaded_by_caregiver_id=caregiver.id,
-        extra_metadata=json.dumps({"content_type": content_type, "file_size_bytes": len(data)}),
-        evidence_status="reported",
-        source_type="caregiver_uploaded_image",
-        confidence=None,
-    )
-    try:
-        db.add(evidence)
-        db.commit()
-        db.refresh(evidence)
-    except Exception as exc:
-        db.rollback()
-        delete_private_object(object_path)
-        raise HTTPException(
-            status_code=500,
-            detail="Evidence metadata could not be saved; the upload was rolled back where possible",
-        ) from exc
-    return {"evidence_id": evidence.id}
-
-
-@router.get("/evidence/{person_id}/{evidence_id}/signed-url")
-def get_evidence_signed_url(
-    person_id: str,
-    evidence_id: str,
-    db: Session = Depends(get_db),
-    account: AuthAccount = Depends(current_account),
-):
-    assert_person_access(db, account.id, person_id, "read")
-    evidence = (
-        db.query(EvidenceModel)
-        .filter_by(id=evidence_id, person_id=person_id)
-        .first()
-    )
-    if not evidence:
-        raise HTTPException(status_code=404, detail="Evidence not found")
-    if not evidence.original_file_path or evidence.source_type != "caregiver_uploaded_image":
-        raise HTTPException(status_code=404, detail="Evidence does not have an accessible image file")
-    return {"url": create_signed_object_url(evidence.original_file_path), "expires_in": 300}
 
 
 @router.post("/events", response_model=CareEventSchema)
