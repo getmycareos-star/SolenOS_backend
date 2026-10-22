@@ -224,6 +224,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             )
 
         if not target_person_id:
+            # Temporary CI diagnostic: path/method only, never care data or tokens.
+            print("SolenOS scope guard diagnostic", repr(path), repr(method))
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Request must identify a care record in the session scope"},
