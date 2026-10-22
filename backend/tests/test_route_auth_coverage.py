@@ -34,3 +34,22 @@ def test_every_non_public_api_operation_requires_a_valid_session():
     assert not missing_auth, (
         "API operations without bearer-session security: " + ", ".join(sorted(missing_auth))
     )
+
+def test_action_routes_match_the_frontend_contract():
+    paths = app.openapi()["paths"]
+    expected = {
+        ("/api/v1/actions", "post"),
+        ("/api/v1/actions/{person_id}", "get"),
+        ("/api/v1/actions/{action_id}/complete", "post"),
+        ("/api/v1/actions/safety-check", "post"),
+        ("/api/v1/actions/documents/{document_id}/extract-actions", "post"),
+    }
+    missing = [
+        f"{method.upper()} {path}"
+        for path, method in expected
+        if path not in paths or method not in paths[path]
+    ]
+    nested_prefixes = [path for path in paths if path.startswith("/api/v1/actions/actions")]
+    assert not missing, "Missing frontend action API routes: " + ", ".join(sorted(missing))
+    assert not nested_prefixes, "Duplicate nested action prefix remains: " + ", ".join(nested_prefixes)
+
