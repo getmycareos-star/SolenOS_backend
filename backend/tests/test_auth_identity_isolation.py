@@ -9,6 +9,7 @@ import app.api.auth as auth
 from app.core.database import Base
 from app.models.auth import AuthAccount
 from app.models.care import Caregiver, CareEvent, Evidence, Person
+from app.models.collaboration import ProfessionalAccessGrant
 from app.models.action import Action as ActionModel
 
 
@@ -56,10 +57,27 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             role="caregiver",
             is_active=True,
         )
-        db.add(account_a)
+        account_b = AuthAccount(
+            id="isolation-account-b",
+            caregiver_id=caregiver_b.id,
+            email=caregiver_b.email,
+            password_hash="test-only",
+            role="professional",
+            is_active=True,
+        )
+        grant_a = ProfessionalAccessGrant(
+            id="isolation-grant-a",
+            professional_caregiver_id=caregiver_b.id,
+            person_id=person_a.id,
+            status="active",
+            granted_by_caregiver_id=caregiver_a.id,
+        )
+        db.add_all([account_a, account_b, grant_a])
         db.commit()
         db.refresh(account_a)
+        db.refresh(account_b)
         token_a = auth.issue_token(account_a)
+        token_b = auth.issue_token(account_b)
     finally:
         db.close()
 
@@ -87,6 +105,35 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         assert professional_dashboard.status_code == 403, professional_dashboard.text
         team_dashboard = client.get("/api/v1/team/moderation/queue", headers=headers)
         assert team_dashboard.status_code == 403, team_dashboard.text
+
+        # A professional may read only recipients covered by an active access grant.
+        professional_headers = {"Authorization": f"Bearer {token_b}"}
+        granted_person = client.get(
+            "/api/v1/persons/isolation-person-a",
+            headers=professional_headers,
+        )
+        assert granted_person.status_code == 200, granted_person.text
+        ungranted_person = client.get(
+            "/api/v1/persons/isolation-person-b",
+            headers=professional_headers,
+        )
+        assert ungranted_person.status_code == 403, ungranted_person.text
+        professional_dashboard = client.get(
+            "/api/v1/professional/dashboard",
+            params={"professional_caregiver_id": "isolation-caregiver-b"},
+            headers=professional_headers,
+        )
+        assert professional_dashboard.status_code == 200, professional_dashboard.text
+        dashboard_people = {
+            row["person_id"] for row in professional_dashboard.json()["care_recipients"]
+        }
+        assert dashboard_people == {"isolation-person-a"}
+        mismatched_professional = client.get(
+            "/api/v1/professional/dashboard",
+            params={"professional_caregiver_id": "isolation-caregiver-a"},
+            headers=professional_headers,
+        )
+        assert mismatched_professional.status_code == 403, mismatched_professional.text
 
         # The authenticated caregiver can write to their linked recipient.
         created = client.post(
