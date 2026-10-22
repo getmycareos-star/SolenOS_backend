@@ -56,12 +56,13 @@ class CareAssertion(Base):
     field = Column(String, nullable=False)
     assertion_kind = Column(String, nullable=False, default="current_state")
     asserted_value = Column(Text, nullable=False)
+    source_event_id = Column(String, ForeignKey("care_events.id"), nullable=True)
     source_label = Column(String, nullable=False)
     source_text = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False, default=list)
     assertion_status = Column(String, nullable=False, default="reported")
     observed_at = Column(DateTime(timezone=True), nullable=True)
-    review_after_days = Column(Integer, nullable=False)
+    review_after_days = Column(Integer, nullable=True
     created_by_caregiver_id = Column(String, nullable=True)
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
