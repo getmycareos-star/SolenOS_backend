@@ -130,6 +130,19 @@ def test_freshness_never_calls_unreviewed_assertion_current(db: OrmSession):
     assert result["age_days"] >= 45
 
 
+def test_unresolved_conflict_overrides_caregiver_review_freshness(db: OrmSession):
+    first = create_assertion(db, _assertion("person-1", "5 mg", "ev-1"))
+    create_assertion(db, _assertion("person-1", "10 mg", "ev-2"))
+    accepted = set_assertion_status(
+        db, first.id, "person-1", "accepted", "caregiver-1", review_after_days=30
+    )
+
+    result = get_freshness(accepted, unresolved_conflict=True)
+    assert result["status"] == "needs_confirmation"
+    assert "competing report" in result["explanation"].lower()
+    assert "must not be presented as the established current state" in result["explanation"]
+
+
 def test_next_best_questions_are_evidence_linked_and_idempotent(db: OrmSession):
     create_assertion(db, _assertion("person-1", "5 mg", "ev-1"))
     create_assertion(db, _assertion("person-1", "10 mg", "ev-2"))
