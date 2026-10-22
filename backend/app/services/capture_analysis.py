@@ -65,7 +65,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         record.provider_status = "not_configured"
         record.status = "not_configured"
         record.model_name = None
-        record.error_message = "Local Ollama Qwen is not configured."
+        record.error_message = "Railway-hosted Qwen is not configured."
         db.commit()
         return {"qwen_extraction_status": record.status, "qwen_candidates": None}
 
@@ -101,7 +101,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
             temperature=0.0,
         )
         if provider_status != "connected" or parsed is None:
-            raise ValueError("Gwen provider unavailable or returned invalid JSON")
+            raise ValueError("Qwen provider unavailable or returned invalid JSON")
         if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
             raise ValueError("Invalid extraction schema")
 
