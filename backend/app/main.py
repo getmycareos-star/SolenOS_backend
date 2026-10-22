@@ -252,6 +252,8 @@ async def require_authenticated_care_access(request, call_next):
             # Only explicitly global or role-scoped endpoints may omit person scope.
             scope_exempt = (
                 path == "/api/v1/auth/me"
+                or path == "/api/v1/auth/care-contexts"
+                or path == "/api/v1/auth/my-caregiver-links"
                 or path == "/api/v1/community"
                 or path.startswith("/api/v1/community/")
                 # Multipart upload fields are validated by the upload handler itself:
