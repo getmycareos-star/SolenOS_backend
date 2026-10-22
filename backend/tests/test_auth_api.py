@@ -15,6 +15,7 @@ from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfi
 from app.models.safety import SafetyAuditRecordModel, SafetyEventModel
 from app.models.action import Action as ActionModel
 from app.models.capture import DailyCapture, EvidenceFile
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.uncertainty import InformationGap
 
 
@@ -104,7 +105,7 @@ def test_health_endpoint_returns_503_when_database_query_fails():
 
 def test_signup_login_current_account_and_logout(monkeypatch):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, SituationModel.__table__, CareEventModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
+    Base.metadata.create_all(bind=engine, tables=[Person.__table__, CaregiverModel.__table__, SituationModel.__table__, CareEventModel.__table__, EvidenceModel.__table__, AuthAccount.__table__, AuthSession.__table__, AccountPersonAccess.__table__, CaregiverAccountLink.__table__, CaregiverInvitation.__table__, InformationGap.__table__, Baseline.__table__, CausalHypothesis.__table__, CaregiverProfileModel.__table__, CaregiverObservationModel.__table__, CaregiverProfileAccountLink.__table__, CaregiverProfileInvitation.__table__, DailyCapture.__table__, EvidenceFile.__table__, CaptureAnalysis.__table__, SafetyAuditRecordModel.__table__, SafetyEventModel.__table__, ActionModel.__table__, InsightModel.__table__])
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
 
     def override_get_db():
