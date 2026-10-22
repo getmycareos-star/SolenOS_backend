@@ -320,9 +320,13 @@ def get_situation(
             "synthesis": None,
             "what_matters_now": None,
             "lifecycle_status": "active",
+            "persistence_source": "relational_evidence_and_events_projection",
+            "reasoning_state_persisted": False,
+            "open_questions_available": False,
+            "theme_classification_available": False,
         }
-        # No persisted reasoning turn exists in these relational tables.
-        # Return the saved situation only; do not synthesize a clinical assessment.
+        # This is a projection of persisted evidence/events, not a persisted ACS/CRS
+        # object. Make that limitation explicit and do not synthesize a clinical assessment.
         active_turn = {"situation": active_situation}
 
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
