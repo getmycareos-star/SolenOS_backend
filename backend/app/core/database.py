@@ -16,6 +16,7 @@ Base = declarative_base()
 # module before it imports app.models.care, so omitting care here left foreign
 # keys such as information_gaps.created_by_caregiver_id unresolved at startup.
 import app.models.care  # noqa: E402, F401
+import app.models.anonymous_session  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
 import app.models.time_location  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
