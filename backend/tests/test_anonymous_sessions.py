@@ -180,6 +180,16 @@ def test_situation_hydration_returns_only_persisted_records_for_session_scope():
         },
     )
     assert write.status_code == 200, write.text
+    written = write.json()
+    assert written["care_key"] == "client-durable-care-key"
+    assert written["care_recipient_id"] == created["person"]["id"]
+    assert written["has_context_root"] is True
+    assert written["total_events"] == 1
+    assert len(written["active_care_situation"]["observations"]) == 1
+    assert written["active_care_situation"]["observations"][0]["raw_text"] == (
+        "Caregiver reports that breakfast was left mostly uneaten."
+    )
+    assert written["analysis_status"] in {"complete", "partial"}
 
     read = client.get(
         "/api/situation?caregiver_id=client-durable-care-key&care_session_id=interaction-session&offer_return_invite=0",

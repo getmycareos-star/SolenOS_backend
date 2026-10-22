@@ -520,7 +520,33 @@ def post_situation(
         if row is not None and row.paused_at is not None:
             row.paused_at = None
             db.commit()
-    return result
+    # Return the same persisted-record projection used by GET /api/situation,
+    # so the client can refresh its LCR from actual saved evidence/events rather
+    # than treating the capture response as the older local pipeline DTO.
+    hydration = get_situation(
+        request,
+        caregiver_id=payload.client_care_key or payload.caregiver_id,
+        care_session_id=interaction_session_id,
+        offer_return_invite=0,
+        db=db,
+    )
+    response_payload = result.dict()
+    response_payload.update({
+        "care_key": hydration["care_key"],
+        "care_recipient_id": hydration["care_recipient_id"],
+        "care_recipient_display_name": hydration["care_recipient_display_name"],
+        "has_context_root": hydration["has_context_root"],
+        "total_events": hydration["total_events"],
+        "care_session_id": interaction_session_id or None,
+        "context": hydration["context"],
+        "ui_situations": hydration["ui_situations"],
+        "active_care_situation": hydration["active_care_situation"],
+        "active_care_situation_turn": hydration["active_care_situation_turn"],
+        "return_continuity": hydration["return_continuity"],
+        "events": hydration["events"],
+        "situations": response_payload.get("situations") or hydration["situations"],
+    })
+    return response_payload
 
 
 app.include_router(situation_router, prefix="/api")

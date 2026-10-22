@@ -64,3 +64,14 @@ class SituationResponse(BaseModel):
     what_changed: Optional[str] = None
     analysis_status: Literal["complete", "partial"] = "complete"
     analysis_warning: Optional[str] = None
+    # Persisted-care projection consumed by the workspace after capture.
+    care_recipient_id: Optional[str] = None
+    care_recipient_display_name: Optional[str] = None
+    has_context_root: bool = False
+    total_events: int = 0
+    care_session_id: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    ui_situations: List[Dict[str, Any]] = Field(default_factory=list)
+    active_care_situation: Optional[Dict[str, Any]] = None
+    active_care_situation_turn: Optional[Dict[str, Any]] = None
+    return_continuity: Optional[Dict[str, Any]] = None
