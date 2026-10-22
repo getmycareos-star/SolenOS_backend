@@ -115,7 +115,7 @@ The new test has been committed but not executed in this environment. The backen
 ## 2026-10-22 follow-up — anonymous session authorization
 
 Implemented in source:
-- Added `POST /api/v1/sessions/anonymous`: creates a care recipient, an email-free caregiver identity, and a 30-day server-issued opaque bearer capability. The database stores only a SHA-256 token digest.
+- Added `POST /api/v1/sessions/anonymous`: creates a care recipient, an email-free caregiver identity, and a 365-day server-issued opaque bearer capability with token rotation through a refresh endpoint. The database stores only a SHA-256 token digest.
 - Added a global guard for `/api/v1/*` care APIs. Except for the bootstrap route and explicitly non-personal time helpers, requests require a valid bearer session and a target person matching the session's server-stored scope. Child-resource routes are resolved through ORM ownership when possible; unresolvable/unscoped requests fail closed.
 - Caller-provided caregiver attribution must match the caregiver bound to the session.
 - Made caregiver email optional and added a PostgreSQL startup compatibility migration for existing `caregivers.email NOT NULL` schemas.
@@ -135,3 +135,9 @@ Not yet verified:
 - Anonymous identity and schema compatibility: `00f46dc2967865aa303b66bcff360f592d2d7eeb`, `c55c80180304ceae7b84b89d5b792bf2758117d4`, `1dacb996ef11230ee736b4a4ca62aefec6e264f2`, `79c1e091ef159718576e1e8499448eca970aa2f7`, `862db155954f2e6edd9cc3b809486a281bceaea0`, `705f2d92115c6575648c5d655cd227d362c1af62`.
 - Security tests and legacy test isolation: `f88e0b4985c90603f5757d4d3300bea7ebc39dc6`, `b4858a41a06963cbf9b57a680ac25d342f6f08c9`, `0c58abc23a18ac81f3fb83407f6c501a570003dd`, `e8854d809c959fde27416f9e166f5c18ea132a90`, `de00e9ac398d2c83d2d5411eaf94e21e24b08277`, `d6e6283ba4a3cc8f5119f4ccb89738cccb840987`.
 - Frontend anonymous-session client and first-capture integration: `1fca01141c933cc25d30f0c3e962bcce3e7486c6`, `15566c58381e42af490d77924e65684d5626f097`, `9f23a2209f2bc3c406db981029637d83a945d076`, `0e0cf907e75189329239a2e27cd5192078118b2e`.
+
+
+Latest follow-up commits after the initial session implementation:
+- Backend bootstrap, refresh and situation-scope binding: `0e77b1cf4cdf44773c9da5ef2731684534f01962`, `1c5d67f3301877bf7a83339f60f5702675111e46`, `b0c240dd33c475c074f18011e6be1ce0be55c96f`, `60e178f912451720c976891679553d2573745ed6`, `705f2d92115c6575648c5d655cd227d362c1af62`.
+- Auth test isolation and rotation coverage: `b4858a41a06963cbf9b57a680ac25d342f6f08c9`, `0c58abc23a18ac81f3fb83407f6c501a570003dd`, `e8854d809c959fde27416f9e166f5c18ea132a90`, `de00e9ac398d2c83d2d5411eaf94e21e24b08277`, `adc3e18c3a91bf0d3086de15d195bb468126fb9c`.
+- Frontend token refresh and care-person ID alignment: `d02bcbe6b12e034f168bf9f78aedc1e1b90a85a7`, `76923200498b089f8e209ca91f221952933dbe75`.
