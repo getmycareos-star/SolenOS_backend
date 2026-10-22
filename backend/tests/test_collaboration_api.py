@@ -80,14 +80,25 @@ def test_community_post_reaction_and_literal_experience_search_persist():
         assert any(item["post_id"] == post_id for item in search.json()["matches"])
 
         # Circle-only care stories must never be returned by shared-experience search.
-        private_post = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": person_id,
-            "content": "A private sundowning routine with restricted visibility.",
-            "post_type": "experience",
-            "visibility": "circle",
-        })
-        assert private_post.status_code == 201, private_post.text
-        private_post_id = private_post.json()["post"]["id"]
+        # Simulate a legacy/private row already present in the database. The
+        # current public API rejects new "circle" posts, but search must remain
+        # safe if old rows or future visibility values exist.
+        from app.models.collaboration import CommunityPost
+        with Session() as db:
+            account = db.query(AuthAccount).filter_by(email="community@example.test").one()
+            private_post = CommunityPost(
+                author_account_id=account.id,
+                body="A private sundowning routine with restricted visibility.",
+                post_type="experience",
+                visibility="circle",
+                care_stage="unspecified",
+                tags=["sundowning", "routine"],
+                status="published",
+            )
+            db.add(private_post)
+            db.commit()
+            db.refresh(private_post)
+            private_post_id = private_post.id
         private_search = client.post(
             "/api/v1/community/experience",
             headers=headers,
