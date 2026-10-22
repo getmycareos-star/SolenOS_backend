@@ -721,7 +721,6 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Events frequently occur in the {period}",
                 "period": period,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
                 "window_days": window_days,
             })
 
