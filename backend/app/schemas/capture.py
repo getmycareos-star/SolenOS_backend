@@ -63,6 +63,23 @@ class DailyCaptureOutput(BaseModel):
     recorded_at: datetime
 
 
+class DailyCaptureRecordOutput(BaseModel):
+    """A saved capture returned only after care-record read authorization."""
+    id: str
+    person_id: str
+    caregiver_id: str
+    recorded_by_account_id: str
+    medications: list[dict]
+    vitals: list[dict]
+    scales: list[dict]
+    notes: str
+    location: Optional[dict] = None
+    location_provenance: Optional[str] = None
+    recorded_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class UploadOutput(BaseModel):
     evidence_id: str
     content_type: str
