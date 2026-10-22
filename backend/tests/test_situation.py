@@ -74,7 +74,7 @@ def test_post_situation_creates_evidence_and_event():
                 "raw_input": "Patient seemed more confused than usual today.",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         data = response.json()
         assert data["ok"] is True
         assert data["care_key"] == caregiver_id
@@ -121,7 +121,7 @@ def test_post_situation_with_documents():
                 },
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         data = response.json()
         assert data["ok"] is True
         assert len(data["events"]) == 1
@@ -195,7 +195,7 @@ def test_post_situation_empty_input_and_no_documents():
                 "documents": [],
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 400, response.text
         assert "No valid evidence provided" in response.json()["detail"]
     finally:
         teardown_db()
