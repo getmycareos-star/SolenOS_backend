@@ -1,7 +1,8 @@
 import json
+from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
@@ -237,9 +238,14 @@ async def require_authenticated_care_access(request, call_next):
             if account.role == "caregiver":
                 allowed = caregiver.person_id == person_id
             elif account.role == "professional":
-                allowed = db.query(ProfessionalAccessGrant.id).filter_by(
-                    professional_caregiver_id=account.caregiver_id,
-                    person_id=person_id, status="active"
+                allowed = db.query(ProfessionalAccessGrant.id).filter(
+                    ProfessionalAccessGrant.professional_caregiver_id == account.caregiver_id,
+                    ProfessionalAccessGrant.person_id == person_id,
+                    ProfessionalAccessGrant.status == "active",
+                    or_(
+                        ProfessionalAccessGrant.expires_at.is_(None),
+                        ProfessionalAccessGrant.expires_at > datetime.now(timezone.utc),
+                    ),
                 ).first() is not None
             else:
                 allowed = False
