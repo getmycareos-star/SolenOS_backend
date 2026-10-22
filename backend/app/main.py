@@ -130,6 +130,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # These legacy list endpoints use the care-recipient ID as the final
             # path segment. Resolve it explicitly before the session-scope check.
             target_person_id = path.rsplit("/", 1)[-1]
+        if path.startswith("/api/v1/care-continuity/"):
+            # Resolve care-record-scoped collection routes explicitly, rather
+            # than trusting a client-provided person ID or a child-record ID.
+            parts = path.split("/")
+            if len(parts) >= 5 and parts[-2] in {
+                "revisions", "assertions", "freshness", "next-questions", "outcomes", "contradictions"
+            }:
+                target_person_id = parts[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
