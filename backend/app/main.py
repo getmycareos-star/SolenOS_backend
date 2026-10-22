@@ -321,35 +321,9 @@ def get_situation(
             "what_matters_now": None,
             "lifecycle_status": "active",
         }
-        active_turn = {
-            "relation": "updates_active",
-            "situation": active_situation,
-            "confirmation_title": "Saved care notes",
-            "confirmation_body": "These are observations previously recorded in this care record.",
-            "understanding_heading": "What has been recorded",
-            "understanding_stage": "gathering",
-            "current_understanding": [item["raw_text"] for item in observations],
-            "insufficiency_note": "These notes are caregiver-reported records. This view does not independently verify them or infer a diagnosis.",
-            "connection_note": None,
-            "what_needs_context": [],
-            "what_will_be_remembered": [item["raw_text"] for item in observations],
-            "what_seems_happening": None,
-            "what_matters_now": None,
-            "show_attention_sections": False,
-            "what_changed_in_understanding": None,
-            "understanding_effect": None,
-            "resolved_uncertainties": [],
-            "pattern_label": None,
-            "what_can_wait": None,
-            "what_may_become_serious": None,
-            "care_reality_state_id": None,
-            "crs_observation_count": len(observations),
-            "crs_revision": 0,
-            "disclosure_stage": "orientation",
-            "disclosure_plan": {},
-            "response_evolution": {},
-            "primary_screen_question": "What has been recorded?",
-        }
+        # No persisted reasoning turn exists in these relational tables.
+        # Return the saved situation only; do not synthesize a clinical assessment.
+        active_turn = {"situation": active_situation}
 
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
     return {
