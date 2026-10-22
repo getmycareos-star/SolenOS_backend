@@ -26,6 +26,7 @@ from app.models.collaboration import (
 )
 from app.models.time_location import Appointment
 from app.services.conversation_service import build_companion_reply
+from app.services.qwen_gateway import call_qwen_json
 
 router = APIRouter(dependencies=[Depends(current_account)])
 community_router = APIRouter(prefix="/community", tags=["community"], dependencies=[Depends(current_account)])
@@ -53,6 +54,17 @@ class ReactionInput(BaseModel):
 
 
 class ExperienceSearchInput(BaseModel):
+    observation: str = Field(min_length=2, max_length=500)
+
+
+
+
+class LCRExplanationInput(BaseModel):
+    person_id: str = Field(min_length=1, max_length=100)
+    question: str = Field(default="Explain the current recorded care situation, what is known, what remains uncertain, and what useful question to ask next.", min_length=5, max_length=2000)
+
+
+class CommunitySummaryInput(BaseModel):
     observation: str = Field(min_length=2, max_length=500)
 
 
@@ -200,6 +212,68 @@ def search_shared_experiences(
     return {"matches": matches, "method": "literal_search", "ai_generated": False}
 
 
+@community_router.post("/experience/summary")
+def summarize_shared_experiences(
+    payload: ExperienceSearchInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Use Qwen to summarize only published peer posts; never writes to the LCR."""
+    terms = [term.lower() for term in re.findall(r"[a-zA-Z0-9]{3,}", payload.observation)][:8]
+    posts = db.query(CommunityPost).filter(
+        CommunityPost.status == "published",
+        CommunityPost.visibility.in_(["public", "anonymous"]),
+    ).order_by(CommunityPost.created_at.desc()).limit(200).all()
+    matches = []
+    for post in posts:
+        haystack = f"{post.title or ''} {post.body} {' '.join(post.tags or [])}".lower()
+        matched = [term for term in terms if term in haystack]
+        if matched:
+            matches.append({
+                "post_id": post.id,
+                "content": post.body[:3000],
+                "tags": post.tags or ["general"],
+            })
+        if len(matches) >= 10:
+            break
+    if not matches:
+        return {"summary": None, "post_ids": [], "provider_status": "not_needed",
+                "ai_generated": False, "notice": "No matching published peer experiences were found."}
+    parsed, status = call_qwen_json(
+        system_prompt=(
+            "You summarize published peer-caregiver experiences for a support community. "
+            "Peer reports are not clinical evidence and are not medical recommendations. "
+            "Do not diagnose, prescribe, infer causality, or claim a peer report is generally true. "
+            "Summarize commonalities and differences only when supported by the supplied posts; "
+            "if they differ, state that. Never write to or update a person's Living Care Record. "
+            "Return JSON with summary (string), post_ids (array copied only from supplied IDs), "
+            "and limitations (array of strings)."
+        ),
+        user_prompt=__import__("json").dumps({
+            "question": payload.observation,
+            "published_peer_posts": matches,
+            "allowed_post_ids": [item["post_id"] for item in matches],
+        }, ensure_ascii=False),
+        temperature=0.0,
+    )
+    summary = parsed.get("summary") if parsed else None
+    ids = parsed.get("post_ids", []) if parsed else []
+    if not isinstance(summary, str) or not summary.strip():
+        summary = None
+    allowed_ids = {item["post_id"] for item in matches}
+    ids = sorted({item for item in ids if isinstance(item, str) and item in allowed_ids}) if isinstance(ids, list) else []
+    limitations = parsed.get("limitations", []) if parsed else []
+    limitations = [item.strip()[:300] for item in limitations if isinstance(item, str) and item.strip()][:5] if isinstance(limitations, list) else []
+    return {
+        "summary": summary,
+        "post_ids": ids,
+        "provider_status": status,
+        "ai_generated": bool(summary and status == "connected"),
+        "limitations": limitations,
+        "notice": "Peer experience only; not clinical advice and never a Living Care Record fact.",
+    }
+
+
 @community_router.post("/{post_id}/reactions")
 def react_to_community_post(
     post_id: str,
@@ -270,6 +344,34 @@ def moderate_community_post(
     post.updated_at = datetime.now(timezone.utc)
     db.commit()
     return {"success": True, "post_id": post.id, "status": post.status}
+
+
+@router.post("/lcr/explain")
+def explain_living_care_record(
+    payload: LCRExplanationInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Read-only Qwen explanation of the authorized LCR; it cannot mutate care facts."""
+    assert_person_access(db, account.id, payload.person_id, "read")
+    result = build_companion_reply(
+        db,
+        payload.person_id,
+        "LCR READ-ONLY EXPLANATION REQUEST: " + payload.question.strip()
+        + " Explain only what the supplied authorized record context supports. Clearly separate "
+        "recorded facts, uncertainty, missing information, and suggested questions. Do not modify the record.",
+        [],
+    )
+    return {
+        "person_id": payload.person_id,
+        "explanation": result.reply,
+        "evidence_ids": result.evidence_ids,
+        "provider_status": result.provider_status,
+        "ai_generated": result.ai_generated,
+        "read_only": True,
+        "guard_verdict": result.guard_verdict,
+        "safety_note": result.safety_note,
+    }
 
 
 @conversation_router.post("/message")
