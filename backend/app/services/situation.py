@@ -41,7 +41,7 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
     try:
         changes = detect_event_changes(
             db, person_id, care_event.event_type, None, occurred_at
-        )
+        ) or []
         significant_changes = [
             item for item in changes
             if item.significance_verdict
@@ -55,7 +55,7 @@ def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
         ]
         what_changed = "; ".join(change_parts) if change_parts else None
 
-        detected = detect_situations(db, person_id, occurred_at)
+        detected = detect_situations(db, person_id, occurred_at) or []
         active_situations = [item for item in detected if item.state.value == "active"]
         if active_situations:
             attention_candidate = attention_candidate or any(
