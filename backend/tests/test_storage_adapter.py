@@ -193,12 +193,12 @@ def test_photo_upload_requires_access_and_persists_evidence(monkeypatch):
                 "person_id": "storage-route-person",
                 "caregiver_id": "storage-route-caregiver",
             },
-            files={"file": ("medication.jpg", b"\\xff\\xd8\\xffimage-bytes", "image/jpeg")},
+            files={"file": ("medication.jpg", b"\xff\xd8\xffimage-bytes", "image/jpeg")},
         )
         assert response.status_code == 201, response.text
         evidence_id = response.json()["evidence_id"]
         assert uploaded["content_type"] == "image/jpeg"
-        assert uploaded["data"] == b"\\xff\\xd8\\xffimage-bytes"
+        assert uploaded["data"] == b"\xff\xd8\xffimage-bytes"
         assert "/" not in uploaded["path"]
 
         db = testing_session()
