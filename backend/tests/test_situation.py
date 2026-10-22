@@ -1,6 +1,4 @@
-from datetime import datetime, timezone, timedelta
-import hashlib
-import secrets
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,7 +9,6 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
@@ -48,18 +45,14 @@ def teardown_db():
     main_module.SessionLocal = DefaultSessionLocal
 
 
-def create_auth_headers(db, person_id: str, caregiver_id: str):
-    token = secrets.token_urlsafe(32)
-    db.add(
-        AnonymousSession(
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-        )
+def create_authenticated_session(client, person_name: str):
+    response = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": person_name, "caregiver_name": "Test family caregiver"},
     )
-    db.commit()
-    return {"Authorization": f"Bearer {token}"}
+    assert response.status_code == 201, response.text
+    body = response.json()
+    return body, {"Authorization": f"Bearer {body['access_token']}"};
 
 
 def test_post_situation_creates_evidence_and_event():
@@ -68,35 +61,24 @@ def test_post_situation_creates_evidence_and_event():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-1", name="Test Person")
-        caregiver = Caregiver(
-            id="caregiver-1",
-            name="Test Caregiver",
-            email="test@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        headers = create_auth_headers(db, person.id, caregiver.id)
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
         response = client.post(
             "/api/situation",
             headers=headers,
             json={
-                "caregiver_id": "caregiver-1",
-                "person_id": "person-1",
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
                 "raw_input": "Patient seemed more confused than usual today.",
             },
         )
         assert response.status_code == 200
         data = response.json()
         assert data["ok"] is True
-        assert data["care_key"] == "caregiver-1"
-        assert data["person_id"] == "person-1"
+        assert data["care_key"] == caregiver_id
+        assert data["person_id"] == person_id
         assert data["message"] == "Care input recorded successfully."
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
@@ -112,27 +94,14 @@ def test_post_situation_with_documents():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-2", name="Test Person 2")
-        caregiver = Caregiver(
-            id="caregiver-2",
-            name="Test Caregiver 2",
-            email="test2@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        headers = create_auth_headers(db, person.id, caregiver.id)
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person 2")
         response = client.post(
             "/api/situation",
             headers=headers,
             json={
-                "caregiver_id": "caregiver-2",
-                "person_id": "person-2",
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
                 "raw_input": "",
                 "documents": [
                     {
@@ -214,27 +183,14 @@ def test_post_situation_empty_input_and_no_documents():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-4", name="Test Person 4")
-        caregiver = Caregiver(
-            id="caregiver-4",
-            name="Test Caregiver 4",
-            email="test4@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        headers = create_auth_headers(db, person.id, caregiver.id)
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person 4")
         response = client.post(
             "/api/situation",
             headers=headers,
             json={
-                "caregiver_id": "caregiver-4",
-                "person_id": "person-4",
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
                 "raw_input": "   ",
                 "documents": [],
             },
