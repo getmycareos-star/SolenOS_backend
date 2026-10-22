@@ -221,7 +221,7 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
             continue
         prior = deduplicated[key]
         prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
-        prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]]))
+        prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]])))
         if item["_weight"] > prior["_weight"]:
             prior["priority"] = item["priority"]
             prior["_weight"] = item["_weight"]
