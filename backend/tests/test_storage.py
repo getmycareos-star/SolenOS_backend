@@ -128,7 +128,7 @@ def test_authenticated_photo_upload_persists_evidence_and_actor(monkeypatch):
     client = TestClient(main.app)
     try:
         response = client.post(
-            "/api/v1/upload?person_id=photo-person&caregiver_id=photo-caregiver",
+            "/api/v1/upload",
             headers={"Authorization": f"Bearer {token}"},
             data={"person_id": "photo-person", "caregiver_id": "photo-caregiver"},
             files={"file": ("medication.jpg", b"\xff\xd8\xffimage-bytes", "image/jpeg")},
