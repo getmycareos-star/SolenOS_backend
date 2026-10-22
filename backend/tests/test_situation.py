@@ -182,7 +182,11 @@ def test_post_situation_with_documents():
         evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
         # OCR confidence describes text extraction, not confidence in the care fact.
         assert evidence.confidence is None
-        assert json.loads(evidence.extra_metadata)["ocr_confidence"] == 0.95
+        metadata = json.loads(evidence.extra_metadata)
+        assert metadata["ocr_confidence"] == 0.95
+        assert metadata["original_filename"] == "discharge_summary.pdf"
+        assert evidence.original_file_path is None
+        assert evidence.source_type == "caregiver_uploaded_document"
         db.close()
     finally:
         teardown_db()
