@@ -114,3 +114,50 @@ def test_anonymous_refresh_rejects_regular_account_sessions():
             assert response.status_code == 403, response.text
     finally:
         teardown_db()
+
+
+
+def test_anonymous_caregiver_can_use_community_without_writing_to_the_care_record():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            session = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Caregiver"})
+            assert session.status_code == 201, session.text
+            body = session.json()
+            headers = {"Authorization": "Bearer " + body["access_token"]}
+            caregiver_id = body["caregiver"]["id"]
+            person_id = body["person"]["id"]
+
+            created = client.post("/api/v1/community", headers=headers, json={
+                "caregiver_id": caregiver_id,
+                "content": "A peer experience shared by this caregiver.",
+                "post_type": "experience",
+                "visibility": "public",
+                "care_stage": "unspecified",
+            })
+            assert created.status_code == 201, created.text
+            post_id = created.json()["post"]["id"]
+
+            listed = client.get(
+                "/api/v1/community",
+                params={"caregiver_id": caregiver_id},
+                headers=headers,
+            )
+            assert listed.status_code == 200, listed.text
+            assert any(item["id"] == post_id for item in listed.json()["posts"])
+
+            reaction = client.post(
+                f"/api/v1/community/{post_id}/reactions",
+                headers=headers,
+                json={"caregiver_id": caregiver_id, "reaction_type": "support"},
+            )
+            assert reaction.status_code == 200, reaction.text
+
+            events = client.get(f"/api/v1/events/{person_id}", headers=headers)
+            evidence = client.get(f"/api/v1/evidence/{person_id}", headers=headers)
+            assert events.status_code == 200, events.text
+            assert evidence.status_code == 200, evidence.text
+            assert events.json() == []
+            assert evidence.json() == []
+    finally:
+        teardown_db()
