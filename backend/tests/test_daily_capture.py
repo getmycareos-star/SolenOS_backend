@@ -6,6 +6,8 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care_continuity import CareAssertion, CareStateRevision
+from app.models.uncertainty import Contradiction
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -70,6 +72,15 @@ def test_daily_capture_persists_for_linked_caregiver():
         assert event.person_id == "person-daily-test"
         assert event.created_by_caregiver_id == "caregiver-daily-test"
         assert "User-recorded note" in event.description
+        assertions = db.query(CareAssertion).filter_by(
+            person_id="person-daily-test", source_event_id=event.id
+        ).all()
+        assert {item.field for item in assertions} >= {"mood", "general_notes"}
+        assert all(item.assertion_kind == "time_bound_observation" for item in assertions)
+        assert all(item.assertion_status == "reported" for item in assertions)
+        assert db.query(CareStateRevision).filter_by(
+            person_id="person-daily-test", target_type="care_events", target_id=event.id
+        ).count() == 1
         db.close()
     finally:
         teardown_db()
@@ -263,3 +274,39 @@ def test_readiness_rejects_incomplete_schema():
     finally:
         app.dependency_overrides.clear()
         incomplete_engine.dispose()
+
+
+
+def test_daily_capture_conflicting_medication_reports_are_preserved():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        for dose in ("5 mg", "10 mg"):
+            response = client.post(
+                "/api/v1/daily-care/entries",
+                json={
+                    "person_id": "person-daily-test",
+                    "caregiver_id": "caregiver-daily-test",
+                    "medications": [{"medication_name": "Example medication", "dose": dose}],
+                },
+            )
+            assert response.status_code == 200, response.text
+
+        db = TestingSessionLocal()
+        reports = db.query(CareAssertion).filter(
+            CareAssertion.person_id == "person-daily-test",
+            CareAssertion.subject_type == "medication",
+            CareAssertion.field == "dose",
+        ).all()
+        conflict = db.query(Contradiction).filter(
+            Contradiction.person_id == "person-daily-test",
+            Contradiction.field == "dose",
+        ).one()
+        assert {item.asserted_value for item in reports} == {"5 mg", "10 mg"}
+        assert conflict.resolution_status == "unresolved"
+        assert set(conflict.source_assertion_ids) == {item.id for item in reports}
+        assert all(item.source_event_id for item in reports)
+        db.close()
+    finally:
+        teardown_db()
