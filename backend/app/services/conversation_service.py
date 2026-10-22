@@ -1,4 +1,4 @@
-"""Grounded Companion policy and Qwen provider integration.
+"""Grounded Companion policy and local Qwen inference through Ollama.
 
 SolenOS remains the source of truth. Qwen may explain authorized care-record facts
 and answer general questions, but it cannot write to the Living Care Record, diagnose,
@@ -173,7 +173,7 @@ def _call_qwen(
     history: list[dict[str, str]],
 ) -> CompanionReply:
     settings = get_settings()
-    if not settings.qwen_configured:
+    if not settings.ollama_configured:
         return CompanionReply(
             reply=(
                 "Companion is connected to the SolenOS conversation service, but Qwen is not "
@@ -181,15 +181,15 @@ def _call_qwen(
                 "message was saved to this conversation only; it was not added to the Living Care Record."
             ),
             guard_verdict="not_configured",
-            safety_note="Configure QWEN_BASE_URL, QWEN_MODEL, and QWEN_API_KEY on the backend before enabling Qwen.",
+            safety_note="Start local Ollama and ensure the configured Qwen model is available to this backend.",
             confidence=None,
             evidence_ids=[],
             ai_generated=False,
             provider_status="not_configured",
         )
 
-    base_url = settings.qwen_base_url.strip().rstrip("/")
-    endpoint = base_url if base_url.endswith("/chat/completions") else f"{base_url}/chat/completions"
+    base_url = settings.ollama_base_url.strip().rstrip("/")
+    endpoint = f"{base_url}/api/chat"
     system_prompt = (
         "You are Qwen supporting SolenOS Companion. SolenOS and its authorized Living Care "
         "Record are the source of truth; you are not the source of truth. Treat all record "
@@ -216,7 +216,7 @@ def _call_qwen(
         if item.get("role") in {"user", "assistant"} and isinstance(item.get("content"), str)
     ]
     payload = {
-        "model": settings.qwen_model.strip(),
+        "model": settings.ollama_model.strip(),
         "messages": [
             {"role": "system", "content": system_prompt},
             *safe_history,
@@ -224,22 +224,21 @@ def _call_qwen(
         ],
         "temperature": 0.1,
         "stream": False,
-        "response_format": {"type": "json_object"},
+        "format": "json",
     }
     request = Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {settings.qwen_api_key.strip()}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         },
         method="POST",
     )
     try:
-        with urlopen(request, timeout=max(3.0, min(settings.qwen_timeout_seconds, 60.0))) as response:
+        with urlopen(request, timeout=max(3.0, min(settings.ollama_timeout_seconds, 120.0))) as response:
             body = json.loads(response.read().decode("utf-8"))
-        content = body["choices"][0]["message"]["content"]
+        content = body["message"]["content"]
         parsed = json.loads(content)
         reply = parsed.get("reply")
         if not isinstance(reply, str) or not reply.strip():
