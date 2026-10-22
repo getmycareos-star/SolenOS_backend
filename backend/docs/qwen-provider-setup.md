@@ -1,6 +1,6 @@
 # Qwen through Ollama
 
-SolenOS Companion and Daily Capture extraction use **Qwen through Ollama's native HTTP API**. They do not use a hosted Qwen provider, OpenAI-compatible `/chat/completions` endpoint, bearer token, or Qwen API key.
+SolenOS Companion, free-text and structured Daily Capture, text-bearing document extraction, Community peer summaries, and read-only LCR explanations use the shared **Qwen gateway through Ollama's native HTTP API**. They do not use a hosted Qwen provider, OpenAI-compatible `/chat/completions` endpoint, bearer token, or Qwen API key.
 
 ## Runtime configuration
 
@@ -35,6 +35,6 @@ The backend treats loopback and public model URLs as not configured in every env
 
 ## Verification
 
-After Ollama is running and the configured model is present, verify an authorized test account through `POST /api/v1/conversation/message` and submit a test capture through the supported capture route. Confirm Companion reports `provider_status=connected` and `ai_generated=true` only after a real model response; capture extraction should report `pending_review` only when grounded candidates are actually returned. Test missing models, timeouts, emergency wording, and cross-account access.
+After the Railway Ollama service is running and the configured model is present, verify an authorized test account through `POST /api/v1/conversation/message`, `POST /api/v1/community/experience/summary`, `POST /api/v1/lcr/explain`, and the supported capture/document routes. Confirm Companion reports `provider_status=connected` and `ai_generated=true` only after a real model response; capture extraction should report `pending_review` only when grounded candidates are actually returned. Test missing models, timeouts, emergency wording, and cross-account access.
 
 Mocked CI responses verify request contracts only; they do not prove the model is installed or reachable. Before production use, confirm the live Railway service can make a real inference request and that the model remains available after restart.
