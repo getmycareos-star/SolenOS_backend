@@ -158,6 +158,45 @@ def save_daily_capture(
     )
 
 
+@router.post("/documents/{care_event_id}/analyze")
+def analyze_text_document_in_care_event(
+    care_event_id: str,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Re-run Qwen extraction for text-bearing document evidence already linked to an event."""
+    event = db.query(CareEventModel).filter(CareEventModel.id == care_event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Care event not found")
+    assert_person_access(db, account.id, event.person_id, "write")
+    evidence_ids = [item for item in (event.evidence_ids or []) if isinstance(item, str)]
+    linked = db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == event.person_id,
+        EvidenceModel.id.in_(evidence_ids),
+    ).all() if evidence_ids else []
+    document_rows = [
+        item for item in linked
+        if item.type == "document" and isinstance(item.source_text, str)
+        and item.source_text.strip()
+        and "text content has not been extracted" not in item.source_text.lower()
+    ]
+    if not document_rows:
+        raise HTTPException(
+            status_code=422,
+            detail="This care event has no text-extracted document evidence. Image OCR/document text extraction must complete before Qwen can analyze it.",
+        )
+    analysis = analyze_saved_care_event(db, event.id)
+    return {
+        "care_event_id": event.id,
+        "document_evidence_ids": [item.id for item in document_rows],
+        "qwen_extraction_status": analysis["qwen_extraction_status"],
+        "qwen_candidates": analysis["qwen_candidates"],
+        "analysis_status": analysis["analysis_status"],
+        "read_only_to_lcr": True,
+        "review_required": True,
+    }
+
+
 @router.get("/capture/analyses/{person_id}")
 def list_capture_analyses(
     person_id: str,
