@@ -55,6 +55,7 @@ def create_authenticated_session(client, person_name: str):
     return body, {"Authorization": f"Bearer {body['access_token']}"}
 
 
+@pytest.mark.session_security
 def test_post_situation_creates_evidence_and_event():
     setup_db()
     try:
@@ -90,6 +91,7 @@ def test_post_situation_creates_evidence_and_event():
         teardown_db()
 
 
+@pytest.mark.session_security
 def test_post_situation_with_documents():
     setup_db()
     try:
@@ -179,6 +181,7 @@ def test_situation_service_rejects_missing_person():
         teardown_db()
 
 
+@pytest.mark.session_security
 def test_post_situation_empty_input_and_no_documents():
     setup_db()
     try:
