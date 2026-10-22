@@ -121,6 +121,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        # The legacy evidence-list route uses the care-recipient ID as its final
+        # path segment. Resolve that explicit contract directly if Starlette's
+        # route matcher does not expose the expected parameter name.
+        if not target_person_id and path.startswith("/api/v1/evidence/"):
+            target_person_id = path.rsplit("/", 1)[-1]
         if path == "/api/situation" and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
