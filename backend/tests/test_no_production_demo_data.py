@@ -23,3 +23,22 @@ def test_application_source_contains_no_demo_care_recipient_identity():
         source = path.read_text(encoding="utf-8")
         for literal in forbidden_literals:
             assert literal not in source, f"{literal!r} found in production module {path}"
+
+
+def test_application_source_has_no_shared_caregiver_or_recipient_fallbacks():
+    forbidden_identity_literals = (
+        "default_caregiver",
+        "default_care_recipient",
+        "demo-person-id",
+    )
+    for path in APPLICATION_ROOT.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for literal in forbidden_identity_literals:
+            assert literal not in source, f"{literal!r} found in production module {path}"
+
+
+def test_time_patterns_do_not_emit_uncalibrated_count_based_confidence():
+    time_intelligence = (APPLICATION_ROOT / "services" / "time_intelligence.py").read_text(encoding="utf-8")
+    api_v1 = (APPLICATION_ROOT / "api" / "v1.py").read_text(encoding="utf-8")
+    assert "min(count / 10.0, 1.0)" not in time_intelligence
+    assert 'confidence="0.9"' not in api_v1
