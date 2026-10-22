@@ -1,20 +1,21 @@
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.core.config import get_settings
+from app.core.database_config import configure_database_url, is_railway_runtime
 
 settings = get_settings()
+RAILWAY_RUNTIME = is_railway_runtime()
+database_url = configure_database_url(settings.database_url, railway_runtime=RAILWAY_RUNTIME)
 
-# SQLite needs check_same_thread=False; PostgreSQL drivers do not accept that
-# SQLite-only connection argument.
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+# SQLite-only connection arguments must not leak into PostgreSQL.
+connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# Register every ORM model before create_all. Importing app.api.v1 imports this
-# module before it imports app.models.care, so omitting care here left foreign
-# keys such as information_gaps.created_by_caregiver_id unresolved at startup.
+# Register all ORM models before local schema creation or Alembic autogeneration.
 import app.models.care  # noqa: E402, F401
 import app.models.anonymous_session  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
@@ -27,8 +28,6 @@ import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
 import app.models.safety  # noqa: E402, F401
-
-Base.metadata.create_all(bind=engine)
 
 
 def get_db():
@@ -47,60 +46,78 @@ def _sqlite_column_type(col, dialect):
 
 
 def ensure_database_schema(bind=None):
-    """Idempotently add ORM columns that are missing from existing SQLite tables.
-
-    The backend persists via Base.metadata.create_all only (no Alembic in use).
-    create_all creates tables but cannot add columns to tables that already
-    exist with an older shape, which previously surfaced as HTTP 500
-    ("table changes has no column named ...") after a model change. This guard
-    adds only missing columns and never drops or rewrites data, so it is safe to
-    run at startup against a stale dev database.
-    """
+    """Add compatible missing columns to local SQLite only; never mutate production PostgreSQL."""
     from sqlalchemy import inspect, text
 
     target = bind or engine
-    try:
-        insp = inspect(target)
-        dialect = target.dialect
-    except Exception:
+    if target.dialect.name != "sqlite":
         return
-    # Existing PostgreSQL deployments may retain the pre-anonymous NOT NULL
-    # constraint. Remove only that constraint; never invent a placeholder email.
-    if dialect.name == "postgresql" and insp.has_table("caregivers"):
-        caregiver_columns = {c["name"]: c for c in (insp.get_columns("caregivers") or [])}
-        email_column = caregiver_columns.get("email")
-        if email_column and not email_column.get("nullable", True):
-            with target.begin() as conn:
-                conn.execute(text('ALTER TABLE "caregivers" ALTER COLUMN "email" DROP NOT NULL'))
 
+    inspector = inspect(target)
     for table_name, table in Base.metadata.tables.items():
-        if not insp.has_table(table_name):
+        if not inspector.has_table(table_name):
             continue
-        existing = {c["name"] for c in (insp.get_columns(table_name) or [])}
+        existing = {column["name"] for column in inspector.get_columns(table_name)}
         for col in table.columns:
             if col.name in existing:
                 continue
-            col_type = _sqlite_column_type(col, dialect) or "TEXT"
-            nullable = "" if col.nullable else " NOT NULL"
+            col_type = _sqlite_column_type(col, target.dialect) or "TEXT"
             default = ""
             if col.server_default is not None:
                 default = f" DEFAULT {col.server_default.arg}"
             elif col.default is not None and not callable(col.default):
-                v = col.default
-                if isinstance(v, bool):
-                    default = f" DEFAULT {1 if v else 0}"
-                elif isinstance(v, (int, float)):
-                    default = f" DEFAULT {v}"
-                elif isinstance(v, str):
-                    default = f" DEFAULT '{v}'"
-            stmt = text(f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" {col_type}{default}{nullable}')
+                value = col.default
+                if isinstance(value, bool):
+                    default = f" DEFAULT {1 if value else 0}"
+                elif isinstance(value, (int, float)):
+                    default = f" DEFAULT {value}"
+                elif isinstance(value, str):
+                    default = " DEFAULT '" + value.replace("'", "''") + "'"
+            nullable = "" if col.nullable else " NOT NULL"
+            statement = text(
+                f'ALTER TABLE "{table_name}" ADD COLUMN "{col.name}" '
+                f"{col_type}{default}{nullable}"
+            )
             try:
-                with target.begin() as conn:
-                    conn.execute(stmt)
+                with target.begin() as connection:
+                    connection.execute(statement)
             except Exception:
-                # A single column that cannot be added should not block startup;
-                # it will raise concretely if actually needed.
-                pass
+                # Concurrent initializers are acceptable only if the column now exists.
+                refreshed = {
+                    column["name"] for column in inspect(target).get_columns(table_name)
+                }
+                if col.name not in refreshed:
+                    raise RuntimeError(
+                        f"Local SQLite schema update failed for {table_name}.{col.name}"
+                    )
 
 
-ensure_database_schema()
+def database_schema_differences(bind=None):
+    """Return missing ORM tables/columns without reading or exposing care records."""
+    from sqlalchemy import inspect
+
+    target = bind or engine
+    inspector = inspect(target)
+    existing_tables = set(inspector.get_table_names())
+    differences = []
+    for table_name, table in Base.metadata.tables.items():
+        if table_name not in existing_tables:
+            differences.append(f"{table_name} (table missing)")
+            continue
+        existing_columns = {
+            column["name"] for column in inspector.get_columns(table_name)
+        }
+        missing_columns = sorted(
+            column.name for column in table.columns if column.name not in existing_columns
+        )
+        if missing_columns:
+            differences.append(f"{table_name}: missing columns {', '.join(missing_columns)}")
+    return differences
+
+
+# Local development keeps its low-friction SQLite bootstrap. Railway production
+# must run reviewed Alembic migrations before ASGI startup; create_all() cannot
+# alter existing PostgreSQL tables and must not silently mutate production schema.
+if not RAILWAY_RUNTIME:
+    Base.metadata.create_all(bind=engine)
+    ensure_database_schema()
