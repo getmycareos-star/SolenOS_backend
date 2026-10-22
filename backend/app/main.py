@@ -57,7 +57,8 @@ PUBLIC_V1_ENDPOINTS = {
 
 @app.middleware("http")
 async def enforce_scoped_anonymous_session(request: Request, call_next):
-    path = request.url.path.rstrip("/")
+    # ASGI scope path excludes query parameters and is the canonical route path.
+    path = str(request.scope.get("path") or request.url.path).rstrip("/")
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
@@ -126,7 +127,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # route matcher does not expose the expected parameter name.
         if not target_person_id and path.startswith("/api/v1/evidence/"):
             target_person_id = path.rsplit("/", 1)[-1]
-        if path == "/api/situation" and method == "GET":
+        if path.endswith("/api/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
@@ -209,7 +210,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     body_payload = parsed_body
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
-        claimed_caregiver_id = None if path == "/api/situation" and method == "GET" else (
+        claimed_caregiver_id = None if path.endswith("/api/situation") and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
