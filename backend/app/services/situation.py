@@ -37,8 +37,12 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
+            # The API receives extracted text and a client-reported filename, not
+            # the original file bytes. Keep the filename as metadata; never imply
+            # that a retrievable file was stored in original_file_path.
             metadata = {
+                "original_filename": doc.name,
                 "ocr_confidence": doc.ocr_confidence,
                 "mime_type": doc.mime_type,
             }
@@ -46,7 +50,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             person_id=payload.person_id,
             type="note" if not doc else "document",
             source_text=source_text,
-            original_file_path=doc.name if doc else None,
+            original_file_path=None,
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
@@ -54,7 +58,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             # confidence score about the care observation itself.
             confidence=None,
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type="caregiver_uploaded_document" if doc else "caregiver_observation",
         )
         db.add(evidence)
         db.flush()
