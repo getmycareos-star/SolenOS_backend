@@ -190,3 +190,6 @@ Follow-up inspection of the actual Vite entrypoint (`src/main.tsx` → `src/App.
 - Capture messaging aligned with anonymous sessions: `147b5b788f019c269b4c6b12776e583948a5ac72`
 
 The frontend direct-fetch audit is documented at `docs/audits/2026-10-22-anonymous-session-frontend-fetch-audit.md` in the frontend repository. It explicitly records remaining legacy `/api/*` calls that are not mounted by the inspected FastAPI application; those endpoints remain unsupported and must not be considered functional.
+
+
+Additional lifecycle test coverage: `bce891d0e4ae260606eb4d6038613a1e54841678` now extends the capture → GET hydration → token refresh → GET rehydration test to verify the active Vite app's `GET /api/v1/evidence/{person_id}` and `GET /api/v1/events/{person_id}` reads continue to return the saved note/event under the rotated token.
