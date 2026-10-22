@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.models.auth_identity import AuthAccount
 from app.models.care import CareEvent as CareEventModel, Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.models.capture import DailyCapture, EvidenceFile
+from app.services.situation import analyze_saved_care_event
 from app.schemas.capture import DailyCaptureInput, DailyCaptureOutput, DailyCaptureRecordOutput, UploadOutput
 
 router = APIRouter(tags=["daily-capture"], dependencies=[Depends(current_account)])
@@ -114,11 +115,21 @@ def save_daily_capture(
     db.commit()
     db.refresh(capture)
     db.refresh(event)
+
+    # Structured Daily Capture and free-text capture share the same deterministic
+    # change/situation analysis. The response reports partial success explicitly.
+    analysis = analyze_saved_care_event(db, event.id)
     return DailyCaptureOutput(
         success=True,
         daily_capture_id=capture.id,
         care_event_id=event.id,
         recorded_at=capture.recorded_at or recorded_at,
+        analysis_status=analysis["analysis_status"],
+        analysis_error=analysis["analysis_error"],
+        what_changed=analysis["what_changed"],
+        attention_candidate=analysis["attention_candidate"],
+        follow_up_candidate=analysis["follow_up_candidate"],
+        situations=analysis["situations"],
     )
 
 
