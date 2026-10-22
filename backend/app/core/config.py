@@ -32,25 +32,19 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60 * 24
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
 
-    # Qwen is enabled only when the endpoint, model identifier, and credential are
-    # explicitly configured in the backend environment. Never infer a local model
-    # or claim connectivity merely because the application starts.
-    qwen_base_url: str = ""
-    qwen_model: str = ""
-    qwen_api_key: str = ""
-    qwen_timeout_seconds: float = 20.0
+    # Local Qwen inference through Ollama. No hosted Qwen API or API key is used.
+    # The Ollama process must be reachable from this backend runtime.
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_timeout_seconds: float = 60.0
 
     class Config:
         env_file = ".env"
         case_sensitive = False
 
     @property
-    def qwen_configured(self) -> bool:
-        return bool(
-            self.qwen_base_url.strip()
-            and self.qwen_model.strip()
-            and self.qwen_api_key.strip()
-        )
+    def ollama_configured(self) -> bool:
+        return bool(self.ollama_base_url.strip() and self.ollama_model.strip())
 
     def validate_production_configuration(self) -> None:
         """Reject unsafe storage or session-signing configuration before serving requests.
