@@ -5,6 +5,7 @@ from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.services.gwen_gateway import call_gwen_json
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 
@@ -94,29 +95,14 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         "source_evidence": sources,
     }, ensure_ascii=False)
-    endpoint = f"{settings.ollama_base_url.strip().rstrip('/')}/api/chat"
-    request = Request(
-        endpoint,
-        data=json.dumps({
-            "model": settings.ollama_model.strip(),
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0.0,
-            "stream": False,
-            "format": "json",
-        }).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
     try:
-        with urlopen(request, timeout=max(3.0, min(settings.ollama_timeout_seconds, 120.0))) as response:
-            provider_body = json.loads(response.read().decode("utf-8"))
-        parsed = json.loads(provider_body["message"]["content"])
+        parsed, provider_status = call_gwen_json(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.0,
+        )
+        if provider_status != "connected" or parsed is None:
+            raise ValueError("Gwen provider unavailable or returned invalid JSON")
         if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
             raise ValueError("Invalid extraction schema")
 
