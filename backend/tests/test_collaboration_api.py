@@ -369,3 +369,46 @@ def test_collaboration_routes_are_registered_and_session_protected():
         f"Missing collaboration routes: {sorted(required - actual)}; "
         f"registered paths: {sorted(schema.get('paths', {}))}"
     )
+
+
+def test_community_qwen_summary_uses_only_published_peer_posts_and_never_writes_lcr(monkeypatch):
+    from app.api import collaboration
+    from app.models.collaboration import CommunityPost
+    engine, Session, client = _client_for_test()
+    try:
+        headers, person_id = _account_context(client, Session, "community-qwen@example.test")
+        created = client.post("/api/v1/community", headers=headers, json={
+            "caregiver_id": person_id,
+            "content": "Our quiet bedtime routine helped us settle.",
+            "post_type": "experience",
+            "visibility": "public",
+        })
+        assert created.status_code == 201, created.text
+        post_id = created.json()["post"]["id"]
+        monkeypatch.setattr(
+            collaboration,
+            "call_qwen_json",
+            lambda **kwargs: ({
+                "summary": "One caregiver describes a quiet bedtime routine.",
+                "post_ids": [post_id, "invented-post"],
+                "limitations": ["This is one person's experience."],
+            }, "connected"),
+        )
+        response = client.post(
+            "/api/v1/community/experience/summary",
+            headers=headers,
+            json={"observation": "quiet bedtime routine"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["ai_generated"] is True
+        assert body["provider_status"] == "connected"
+        assert body["post_ids"] == [post_id]
+        assert body["matches"][0]["post_id"] == post_id
+        assert body["notice"].startswith("Peer experience only")
+        # Qwen community assistance must never add care events or facts.
+        from app.models.care import CareEvent
+        with Session() as db:
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+    finally:
+        _cleanup(engine, client)
