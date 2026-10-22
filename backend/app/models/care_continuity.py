@@ -115,6 +115,8 @@ def _snapshot(obj, *, before=False):
         key = column.key
         history = state.attrs[key].history
         if before and history.has_changes():
+            if not history.deleted:
+                history = state.attrs[key].load_history()
             value = history.deleted[0] if history.deleted else None
         else:
             value = getattr(obj, key, None)
@@ -125,6 +127,8 @@ def _snapshot(obj, *, before=False):
 @event.listens_for(Session, "before_flush")
 def _version_care_state(session, flush_context, instances):
     """Create immutable before/after revisions in the same transaction as each write."""
+    if any(isinstance(obj, CareStateRevision) for obj in list(session.dirty) + list(session.deleted)):
+        raise ValueError("Care-state revisions are append-only and cannot be updated or deleted")
     candidates = list(session.new) + list(session.dirty) + list(session.deleted)
     seen = set()
     for obj in candidates:
