@@ -15,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.authentication import current_account
-from app.core.authz import assert_person_access, require_staff
+from app.core.authz import assert_account_is_caregiver, assert_person_access, require_staff
 from app.core.database import get_db
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
 from app.models.care import CareEvent, Caregiver, Person
@@ -31,6 +31,16 @@ from app.services.qwen_gateway import call_qwen_json
 
 router = APIRouter(dependencies=[Depends(current_account)])
 community_router = APIRouter(prefix="/community", tags=["community"], dependencies=[Depends(current_account)])
+
+def _require_authorized_caregiver_context(db: Session, account_id: str, caregiver_id: str, permission: str) -> Caregiver:
+    """Resolve caregiver identity to its person, then enforce identity link and record grant."""
+    caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="Caregiver identity not found")
+    assert_account_is_caregiver(db, account_id, caregiver.id, caregiver.person_id)
+    assert_person_access(db, account_id, caregiver.person_id, permission)
+    return caregiver
+
 conversation_router = APIRouter(prefix="/conversation", tags=["conversation"], dependencies=[Depends(current_account)])
 team_router = APIRouter(prefix="/team", tags=["team"], dependencies=[Depends(require_staff)])
 professional_router = APIRouter(prefix="/professional-dashboard", tags=["professional-dashboard"], dependencies=[Depends(current_account)])
@@ -135,7 +145,7 @@ def list_community_posts(
     # caregiver_id query name. Treat it only as a context authorization check;
     # never infer caregiver identity from it.
     if caregiver_id:
-        assert_person_access(db, account.id, caregiver_id, "read")
+        _require_authorized_caregiver_context(db, account.id, caregiver_id, "read")
     posts = (
         db.query(CommunityPost)
         .filter(CommunityPost.status == "published", CommunityPost.visibility.in_([ "public", "anonymous" ]))
@@ -157,7 +167,7 @@ def create_community_post(
 ):
     # This confirms that the author is an authorized caregiver in a care context.
     # The context ID is not stored on the public post and is not an attribution ID.
-    assert_person_access(db, account.id, payload.caregiver_id, "write")
+    _require_authorized_caregiver_context(db, account.id, payload.caregiver_id, "write")
     body = payload.content.strip()
     if not body:
         raise HTTPException(status_code=422, detail="Post content cannot be blank")
@@ -281,7 +291,7 @@ def react_to_community_post(
     db: Session = Depends(get_db),
     account: AuthAccount = Depends(current_account),
 ):
-    assert_person_access(db, account.id, payload.caregiver_id, "read")
+    _require_authorized_caregiver_context(db, account.id, payload.caregiver_id, "read")
     post = db.query(CommunityPost).filter(
         CommunityPost.id == post_id,
         CommunityPost.status == "published",
