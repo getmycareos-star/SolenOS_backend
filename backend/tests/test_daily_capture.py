@@ -5,7 +5,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -197,7 +197,7 @@ def test_insight_rejects_evidence_from_another_person():
         seed_person_and_caregiver()
         seed_second_person_and_caregiver()
         db = TestingSessionLocal()
-        foreign_evidence = __import__("app.models.care", fromlist=["Evidence"]).Evidence(
+        foreign_evidence = Evidence(
             id="foreign-evidence-test",
             person_id="person-other-test",
             type="note",
