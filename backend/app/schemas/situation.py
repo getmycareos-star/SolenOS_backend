@@ -21,6 +21,7 @@ class SituationDocument(BaseModel):
 
 class SituationInput(BaseModel):
     caregiver_id: str
+    client_care_key: Optional[str] = None
     person_id: str
     raw_input: str = ""
     documents: Optional[List[SituationDocument]] = None
