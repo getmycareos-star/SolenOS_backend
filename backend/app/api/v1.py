@@ -321,6 +321,14 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Se
         if value is None or (isinstance(value, str) and not value.strip()):
             return
         source_value = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        normalized_observed_at = observed_at
+        if isinstance(normalized_observed_at, str):
+            try:
+                normalized_observed_at = datetime.fromisoformat(normalized_observed_at.replace("Z", "+00:00"))
+            except ValueError:
+                normalized_observed_at = None
+        if not isinstance(normalized_observed_at, datetime):
+            normalized_observed_at = occurred_at
         create_assertion(
             db,
             CareAssertionCreate(
@@ -334,7 +342,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Se
                 source_label=title,
                 source_text=source_value[:12000],
                 evidence_ids=[],
-                observed_at=observed_at or occurred_at,
+                observed_at=normalized_observed_at,
                 review_after_days=None,
                 created_by_caregiver_id=caregiver_id,
             ),
