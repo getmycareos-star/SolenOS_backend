@@ -215,6 +215,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         claimed_caregiver_id = None if path.endswith("/situation") and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
+            or body_payload.get("updated_by_caregiver_id")
+            or body_payload.get("resolved_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
             or request.query_params.get("caregiver_id")
             or request.query_params.get("created_by_caregiver_id")
