@@ -179,9 +179,9 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert unauthenticated_caregiver_read.status_code == 401
             unauthenticated_safety_read = client.get("/api/v1/safety/audit/not-authorized")
             assert unauthenticated_safety_read.status_code == 401
-            unauthenticated_action_read = client.get("/api/v1/actions/actions/not-authorized")
+            unauthenticated_action_read = client.get("/api/v1/actions/not-authorized")
             assert unauthenticated_action_read.status_code == 401
-            unauthenticated_action_safety = client.post("/api/v1/actions/actions/safety-check", json={"source_evidence_id": "not-authorized", "source_passage": "test", "original_text": "test", "extraction_confidence": 0.5, "normalized_action": "test"})
+            unauthenticated_action_safety = client.post("/api/v1/actions/safety-check", json={"source_evidence_id": "not-authorized", "source_passage": "test", "original_text": "test", "extraction_confidence": 0.5, "normalized_action": "test"})
             assert unauthenticated_action_safety.status_code == 401
             unauthenticated_situation_write = client.post("/api/situation", json={"person_id": "not-authorized", "caregiver_id": "not-authorized", "raw_input": "test"})
             assert unauthenticated_situation_write.status_code == 401
@@ -268,10 +268,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             own_safety_audits = client.get("/api/v1/safety/audit/" + context["person_id"], headers=headers)
             assert own_safety_audits.status_code == 200, own_safety_audits.text
             assert own_safety_audits.json() == []
-            own_actions = client.get("/api/v1/actions/actions/" + context["person_id"], headers=headers)
+            own_actions = client.get("/api/v1/actions/" + context["person_id"], headers=headers)
             assert own_actions.status_code == 200, own_actions.text
             assert own_actions.json() == []
-            own_uncompleted_actions = client.get("/api/v1/actions/actions/" + context["person_id"] + "/uncompleted", headers=headers)
+            own_uncompleted_actions = client.get("/api/v1/actions/" + context["person_id"] + "/uncompleted", headers=headers)
             assert own_uncompleted_actions.status_code == 200, own_uncompleted_actions.text
             assert own_uncompleted_actions.json() == []
             with TestingSession() as db:
@@ -391,10 +391,10 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             replayed_invitation = client.post("/api/v1/auth/caregiver-invitations/accept", headers=headers, json={"token": invitation_token})
             assert replayed_invitation.status_code == 400, replayed_invitation.text
             safety_candidate = {"source_evidence_id": own_evidence_id, "source_passage": "Call the clinic tomorrow.", "original_text": "Call the clinic tomorrow.", "extraction_confidence": 0.8, "normalized_action": "call clinic"}
-            own_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=safety_candidate)
+            own_safety_check = client.post("/api/v1/actions/safety-check", headers=headers, json=safety_candidate)
             assert own_safety_check.status_code == 200, own_safety_check.text
             foreign_candidate = dict(safety_candidate, source_evidence_id=foreign_evidence_id)
-            foreign_safety_check = client.post("/api/v1/actions/actions/safety-check", headers=headers, json=foreign_candidate)
+            foreign_safety_check = client.post("/api/v1/actions/safety-check", headers=headers, json=foreign_candidate)
             assert foreign_safety_check.status_code == 403, foreign_safety_check.text
             foreign_safety_validation = client.post("/api/v1/safety/validate-response", headers=headers, params={"candidate_response": "A summary", "risk_class": "low_risk", "person_id": foreign_person_id}, json={"claims": ["claim"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_safety_validation.status_code == 403, foreign_safety_validation.text
@@ -426,7 +426,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             assert foreign_evidence_transition.status_code == 400, foreign_evidence_transition.text
             foreign_evidence_temporal_fact = client.post("/api/v1/temporal/facts", headers=headers, json={"person_id": context["person_id"], "subject_type": "person", "subject_id": context["person_id"], "evidence_ids": [foreign_evidence_id]})
             assert foreign_evidence_temporal_fact.status_code == 400, foreign_evidence_temporal_fact.text
-            action_create = client.post("/api/v1/actions/actions", headers=headers, json={
+            action_create = client.post("/api/v1/actions", headers=headers, json={
                 "person_id": context["person_id"],
                 "source_evidence_id": own_evidence_id,
                 "source_passage": "Call the clinic tomorrow.",
@@ -450,11 +450,11 @@ def test_signup_login_current_account_and_logout(monkeypatch):
             })
             assert outsider_login.status_code == 200, outsider_login.text
             outsider_headers = {"Authorization": f"Bearer {outsider_login.json()['access_token']}"}
-            outsider_action_read = client.get("/api/v1/actions/actions/detail/" + created_action_id, headers=outsider_headers)
+            outsider_action_read = client.get("/api/v1/actions/detail/" + created_action_id, headers=outsider_headers)
             assert outsider_action_read.status_code == 403, outsider_action_read.text
-            outsider_action_update = client.patch("/api/v1/actions/actions/" + created_action_id, headers=outsider_headers, json={"normalized_action": "forged change"})
+            outsider_action_update = client.patch("/api/v1/actions/" + created_action_id, headers=outsider_headers, json={"normalized_action": "forged change"})
             assert outsider_action_update.status_code == 403, outsider_action_update.text
-            outsider_action_cancel = client.post("/api/v1/actions/actions/" + created_action_id + "/cancel", headers=outsider_headers)
+            outsider_action_cancel = client.post("/api/v1/actions/" + created_action_id + "/cancel", headers=outsider_headers)
             assert outsider_action_cancel.status_code == 403, outsider_action_cancel.text
             staff_only = client.get("/api/v1/safety/policy-rules", headers=headers)
             assert staff_only.status_code == 403, staff_only.text
@@ -499,7 +499,7 @@ def test_signup_login_current_account_and_logout(monkeypatch):
                     assert exc.status_code == 403
             unrelated_legacy_person = client.get("/api/v1/persons/" + unrelated.id, headers=headers)
             assert unrelated_legacy_person.status_code == 403, unrelated_legacy_person.text
-            unrelated_action_read = client.get("/api/v1/actions/actions/" + unrelated.id, headers=headers)
+            unrelated_action_read = client.get("/api/v1/actions/" + unrelated.id, headers=headers)
             assert unrelated_action_read.status_code == 403, unrelated_action_read.text
             unrelated_situation_write = client.post("/api/situation", headers=headers, json={"person_id": unrelated.id, "caregiver_id": "not-a-real-caregiver", "raw_input": "test"})
             assert unrelated_situation_write.status_code == 403, unrelated_situation_write.text
