@@ -156,7 +156,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     return SituationResponse(
         ok=True,
         situation_id=care_event.id,
-        care_key=payload.caregiver_id,
+        care_key=payload.client_care_key or payload.caregiver_id,
         person_id=payload.person_id,
         evidence_id=evidence_ids[0],
         care_event_id=care_event.id,
