@@ -52,7 +52,7 @@ def create_authenticated_session(client, person_name: str):
     )
     assert response.status_code == 201, response.text
     body = response.json()
-    return body, {"Authorization": f"Bearer {body['access_token']}"};
+    return body, {"Authorization": f"Bearer {body['access_token']}"}
 
 
 def test_post_situation_creates_evidence_and_event():
