@@ -311,6 +311,72 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Se
         tags=["daily_capture"],
     )
     db.add(event)
+    # Flush first so assertions retain a durable link to this exact source event.
+    db.flush()
+
+    from app.schemas.care_continuity import CareAssertionCreate
+    from app.services.care_continuity import create_assertion
+
+    def add_source_assertion(field, value, subject_type, subject_id, assertion_kind, observed_at=None):
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return
+        source_value = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        create_assertion(
+            db,
+            CareAssertionCreate(
+                person_id=person_id,
+                subject_type=subject_type,
+                subject_id=str(subject_id),
+                field=str(field),
+                assertion_kind=assertion_kind,
+                asserted_value=source_value[:4000],
+                source_event_id=event.id,
+                source_label=title,
+                source_text=source_value[:12000],
+                evidence_ids=[],
+                observed_at=observed_at or occurred_at,
+                review_after_days=None,
+                created_by_caregiver_id=caregiver_id,
+            ),
+            commit=False,
+        )
+
+    # Medication state can conflict; administration/status remains time-bound.
+    medications = payload.get("medications")
+    if isinstance(medications, list):
+        for medication in medications:
+            if not isinstance(medication, dict):
+                continue
+            medication_name = str(medication.get("medication_name") or medication.get("name") or "").strip()
+            if not medication_name:
+                continue
+            medication_subject = medication_name.casefold()
+            for medication_field in ("dose", "medication_name", "name"):
+                if medication.get(medication_field) not in (None, ""):
+                    add_source_assertion(medication_field, medication[medication_field], "medication", medication_subject, "current_state")
+            for medication_field in ("status", "administered_at", "scheduled_for", "note"):
+                if medication.get(medication_field) not in (None, ""):
+                    add_source_assertion(medication_field, medication[medication_field], "medication", medication_subject, "time_bound_observation", medication.get("administered_at") or medication.get("scheduled_for"))
+
+    # Vitals and scales are observations, not enduring current-state claims.
+    vitals = payload.get("vitals")
+    if isinstance(vitals, dict):
+        for vital_name, vital_value in vitals.items():
+            add_source_assertion("value", vital_value, "vital", str(vital_name), "time_bound_observation")
+    scales = payload.get("scales")
+    if isinstance(scales, list):
+        for scale in scales:
+            if isinstance(scale, dict) and scale.get("axis") and scale.get("score") is not None:
+                add_source_assertion("score", scale["score"], "scale", str(scale["axis"]), "time_bound_observation", scale.get("observed_at"))
+
+    # Narrative observations are preserved verbatim and cannot contradict reports from other days.
+    for observation_field in (
+        "mood", "agitation_level", "agitation_scale", "behavior_notes", "sleep_notes",
+        "eating_notes", "wellbeing_notes", "general_notes", "notes",
+    ):
+        if payload.get(observation_field) not in (None, ""):
+            add_source_assertion(observation_field, payload[observation_field], "daily_care", person_id, "time_bound_observation")
+
     db.commit()
     db.refresh(event)
     _log_and_learn(
