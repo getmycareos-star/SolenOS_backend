@@ -38,13 +38,68 @@ class ActionLifecycleService:
         db.refresh(action)
         return action
 
-    def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session) -> ActionModel:
-        if action.status in ("cancelled", "superseded", "expired"):
-            raise ValueError(f"Cannot complete action in status {action.status}")
+    def record_completion(
+        self,
+        action: ActionModel,
+        evidence: ActionCompletionEvidence,
+        db: Session,
+        caregiver_id: Optional[str] = None,
+    ) -> ActionModel:
+        if action.status != ActionStatus.ACTIVE:
+            raise ValueError(f"Only active actions can be completed; current status is {action.status}")
+        if not action.person_id:
+            raise ValueError("Action is not linked to a care recipient")
+
+        from app.models.care import Caregiver as CaregiverModel
+        from app.models.care import Evidence as EvidenceModel
+
+        supplied_ids = list(dict.fromkeys(evidence.evidence_ids or []))
+        if supplied_ids:
+            matching = (
+                db.query(EvidenceModel.id)
+                .filter(
+                    EvidenceModel.id.in_(supplied_ids),
+                    EvidenceModel.person_id == action.person_id,
+                )
+                .all()
+            )
+            if len(matching) != len(supplied_ids):
+                raise ValueError("Completion evidence must belong to the same care recipient as the action")
+
+        if not caregiver_id:
+            raise ValueError("Authenticated caregiver identity is required to record completion")
+        caregiver = (
+            db.query(CaregiverModel)
+            .filter_by(id=caregiver_id, person_id=action.person_id)
+            .first()
+        )
+        if not caregiver:
+            raise ValueError("Authenticated caregiver is not linked to this care recipient")
+
+        # The caregiver's click is itself a report, not independent proof that
+        # the task occurred. Persist it as explicitly reported evidence and keep
+        # confidence unset when no separate evidence was attached.
+        note = (evidence.notes or "").strip()
+        report_text = f"Caregiver reported completion of action: {action.normalized_action}."
+        if note:
+            report_text += f" Caregiver note: {note}"
+        else:
+            report_text += " No additional note was provided."
+        report = EvidenceModel(
+            person_id=action.person_id,
+            type="caregiver_report",
+            source_text=report_text,
+            uploaded_by_caregiver_id=caregiver_id,
+            evidence_status="reported",
+            source_type="caregiver_completion",
+            confidence=None,
+        )
+        db.add(report)
+        db.flush()
 
         action.status = ActionStatus.COMPLETED
-        action.completion_evidence_ids = evidence.evidence_ids
-        action.completion_confidence = evidence.completion_confidence
+        action.completion_evidence_ids = supplied_ids + [report.id]
+        action.completion_confidence = evidence.completion_confidence if supplied_ids else None
         action.completed_at = datetime.utcnow()
 
         db.add(action)
