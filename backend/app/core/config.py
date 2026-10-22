@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # SQLite is a local-development fallback only. Production validation below
     # rejects it so a missing DATABASE_URL cannot silently create local storage.
     database_url: str = "sqlite:///./solenos.db"
-    secret_key: str = "change-me-in-production"
+    secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
 
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
                 "SQLite and missing DATABASE_URL values are not allowed."
             )
 
-        if self.secret_key == "change-me-in-production" or len(self.secret_key) < 32:
+        if self.secret_key == "change-me-in-production" or len(self.secret_key.strip()) < 32:
             raise RuntimeError(
                 "Production requires SECRET_KEY to be a unique random value of at least 32 characters."
             )
