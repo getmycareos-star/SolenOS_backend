@@ -52,6 +52,7 @@ def upgrade():
             sa.Column("subject_type", sa.String(), nullable=False),
             sa.Column("subject_id", sa.String(), nullable=False),
             sa.Column("field", sa.String(), nullable=False),
+            sa.Column("assertion_kind", sa.String(), nullable=False, server_default="current_state"),
             sa.Column("asserted_value", sa.Text(), nullable=False),
             sa.Column("source_label", sa.String(), nullable=False),
             sa.Column("source_text", sa.Text(), nullable=True),
