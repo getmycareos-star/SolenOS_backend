@@ -95,6 +95,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             )
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
+        request.state.anonymous_session_id = session.id
+        if path == "/api/v1/sessions/refresh" and method == "POST":
+            return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved
