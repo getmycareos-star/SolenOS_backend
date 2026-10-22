@@ -30,17 +30,17 @@ This is a source-level audit, not a production sign-off. The repository evidence
 - Status: **Verified design distinction; exploitability depends on backend route enforcement.**
 - Required fix: preserve no-forced-registration onboarding while using server-controlled anonymous sessions and explicit ownership/consent boundaries.
 
-### P1 — Production secret fallback remains in source, but a guard exists
-- Backend: `backend/app/core/config.py` defaults `secret_key` to `change-me-in-production`; `validate_production_configuration()` raises in production for that value or a key shorter than 32 characters.
-- Tests: `backend/tests/test_production_config.py` covers rejection of SQLite and a default/short secret, plus acceptance of PostgreSQL and a long secret.
-- Impact: the guard is a meaningful safeguard; this source alone does not establish whether Railway has a valid secret set or whether the deployed service starts.
-- Status: **Guard verified in source; deployed environment unverified.**
+### P1 — Production secret default removed; deployed environment remains unverified
+- Backend: `backend/app/core/config.py` now defaults `secret_key` to an empty string; production validation rejects empty or shorter-than-32-character keys and rejects the legacy placeholder.
+- Tests: `backend/tests/test_production_config.py` includes a test that expects production configuration to reject an empty key.
+- Impact: a missing key should fail production configuration rather than silently use a known default. This does not establish whether Railway has a valid secret set or whether the deployed service starts.
+- Status: **Source change and regression-test source verified; test execution and deployed environment unverified.**
 - Required verification: check production environment configuration and live startup logs without exposing the secret. Do not print or commit secret values.
 
-### P1 — Readiness checks database connectivity, not full persistence
-- Backend: `backend/app/main.py` `/health` returns process liveness; `/ready` executes `SELECT 1`.
-- Impact: this does not prove schema compatibility, record creation, retrieval, refresh persistence, authorization isolation, or migrations.
-- Status: **Verified endpoint semantics from source.**
+### P1 — Readiness now checks ORM schema presence, but not full persistence
+- Backend: `backend/app/main.py` `/health` returns process liveness. `/ready` now executes `SELECT 1` and compares the database's table names against all ORM-managed tables in `Base.metadata`; missing tables cause HTTP 503.
+- Impact: this catches missing ORM tables, but does not prove column compatibility, successful writes, retrieval after restart, authorization isolation, or safe migrations.
+- Status: **Readiness source change verified; live response and actual persistence unverified.**
 - Required verification: run a disposable end-to-end create → retrieve → restart/refresh → retrieve → delete workflow against a test database and confirm isolation.
 
 ### P1 — Community UI depends on backend truth and must not be accepted from UI appearance
@@ -87,3 +87,17 @@ This is a source-level audit, not a production sign-off. The repository evidence
 ## Acceptance rule
 
 Do not declare SolenOS production-ready until the test evidence demonstrates: authorized identity binding; cross-person access denied; no fabricated production records; correct route contracts; real persistence; failure states surfaced honestly; and reproducible clean builds/tests. A green build or a successful `/ready` response is insufficient.
+
+
+## Follow-up implementation activity (2026-10-22)
+
+The following source changes were committed after the initial inspection:
+
+- Backend configuration: removed the known placeholder signing-key default and added an empty-key rejection test. Commits: `a481312e26733fb91d0b28f94a57e09e2e8ac491`, `8cc1eb90093d9bc4da97f81e793f4b65c183d961`.
+- Backend readiness: checks that all ORM-managed tables exist before returning ready. Commit: `bf1effde971ea93c38c79c640c4a0e491555d7f6`.
+- Backend CI: added a GitHub Actions workflow to install the backend and run `pytest backend/tests -q`. Commit: `0a6e6572252c6c24b3e99b0ed36c7c12010914dd`.
+- Frontend Companion: removed the unsupported claim that replies are backed by local evidence and made missing-endpoint failures explicit. Commit: `64f5b297244cc076db742500d89657e9d94df9d3`.
+- Frontend CI: added a workflow for `npm ci`, TypeScript checking, Jest tests, and a Vite production build. Commit: `b68053524d407a0ee7e7954848bf8c40abf2fe6c`.
+- API reference: removed the shared `default_caregiver` fallback recommendation. Commit: `cf5b8ee45d78ae21bfdddfd9cba519ea5b7da16f`.
+
+These are repository/source changes only. Neither CI workflow has a confirmed run result in this report; no build, test suite, live API request, or end-to-end persistence test is claimed as passing. The missing Companion backend workflow and server-side identity/authorization remain unresolved high-priority issues.
