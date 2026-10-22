@@ -1,14 +1,44 @@
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.core.config import get_settings
 
 settings = get_settings()
 
-# SQLite needs check_same_thread=False; PostgreSQL drivers do not accept that
-# SQLite-only connection argument.
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+
+def normalize_database_url(raw_url: str, *, require_ssl: bool = False) -> str:
+    """Normalize hosted PostgreSQL URLs to the installed psycopg2 driver.
+
+    Supabase and Railway commonly supply postgres:// or postgresql:// URLs.
+    Production PostgreSQL connections require TLS unless the URL explicitly
+    configures an sslmode.
+    """
+    value = raw_url.strip()
+    if value.startswith("postgres://"):
+        value = "postgresql+psycopg2://" + value[len("postgres://"):]
+    elif value.startswith("postgresql://"):
+        value = "postgresql+psycopg2://" + value[len("postgresql://"):]
+    elif value.startswith("postgresql+psycopg://"):
+        # This project installs psycopg2-binary, not psycopg 3.
+        value = "postgresql+psycopg2://" + value[len("postgresql+psycopg://"):]
+
+    parsed = make_url(value)
+    if parsed.get_backend_name() == "postgresql" and require_ssl and "sslmode" not in parsed.query:
+        parsed = parsed.update_query_dict({"sslmode": "require"})
+    return parsed.render_as_string(hide_password=False)
+
+
+database_url = normalize_database_url(
+    settings.database_url,
+    require_ssl=settings.is_production,
+)
+parsed_url = make_url(database_url)
+engine_options = {"pool_pre_ping": True}
+if parsed_url.get_backend_name() == "sqlite":
+    engine_options["connect_args"] = {"check_same_thread": False}
+engine = create_engine(database_url, **engine_options)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
