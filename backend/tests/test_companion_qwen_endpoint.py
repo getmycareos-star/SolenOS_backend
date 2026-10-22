@@ -62,11 +62,10 @@ def test_companion_endpoint_saves_messages_and_returns_explicit_provider_state(m
             conversation_service,
             "get_settings",
             lambda: SimpleNamespace(
-                qwen_configured=False,
-                qwen_base_url="",
-                qwen_model="",
-                qwen_api_key="",
-                qwen_timeout_seconds=20,
+                ollama_configured=False,
+                ollama_base_url="",
+                ollama_model="",
+                ollama_timeout_seconds=20,
             ),
         )
         with TestClient(app) as client:
@@ -101,11 +100,10 @@ def test_companion_cannot_read_another_account_care_context(monkeypatch):
             conversation_service,
             "get_settings",
             lambda: SimpleNamespace(
-                qwen_configured=False,
-                qwen_base_url="",
-                qwen_model="",
-                qwen_api_key="",
-                qwen_timeout_seconds=20,
+                ollama_configured=False,
+                ollama_base_url="",
+                ollama_model="",
+                ollama_timeout_seconds=20,
             ),
         )
         with TestClient(app) as client:
