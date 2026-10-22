@@ -521,3 +521,16 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     )
     assert resolved.status_code == 200, resolved.text
     assert resolved.json()["resolved_by_caregiver_id"] == caregiver_id
+
+    # "Qualified" retains uncertainty: it must not turn either competing report
+    # into a confirmed current state.
+    freshness_after_qualification = client.get(
+        f"/api/v1/care-continuity/freshness/{person_id}",
+        headers=headers,
+    )
+    assert freshness_after_qualification.status_code == 200, freshness_after_qualification.text
+    after_qualification = {
+        item["assertion_id"]: item for item in freshness_after_qualification.json()
+    }
+    assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
+    assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()
