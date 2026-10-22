@@ -136,6 +136,21 @@ def test_daily_capture_persists_payload_and_lcr_event(capture_client):
     assert result["daily_capture_id"]
     assert result["care_event_id"]
 
+    # Verify readback through the actual authenticated API, not only by querying
+    # the test database directly.
+    readback = client.get(
+        f"/api/v1/daily/log/{context['person_id']}",
+        headers={"Authorization": f"Bearer {context['token']}"},
+    )
+    assert readback.status_code == 200, readback.text
+    saved_records = readback.json()
+    assert len(saved_records) == 1
+    assert saved_records[0]["id"] == result["daily_capture_id"]
+    assert saved_records[0]["medications"][0]["medication_name"] == "Medication recorded by caregiver"
+    assert saved_records[0]["vitals"][0]["value"] == 72
+    assert saved_records[0]["scales"][0]["score"] == 3
+    assert saved_records[0]["notes"] == "Caregiver's own daily note."
+
     db = session_factory()
     try:
         capture = db.query(DailyCapture).filter(DailyCapture.id == result["daily_capture_id"]).one()
@@ -299,3 +314,26 @@ def test_uploaded_image_download_denies_account_without_care_access(capture_clie
         headers={"Authorization": f"Bearer {unrelated_token}"},
     )
     assert download.status_code == 403, download.text
+
+
+
+def test_daily_capture_readback_rejects_an_ungranted_account(capture_client):
+    client, context, session_factory = capture_client
+    db = session_factory()
+    try:
+        outsider = AuthAccount(
+            email="ungranted-reader@example.test",
+            password_hash="test-only-hash",
+            display_name="Unrelated account",
+        )
+        db.add(outsider)
+        db.flush()
+        token, _session = create_session(db, outsider)
+    finally:
+        db.close()
+
+    response = client.get(
+        f"/api/v1/daily/log/{context['person_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403, response.text
