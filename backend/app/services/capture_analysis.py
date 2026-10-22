@@ -51,6 +51,11 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         record.candidate_data = None
         record.error_message = None
 
+    # Persist a pending row before the network call so a crash or provider failure
+    # cannot erase the fact that extraction was attempted.
+    db.commit()
+    db.refresh(record)
+
     if not settings.qwen_configured:
         record.provider_status = "not_configured"
         record.status = "not_configured"
