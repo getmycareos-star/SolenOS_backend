@@ -62,7 +62,7 @@ class Settings(BaseSettings):
 
     # Local development default only. Railway must set OLLAMA_BASE_URL to the
     # private URL of a separate Ollama service; localhost is a different container.
-    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_base_url: str = ""
     ollama_model: str = "qwen2.5:1.5b"
     ollama_timeout_seconds: float = 60.0
 
@@ -77,12 +77,9 @@ class Settings(BaseSettings):
         if not url or not model:
             return False
 
-        # A loopback or public URL is not an acceptable Railway-to-Ollama link.
-        # Use Railway's private service DNS and keep the inference API unexposed.
-        railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
-        if railway_runtime:
-            return is_railway_private_ollama_url(url) and not is_loopback_ollama_url(url)
-        return True
+        # Qwen must never fall back to a developer desktop or public hosted endpoint.
+        # Only Railway's private service DNS is accepted in every environment.
+        return is_railway_private_ollama_url(url) and not is_loopback_ollama_url(url)
 
     def validate_production_configuration(self) -> None:
         """Reject unsafe storage or session-signing configuration before serving requests.
