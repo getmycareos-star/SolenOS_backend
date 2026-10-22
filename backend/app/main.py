@@ -16,9 +16,10 @@ from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
+from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
-from app.schemas.situation import SituationInput, SituationResponse
+from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 
@@ -427,12 +428,83 @@ def update_situation_display_name(
     }
 
 
-@situation_router.post("/situation", response_model=SituationResponse)
-def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
+@situation_router.post(
+    "/situation",
+    response_model=SituationResponse | InteractionPauseResponse,
+)
+def post_situation(
+    payload: SituationInput,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    if str(payload.person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if str(payload.caregiver_id) != str(scoped_caregiver_id):
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+
+    if payload.action == "pause_active_care_situation":
+        interaction_session_id = (payload.care_session_id or "").strip()
+        if not interaction_session_id:
+            raise HTTPException(status_code=422, detail="care_session_id is required to pause an interaction")
+        now = datetime.now(timezone.utc)
+        row = (
+            db.query(InteractionSession)
+            .filter(
+                InteractionSession.interaction_session_id == interaction_session_id,
+                InteractionSession.person_id == scoped_person_id,
+                InteractionSession.caregiver_id == scoped_caregiver_id,
+            )
+            .first()
+        )
+        if row is None:
+            row = InteractionSession(
+                interaction_session_id=interaction_session_id,
+                person_id=scoped_person_id,
+                caregiver_id=scoped_caregiver_id,
+                paused_at=now,
+            )
+            db.add(row)
+        elif row.paused_at is None:
+            row.paused_at = now
+        try:
+            db.commit()
+            db.refresh(row)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="The interaction pause could not be persisted")
+        return {
+            "ok": True,
+            "action": "pause_active_care_situation",
+            "interaction_session_id": row.interaction_session_id,
+            "paused_at": row.paused_at,
+            "care_reality_preserved": True,
+        }
+
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # A new, accepted care entry resumes only the matching interaction session.
+    # It never changes the lifecycle of the underlying care situation.
+    interaction_session_id = (payload.care_session_id or "").strip()
+    if interaction_session_id:
+        row = (
+            db.query(InteractionSession)
+            .filter(
+                InteractionSession.interaction_session_id == interaction_session_id,
+                InteractionSession.person_id == scoped_person_id,
+                InteractionSession.caregiver_id == scoped_caregiver_id,
+            )
+            .first()
+        )
+        if row is not None and row.paused_at is not None:
+            row.paused_at = None
+            db.commit()
     return result
 
 
