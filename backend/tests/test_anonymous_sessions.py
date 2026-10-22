@@ -134,3 +134,29 @@ def test_situation_capture_uses_server_bound_person_and_caregiver():
         assert evidence.uploaded_by_caregiver_id == created["caregiver"]["id"]
     finally:
         db.close()
+
+
+def test_refresh_rotates_token_without_changing_record_scope():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient")
+    refreshed_response = client.post(
+        "/api/v1/sessions/refresh",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert refreshed_response.status_code == 200, refreshed_response.text
+    refreshed = refreshed_response.json()
+    assert refreshed["person_id"] == created["person"]["id"]
+    assert refreshed["caregiver_id"] == created["caregiver"]["id"]
+    assert refreshed["access_token"] != created["access_token"]
+
+    old_token_response = client.get(
+        f"/api/v1/evidence/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert old_token_response.status_code == 401, old_token_response.text
+
+    new_token_response = client.get(
+        f"/api/v1/evidence/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    assert new_token_response.status_code == 200, new_token_response.text
