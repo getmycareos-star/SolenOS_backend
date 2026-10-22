@@ -254,6 +254,10 @@ async def require_authenticated_care_access(request, call_next):
                 path == "/api/v1/auth/me"
                 or path == "/api/v1/community"
                 or path.startswith("/api/v1/community/")
+                # Multipart upload fields are validated by the upload handler itself:
+                # it binds caregiver_id to the signed-in identity and verifies that
+                # the caregiver is linked to the submitted person_id before storage.
+                or path == "/api/v1/upload"
                 or (path == "/api/v1/professional/dashboard" and account.role == "professional")
                 or ((path.startswith("/api/v1/team/") or path == "/api/v1/metrics") and account.role == "team")
             )
