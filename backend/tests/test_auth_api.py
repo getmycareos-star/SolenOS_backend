@@ -605,6 +605,9 @@ def test_every_sensitive_api_route_has_authenticated_account_dependency():
         ("/api/v1/auth/signup", "post"),
         ("/api/v1/auth/login", "post"),
         ("/api/v1/auth/logout", "post"),
+        # Deliberate public bootstrap only: it creates a new isolated anonymous
+        # identity and record. Refresh and all care-data routes remain bearer-protected.
+        ("/api/v1/sessions/anonymous", "post"),
     }
     schema = app.openapi()
     missing = []
