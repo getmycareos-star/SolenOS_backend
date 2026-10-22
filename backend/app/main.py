@@ -60,6 +60,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     # ASGI scope path excludes query parameters and is the canonical route path.
     path = str(request.scope.get("path") or request.url.path).rstrip("/")
     method = request.method.upper()
+    # Temporary CI diagnostic: request path and method only.
+    print("SolenOS middleware entry", repr(path), repr(method))
     if method == "OPTIONS":
         return await call_next(request)
     if not path.startswith("/api/v1/") and path != "/api/situation":
