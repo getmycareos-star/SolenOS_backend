@@ -5,7 +5,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
-from app.models.auth_identity import AuthAccount
+from app.models.auth_identity import AuthAccount, CaregiverAccountLink
 from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel, CareEvent as CareEventModel
 from app.models.temporal import TemporalReferenceFrame as TemporalReferenceFrameModel
 from app.models.action import Action as ActionModel, ActionStatus
@@ -280,7 +280,31 @@ def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Sess
         raise HTTPException(status_code=403, detail="Action has no care-record scope")
     assert_person_access(db, account.id, db_action.person_id, "write")
     _assert_evidence_ids_for_person(db, evidence.evidence_ids, db_action.person_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+
+    caregiver_link = (
+        db.query(CaregiverAccountLink)
+        .filter(
+            CaregiverAccountLink.account_id == account.id,
+            CaregiverAccountLink.person_id == db_action.person_id,
+            CaregiverAccountLink.is_active.is_(True),
+            CaregiverAccountLink.revoked_at.is_(None),
+        )
+        .first()
+    )
+    if caregiver_link is None:
+        raise HTTPException(
+            status_code=403,
+            detail="A verified caregiver identity is required to record action completion",
+        )
+    try:
+        return lifecycle_service.record_completion(
+            db_action,
+            evidence,
+            db,
+            caregiver_id=caregiver_link.caregiver_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{action_id}/cancel", response_model=ActionSchema)
