@@ -20,7 +20,7 @@ See `docs/philosophy.md` for the full product philosophy.
 
 - **Backend**: FastAPI + SQLAlchemy (Python)
 - **Frontend**: React + Vite (TypeScript)
-- **Database**: SQLite (default), upgradeable to PostgreSQL
+- **Database**: PostgreSQL for production (Railway/Supabase); SQLite is for local development and tests only
 
 ## Getting Started
 
@@ -46,3 +46,16 @@ npm run dev
 4. **Uncertainty Is a Feature** - Never hide what is not known.
 5. **Calm Over Clever** - Reduce caregiver anxiety, don't impress.
 6. **Build for the Worst Day** - Hospital discharges, late-night confusion, exhaustion.
+
+
+## Production configuration
+
+Set these in the Railway backend service Variables panel. Do not commit secret values or expose them to the frontend.
+
+- `DATABASE_URL`: Supabase PostgreSQL connection string. The backend normalizes the URL to its installed driver and enforces TLS when running in Railway.
+- `SECRET_KEY`: a unique random secret of at least 32 characters; never use `change-me-in-production`.
+- `CORS_ORIGINS`: comma-separated frontend origins; include `https://solenosai.netlify.app` for the production frontend.
+
+Railway runs `alembic upgrade head` before starting Uvicorn. The backend health endpoint is `/health`; readiness includes database connectivity and schema validation. Uploaded caregiver photos are stored as private database-backed evidence records and are served only through the authenticated download route, not from a public filesystem path.
+
+Rotate the Supabase database password that was exposed in the conversation, then update Railway's `DATABASE_URL` with the new connection string before deployment.

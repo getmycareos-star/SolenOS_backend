@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.database import Base, get_db
 from app.main import app
 from app.services.safety import SafetyEngine
 from app.services.claim_extraction import ClaimExtractionEngine, EvidenceMatcher, SourceQualityEvaluator
@@ -484,7 +484,7 @@ class TestClaimStrengthMatcher:
 class TestSafetyAPI:
     def setup_method(self):
         setup_db()
-        app.dependency_overrides[override_get_db] = override_get_db
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
 
     def teardown_method(self):
@@ -492,7 +492,7 @@ class TestSafetyAPI:
 
     def test_evaluate_endpoint(self):
         response = self.client.post(
-            "/api/v1/evaluate",
+            "/api/v1/safety/evaluate",
             json={
                 "user_intent": "The blood pressure was 145/90.",
                 "candidate_claims": [],
@@ -553,7 +553,7 @@ class TestSafetyAPI:
         assert result.score >= 0.0
 
     def test_adversarial_tests(self):
-        response = self.client.post("/api/v1/adversarial-tests")
+        response = self.client.post("/api/v1/safety/adversarial-tests")
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data

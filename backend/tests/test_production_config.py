@@ -5,6 +5,7 @@ from app.core.config import Settings
 
 def clear_environment(monkeypatch):
     for name in (
+        "RAILWAY_PROJECT_ID",
         "RAILWAY_ENVIRONMENT_NAME",
         "RAILWAY_ENVIRONMENT",
         "APP_ENV",

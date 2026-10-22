@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, UniqueConstraint
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -16,9 +16,14 @@ class Person(Base):
 
 class Caregiver(Base):
     __tablename__ = "caregivers"
+    __table_args__ = (
+        UniqueConstraint("person_id", "email", name="uq_caregiver_person_email"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    # A caregiver account may support multiple care recipients; email uniqueness
+    # is scoped to the care record, not globally across all records.
+    email = Column(String, nullable=False)
     relationship = Column(String, nullable=False)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False)
     timezone = Column(String, nullable=False, default="UTC")
