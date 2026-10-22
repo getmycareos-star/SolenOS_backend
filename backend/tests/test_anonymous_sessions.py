@@ -163,3 +163,52 @@ def test_refresh_rotates_token_without_changing_record_scope():
         headers={"Authorization": f"Bearer {refreshed['access_token']}"},
     )
     assert new_token_response.status_code == 200, new_token_response.text
+
+
+def test_situation_hydration_returns_only_persisted_records_for_session_scope():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient")
+    token_headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    write = client.post(
+        "/api/situation",
+        headers=token_headers,
+        json={
+            "raw_input": "Caregiver reports that breakfast was left mostly uneaten.",
+            "caregiver_id": "client-durable-care-key",
+            "care_session_id": "interaction-session",
+        },
+    )
+    assert write.status_code == 200, write.text
+
+    read = client.get(
+        "/api/situation?caregiver_id=client-durable-care-key&care_session_id=interaction-session&offer_return_invite=0",
+        headers=token_headers,
+    )
+    assert read.status_code == 200, read.text
+    data = read.json()
+    assert data["care_recipient_id"] == created["person"]["id"]
+    assert data["care_key"] == "client-durable-care-key"
+    assert data["has_context_root"] is True
+    assert data["total_events"] == 1
+    assert len(data["active_care_situation"]["observations"]) == 1
+    observation = data["active_care_situation"]["observations"][0]
+    assert observation["raw_text"] == "Caregiver reports that breakfast was left mostly uneaten."
+    assert observation["human_fact"] == observation["raw_text"]
+    assert observation["event_ids"] == [write.json()["care_event_id"]]
+    assert data["active_care_situation_turn"]["what_seems_happening"] is None
+
+
+def test_situation_hydration_requires_session_and_ignores_spoofed_person_query():
+    client = TestClient(app)
+    first = create_session(client, "First person")
+    second = create_session(client, "Second person")
+
+    no_token = client.get("/api/situation")
+    assert no_token.status_code == 401, no_token.text
+
+    response = client.get(
+        f"/api/situation?person_id={first['person']['id']}&caregiver_id={second['caregiver']['id']}",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert response.status_code == 403, response.text
