@@ -76,6 +76,11 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         )
         assert cross_recipient.status_code == 403, cross_recipient.text
 
+        # Authenticated requests to private endpoints may not omit recipient scope.
+        unscoped_private = client.get("/api/v1/changes/detect", headers=headers)
+        assert unscoped_private.status_code == 400, unscoped_private.text
+        assert "Care recipient scope is required" in unscoped_private.json()["detail"]
+
         # The authenticated caregiver can write to their linked recipient.
         created = client.post(
             "/api/v1/daily-care/entries",
