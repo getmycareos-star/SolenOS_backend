@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
@@ -211,9 +212,19 @@ def get_person(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/caregivers", response_model=CaregiverSchema)
 def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
+    person = db.query(PersonModel).filter(PersonModel.id == caregiver.person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
+    existing = db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="A caregiver with this email already exists")
     db_caregiver = CaregiverModel(**caregiver.model_dump())
     db.add(db_caregiver)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Caregiver email conflicts with an existing record") from exc
     db.refresh(db_caregiver)
     _log_and_learn(
         db,
@@ -357,9 +368,27 @@ def list_events(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/insights", response_model=InsightSchema)
 def create_insight(insight: InsightCreate, db: Session = Depends(get_db)):
+    person = db.query(PersonModel).filter(PersonModel.id == insight.person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Person not found")
     if not insight.evidence_ids:
         raise HTTPException(
             status_code=400, detail="Insight must link to at least one evidence item"
+        )
+    evidence = (
+        db.query(EvidenceModel)
+        .filter(
+            EvidenceModel.id.in_(insight.evidence_ids),
+            EvidenceModel.person_id == insight.person_id,
+        )
+        .all()
+    )
+    found_ids = {item.id for item in evidence}
+    missing_or_foreign_ids = sorted(set(insight.evidence_ids) - found_ids)
+    if missing_or_foreign_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Every evidence item must exist and belong to the same care record",
         )
     db_insight = InsightModel(**insight.model_dump())
     db.add(db_insight)
