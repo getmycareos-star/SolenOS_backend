@@ -206,7 +206,10 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
 def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    try:
+        return lifecycle_service.record_completion(db_action, evidence, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
