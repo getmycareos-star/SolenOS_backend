@@ -415,3 +415,41 @@ def test_community_qwen_summary_uses_only_published_peer_posts_and_never_writes_
             assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
     finally:
         _cleanup(engine, client)
+
+
+def test_lcr_explanation_is_read_only_and_authorization_scoped(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import collaboration
+    engine, Session, client = _client_for_test()
+    try:
+        headers, person_id = _account_context(client, Session, "lcr-qwen@example.test")
+        monkeypatch.setattr(
+            collaboration,
+            "build_companion_reply",
+            lambda db, person, message, history: SimpleNamespace(
+                reply="The record contains one reported observation; more context is needed.",
+                evidence_ids=["evidence-1"],
+                provider_status="connected",
+                ai_generated=True,
+                guard_verdict="grounded",
+                safety_note=None,
+            ),
+        )
+        response = client.post("/api/v1/lcr/explain", headers=headers, json={
+            "person_id": person_id,
+            "question": "What is known and what remains uncertain?",
+        })
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["read_only"] is True
+        assert body["ai_generated"] is True
+        assert body["provider_status"] == "connected"
+        assert body["evidence_ids"] == ["evidence-1"]
+
+        denied = client.post("/api/v1/lcr/explain", headers=headers, json={
+            "person_id": "another-account-record",
+            "question": "Explain this record.",
+        })
+        assert denied.status_code == 403, denied.text
+    finally:
+        _cleanup(engine, client)
