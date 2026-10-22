@@ -54,3 +54,4 @@ class SituationResponse(BaseModel):
     analysis_error: Optional[str] = None
     qwen_extraction_status: str = "not_configured"
     qwen_candidates: Optional[Dict[str, Any]] = None
+    qwen_analysis_id: Optional[str] = None
