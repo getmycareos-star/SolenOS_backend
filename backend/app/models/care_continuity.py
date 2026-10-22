@@ -64,6 +64,7 @@ class CareAssertion(Base):
     observed_at = Column(DateTime(timezone=True), nullable=True)
     review_after_days = Column(Integer, nullable=True
     created_by_caregiver_id = Column(String, nullable=True)
+    updated_by_caregiver_id = Column(String, nullable=True)
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
@@ -147,8 +148,8 @@ def _version_care_state(session, flush_context, instances):
         after_state = None if is_deleted else _snapshot(obj)
         evidence_ids = [] if is_deleted else (getattr(obj, "evidence_ids", None) or [])
         caregiver_id = (
-            getattr(obj, "created_by_caregiver_id", None)
-            or getattr(obj, "updated_by_caregiver_id", None)
+            getattr(obj, "updated_by_caregiver_id", None)
+            or getattr(obj, "created_by_caregiver_id", None)
             or getattr(obj, "caregiver_id", None)
         )
         with session.no_autoflush:
