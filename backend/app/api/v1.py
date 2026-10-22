@@ -304,7 +304,6 @@ def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
 
 
-@router.post("/daily/log")
 @router.post("/daily-care/entries")
 def create_daily_care_entry(
     payload: dict,
