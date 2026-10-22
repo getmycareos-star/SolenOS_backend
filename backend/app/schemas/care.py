@@ -23,7 +23,7 @@ class Person(PersonBase):
 
 class CaregiverBase(BaseModel):
     name: str
-    email: str
+    email: Optional[str] = None
     relationship: str
     person_id: str
     timezone: str = "UTC"
