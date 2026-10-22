@@ -32,7 +32,7 @@ def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
     return action
 
 
-@router.post("/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
+@router.post("/actions/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
 def extract_actions_from_document(
     document_id: str,
     document_text: str,
