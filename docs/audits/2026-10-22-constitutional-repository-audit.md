@@ -110,3 +110,19 @@ These are repository/source changes only. Neither CI workflow has a confirmed ru
 - Readiness regression test: added `test_readiness_rejects_incomplete_schema` in `backend/tests/test_daily_capture.py`, constructing an in-memory database with only the persons table and expecting `/ready` to return 503. Commit: `2670e0b96ddf6c142db7d42b481472869fc18201`.
 
 The new test has been committed but not executed in this environment. The backend route files inspected in this follow-up still do not demonstrate server-issued anonymous sessions or authenticated authorization for every sensitive endpoint. Relationship checks on some write routes are integrity checks only and must not be described as authentication. The production identity-isolation gap remains open.
+
+
+## 2026-10-22 follow-up — anonymous session authorization
+
+Implemented in source:
+- Added `POST /api/v1/sessions/anonymous`: creates a care recipient, an email-free caregiver identity, and a 30-day server-issued opaque bearer capability. The database stores only a SHA-256 token digest.
+- Added a global guard for `/api/v1/*` care APIs. Except for the bootstrap route and explicitly non-personal time helpers, requests require a valid bearer session and a target person matching the session's server-stored scope. Child-resource routes are resolved through ORM ownership when possible; unresolvable/unscoped requests fail closed.
+- Caller-provided caregiver attribution must match the caregiver bound to the session.
+- Made caregiver email optional and added a PostgreSQL startup compatibility migration for existing `caregivers.email NOT NULL` schemas.
+- Added tests for anonymous bootstrap, token storage, missing-token denial, cross-person read denial, and caregiver-attribution spoofing.
+
+Not yet verified:
+- The test suite has not been executed in this environment. Existing API tests that call care routes without bearer tokens will need authenticated test fixtures; CI may expose these and other integration failures.
+- The frontend has not yet been wired to persist and send the bearer token, so current frontend requests will be rejected until that client integration is implemented.
+- The production Railway database migration and live endpoints have not been exercised. SQLite databases created before this change cannot have the email nullability changed by the PostgreSQL migration; they need an explicit SQLite migration before using anonymous caregiver creation.
+- The guard is deliberately fail-closed for routes that cannot be tied to a person scope; some legacy routes may require route-specific ownership handling rather than being available immediately.
