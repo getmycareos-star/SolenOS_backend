@@ -9,8 +9,8 @@ from pydantic import ValidationError
 from app.core.database import Base
 from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, CareStateRevision, CareActionOutcome
-from app.models.uncertainty import Contradiction, OpenQuestion
-from app.core.uncertainty_enums import Priority
+from app.models.uncertainty import Contradiction, OpenQuestion, InformationGap
+from app.core.uncertainty_enums import Priority, EpistemicState, GapReason, GapLifecycleStatus
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.services.care_continuity import (
     create_assertion, create_action_outcome, get_freshness, next_best_questions, set_assertion_status,
@@ -244,3 +244,43 @@ def test_additive_care_continuity_migration_creates_tables_and_provenance_column
     assert "source_assertion_ids" in {column["name"] for column in inspector.get_columns("contradictions")}
     assert "source_event_id" in {column["name"] for column in inspector.get_columns("care_assertions")}
     engine.dispose()
+
+
+def test_next_best_question_engine_uses_explicit_information_gaps(db: OrmSession):
+    gap = InformationGap(
+        id="gap-mobility", person_id="person-1", subject_type="care_recipient",
+        subject_id="person-1", field="mobility baseline",
+        epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
+        priority=Priority.HIGH, lifecycle_status=GapLifecycleStatus.OPEN,
+        description="No recent mobility baseline has been recorded.",
+        evidence_ids=["ev-1"],
+    )
+    db.add(gap)
+    db.commit()
+
+    questions = next_best_questions(db, "person-1", persist=True)
+    candidate = next(item for item in questions if item["source_kind"] == "information_gap")
+    assert candidate["source_id"] == gap.id
+    assert candidate["priority"] == "high"
+    assert candidate["evidence_ids"] == ["ev-1"]
+    assert "mobility baseline" in candidate["question"]
+
+
+def test_corrected_outcome_is_recorded_without_closing_underlying_question(db: OrmSession):
+    question = OpenQuestion(
+        id="question-correction", person_id="person-1",
+        question="Can you confirm the dose?", subject_type="medication",
+        subject_id="med-1", status="open", priority=Priority.INFORMATIONAL,
+        evidence_ids=["ev-1"],
+    )
+    db.add(question)
+    db.commit()
+    outcome = create_action_outcome(db, CareActionOutcomeCreate(
+        person_id="person-1", action_id=question.id, action_type="next_best_question",
+        outcome_status="corrected", correction_text="The source actually says 15 mg.",
+        evidence_ids=["ev-1"],
+    ))
+    db.refresh(question)
+    assert outcome.outcome_status == "corrected"
+    assert outcome.correction_text == "The source actually says 15 mg."
+    assert question.status == "open"
