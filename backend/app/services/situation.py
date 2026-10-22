@@ -215,7 +215,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         evidence_id=evidence_ids[0],
         care_event_id=saved_event.id,
         message=(
-            "Care input recorded and analyzed."
+            "Care input recorded successfully."
             if analysis["analysis_status"] == "complete"
             else "Care input recorded; derived analysis is incomplete."
         ),
