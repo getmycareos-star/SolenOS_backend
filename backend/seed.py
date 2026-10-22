@@ -33,6 +33,8 @@ def _assert_demo_seed_allowed() -> None:
     ).strip().lower()
     if environment in {"production", "prod"}:
         raise RuntimeError("Demo care records must never be seeded in production.")
+    if environment not in {"development", "dev", "local", "test"}:
+        raise RuntimeError("Demo care records may only be seeded in an explicitly named local development environment.")
     if os.getenv("SOLENOS_ENABLE_DEMO_SEED", "").strip().lower() != "true":
         raise RuntimeError(
             "Demo seeding is disabled by default. Set SOLENOS_ENABLE_DEMO_SEED=true "
