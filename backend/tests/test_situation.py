@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -179,7 +180,9 @@ def test_post_situation_with_documents():
 
         db = TestingSessionLocal()
         evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
-        assert evidence.confidence == 0.95
+        # OCR confidence describes text extraction, not confidence in the care fact.
+        assert evidence.confidence is None
+        assert json.loads(evidence.extra_metadata)["ocr_confidence"] == 0.95
         db.close()
     finally:
         teardown_db()
