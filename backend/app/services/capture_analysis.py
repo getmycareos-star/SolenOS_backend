@@ -1,11 +1,10 @@
 """Qwen extraction candidates are persisted separately and never auto-write LCR facts."""
 import json
-from urllib.request import Request, urlopen
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.services.gwen_gateway import call_gwen_json
+from app.services.qwen_gateway import call_qwen_json
 from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 
@@ -96,7 +95,7 @@ def analyze_capture_with_qwen(db: Session, care_event_id: str) -> dict:
         "source_evidence": sources,
     }, ensure_ascii=False)
     try:
-        parsed, provider_status = call_gwen_json(
+        parsed, provider_status = call_qwen_json(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.0,
