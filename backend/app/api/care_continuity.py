@@ -55,7 +55,24 @@ def get_assertion_freshness(person_id: str, db: Session = Depends(get_db)):
     assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id
     ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
-    return [get_freshness(item) for item in assertions]
+    unresolved = db.query(Contradiction).filter(
+        Contradiction.person_id == person_id,
+        Contradiction.resolution_status == "unresolved",
+    ).all()
+    unresolved_keys = {
+        (item.subject_type, item.subject_id, item.field)
+        for item in unresolved
+    }
+    return [
+        get_freshness(
+            item,
+            unresolved_conflict=(
+                item.assertion_kind == "current_state"
+                and (item.subject_type, item.subject_id, item.field) in unresolved_keys
+            ),
+        )
+        for item in assertions
+    ]
 
 
 @router.post("/next-questions/{person_id}", response_model=List[NextQuestionResponse])
