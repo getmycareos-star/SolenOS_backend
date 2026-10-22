@@ -37,7 +37,7 @@ def test_registration_requires_enrollment_and_persists_account_and_care_context(
     client = TestClient(main.app)
     try:
         payload = {
-            "email": "new-caregiver@example.invalid",
+            "email": "new-caregiver@example.com",
             "password": "a-secure-test-password-123",
             "name": "Test Caregiver",
             "person_name": "Test Care Recipient",
