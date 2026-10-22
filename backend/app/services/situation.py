@@ -27,8 +27,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError:
-            occurred_at = _utc_now()
+        except ValueError as exc:
+            raise ValueError("timestamp must be a valid ISO 8601 datetime; occurrence time was not inferred.") from exc
     else:
         occurred_at = _utc_now()
 
@@ -50,7 +50,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=1.0 if not doc else (doc.ocr_confidence or 0.5),
+            confidence=doc.ocr_confidence if doc and doc.ocr_confidence is not None else None,
             evidence_status="reported",
             source_type="caregiver_observation",
         )
@@ -117,7 +117,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         care_event.significance_verdict = sig_changes[0].significance_verdict.value if sig_changes else None
         care_event.attention_candidate = attention_candidate
         care_event.follow_up_candidate = follow_up_candidate
-        care_event.confidence = sig_changes[0].confidence if sig_changes else 0.5
+        care_event.confidence = sig_changes[0].confidence if sig_changes else None
         if situations:
             care_event.situation_id = situations[0].id
         db.commit()
