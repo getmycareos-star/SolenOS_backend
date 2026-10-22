@@ -231,4 +231,6 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         what_changed=analysis["what_changed"],
         analysis_status=analysis["analysis_status"],
         analysis_error=analysis["analysis_error"],
+        qwen_extraction_status=analysis["qwen_extraction_status"],
+        qwen_candidates=analysis["qwen_candidates"],
     )
