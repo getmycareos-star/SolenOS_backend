@@ -9,7 +9,7 @@ import app.api.auth as auth
 from app.core.database import Base
 from app.models.auth import AuthAccount
 from app.models.care import Caregiver, CareEvent, Evidence, Person
-from app.models.collaboration import ProfessionalAccessGrant
+from app.models.collaboration import CommunityPost, ProfessionalAccessGrant
 from app.models.action import Action as ActionModel
 
 
@@ -88,7 +88,18 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             status="active",
             granted_by_caregiver_id=caregiver_a.id,
         )
-        db.add_all([account_a, account_b, account_team, grant_a])
+        pending_post = CommunityPost(
+            id="isolation-community-post",
+            caregiver_id=caregiver_a.id,
+            author_label="Test Caregiver A",
+            author_type="peer_caregiver",
+            post_type="experience",
+            content="Test-only moderation item",
+            tags_json='["test"]',
+            visibility="public",
+            moderation_status="pending",
+        )
+        db.add_all([account_a, account_b, account_team, grant_a, pending_post])
         db.commit()
         db.refresh(account_a)
         db.refresh(account_b)
@@ -126,8 +137,36 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         )
         assert forbidden_link.status_code == 403, forbidden_link.text
 
-        # Team accounts do not receive patient contexts or caregiver links.
+        # Team-only dashboards are backed by real database rows, not demo metrics.
         team_headers = {"Authorization": f"Bearer {token_team}"}
+        team_dashboard = client.get("/api/v1/team/dashboard", headers=team_headers)
+        assert team_dashboard.status_code == 200, team_dashboard.text
+        team_metrics = team_dashboard.json()
+        assert team_metrics["people_count"] == 3
+        assert team_metrics["caregiver_count"] == 3
+        assert team_metrics["community_post_count"] == 1
+        assert team_metrics["pending_moderation_count"] == 1
+        assert team_metrics["data_source"] == "database"
+
+        state_report = client.get("/api/v1/team/state-report", headers=team_headers)
+        assert state_report.status_code == 200, state_report.text
+        assert {"status": "pending", "count": 1} in state_report.json()["community_posts_by_moderation_status"]
+
+        moderation_queue = client.get("/api/v1/team/moderation?status=pending", headers=team_headers)
+        assert moderation_queue.status_code == 200, moderation_queue.text
+        assert [post["id"] for post in moderation_queue.json()["posts"]] == ["isolation-community-post"]
+        moderation_update = client.patch(
+            "/api/v1/team/moderation/isolation-community-post",
+            headers=team_headers,
+            json={"moderation_status": "published"},
+        )
+        assert moderation_update.status_code == 200, moderation_update.text
+        assert moderation_update.json() == {
+            "id": "isolation-community-post",
+            "moderation_status": "published",
+        }
+
+        # Team accounts do not receive patient contexts or caregiver links.
         team_contexts = client.get("/api/v1/auth/care-contexts", headers=team_headers)
         assert team_contexts.status_code == 200, team_contexts.text
         assert team_contexts.json() == []
