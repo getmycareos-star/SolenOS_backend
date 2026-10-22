@@ -117,6 +117,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        query_person_id = request.query_params.get("person_id")
+        if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
+            return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
         payload = {}
         if method in {"POST", "PUT", "PATCH", "DELETE"}:
