@@ -115,11 +115,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
         body = b""
-        if not target_person_id:
+        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+            body = await request.body()
             try:
-                body = await request.body()
                 payload = json.loads(body.decode("utf-8")) if body else {}
-                if isinstance(payload, dict):
+                if not target_person_id and isinstance(payload, dict):
                     target_person_id = payload.get("person_id")
             except (UnicodeDecodeError, json.JSONDecodeError):
                 payload = {}
@@ -172,6 +172,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
+            or request.query_params.get("caregiver_id")
+            or request.query_params.get("created_by_caregiver_id")
         )
         if claimed_caregiver_id and str(claimed_caregiver_id) != str(scoped_caregiver_id):
             return JSONResponse(
