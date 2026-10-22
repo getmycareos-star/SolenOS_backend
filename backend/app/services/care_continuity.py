@@ -106,7 +106,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
     return assertion
 
 
-def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None) -> CareAssertion:
+def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None, review_after_days: Optional[int] = None) -> CareAssertion:
     allowed = {"reported", "review_required", "accepted", "rejected", "superseded"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported assertion status")
@@ -115,6 +115,10 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
     ).first()
     if assertion is None:
         raise HTTPException(status_code=404, detail="Assertion not found")
+    if status == "accepted" and review_after_days is None and assertion.review_after_days is None:
+        raise HTTPException(status_code=422, detail="Set a review window before marking a current-state assertion as accepted")
+    if review_after_days is not None:
+        assertion.review_after_days = review_after_days
     assertion.assertion_status = status
     assertion.updated_by_caregiver_id = updated_by_caregiver_id
     db.commit()
@@ -283,6 +287,13 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
 
 
 def create_action_outcome(db: Session, payload: CareActionOutcomeCreate) -> CareActionOutcome:
+    if payload.evidence_ids:
+        evidence_rows = db.query(Evidence.id).filter(
+            Evidence.person_id == payload.person_id,
+            Evidence.id.in_(payload.evidence_ids),
+        ).all()
+        if {row[0] for row in evidence_rows} != set(payload.evidence_ids):
+            raise HTTPException(status_code=422, detail="Every outcome evidence ID must belong to this care record")
     if payload.action_type == "next_best_question":
         question = db.query(OpenQuestion).filter(
             OpenQuestion.id == payload.action_id,
