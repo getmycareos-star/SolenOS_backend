@@ -125,7 +125,7 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         )
         assert professional_dashboard.status_code == 200, professional_dashboard.text
         dashboard_people = {
-            row["person_id"] for row in professional_dashboard.json()["care_recipients"]
+            row["person"]["id"] for row in professional_dashboard.json()["care_recipients"]
         }
         assert dashboard_people == {"isolation-person-a"}
         mismatched_professional = client.get(
