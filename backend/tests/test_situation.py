@@ -1,12 +1,20 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import hashlib
+import secrets
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+import app.main as main_module
+from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver
+from app.schemas.situation import SituationInput
+from app.services.situation import process_situation_input
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -31,11 +39,27 @@ app.dependency_overrides = {}
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+    main_module.SessionLocal = TestingSessionLocal
 
 
 def teardown_db():
     Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+
+
+def create_auth_headers(db, person_id: str, caregiver_id: str):
+    token = secrets.token_urlsafe(32)
+    db.add(
+        AnonymousSession(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+    )
+    db.commit()
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_post_situation_creates_evidence_and_event():
@@ -55,11 +79,13 @@ def test_post_situation_creates_evidence_and_event():
         )
         db.add_all([person, caregiver])
         db.commit()
+        headers = create_auth_headers(db, person.id, caregiver.id)
         db.close()
 
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
                 "caregiver_id": "caregiver-1",
                 "person_id": "person-1",
@@ -97,11 +123,13 @@ def test_post_situation_with_documents():
         )
         db.add_all([person, caregiver])
         db.commit()
+        headers = create_auth_headers(db, person.id, caregiver.id)
         db.close()
 
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
                 "caregiver_id": "caregiver-2",
                 "person_id": "person-2",
@@ -133,33 +161,29 @@ def test_post_situation_with_documents():
         teardown_db()
 
 
-def test_post_situation_missing_caregiver():
+def test_situation_service_rejects_missing_caregiver():
     setup_db()
     try:
-        from app.core.database import get_db
-        app.dependency_overrides[get_db] = override_get_db
-
-        client = TestClient(app)
-        response = client.post(
-            "/api/situation",
-            json={
-                "caregiver_id": "nonexistent",
-                "person_id": "person-1",
-                "raw_input": "Some input",
-            },
-        )
-        assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["detail"]
+        db = TestingSessionLocal()
+        db.add(Person(id="person-1", name="Test Person"))
+        db.commit()
+        with pytest.raises(ValueError, match="Caregiver not found"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id="nonexistent",
+                    person_id="person-1",
+                    raw_input="Some input",
+                ),
+            )
+        db.close()
     finally:
         teardown_db()
 
 
-def test_post_situation_missing_person():
+def test_situation_service_rejects_missing_person():
     setup_db()
     try:
-        from app.core.database import get_db
-        app.dependency_overrides[get_db] = override_get_db
-
         db = TestingSessionLocal()
         caregiver = Caregiver(
             id="caregiver-3",
@@ -170,19 +194,16 @@ def test_post_situation_missing_person():
         )
         db.add(caregiver)
         db.commit()
+        with pytest.raises(ValueError, match="Person not found"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id="caregiver-3",
+                    person_id="nonexistent",
+                    raw_input="Some input",
+                ),
+            )
         db.close()
-
-        client = TestClient(app)
-        response = client.post(
-            "/api/situation",
-            json={
-                "caregiver_id": "caregiver-3",
-                "person_id": "nonexistent",
-                "raw_input": "Some input",
-            },
-        )
-        assert response.status_code == 400
-        assert "Person not found" in response.json()["detail"]
     finally:
         teardown_db()
 
@@ -204,11 +225,13 @@ def test_post_situation_empty_input_and_no_documents():
         )
         db.add_all([person, caregiver])
         db.commit()
+        headers = create_auth_headers(db, person.id, caregiver.id)
         db.close()
 
         client = TestClient(app)
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
                 "caregiver_id": "caregiver-4",
                 "person_id": "person-4",
