@@ -660,7 +660,7 @@ def create_anonymous_session(payload: AnonymousSessionInput, db: Session = Depen
     db.refresh(person)
     db.refresh(caregiver)
 
-    raw_token, session = create_session(db, account)
+    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
     return _anonymous_session_payload(account, person, caregiver, raw_token, session)
 
 
@@ -700,5 +700,5 @@ def refresh_anonymous_session(
         raise HTTPException(status_code=409, detail="Anonymous care record is incomplete; no replacement record was created")
 
     revoke_session(db, credentials.credentials)
-    raw_token, session = create_session(db, account)
+    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
     return _anonymous_session_payload(account, person, caregiver, raw_token, session)
