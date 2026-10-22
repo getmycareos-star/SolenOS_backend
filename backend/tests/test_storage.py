@@ -155,3 +155,43 @@ def test_authenticated_photo_upload_persists_evidence_and_actor(monkeypatch):
         main.app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+
+def test_signed_url_includes_supabase_storage_api_prefix(monkeypatch):
+    monkeypatch.setattr(
+        storage,
+        "get_settings",
+        lambda: SimpleNamespace(
+            supabase_url="https://project.supabase.co",
+            supabase_service_role_key="service-role-test-secret",
+            supabase_storage_bucket="care-evidence",
+        ),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"signedURL":"/object/sign/care-evidence/opaque-photo.jpg?token=short-lived"}'
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == (
+            "https://project.supabase.co/storage/v1/object/sign/"
+            "care-evidence/opaque-photo.jpg"
+        )
+        assert request.get_method() == "POST"
+        assert timeout == 15
+        return FakeResponse()
+
+    monkeypatch.setattr(storage, "urlopen", fake_urlopen)
+    url = storage.create_signed_object_url("opaque-photo.jpg")
+
+    assert url == (
+        "https://project.supabase.co/storage/v1/object/sign/"
+        "care-evidence/opaque-photo.jpg?token=short-lived"
+    )
