@@ -19,6 +19,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import SituationInput, SituationResponse
+from pydantic import BaseModel, Field
 from app.services.situation import process_situation_input
 
 settings = get_settings()
@@ -142,10 +143,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 # The legacy situation-capture UI has no server person ID yet.
                 # Bind its write to the authenticated session rather than
                 # trusting the client-generated caregiver key as identity.
-                if path == "/api/situation" and method == "POST":
+                if path == "/api/situation" and method in {"POST", "PATCH"}:
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
-                    if payload.get("caregiver_id"):
+                    if method == "POST" and payload.get("caregiver_id"):
                         payload["client_care_key"] = payload["caregiver_id"]
                     payload["person_id"] = scoped_person_id
                     payload["caregiver_id"] = scoped_caregiver_id
@@ -375,6 +376,39 @@ def get_situation(
             "important_unresolved": [],
             "suppress_first_time_ux": bool(observations),
         },
+    }
+
+
+class SituationDisplayNameUpdate(BaseModel):
+    person_id: str
+    caregiver_id: str
+    display_name: str
+
+
+@situation_router.patch("/situation")
+def update_situation_display_name(
+    payload: SituationDisplayNameUpdate,
+    db: Session = Depends(get_db),
+):
+    display_name = payload.display_name.strip()
+    if not display_name:
+        raise HTTPException(status_code=422, detail="display_name must not be blank")
+    person = db.query(Person).filter(Person.id == payload.person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Care recipient not found")
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == payload.caregiver_id,
+        Caregiver.person_id == payload.person_id,
+    ).first()
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Session caregiver is not linked to this care record")
+    person.name = display_name
+    db.commit()
+    db.refresh(person)
+    return {
+        "ok": True,
+        "care_recipient_id": person.id,
+        "care_recipient_display_name": person.name,
     }
 
 
