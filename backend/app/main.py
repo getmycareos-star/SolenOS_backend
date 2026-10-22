@@ -544,7 +544,7 @@ def post_situation(
         "active_care_situation_turn": hydration["active_care_situation_turn"],
         "return_continuity": hydration["return_continuity"],
         "events": hydration["events"],
-        "situations": hydration["situations"],
+        "situations": response_payload.get("situations") or hydration["situations"],
     })
     return response_payload
 
