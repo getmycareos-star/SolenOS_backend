@@ -1,4 +1,4 @@
-"""Single Railway-hosted Qwen/Qwen inference gateway for all SolenOS modules.
+"""Shared Railway-hosted Qwen inference gateway for all SolenOS modules.
 
 All model traffic uses Ollama's native /api/chat endpoint. Module services supply
 their own scoped context and policy; this transport layer never reads or writes care
