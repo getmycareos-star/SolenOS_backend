@@ -96,7 +96,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         scoped_person_id = session.person_id
         scoped_caregiver_id = session.caregiver_id
         request.state.anonymous_session_id = session.id
-        if path == "/api/v1/sessions/refresh" and method == "POST":
+        if path.rstrip("/").endswith("/sessions/refresh") and method == "POST":
             return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
@@ -158,6 +158,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
             request._receive = receive_body
+            # Request.body() caches the original client body. Replace that cache
+            # too, otherwise FastAPI validates the unscoped payload rather than
+            # the server-bound payload above.
+            request._body = body
 
         if not target_person_id:
             # For routes addressing a child resource by its own ID, look up the
