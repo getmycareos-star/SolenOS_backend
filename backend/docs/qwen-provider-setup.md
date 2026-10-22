@@ -1,22 +1,30 @@
-# Local Qwen through Ollama
+# Qwen through Ollama
 
-SolenOS Companion and Daily Capture extraction use **local Qwen inference through Ollama's native HTTP API**. They do not use a hosted Qwen provider, OpenAI-compatible `/chat/completions` endpoint, bearer token, or Qwen API key.
+SolenOS Companion and Daily Capture extraction use **Qwen through Ollama's native HTTP API**. They do not use a hosted Qwen provider, OpenAI-compatible `/chat/completions` endpoint, bearer token, or Qwen API key.
 
 ## Local runtime configuration
 
-Ollama must be running in the same host/network namespace as the backend, or at a private Ollama endpoint reachable from the backend. The defaults are:
+For local development, the defaults are:
 
 - `OLLAMA_BASE_URL=http://127.0.0.1:11434`
-- `OLLAMA_MODEL=qwen2.5:7b`
+- `OLLAMA_MODEL=qwen2.5:1.5b`
 - `OLLAMA_TIMEOUT_SECONDS=60` (optional; request timeout is bounded)
 
-Install/pull the intended Qwen model in Ollama before starting the application. For example, run `ollama pull qwen2.5:7b` in a terminal where Ollama is installed. If your local Qwen model has a different exact tag, set `OLLAMA_MODEL` to the tag shown by `ollama list`. No Qwen API key is needed or read by this integration.
+Install/pull the intended Qwen model before starting the application. For example, run `ollama pull qwen2.5:1.5b` in a terminal where Ollama is installed. If your local model has a different exact tag, set `OLLAMA_MODEL` to the tag shown by `ollama list`. No Qwen API key is needed or read by this integration.
 
 The backend calls Ollama's native `POST /api/chat` endpoint and reads `message.content`. It sends no `Authorization` header. It does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint if local Ollama is unavailable.
 
-## Important deployment boundary
+## Railway deployment
 
-A backend running on Railway cannot reach Ollama at `127.0.0.1` on a developer's computer: localhost refers to the Railway container itself. Local inference therefore works only when the backend and Ollama share a host/network namespace, or when the backend is intentionally configured to reach a private, secured Ollama host. Do not expose Ollama publicly without a proper network security boundary. This source change does not make the remote Railway backend able to reach a developer's laptop automatically.
+**Do not use the local loopback URL in Railway.** Railway's backend container cannot reach Ollama on a developer's computer through `127.0.0.1`; loopback refers to the backend container itself.
+
+For the Railway setup, follow [railway-qwen-deployment.md](railway-qwen-deployment.md). It provides a separate Ollama service image, persistent model storage instructions, and the required private service URL. The backend service must set:
+
+- `OLLAMA_BASE_URL=http://${{ollama.RAILWAY_PRIVATE_DOMAIN}}:11434`
+- `OLLAMA_MODEL=qwen2.5:1.5b`
+- `OLLAMA_TIMEOUT_SECONDS=60`
+
+The backend treats a loopback URL as not configured when Railway runtime variables are present. This prevents an incorrect localhost value from being treated as a valid remote model connection. This repository does not itself create Railway services, configure Railway variables, attach volumes, or deploy services.
 
 ## Runtime behavior and safety
 
@@ -29,4 +37,6 @@ A backend running on Railway cannot reach Ollama at `127.0.0.1` on a developer's
 
 ## Verification
 
-After starting Ollama and ensuring the configured model exists, verify a signed-in test account through `POST /api/v1/conversation/message` and submit a test capture through `POST /api/situation` or `POST /api/v1/daily/log`. Confirm Companion reports `provider_status=connected`, capture reports `qwen_extraction_status=pending_review` when grounded candidates are found, and the request targets `/api/chat` without an Authorization header. Test missing models, timeouts, emergency wording, and cross-account access. CI with mocked Ollama responses does not prove the local model is installed or reachable at runtime.
+After Ollama is running and the configured model is present, verify an authorized test account through `POST /api/v1/conversation/message` and submit a test capture through the supported capture route. Confirm Companion reports `provider_status=connected` and `ai_generated=true` only after a real model response; capture extraction should report `pending_review` only when grounded candidates are actually returned. Test missing models, timeouts, emergency wording, and cross-account access.
+
+Mocked CI responses verify request contracts only; they do not prove the model is installed or reachable. Before production use, confirm the live Railway service can make a real inference request and that the model remains available after restart.
