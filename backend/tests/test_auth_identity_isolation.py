@@ -8,7 +8,8 @@ import app.main as main
 import app.api.auth as auth
 from app.core.database import Base
 from app.models.auth import AuthAccount
-from app.models.care import Caregiver, CareEvent, Person
+from app.models.care import Caregiver, CareEvent, Evidence, Person
+from app.models.action import Action as ActionModel
 
 
 def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatch):
@@ -127,6 +128,101 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             },
         )
         assert cross_write.status_code == 403, cross_write.text
+    finally:
+        main.app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_authenticated_action_completion_persists_report_under_signed_in_caregiver(monkeypatch):
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    secret = "test-only-action-completion-secret-at-least-32-bytes"
+    monkeypatch.setattr(main.settings, "secret_key", secret)
+    monkeypatch.setattr(auth.settings, "secret_key", secret)
+    monkeypatch.setattr(database, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(main, "SessionLocal", TestingSessionLocal)
+    main.app.dependency_overrides.clear()
+
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="completion-route-person", name="Completion Route Person")
+        caregiver = Caregiver(
+            id="completion-route-caregiver",
+            name="Completion Route Caregiver",
+            email="completion-route@example.invalid",
+            relationship="Family",
+            person_id=person.id,
+            timezone="UTC",
+        )
+        source = Evidence(
+            id="completion-route-source",
+            person_id=person.id,
+            type="note",
+            source_text="Source note for the action",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        action = ActionModel(
+            id="completion-route-action",
+            person_id=person.id,
+            status="active",
+            normalized_action="Arrange transport",
+            source_evidence_id=source.id,
+            source_passage="Arrange transport",
+            original_text="Arrange transport",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, source, action])
+        db.flush()
+        account = AuthAccount(
+            id="completion-route-account",
+            caregiver_id=caregiver.id,
+            email=caregiver.email,
+            password_hash="test-only",
+            role="caregiver",
+            is_active=True,
+        )
+        db.add(account)
+        db.commit()
+        token = auth.issue_token(account)
+    finally:
+        db.close()
+
+    client = TestClient(main.app)
+    try:
+        response = client.post(
+            "/api/v1/actions/completion-route-action/complete",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "evidence_ids": [],
+                "notes": "Transport was arranged by phone.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result["status"] == "completed"
+        assert result["completion_confidence"] is None
+        assert len(result["completion_evidence_ids"]) == 1
+
+        db = TestingSessionLocal()
+        try:
+            report = db.query(Evidence).filter_by(
+                id=result["completion_evidence_ids"][0]
+            ).one()
+            assert report.person_id == "completion-route-person"
+            assert report.uploaded_by_caregiver_id == "completion-route-caregiver"
+            assert report.source_type == "caregiver_completion"
+            assert report.evidence_status == "reported"
+            assert "Transport was arranged by phone." in report.source_text
+        finally:
+            db.close()
     finally:
         main.app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
