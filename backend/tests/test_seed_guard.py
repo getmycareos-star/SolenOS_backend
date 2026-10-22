@@ -22,6 +22,14 @@ def test_demo_seed_is_disabled_by_default(monkeypatch):
         _assert_demo_seed_allowed()
 
 
+def test_demo_seed_is_denied_when_environment_is_not_explicit(monkeypatch):
+    clear_environment(monkeypatch)
+    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
+
+    with pytest.raises(RuntimeError, match="explicitly named local development environment"):
+        _assert_demo_seed_allowed()
+
+
 def test_demo_seed_requires_explicit_local_opt_in(monkeypatch):
     clear_environment(monkeypatch)
     monkeypatch.setenv("APP_ENV", "development")
