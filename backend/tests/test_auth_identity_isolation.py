@@ -88,6 +88,26 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         no_token = client.get("/api/v1/persons/isolation-person-a")
         assert no_token.status_code == 401, no_token.text
 
+        caregiver_contexts = client.get("/api/v1/auth/care-contexts", headers=headers)
+        assert caregiver_contexts.status_code == 200, caregiver_contexts.text
+        assert {row["person_id"] for row in caregiver_contexts.json()} == {"isolation-person-a"}
+        caregiver_links = client.get(
+            "/api/v1/auth/my-caregiver-links?person_id=isolation-person-a",
+            headers=headers,
+        )
+        assert caregiver_links.status_code == 200, caregiver_links.text
+        assert caregiver_links.json() == [{
+            "person_id": "isolation-person-a",
+            "caregiver_id": "isolation-caregiver-a",
+            "account_id": "isolation-account-a",
+            "permissions": ["read", "write"],
+        }]
+        forbidden_link = client.get(
+            "/api/v1/auth/my-caregiver-links?person_id=isolation-person-b",
+            headers=headers,
+        )
+        assert forbidden_link.status_code == 403, forbidden_link.text
+
         # A valid caregiver token must not read another recipient's record.
         cross_recipient = client.get(
             "/api/v1/persons/isolation-person-b",
@@ -108,6 +128,18 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
 
         # A professional may read only recipients covered by an active access grant.
         professional_headers = {"Authorization": f"Bearer {token_b}"}
+        professional_contexts = client.get(
+            "/api/v1/auth/care-contexts",
+            headers=professional_headers,
+        )
+        assert professional_contexts.status_code == 200, professional_contexts.text
+        assert {row["person_id"] for row in professional_contexts.json()} == {"isolation-person-a"}
+        professional_link = client.get(
+            "/api/v1/auth/my-caregiver-links?person_id=isolation-person-a",
+            headers=professional_headers,
+        )
+        assert professional_link.status_code == 200, professional_link.text
+        assert professional_link.json()[0]["caregiver_id"] == "isolation-caregiver-b"
         granted_person = client.get(
             "/api/v1/persons/isolation-person-a",
             headers=professional_headers,
