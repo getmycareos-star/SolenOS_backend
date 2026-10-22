@@ -1,5 +1,6 @@
 """Authenticated review of Qwen candidates preserves provenance and never writes LCR facts."""
 from datetime import datetime, timezone
+import json
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 
 engine = create_engine(
@@ -168,5 +169,40 @@ def test_another_account_cannot_review_a_candidate_for_an_ungranted_record():
                 json={"candidate_index": 0, "decision": "reject"},
             )
             assert response.status_code == 403, response.text
+    finally:
+        teardown_db()
+
+
+
+def test_document_evidence_metadata_remains_readable_in_lcr_after_refresh():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, context = create_owner(client, "document-evidence-owner")
+            with TestingSessionLocal() as db:
+                from app.models.care import Caregiver
+                caregiver_id = db.query(Caregiver).filter_by(person_id=context["person_id"]).one().id
+                db.add(Evidence(
+                    person_id=context["person_id"],
+                    type="document",
+                    source_text="Care appointment is scheduled for Thursday.",
+                    original_file_path="appointment-note.txt",
+                    uploaded_by_caregiver_id=caregiver_id,
+                    extra_metadata=json.dumps({"mime_type": "text/plain", "ocr_confidence": None}),
+                    evidence_status="reported",
+                    source_type="caregiver_observation",
+                ))
+                db.commit()
+
+            response = client.get(
+                f"/api/v1/evidence/{context['person_id']}",
+                headers=headers,
+            )
+            assert response.status_code == 200, response.text
+            rows = response.json()
+            assert len(rows) == 1
+            assert rows[0]["original_file_path"] == "appointment-note.txt"
+            assert rows[0]["extra_metadata"] == {"mime_type": "text/plain", "ocr_confidence": None}
+            assert rows[0]["source_text"] == "Care appointment is scheduled for Thursday."
     finally:
         teardown_db()
