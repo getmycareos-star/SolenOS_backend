@@ -93,7 +93,23 @@ def test_competing_assertions_are_both_preserved_and_conflict_is_open(db: OrmSes
     assert {item.assertion_status for item in assertions} == {"reported"}
     assert conflict.resolution_status == "unresolved"
     assert set(conflict.evidence_ids) == {"ev-1", "ev-2"}
+    assert set(conflict.source_assertion_ids) == {first.id, second.id}
     assert "no assertion was selected as true" in conflict.description.lower()
+
+
+def test_time_bound_observations_do_not_create_false_state_conflicts(db: OrmSession):
+    first = _assertion("person-1", "calm", "ev-1").model_copy(update={
+        "field": "mood", "assertion_kind": "time_bound_observation",
+        "observed_at": datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc),
+    })
+    second = _assertion("person-1", "agitated", "ev-2").model_copy(update={
+        "field": "mood", "assertion_kind": "time_bound_observation",
+        "observed_at": datetime(2026, 10, 21, 16, 0, tzinfo=timezone.utc),
+    })
+    create_assertion(db, first)
+    create_assertion(db, second)
+    assert db.query(CareAssertion).filter(CareAssertion.field == "mood").count() == 2
+    assert db.query(Contradiction).filter(Contradiction.field == "mood").count() == 0
 
 
 def test_freshness_never_calls_unreviewed_assertion_current(db: OrmSession):
