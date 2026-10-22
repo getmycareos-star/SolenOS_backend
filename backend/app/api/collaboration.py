@@ -297,7 +297,23 @@ def send_companion_message(
     user_text = payload.text.strip()
     if not user_text:
         raise HTTPException(status_code=422, detail="Message cannot be blank")
-    policy_reply = build_companion_reply(user_text)
+    # Load only this authenticated account's prior messages for this authorized person/session.
+    history_rows = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.session_id == session.id,
+            ConversationMessage.account_id == account.id,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    history = [
+        {"role": row.role, "content": row.content}
+        for row in reversed(history_rows)
+        if row.role in {"user", "assistant"}
+    ]
+    policy_reply = build_companion_reply(db, payload.person_id, user_text, history)
     db.add(ConversationMessage(
         session_id=session.id, account_id=account.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids=[],
@@ -316,8 +332,8 @@ def send_companion_message(
         "safety_note": policy_reply.safety_note,
         "confidence": policy_reply.confidence,
         "evidence_ids": policy_reply.evidence_ids,
-        "ai_generated": False,
-        "provider_status": "not_configured",
+        "ai_generated": policy_reply.ai_generated,
+        "provider_status": policy_reply.provider_status,
     }
 
 
