@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 
 
 class SituationProvenance(BaseModel):
@@ -27,6 +27,9 @@ class SituationInput(BaseModel):
     documents: Optional[List[SituationDocument]] = None
     provenance: Optional[SituationProvenance] = None
     timestamp: Optional[str] = None
+    # Explicit command for interaction lifecycle only; never resolves or deletes care reality.
+    action: Optional[Literal["pause_active_care_situation"]] = None
+    care_session_id: Optional[str] = Field(None, max_length=128)
 
 
 class SituationEvent(BaseModel):
