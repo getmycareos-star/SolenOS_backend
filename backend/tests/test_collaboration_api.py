@@ -78,6 +78,24 @@ def test_community_post_reaction_and_literal_experience_search_persist():
         search = client.post("/api/v1/community/experience", headers=headers, json={"observation": "bedtime routine"})
         assert search.status_code == 200, search.text
         assert any(item["post_id"] == post_id for item in search.json()["matches"])
+
+        # Circle-only care stories must never be returned by shared-experience search.
+        private_post = client.post("/api/v1/community", headers=headers, json={
+            "caregiver_id": person_id,
+            "content": "A private sundowning routine with restricted visibility.",
+            "post_type": "experience",
+            "visibility": "circle",
+        })
+        assert private_post.status_code == 201, private_post.text
+        private_post_id = private_post.json()["post"]["id"]
+        private_search = client.post(
+            "/api/v1/community/experience",
+            headers=headers,
+            json={"observation": "private sundowning routine"},
+        )
+        assert private_search.status_code == 200, private_search.text
+        assert all(item["post_id"] != private_post_id for item in private_search.json()["matches"])
+
         # Same reaction toggles off instead of creating duplicate rows.
         client.post(f"/api/v1/community/{post_id}/reactions", headers=headers, json={
             "caregiver_id": person_id, "reaction_type": "support"
