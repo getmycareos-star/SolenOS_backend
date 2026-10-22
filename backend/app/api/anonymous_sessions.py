@@ -3,7 +3,7 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Person
 
 router = APIRouter(prefix="/sessions", tags=["anonymous sessions"])
-SESSION_TTL_DAYS = 30
+SESSION_TTL_DAYS = 365
 
 
 class AnonymousSessionCreate(BaseModel):
@@ -72,6 +72,36 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
             "name": caregiver.name,
             "relationship": caregiver.relationship,
         },
+        "session_id": session.id,
+        "access_token": raw_token,
+        "token_type": "Bearer",
+        "expires_at": expires_at.isoformat(),
+        "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
+    }
+
+
+@router.post("/refresh")
+def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
+    """Rotate a still-valid anonymous capability without changing record ownership."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    session = (
+        db.query(AnonymousSession)
+        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
+    session.token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    session.expires_at = expires_at
+    db.commit()
+    return {
+        "session_id": session.id,
+        "person_id": session.person_id,
+        "caregiver_id": session.caregiver_id,
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
