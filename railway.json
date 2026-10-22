@@ -5,7 +5,7 @@
     "buildCommand": "python -m pip install --upgrade pip && python -m pip install -e ./backend"
   },
   "deploy": {
-    "startCommand": "cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT",
+    "startCommand": "cd backend && alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT",
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
