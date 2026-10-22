@@ -141,3 +141,12 @@ Latest follow-up commits after the initial session implementation:
 - Backend bootstrap, refresh and situation-scope binding: `0e77b1cf4cdf44773c9da5ef2731684534f01962`, `1c5d67f3301877bf7a83339f60f5702675111e46`, `b0c240dd33c475c074f18011e6be1ce0be55c96f`, `60e178f912451720c976891679553d2573745ed6`, `705f2d92115c6575648c5d655cd227d362c1af62`.
 - Auth test isolation and rotation coverage: `b4858a41a06963cbf9b57a680ac25d342f6f08c9`, `0c58abc23a18ac81f3fb83407f6c501a570003dd`, `e8854d809c959fde27416f9e166f5c18ea132a90`, `de00e9ac398d2c83d2d5411eaf94e21e24b08277`, `adc3e18c3a91bf0d3086de15d195bb468126fb9c`.
 - Frontend token refresh and care-person ID alignment: `d02bcbe6b12e034f168bf9f78aedc1e1b90a85a7`, `76923200498b089f8e209ca91f221952933dbe75`.
+
+
+Final source follow-up after the prior report update:
+- Preserved the client durable care key separately from server-bound caregiver attribution in situation capture: `de8724a96274a703db0fa775fae3739f055c2796`, `3d5c20c2c499cb3e954366bd232b801daf80d4a7`, `ceca7e7d2350332af26e92a408b49c88b6b27408`, `2234d420f79c57fdb1294ff33562718068245b18`.
+- Rejected conflicting person IDs across route, query and request body: `67fb1fff13705be213aa4c50d9f0625aef526b53`.
+- Added the test HTTP dependency to the backend CI workflow: `cc614da7ce4335ae529e223baf44ac487025477b`.
+- Frontend first-capture bearer integration and session recovery safeguards: `1fca01141c933cc25d30f0c3e962bcce3e7486c6`, `15566c58381e42af490d77924e65684d5626f097`, `9f23a2209f2bc3c406db981029637d83a945d076`, `0e0cf907e75189329239a2e27cd5192078118b2e`, `d02bcbe6b12e034f168bf9f78aedc1e1b90a85a7`, `76923200498b089f8e209ca91f221952933dbe75`.
+
+The source is committed, but CI has not been observed completing and the Railway deployment is not live-verified. Do not treat this as production sign-off until the backend tests run, the SQLite migration limitation is resolved where applicable, and the deployed frontend/backend capture→read→refresh path is executed.
