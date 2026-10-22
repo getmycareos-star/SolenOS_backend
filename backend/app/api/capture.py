@@ -130,6 +130,8 @@ def save_daily_capture(
         attention_candidate=analysis["attention_candidate"],
         follow_up_candidate=analysis["follow_up_candidate"],
         situations=analysis["situations"],
+        qwen_extraction_status=analysis["qwen_extraction_status"],
+        qwen_candidates=analysis["qwen_candidates"],
     )
 
 
