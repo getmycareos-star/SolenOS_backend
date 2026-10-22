@@ -173,6 +173,7 @@ def test_photo_upload_requires_access_and_persists_evidence(monkeypatch):
             )
         )
         db.commit()
+        account_stub = SimpleNamespace(id=account.id)
     finally:
         db.close()
 
@@ -184,7 +185,7 @@ def test_photo_upload_requires_access_and_persists_evidence(monkeypatch):
             session.close()
 
     app.dependency_overrides[get_db] = override_db
-    app.dependency_overrides[current_account] = lambda: account
+    app.dependency_overrides[current_account] = lambda: account_stub
     client = TestClient(app)
     try:
         response = client.post(
