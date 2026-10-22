@@ -525,7 +525,7 @@ def post_situation(
     # than treating the capture response as the older local pipeline DTO.
     hydration = get_situation(
         request,
-        caregiver_id=payload.caregiver_id,
+        caregiver_id=payload.client_care_key or payload.caregiver_id,
         care_session_id=interaction_session_id,
         offer_return_invite=0,
         db=db,
