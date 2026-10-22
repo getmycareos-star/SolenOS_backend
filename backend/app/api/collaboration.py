@@ -5,6 +5,7 @@ Professional access requires an explicit active access grant with role='professi
 Team-wide endpoints require an out-of-band staff account flag.
 """
 from datetime import datetime, timedelta, timezone
+import json
 import re
 from typing import Literal, Optional
 
@@ -249,7 +250,7 @@ def summarize_shared_experiences(
             "Return JSON with summary (string), post_ids (array copied only from supplied IDs), "
             "and limitations (array of strings)."
         ),
-        user_prompt=__import__("json").dumps({
+        user_prompt=json.dumps({
             "question": payload.observation,
             "published_peer_posts": matches,
             "allowed_post_ids": [item["post_id"] for item in matches],
@@ -271,6 +272,7 @@ def summarize_shared_experiences(
         "ai_generated": bool(summary and status == "connected"),
         "limitations": limitations,
         "notice": "Peer experience only; not clinical advice and never a Living Care Record fact.",
+        "matches": matches,
     }
 
 
