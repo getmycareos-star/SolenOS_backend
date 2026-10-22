@@ -1,12 +1,17 @@
 from datetime import datetime, timezone
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+import app.main as main_module
+from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver
+from app.schemas.situation import SituationInput
+from app.services.situation import process_situation_input
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -31,11 +36,23 @@ app.dependency_overrides = {}
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+    main_module.SessionLocal = TestingSessionLocal
 
 
 def teardown_db():
     Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+
+
+def create_authenticated_session(client, person_name: str):
+    response = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": person_name, "caregiver_name": "Test family caregiver"},
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    return body, {"Authorization": f"Bearer {body['access_token']}"}
 
 
 def test_post_situation_creates_evidence_and_event():
@@ -44,33 +61,24 @@ def test_post_situation_creates_evidence_and_event():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-1", name="Test Person")
-        caregiver = Caregiver(
-            id="caregiver-1",
-            name="Test Caregiver",
-            email="test@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
-                "caregiver_id": "caregiver-1",
-                "person_id": "person-1",
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
                 "raw_input": "Patient seemed more confused than usual today.",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         data = response.json()
         assert data["ok"] is True
-        assert data["care_key"] == "caregiver-1"
-        assert data["person_id"] == "person-1"
+        assert data["care_key"] == caregiver_id
+        assert data["person_id"] == person_id
         assert data["message"] == "Care input recorded successfully."
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
@@ -86,25 +94,14 @@ def test_post_situation_with_documents():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-2", name="Test Person 2")
-        caregiver = Caregiver(
-            id="caregiver-2",
-            name="Test Caregiver 2",
-            email="test2@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person 2")
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
-                "caregiver_id": "caregiver-2",
-                "person_id": "person-2",
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
                 "raw_input": "",
                 "documents": [
                     {
@@ -124,7 +121,7 @@ def test_post_situation_with_documents():
                 },
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         data = response.json()
         assert data["ok"] is True
         assert len(data["events"]) == 1
@@ -133,33 +130,29 @@ def test_post_situation_with_documents():
         teardown_db()
 
 
-def test_post_situation_missing_caregiver():
+def test_situation_service_rejects_missing_caregiver():
     setup_db()
     try:
-        from app.core.database import get_db
-        app.dependency_overrides[get_db] = override_get_db
-
-        client = TestClient(app)
-        response = client.post(
-            "/api/situation",
-            json={
-                "caregiver_id": "nonexistent",
-                "person_id": "person-1",
-                "raw_input": "Some input",
-            },
-        )
-        assert response.status_code == 400
-        assert "Caregiver not found" in response.json()["detail"]
+        db = TestingSessionLocal()
+        db.add(Person(id="person-1", name="Test Person"))
+        db.commit()
+        with pytest.raises(ValueError, match="Caregiver not found"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id="nonexistent",
+                    person_id="person-1",
+                    raw_input="Some input",
+                ),
+            )
+        db.close()
     finally:
         teardown_db()
 
 
-def test_post_situation_missing_person():
+def test_situation_service_rejects_missing_person():
     setup_db()
     try:
-        from app.core.database import get_db
-        app.dependency_overrides[get_db] = override_get_db
-
         db = TestingSessionLocal()
         caregiver = Caregiver(
             id="caregiver-3",
@@ -170,19 +163,16 @@ def test_post_situation_missing_person():
         )
         db.add(caregiver)
         db.commit()
+        with pytest.raises(ValueError, match="Person not found"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id="caregiver-3",
+                    person_id="nonexistent",
+                    raw_input="Some input",
+                ),
+            )
         db.close()
-
-        client = TestClient(app)
-        response = client.post(
-            "/api/situation",
-            json={
-                "caregiver_id": "caregiver-3",
-                "person_id": "nonexistent",
-                "raw_input": "Some input",
-            },
-        )
-        assert response.status_code == 400
-        assert "Person not found" in response.json()["detail"]
     finally:
         teardown_db()
 
@@ -193,30 +183,19 @@ def test_post_situation_empty_input_and_no_documents():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
 
-        db = TestingSessionLocal()
-        person = Person(id="person-4", name="Test Person 4")
-        caregiver = Caregiver(
-            id="caregiver-4",
-            name="Test Caregiver 4",
-            email="test4@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        db.add_all([person, caregiver])
-        db.commit()
-        db.close()
-
         client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Test Person 4")
         response = client.post(
             "/api/situation",
+            headers=headers,
             json={
-                "caregiver_id": "caregiver-4",
-                "person_id": "person-4",
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
                 "raw_input": "   ",
                 "documents": [],
             },
         )
-        assert response.status_code == 400
+        assert response.status_code == 400, response.text
         assert "No valid evidence provided" in response.json()["detail"]
     finally:
         teardown_db()

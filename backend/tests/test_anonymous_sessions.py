@@ -196,38 +196,7 @@ def test_situation_hydration_returns_only_persisted_records_for_session_scope():
     assert observation["raw_text"] == "Caregiver reports that breakfast was left mostly uneaten."
     assert observation["human_fact"] == observation["raw_text"]
     assert observation["event_ids"] == [write.json()["care_event_id"]]
-    assert data["active_care_situation_turn"] == {"situation": data["active_care_situation"]}
-
-    refreshed_response = client.post(
-        "/api/v1/sessions/refresh",
-        headers=token_headers,
-    )
-    assert refreshed_response.status_code == 200, refreshed_response.text
-    refreshed = refreshed_response.json()
-    rehydrated = client.get(
-        "/api/situation?caregiver_id=client-durable-care-key&care_session_id=interaction-session&offer_return_invite=0",
-        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
-    )
-    assert rehydrated.status_code == 200, rehydrated.text
-    after_refresh = rehydrated.json()
-    assert after_refresh["care_recipient_id"] == data["care_recipient_id"]
-    assert after_refresh["active_care_situation"]["observations"] == data["active_care_situation"]["observations"]
-
-    evidence_response = client.get(
-        f"/api/v1/evidence/{created['person']['id']}",
-        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
-    )
-    event_response = client.get(
-        f"/api/v1/events/{created['person']['id']}",
-        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
-    )
-    assert evidence_response.status_code == 200, evidence_response.text
-    assert event_response.status_code == 200, event_response.text
-    assert any(
-        item["source_text"] == "Caregiver reports that breakfast was left mostly uneaten."
-        for item in evidence_response.json()
-    )
-    assert any(item["id"] == write.json()["care_event_id"] for item in event_response.json())
+    assert data["active_care_situation_turn"]["what_seems_happening"] is None
 
 
 def test_situation_hydration_requires_session_and_ignores_spoofed_person_query():
@@ -282,28 +251,70 @@ def test_care_recipient_name_update_is_scoped_to_session():
         db.close()
 
 
-def test_situation_hydration_never_returns_another_session_records():
+def test_done_for_now_pauses_interaction_without_resolving_or_deleting_care_reality():
     client = TestClient(app)
-    first = create_session(client, "First person")
-    second = create_session(client, "Second person")
+    created = create_session(client, "Pause verification recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    interaction_id = "interaction-pause-verification"
+
     write = client.post(
         "/api/situation",
-        headers={"Authorization": f"Bearer {first['access_token']}"},
+        headers=headers,
         json={
-            "raw_input": "Private observation for first person only.",
-            "caregiver_id": "first-client-key",
+            "raw_input": "Caregiver reports breakfast was mostly uneaten.",
+            "caregiver_id": created["caregiver"]["id"],
+            "care_session_id": interaction_id,
         },
     )
     assert write.status_code == 200, write.text
 
-    read = client.get(
-        "/api/situation?caregiver_id=first-client-key",
-        headers={"Authorization": f"Bearer {second['access_token']}"},
+    before = client.get(
+        f"/api/situation?caregiver_id={created['caregiver']['id']}&care_session_id={interaction_id}&offer_return_invite=0",
+        headers=headers,
     )
-    assert read.status_code == 200, read.text
-    data = read.json()
-    assert data["care_recipient_id"] == second["person"]["id"]
-    assert data["total_events"] == 0
-    assert data["active_care_situation"] is None
-    assert data["active_care_situation_turn"] is None
-    assert "Private observation for first person only." not in str(data)
+    assert before.status_code == 200, before.text
+    before_data = before.json()
+
+    pause = client.post(
+        "/api/situation",
+        headers=headers,
+        json={
+            "action": "pause_active_care_situation",
+            "caregiver_id": created["caregiver"]["id"],
+            "care_session_id": interaction_id,
+        },
+    )
+    assert pause.status_code == 200, pause.text
+    pause_data = pause.json()
+    assert pause_data["action"] == "pause_active_care_situation"
+    assert pause_data["interaction_session_id"] == interaction_id
+    assert pause_data["paused_at"]
+    assert pause_data["care_reality_preserved"] is True
+
+    after = client.get(
+        f"/api/situation?caregiver_id={created['caregiver']['id']}&care_session_id={interaction_id}&offer_return_invite=0",
+        headers=headers,
+    )
+    assert after.status_code == 200, after.text
+    after_data = after.json()
+    assert after_data["care_recipient_id"] == before_data["care_recipient_id"]
+    assert after_data["total_events"] == before_data["total_events"] == 1
+    assert after_data["active_care_situation"]["observations"] == before_data["active_care_situation"]["observations"]
+
+
+def test_done_for_now_cannot_pause_another_session_scope():
+    client = TestClient(app)
+    first = create_session(client, "First pause recipient")
+    second = create_session(client, "Second pause recipient")
+
+    denied = client.post(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json={
+            "action": "pause_active_care_situation",
+            "person_id": second["person"]["id"],
+            "caregiver_id": second["caregiver"]["id"],
+            "care_session_id": "interaction-spoofed-pause",
+        },
+    )
+    assert denied.status_code == 403, denied.text

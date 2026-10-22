@@ -5,7 +5,7 @@ from sqlalchemy import text
 import hashlib
 import json
 from datetime import datetime, timezone
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
 from app.api.uncertainty import router as uncertainty_router
@@ -14,11 +14,12 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
-from app.core.database import Base, get_db, SessionLocal
+from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
+from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
-from app.schemas.situation import SituationInput, SituationResponse
+from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 
@@ -57,7 +58,7 @@ PUBLIC_V1_ENDPOINTS = {
 
 @app.middleware("http")
 async def enforce_scoped_anonymous_session(request: Request, call_next):
-    path = request.url.path
+    path = str(request.scope.get("path") or request.url.path).rstrip("/")
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
@@ -100,7 +101,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
         request.state.scoped_caregiver_id = scoped_caregiver_id
-        if path == "/api/v1/sessions/refresh" and method == "POST":
+        if path.endswith("/sessions/refresh") and method == "POST":
             return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
@@ -121,7 +122,13 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
-        if path == "/api/situation" and method == "GET":
+        if not target_person_id and (
+            path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
+        ):
+            # These legacy list endpoints use the care-recipient ID as the final
+            # path segment. Resolve it explicitly before the session-scope check.
+            target_person_id = path.rsplit("/", 1)[-1]
+        if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
@@ -143,7 +150,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 # The legacy situation-capture UI has no server person ID yet.
                 # Bind its write to the authenticated session rather than
                 # trusting the client-generated caregiver key as identity.
-                if path == "/api/situation" and method in {"POST", "PATCH"}:
+                if path.endswith("/situation") and method in {"POST", "PATCH"}:
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
                     if method == "POST" and payload.get("caregiver_id"):
@@ -164,6 +171,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
             request._receive = receive_body
+            # FastAPI may read the cached Request.body() after middleware has
+            # replaced the payload; keep both body interfaces aligned.
+            request._body = body
 
         if not target_person_id:
             # For routes addressing a child resource by its own ID, look up the
@@ -200,7 +210,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     body_payload = parsed_body
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
-        claimed_caregiver_id = None if path == "/api/situation" and method == "GET" else (
+        claimed_caregiver_id = None if path.endswith("/situation") and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
@@ -327,7 +337,12 @@ def get_situation(
         }
         # This is a projection of persisted evidence/events, not a persisted ACS/CRS
         # object. Make that limitation explicit and do not synthesize a clinical assessment.
-        active_turn = {"situation": active_situation}
+        active_turn = {
+            "situation": active_situation,
+            # No supported synthesis exists in this hydration-only path; keep
+            # the field explicit rather than inventing a conclusion.
+            "what_seems_happening": None,
+        }
 
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
     return {
@@ -390,12 +405,121 @@ def update_situation_display_name(
     }
 
 
-@situation_router.post("/situation", response_model=SituationResponse)
-def post_situation(payload: SituationInput, db: Session = Depends(get_db)):
+@situation_router.post(
+    "/situation",
+    response_model=SituationResponse | InteractionPauseResponse,
+)
+def post_situation(
+    payload: SituationInput,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # Revalidate the bearer capability at the route boundary instead of relying
+    # solely on middleware request.state propagation. This also protects this
+    # write path if middleware behavior changes in a future framework upgrade.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = (
+        db.query(AnonymousSession)
+        .filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    scoped_person_id = str(authorized_session.person_id)
+    scoped_caregiver_id = str(authorized_session.caregiver_id)
+    if str(payload.person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if str(payload.caregiver_id) != scoped_caregiver_id:
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+
+    if payload.action == "pause_active_care_situation":
+        interaction_session_id = (payload.care_session_id or "").strip()
+        if not interaction_session_id:
+            raise HTTPException(status_code=422, detail="care_session_id is required to pause an interaction")
+        now = datetime.now(timezone.utc)
+        row = (
+            db.query(InteractionSession)
+            .filter(
+                InteractionSession.interaction_session_id == interaction_session_id,
+                InteractionSession.person_id == scoped_person_id,
+                InteractionSession.caregiver_id == scoped_caregiver_id,
+            )
+            .first()
+        )
+        if row is None:
+            row = InteractionSession(
+                interaction_session_id=interaction_session_id,
+                person_id=scoped_person_id,
+                caregiver_id=scoped_caregiver_id,
+                paused_at=now,
+            )
+            db.add(row)
+        elif row.paused_at is None:
+            row.paused_at = now
+        try:
+            db.commit()
+            db.refresh(row)
+        except IntegrityError:
+            db.rollback()
+            row = (
+                db.query(InteractionSession)
+                .filter(
+                    InteractionSession.interaction_session_id == interaction_session_id,
+                    InteractionSession.person_id == scoped_person_id,
+                    InteractionSession.caregiver_id == scoped_caregiver_id,
+                )
+                .first()
+            )
+            if row is None:
+                raise HTTPException(status_code=503, detail="The interaction pause could not be persisted")
+            if row.paused_at is None:
+                row.paused_at = now
+                try:
+                    db.commit()
+                    db.refresh(row)
+                except Exception as exc:
+                    db.rollback()
+                    raise HTTPException(status_code=503, detail="The interaction pause could not be persisted") from exc
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="The interaction pause could not be persisted") from exc
+        return {
+            "ok": True,
+            "action": "pause_active_care_situation",
+            "interaction_session_id": row.interaction_session_id,
+            "paused_at": row.paused_at,
+            "care_reality_preserved": True,
+        }
+
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    # A new accepted care entry resumes only this interaction session, never the
+    # underlying care situation lifecycle.
+    interaction_session_id = (payload.care_session_id or "").strip()
+    if interaction_session_id:
+        row = (
+            db.query(InteractionSession)
+            .filter(
+                InteractionSession.interaction_session_id == interaction_session_id,
+                InteractionSession.person_id == scoped_person_id,
+                InteractionSession.caregiver_id == scoped_caregiver_id,
+            )
+            .first()
+        )
+        if row is not None and row.paused_at is not None:
+            row.paused_at = None
+            db.commit()
     return result
 
 
@@ -426,6 +550,13 @@ def readiness_check(db: Session = Depends(get_db)):
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
+        raise HTTPException(status_code=503, detail="Database schema is incomplete")
+
+    try:
+        differences = database_schema_differences(db.get_bind())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
+    if differences:
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     return {
