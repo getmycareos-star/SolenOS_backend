@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
-from app.core.uncertainty_enums import GapLifecycleStatus
+from app.core.uncertainty_enums import GapLifecycleStatus, Priority
 
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -219,7 +219,7 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
                     subject_type=clean["subject_type"],
                     subject_id=clean["subject_id"],
                     status="open",
-                    priority=clean["priority"],
+                    priority=Priority(clean["priority"]),
                     evidence_ids=clean["evidence_ids"],
                     context=[{"source_kind": clean["source_kind"], "source_id": clean["source_id"], "reason": clean["reason"]}],
                 )
