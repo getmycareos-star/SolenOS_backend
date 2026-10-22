@@ -131,12 +131,12 @@ def test_authenticated_photo_upload_persists_evidence_and_actor(monkeypatch):
             "/api/v1/upload?person_id=photo-person&caregiver_id=photo-caregiver",
             headers={"Authorization": f"Bearer {token}"},
             data={"person_id": "photo-person", "caregiver_id": "photo-caregiver"},
-            files={"file": ("medication.jpg", b"\\xff\\xd8\\xffimage-bytes", "image/jpeg")},
+            files={"file": ("medication.jpg", b"\xff\xd8\xffimage-bytes", "image/jpeg")},
         )
         assert response.status_code == 201, response.text
         evidence_id = response.json()["evidence_id"]
         assert uploaded["content_type"] == "image/jpeg"
-        assert uploaded["data"] == b"\\xff\\xd8\\xffimage-bytes"
+        assert uploaded["data"] == b"\xff\xd8\xffimage-bytes"
         assert "/" not in uploaded["path"]
         assert "photo-person" not in uploaded["path"]
 
