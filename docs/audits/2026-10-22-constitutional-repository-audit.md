@@ -12,9 +12,10 @@ This is a source-level audit, not a production sign-off. The repository evidence
 ### P0 — Companion calls a route not found in the inspected backend source
 - Frontend: `src/pages/Companion.tsx` calls `postJSON('/conversation/message', ...)`.
 - API client: `src/api/client.ts` prefixes most requests with `/api/v1`, so the request resolves to `/api/v1/conversation/message`.
-- Backend: searched indexed default-branch source for conversation-message route and inspected the API route search results; no matching route was found. Existing route examples include `backend/app/api/v1.py`, `backend/app/api/safety.py`, and `backend/app/api/causal.py`.
-- Impact: Companion is not demonstrated to have a complete request path and is likely to fail unless the route is registered in unindexed or otherwise uninspected code.
-- Status: **Verified frontend call; backend absence strongly indicated but requires route-table/live HTTP confirmation.**
+- Backend: direct inspection of `backend/app/main.py` and `backend/app/api/v1.py`, plus code search, found no registered conversation-message route. This remains a source-level finding; deployed route behavior has not been probed.
+- Impact: Companion is not demonstrated to have a complete request path and is likely to fail.
+- Status: **Source-level route gap confirmed; live HTTP confirmation remains outstanding.**
+- Follow-up frontend change: failure handling now distinguishes a 404 from an unknown server outcome and warns users to check the care record before retrying when receipt is uncertain. It does not implement the missing backend workflow.
 - Required verification: enumerate `app.routes` in the deployed app and send an authenticated/authorized test request; do not fabricate a reply or mock the route as a fix.
 
 ### P0 — Server-side authentication and authorization are not demonstrated
@@ -101,3 +102,11 @@ The following source changes were committed after the initial inspection:
 - API reference: removed the shared `default_caregiver` fallback recommendation. Commit: `cf5b8ee45d78ae21bfdddfd9cba519ea5b7da16f`.
 
 These are repository/source changes only. Neither CI workflow has a confirmed run result in this report; no build, test suite, live API request, or end-to-end persistence test is claimed as passing. The missing Companion backend workflow and server-side identity/authorization remain unresolved high-priority issues.
+
+
+## Follow-up implementation activity (continued)
+
+- Companion error semantics: updated `src/pages/Companion.tsx` so a generic server/network failure no longer claims the message definitely was not sent. It advises checking the care record before retrying to avoid duplicate submissions. Commit: `382cbe404fe9109ce39b7073b834fa83987024c1`.
+- Readiness regression test: added `test_readiness_rejects_incomplete_schema` in `backend/tests/test_daily_capture.py`, constructing an in-memory database with only the persons table and expecting `/ready` to return 503. Commit: `2670e0b96ddf6c142db7d42b481472869fc18201`.
+
+The new test has been committed but not executed in this environment. The backend route files inspected in this follow-up still do not demonstrate server-issued anonymous sessions or authenticated authorization for every sensitive endpoint. Relationship checks on some write routes are integrity checks only and must not be described as authentication. The production identity-isolation gap remains open.
