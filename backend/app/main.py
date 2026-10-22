@@ -127,7 +127,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # route matcher does not expose the expected parameter name.
         if not target_person_id and path.startswith("/api/v1/evidence/"):
             target_person_id = path.rsplit("/", 1)[-1]
-        if path.endswith("/api/situation") and method == "GET":
+        if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
@@ -149,7 +149,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 # The legacy situation-capture UI has no server person ID yet.
                 # Bind its write to the authenticated session rather than
                 # trusting the client-generated caregiver key as identity.
-                if path == "/api/situation" and method in {"POST", "PATCH"}:
+                if path.endswith("/situation") and method in {"POST", "PATCH"}:
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
                     if method == "POST" and payload.get("caregiver_id"):
@@ -210,7 +210,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     body_payload = parsed_body
             except (UnicodeDecodeError, json.JSONDecodeError):
                 pass
-        claimed_caregiver_id = None if path.endswith("/api/situation") and method == "GET" else (
+        claimed_caregiver_id = None if path.endswith("/situation") and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
