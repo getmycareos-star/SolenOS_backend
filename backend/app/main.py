@@ -57,7 +57,7 @@ PUBLIC_V1_ENDPOINTS = {
 
 @app.middleware("http")
 async def enforce_scoped_anonymous_session(request: Request, call_next):
-    path = request.url.path
+    path = request.url.path.rstrip("/")
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
@@ -164,6 +164,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 sent = True
                 return {"type": "http.request", "body": body, "more_body": False}
             request._receive = receive_body
+            # FastAPI may read the cached Request.body() after middleware has
+            # replaced the payload. Keep both body interfaces aligned so
+            # server-bound person/caregiver IDs reach schema validation.
+            request._body = body
 
         if not target_person_id:
             # For routes addressing a child resource by its own ID, look up the
