@@ -208,6 +208,7 @@ def create_care_context(
     db.refresh(person)
     return {
         "person_id": person.id,
+        "caregiver_id": caregiver.id,
         "name": person.name,
         "role": "caregiver",
         "permissions": ["read", "write"],
