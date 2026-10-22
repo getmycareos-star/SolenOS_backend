@@ -213,6 +213,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 content={"detail": "Caregiver attribution does not match this session"},
             )
 
+        if method == "POST" and path.rstrip("/") == "/api/v1/sessions/refresh":
+            target_person_id = scoped_person_id
+
         if not target_person_id:
             return JSONResponse(
                 status_code=403,
