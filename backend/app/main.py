@@ -19,7 +19,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import SituationInput, SituationResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from app.services.situation import process_situation_input
 
 settings = get_settings()
@@ -304,7 +304,7 @@ def get_situation(
         last_timestamp = observations[-1]["captured_at"]
         root_event_id = events[0].id if events else None
         active_situation = {
-            "id": events[-1].situation_id or root_event_id or observations[0]["id"],
+            "id": (events[0].situation_id if events and events[0].situation_id else None) or root_event_id or observations[0]["id"],
             "care_recipient_id": person_id,
             "caregiver_id": caregiver_scope_id,
             "opened_at": first_timestamp,
