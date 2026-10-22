@@ -191,8 +191,8 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
         # Role-specific dashboards cannot be opened by a caregiver token.
         professional_dashboard = client.get("/api/v1/professional/dashboard", headers=headers)
         assert professional_dashboard.status_code == 403, professional_dashboard.text
-        team_dashboard = client.get("/api/v1/team/moderation/queue", headers=headers)
-        assert team_dashboard.status_code == 403, team_dashboard.text
+        forbidden_team_dashboard = client.get("/api/v1/team/dashboard", headers=headers)
+        assert forbidden_team_dashboard.status_code == 403, forbidden_team_dashboard.text
 
         # A professional may read only recipients covered by an active access grant.
         professional_headers = {"Authorization": f"Bearer {token_b}"}
