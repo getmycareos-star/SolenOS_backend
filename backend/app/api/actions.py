@@ -122,7 +122,7 @@ def extract_actions_from_document(
     return created_actions
 
 
-@router.post("/actions", response_model=ActionSchema)
+@router.post("", response_model=ActionSchema)
 def create_action(action: ActionCreate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     if not action.person_id:
         raise HTTPException(status_code=400, detail="person_id is required")
@@ -232,7 +232,7 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db), account: 
     return db_action
 
 
-@router.get("/actions/{person_id}", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
+@router.get("/{person_id}", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_actions(person_id: str, status: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(ActionModel).filter(ActionModel.person_id == person_id)
     if status:
@@ -240,7 +240,7 @@ def list_actions(person_id: str, status: Optional[str] = None, db: Session = Dep
     return query.order_by(ActionModel.created_at.desc()).all()
 
 
-@router.get("/actions/detail/{action_id}", response_model=ActionSchema)
+@router.get("/detail/{action_id}", response_model=ActionSchema)
 def get_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     action = _get_action_or_404(db, action_id)
     if not action.person_id:
@@ -249,7 +249,7 @@ def get_action(action_id: str, db: Session = Depends(get_db), account: AuthAccou
     return action
 
 
-@router.patch("/actions/{action_id}", response_model=ActionSchema)
+@router.patch("/{action_id}", response_model=ActionSchema)
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -273,7 +273,7 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
     return db_action
 
 
-@router.post("/actions/{action_id}/complete", response_model=ActionSchema)
+@router.post("/{action_id}/complete", response_model=ActionSchema)
 def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -283,7 +283,7 @@ def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Sess
     return lifecycle_service.record_completion(db_action, evidence, db)
 
 
-@router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
+@router.post("/{action_id}/cancel", response_model=ActionSchema)
 def cancel_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -292,7 +292,7 @@ def cancel_action(action_id: str, db: Session = Depends(get_db), account: AuthAc
     return lifecycle_service.cancel_action(db_action, db)
 
 
-@router.post("/actions/{action_id}/supersede", response_model=ActionSchema)
+@router.post("/{action_id}/supersede", response_model=ActionSchema)
 def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     new_action = _get_action_or_404(db, new_action_id)
@@ -302,7 +302,7 @@ def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(g
     return lifecycle_service.supersede_action(db_action, new_action_id, db)
 
 
-@router.post("/actions/{action_id}/activate", response_model=ActionSchema)
+@router.post("/{action_id}/activate", response_model=ActionSchema)
 def activate_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -311,7 +311,7 @@ def activate_action(action_id: str, db: Session = Depends(get_db), account: Auth
     return lifecycle_service.activate_action(db_action, db)
 
 
-@router.post("/actions/{action_id}/block", response_model=ActionSchema)
+@router.post("/{action_id}/block", response_model=ActionSchema)
 def block_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -320,7 +320,7 @@ def block_action(action_id: str, db: Session = Depends(get_db), account: AuthAcc
     return lifecycle_service.block_action(db_action, db)
 
 
-@router.post("/actions/{action_id}/expire", response_model=ActionSchema)
+@router.post("/{action_id}/expire", response_model=ActionSchema)
 def expire_action(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -329,7 +329,7 @@ def expire_action(action_id: str, db: Session = Depends(get_db), account: AuthAc
     return lifecycle_service.expire_action(db_action, db)
 
 
-@router.get("/actions/{action_id}/duplicates", response_model=List[ActionDeduplicationResult])
+@router.get("/{action_id}/duplicates", response_model=List[ActionDeduplicationResult])
 def find_duplicate_actions(action_id: str, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     db_action = _get_action_or_404(db, action_id)
     if not db_action.person_id:
@@ -340,7 +340,7 @@ def find_duplicate_actions(action_id: str, db: Session = Depends(get_db), accoun
     return [ActionDeduplicationResult(**d) for d in duplicates]
 
 
-@router.post("/actions/safety-check", response_model=ActionSafetyCheck)
+@router.post("/safety-check", response_model=ActionSafetyCheck)
 def check_action_safety(candidate: ActionCandidate, db: Session = Depends(get_db), account: AuthAccount = Depends(current_account)):
     source_evidence = db.query(EvidenceModel).filter(EvidenceModel.id == candidate.source_evidence_id).first()
     if source_evidence is None:
@@ -349,7 +349,7 @@ def check_action_safety(candidate: ActionCandidate, db: Session = Depends(get_db
     return normalization_service.safety_check(candidate)
 
 
-@router.get("/actions/{person_id}/uncompleted", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
+@router.get("/{person_id}/uncompleted", response_model=List[ActionSchema], dependencies=[Depends(require_person_access("read"))])
 def list_uncompleted_actions(person_id: str, db: Session = Depends(get_db)):
     active_statuses = ["active", "conditional", "pending_confirmation", "blocked"]
     return (
