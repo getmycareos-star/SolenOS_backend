@@ -33,6 +33,7 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
     try:
         person_a = Person(id="isolation-person-a", name="Test Person A")
         person_b = Person(id="isolation-person-b", name="Test Person B")
+        person_c = Person(id="isolation-person-c", name="Internal Team Placeholder Record")
         caregiver_a = Caregiver(
             id="isolation-caregiver-a",
             name="Test Caregiver A",
@@ -47,7 +48,14 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             relationship="Family",
             person_id=person_b.id,
         )
-        db.add_all([person_a, person_b, caregiver_a, caregiver_b])
+        caregiver_c = Caregiver(
+            id="isolation-caregiver-c",
+            name="Test Team Account",
+            email="team@example.invalid",
+            relationship="Internal",
+            person_id=person_c.id,
+        )
+        db.add_all([person_a, person_b, person_c, caregiver_a, caregiver_b, caregiver_c])
         db.flush()
         account_a = AuthAccount(
             id="isolation-account-a",
@@ -65,6 +73,14 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             role="professional",
             is_active=True,
         )
+        account_team = AuthAccount(
+            id="isolation-account-team",
+            caregiver_id=caregiver_c.id,
+            email=caregiver_c.email,
+            password_hash="test-only",
+            role="team",
+            is_active=True,
+        )
         grant_a = ProfessionalAccessGrant(
             id="isolation-grant-a",
             professional_caregiver_id=caregiver_b.id,
@@ -72,12 +88,14 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             status="active",
             granted_by_caregiver_id=caregiver_a.id,
         )
-        db.add_all([account_a, account_b, grant_a])
+        db.add_all([account_a, account_b, account_team, grant_a])
         db.commit()
         db.refresh(account_a)
         db.refresh(account_b)
+        db.refresh(account_team)
         token_a = auth.issue_token(account_a)
         token_b = auth.issue_token(account_b)
+        token_team = auth.issue_token(account_team)
     finally:
         db.close()
 
@@ -107,6 +125,17 @@ def test_authenticated_caregiver_is_isolated_to_linked_care_recipient(monkeypatc
             headers=headers,
         )
         assert forbidden_link.status_code == 403, forbidden_link.text
+
+        # Team accounts do not receive patient contexts or caregiver links.
+        team_headers = {"Authorization": f"Bearer {token_team}"}
+        team_contexts = client.get("/api/v1/auth/care-contexts", headers=team_headers)
+        assert team_contexts.status_code == 200, team_contexts.text
+        assert team_contexts.json() == []
+        team_link = client.get(
+            "/api/v1/auth/my-caregiver-links?person_id=isolation-person-c",
+            headers=team_headers,
+        )
+        assert team_link.status_code == 403, team_link.text
 
         # A valid caregiver token must not read another recipient's record.
         cross_recipient = client.get(
