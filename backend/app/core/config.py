@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
     cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_storage_bucket: str = ""
 
     class Config:
         env_file = ".env"
