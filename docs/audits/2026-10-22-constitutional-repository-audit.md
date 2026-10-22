@@ -150,3 +150,30 @@ Final source follow-up after the prior report update:
 - Frontend first-capture bearer integration and session recovery safeguards: `1fca01141c933cc25d30f0c3e962bcce3e7486c6`, `15566c58381e42af490d77924e65684d5626f097`, `9f23a2209f2bc3c406db981029637d83a945d076`, `0e0cf907e75189329239a2e27cd5192078118b2e`, `d02bcbe6b12e034f168bf9f78aedc1e1b90a85a7`, `76923200498b089f8e209ca91f221952933dbe75`.
 
 The source is committed, but CI has not been observed completing and the Railway deployment is not live-verified. Do not treat this as production sign-off until the backend tests run, the SQLite migration limitation is resolved where applicable, and the deployed frontend/backend capture→read→refresh path is executed.
+
+
+## Capture → read → refresh follow-up (source committed; execution pending)
+
+- Added authenticated `GET /api/situation` in `backend/app/main.py`. It resolves the care recipient from the validated bearer session and queries only that person's persisted `Evidence` and `CareEvent` rows. Client-supplied `caregiver_id` / `care_session_id` are continuity labels only and do not select or authorize a record.
+- The GET response projects saved source notes into the legacy observation shape so the existing workspace can rehydrate them. It explicitly labels this as a relational evidence/event projection; it does **not** claim a persisted ACS/CRS reasoning turn exists and does not invent a clinical interpretation.
+- Added a scoped `PATCH /api/situation` for changing the care recipient's display name. It updates the `Person.name` associated with the current bearer scope; cross-person IDs are rejected.
+- Replaced the unsupported `POST /api/situation` “pause” action with an authenticated GET of saved care state. A pause is local interaction state; it is not falsely recorded as a persisted backend mutation.
+- Updated direct frontend reads/writes of `/api/situation` in `CognitiveWorkspace.tsx`, `workspace-context.tsx`, `CareRecipientNameGate.tsx`, `voice-controller/conversation-controller.ts`, and `ShareCareSummaryPanel.tsx` to use the server-issued bearer capability. The shared `src/api/client.ts` already attaches the bearer token to `/api/v1` helper requests. `getCaregiverId()` now returns the server-issued caregiver ID, not the client durable care key.
+- Added test coverage for saved-note hydration, token rotation followed by rehydration, record-scope isolation, and scoped care-recipient naming.
+
+Relevant commits:
+- Backend hydration: `bceff54c7db6b6848ee692052184c546c0390d92`
+- Frontend authenticated hydration: `2482ce29a8a47634f6b435d7026fdede4e9e334c`
+- Scoped display-name endpoint: `24c7b574894bdb35f7b6439e20f9cb26fac25fbd`
+- Frontend display-name integration: `b8f0f1b7f4fef5bbceaecccca1fb0e6849ec244a`
+- Authenticated voice capture: `106cab98592485a8e5b2d1480733a66fb5f50c95`
+- Authenticated workspace context: `735c7bcd8bc738f7f7f3b87fc544b2ee701e1ba0`
+- Authenticated share-summary read: `639fa8f93eb0e05ff00fbdf40a666be18298dfe0`
+- End-to-end lifecycle test additions: `a45fca4eeb6d8f6381446f25ac9fd87d00c6401d`
+
+### Remaining verified limitations
+
+- Backend and frontend test commands have **not** been executed. The current GitHub commit-status endpoint returns no backend checks, and the frontend commits show Vercel build-rate-limit failures, not a successful build. The execution container cannot resolve `github.com`, so it cannot clone dependencies or run the repository test suites locally.
+- Several older frontend direct fetches target legacy `/api/*` paths such as telemetry, policy/consent, extraction, TTS, and ops/devtools APIs. They are not routes mounted by the current FastAPI `main.py`; they must not be considered operational merely because the UI code exists. Their active-build usage and replacement/removal still require a separate endpoint-by-endpoint audit.
+- The new GET projection reconstructs the visible note timeline from persisted relational `Evidence` and `CareEvent` rows. It does not make the legacy file-based ACS/CRS persistence durable in this FastAPI backend. Open questions, synthesis, and prior reasoning are not stored by this route and are not reconstructed.
+- Live Railway migration, authentication, persistence-after-restart, and browser end-to-end behavior remain unverified.
