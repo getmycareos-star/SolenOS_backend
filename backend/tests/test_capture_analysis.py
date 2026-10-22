@@ -99,7 +99,7 @@ def test_capture_extraction_only_keeps_candidates_with_verbatim_source_quotes(mo
                     ollama_configured=True,
                     ollama_base_url="http://127.0.0.1:11434",
                     ollama_model="qwen-test",
-                                        ollama_timeout_seconds=3,
+                    ollama_timeout_seconds=3,
                 ),
             )
             model_result = {
@@ -123,8 +123,12 @@ def test_capture_extraction_only_keeps_candidates_with_verbatim_source_quotes(mo
                 "possible_safety_flags": [],
             }
             body = json.dumps({"message": {"content": json.dumps(model_result)}}).encode()
-            with patch.object(capture_analysis, "urlopen", return_value=io.BytesIO(body)):
+            with patch.object(capture_analysis, "urlopen", return_value=io.BytesIO(body)) as ollama_call:
                 result = capture_analysis.analyze_capture_with_qwen(db, "capture-event")
+            request = ollama_call.call_args.args[0]
+            assert request.full_url == "http://127.0.0.1:11434/api/chat"
+            assert request.get_header("Authorization") is None
+            assert json.loads(request.data)["format"] == "json"
             assert result["qwen_extraction_status"] == "pending_review"
             candidates = result["qwen_candidates"]["observations"]
             assert len(candidates) == 1
