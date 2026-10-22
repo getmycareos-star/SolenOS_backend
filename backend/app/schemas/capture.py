@@ -61,6 +61,12 @@ class DailyCaptureOutput(BaseModel):
     daily_capture_id: str
     care_event_id: str
     recorded_at: datetime
+    analysis_status: str = "complete"
+    analysis_error: Optional[str] = None
+    what_changed: Optional[str] = None
+    attention_candidate: bool = False
+    follow_up_candidate: bool = False
+    situations: list[dict] = Field(default_factory=list)
 
 
 class DailyCaptureRecordOutput(BaseModel):
