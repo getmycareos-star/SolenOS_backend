@@ -151,7 +151,12 @@ def revision_response(revision: CareStateRevision) -> Dict[str, Any]:
     }
 
 
-def get_freshness(assertion: CareAssertion, now: Optional[datetime] = None) -> Dict[str, Any]:
+def get_freshness(
+    assertion: CareAssertion,
+    now: Optional[datetime] = None,
+    *,
+    unresolved_conflict: bool = False,
+) -> Dict[str, Any]:
     now = _utc(now or datetime.now(timezone.utc))
     reference = _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
@@ -161,6 +166,9 @@ def get_freshness(assertion: CareAssertion, now: Optional[datetime] = None) -> D
     elif assertion.assertion_status in {"rejected", "superseded"}:
         status = "historical"
         explanation = "This assertion was explicitly rejected or superseded; it must not be presented as current."
+    elif unresolved_conflict:
+        status = "needs_confirmation"
+        explanation = "A competing report for this same field remains unresolved. This report must not be presented as the established current state, even if a caregiver reviewed it."
     elif assertion.review_after_days is None or age_days is None or age_days > assertion.review_after_days:
         status = "needs_confirmation"
         explanation = "The review window is missing/elapsed or the observation time is unavailable; confirm before treating this report as current."
@@ -205,10 +213,25 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
         CareAssertion.person_id == person_id,
         CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
     ).all()
+    unresolved = db.query(Contradiction).filter(
+        Contradiction.person_id == person_id,
+        Contradiction.resolution_status == "unresolved",
+    ).all()
+    unresolved_keys = {
+        (item.subject_type, item.subject_id, item.field)
+        for item in unresolved
+    }
     now = datetime.now(timezone.utc)
     for item in assertions:
+        has_conflict = (
+            item.assertion_kind == "current_state"
+            and (item.subject_type, item.subject_id, item.field) in unresolved_keys
+        )
+        # The contradiction itself already generates the higher-priority,
+        # source-linked question. Do not emit a duplicate stale-report question.
+        if has_conflict:
+            continue
         freshness = get_freshness(item, now)
-        if freshness["status"] == "needs_confirmation":
             candidates.append({
                 "question": f"Can you confirm whether the reported information about {item.field} is still accurate? The record does not establish that it is current.",
                 "subject_type": item.subject_type, "subject_id": item.subject_id,
