@@ -162,6 +162,12 @@ async def require_authenticated_care_access(request, call_next):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=401, content={"detail": "Account caregiver is unavailable"})
 
+        # Routes that create provenance records use the authenticated identity,
+        # never a caller-supplied caregiver ID or the original action creator.
+        request.state.auth_account_id = account.id
+        request.state.auth_caregiver_id = account.caregiver_id
+        request.state.auth_role = account.role
+
         if path.startswith("/api/v1/team/") or path == "/api/v1/metrics":
             if account.role != "team":
                 from fastapi.responses import JSONResponse
