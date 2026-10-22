@@ -65,9 +65,11 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
             .first()
         )
         conflict_text = "Competing source assertions require review; no assertion was selected as true. Reported values: " + " | ".join(descriptions)
+        source_assertion_ids = list(dict.fromkeys([peer.id for peer in conflicts] + [assertion.id]))
         if contradiction:
             contradiction.description = conflict_text
             contradiction.evidence_ids = evidence_ids
+            contradiction.source_assertion_ids = list(dict.fromkeys((contradiction.source_assertion_ids or []) + source_assertion_ids))
         else:
             contradiction = Contradiction(
                 person_id=payload.person_id,
@@ -76,6 +78,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
                 field=payload.field,
                 description=conflict_text,
                 evidence_ids=evidence_ids,
+                source_assertion_ids=source_assertion_ids,
                 resolution_status="unresolved",
             )
             db.add(contradiction)
@@ -174,7 +177,7 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
             "question": f"Two different reports conflict about {item.field}. What, if anything, confirms the current situation? Neither report has been selected as correct.",
             "subject_type": item.subject_type, "subject_id": item.subject_id,
             "priority": "high", "reason": "An unresolved contradiction prevents a reliable current-state conclusion.",
-            "evidence_ids": item.evidence_ids or [], "source_kind": "contradiction", "source_id": item.id, "_weight": 40,
+            "evidence_ids": item.evidence_ids or [], "source_kind": "contradiction", "source_id": item.id, "source_ids": item.source_assertion_ids or [], "_weight": 40,
         })
 
     assertions = db.query(CareAssertion).filter(
@@ -213,12 +216,12 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
     for item in candidates:
         key = (item["question"], item["subject_type"], item["subject_id"])
         if key not in deduplicated:
-            item["source_ids"] = [item["source_id"]]
+            item["source_ids"] = item.get("source_ids") or [item["source_id"]]
             deduplicated[key] = item
             continue
         prior = deduplicated[key]
         prior["evidence_ids"] = list(dict.fromkeys(prior["evidence_ids"] + item["evidence_ids"]))
-        prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + [item["source_id"]]))
+        prior["source_ids"] = list(dict.fromkeys(prior["source_ids"] + (item.get("source_ids") or [item["source_id"]]))
         if item["_weight"] > prior["_weight"]:
             prior["priority"] = item["priority"]
             prior["_weight"] = item["_weight"]
