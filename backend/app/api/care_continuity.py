@@ -55,13 +55,13 @@ def get_assertion_freshness(person_id: str, db: Session = Depends(get_db)):
     assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id
     ).order_by(CareAssertion.recorded_at.desc()).limit(500).all()
-    unresolved = db.query(Contradiction).filter(
+    uncertainty_records = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
-        Contradiction.resolution_status == "unresolved",
+        Contradiction.resolution_status.in_(["unresolved", "qualified"]),
     ).all()
     unresolved_keys = {
         (item.subject_type, item.subject_id, item.field)
-        for item in unresolved
+        for item in uncertainty_records
     }
     return [
         get_freshness(
