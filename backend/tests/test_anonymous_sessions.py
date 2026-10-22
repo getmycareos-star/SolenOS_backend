@@ -213,6 +213,22 @@ def test_situation_hydration_returns_only_persisted_records_for_session_scope():
     assert after_refresh["care_recipient_id"] == data["care_recipient_id"]
     assert after_refresh["active_care_situation"]["observations"] == data["active_care_situation"]["observations"]
 
+    evidence_response = client.get(
+        f"/api/v1/evidence/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    event_response = client.get(
+        f"/api/v1/events/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {refreshed['access_token']}"},
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    assert event_response.status_code == 200, event_response.text
+    assert any(
+        item["source_text"] == "Caregiver reports that breakfast was left mostly uneaten."
+        for item in evidence_response.json()
+    )
+    assert any(item["id"] == write.json()["care_event_id"] for item in event_response.json())
+
 
 def test_situation_hydration_requires_session_and_ignores_spoofed_person_query():
     client = TestClient(app)
