@@ -7,9 +7,10 @@ from sqlalchemy.pool import StaticPool
 from pydantic import ValidationError
 
 from app.core.database import Base
-from app.models.care import Person, Caregiver, CareEvent
+from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, CareStateRevision, CareActionOutcome
 from app.models.uncertainty import Contradiction, OpenQuestion
+from app.core.uncertainty_enums import Priority
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.services.care_continuity import (
     create_assertion, create_action_outcome, get_freshness, next_best_questions,
@@ -32,6 +33,11 @@ def db():
         person_id="person-1", timezone="UTC",
     )
     session.add_all([person, caregiver])
+    session.commit()
+    session.add_all([
+        Evidence(id="ev-1", person_id="person-1", type="note", source_text="First source", uploaded_by_caregiver_id="caregiver-1"),
+        Evidence(id="ev-2", person_id="person-1", type="note", source_text="Second source", uploaded_by_caregiver_id="caregiver-1"),
+    ])
     session.commit()
     try:
         yield session
@@ -147,8 +153,14 @@ def test_corrected_outcome_requires_correction_text():
 
 
 def test_outcome_feedback_is_persisted_without_implying_resolution(db: OrmSession):
+    db.add(OpenQuestion(
+        id="next-question-1", person_id="person-1", question="Can you confirm this?",
+        subject_type="medication", subject_id="med-1", status="open",
+        priority=Priority.INFORMATIONAL, evidence_ids=["ev-1"],
+    ))
+    db.commit()
     payload = CareActionOutcomeCreate(
-        person_id="person-1", action_id="next-question-1", action_type="next_question",
+        person_id="person-1", action_id="next-question-1", action_type="next_best_question",
         outcome_status="unresolved", notes="Still waiting for confirmation",
         evidence_ids=["ev-1"],
     )
