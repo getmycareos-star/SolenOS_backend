@@ -29,6 +29,16 @@ def is_loopback_ollama_url(url: str) -> bool:
         return False
 
 
+def is_railway_private_ollama_url(url: str) -> bool:
+    """Accept only Railway's private-network hostname for Railway-to-Ollama traffic."""
+    try:
+        parsed = urlparse(url.strip())
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    return parsed.scheme == "http" and host.endswith(".railway.internal")
+
+
 def validate_deployment_secret(secret_key: str, *, railway_runtime: bool) -> None:
     """Reject missing, short, or placeholder session secrets on Railway."""
     secret = secret_key.strip()
@@ -67,11 +77,11 @@ class Settings(BaseSettings):
         if not url or not model:
             return False
 
-        # A loopback endpoint is valid for local development but can never reach
-        # a separate Ollama service from a Railway backend container.
+        # A loopback or public URL is not an acceptable Railway-to-Ollama link.
+        # Use Railway's private service DNS and keep the inference API unexposed.
         railway_runtime = any(os.getenv(name) for name in RAILWAY_RUNTIME_VARIABLES)
-        if railway_runtime and is_loopback_ollama_url(url):
-            return False
+        if railway_runtime:
+            return is_railway_private_ollama_url(url) and not is_loopback_ollama_url(url)
         return True
 
     def validate_production_configuration(self) -> None:
