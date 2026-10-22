@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision
+from app.models.care import CareEvent, Evidence
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.schemas.care_continuity import CareAssertionCreate, CareActionOutcomeCreate
 from app.core.uncertainty_enums import GapLifecycleStatus, Priority
@@ -26,6 +27,21 @@ def _value_key(value: str) -> str:
 def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool = True) -> CareAssertion:
     """Store every report; create/update unresolved conflict metadata without selecting a winner."""
     assertion = CareAssertion(**payload.model_dump())
+    if payload.source_event_id:
+        source_event = db.query(CareEvent).filter(
+            CareEvent.id == payload.source_event_id,
+            CareEvent.person_id == payload.person_id,
+        ).first()
+        if source_event is None:
+            raise HTTPException(status_code=422, detail="source_event_id must belong to the same care record")
+    if payload.evidence_ids:
+        evidence_rows = db.query(Evidence.id).filter(
+            Evidence.person_id == payload.person_id,
+            Evidence.id.in_(payload.evidence_ids),
+        ).all()
+        found = {row[0] for row in evidence_rows}
+        if found != set(payload.evidence_ids):
+            raise HTTPException(status_code=422, detail="Every evidence ID must exist and belong to the same care record")
     assertion.assertion_status = "reported"
     db.add(assertion)
     db.flush()
@@ -90,7 +106,7 @@ def create_assertion(db: Session, payload: CareAssertionCreate, *, commit: bool 
     return assertion
 
 
-def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str) -> CareAssertion:
+def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None) -> CareAssertion:
     allowed = {"reported", "review_required", "accepted", "rejected", "superseded"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported assertion status")
@@ -100,6 +116,7 @@ def set_assertion_status(db: Session, assertion_id: str, person_id: str, status:
     if assertion is None:
         raise HTTPException(status_code=404, detail="Assertion not found")
     assertion.assertion_status = status
+    assertion.updated_by_caregiver_id = updated_by_caregiver_id
     db.commit()
     db.refresh(assertion)
     return assertion
@@ -266,6 +283,13 @@ def next_best_questions(db: Session, person_id: str, persist: bool = True) -> Li
 
 
 def create_action_outcome(db: Session, payload: CareActionOutcomeCreate) -> CareActionOutcome:
+    if payload.action_type == "next_best_question":
+        question = db.query(OpenQuestion).filter(
+            OpenQuestion.id == payload.action_id,
+            OpenQuestion.person_id == payload.person_id,
+        ).first()
+        if question is None:
+            raise HTTPException(status_code=422, detail="The referenced next-best question does not belong to this care record")
     outcome = CareActionOutcome(**payload.model_dump())
     db.add(outcome)
     db.commit()
