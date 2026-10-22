@@ -3,6 +3,7 @@ from threading import Lock
 import os
 
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -32,6 +33,12 @@ def configure_database_url(url: str, *, railway_runtime: bool) -> str:
             "DATABASE_URL must use PostgreSQL with the psycopg driver in Railway; "
             "SQLite and other database drivers are not supported for production care storage."
         )
+    if railway_runtime:
+        parsed = make_url(normalized)
+        sslmode = parsed.query.get("sslmode")
+        if sslmode not in {"require", "verify-ca", "verify-full"}:
+            parsed = parsed.update_query_dict({"sslmode": "require"})
+        normalized = parsed.render_as_string(hide_password=False)
     return normalized
 
 
