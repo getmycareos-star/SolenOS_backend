@@ -169,3 +169,58 @@ def test_appointment_write_rejects_caregiver_from_another_person():
         assert response.json()["detail"] == "Caregiver is not linked to this care record"
     finally:
         teardown_db()
+
+
+
+def test_caregiver_creation_rejects_unknown_person():
+    setup_db()
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/caregivers",
+            json={
+                "name": "Unlinked Caregiver",
+                "email": "unknown-person@example.invalid",
+                "relationship": "Family",
+                "person_id": "missing-person",
+            },
+        )
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == "Person not found"
+    finally:
+        teardown_db()
+
+
+def test_insight_rejects_evidence_from_another_person():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        db = TestingSessionLocal()
+        foreign_evidence = __import__("app.models.care", fromlist=["Evidence"]).Evidence(
+            id="foreign-evidence-test",
+            person_id="person-other-test",
+            type="note",
+            source_text="Evidence belongs to a different care record",
+            uploaded_by_caregiver_id="caregiver-other-test",
+        )
+        db.add(foreign_evidence)
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/insights",
+            json={
+                "person_id": "person-daily-test",
+                "title": "Cross-record evidence test",
+                "description": "This should be rejected",
+                "insight_type": "observation",
+                "confidence": 0.5,
+                "evidence_ids": ["foreign-evidence-test"],
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "Every evidence item must exist and belong to the same care record"
+    finally:
+        teardown_db()
