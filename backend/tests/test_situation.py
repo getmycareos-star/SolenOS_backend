@@ -191,3 +191,43 @@ def test_post_situation_empty_input_and_no_documents():
             assert "No valid evidence provided" in response.json()["detail"]
     finally:
         teardown_db()
+
+
+
+def test_post_situation_returns_persisted_qwen_analysis_id(monkeypatch):
+    from app.services import situation as situation_service
+
+    setup_db()
+    try:
+        monkeypatch.setattr(
+            situation_service,
+            "analyze_saved_care_event",
+            lambda db, event_id: {
+                "analysis_status": "complete",
+                "analysis_error": None,
+                "what_changed": None,
+                "attention_candidate": False,
+                "follow_up_candidate": False,
+                "situations": [],
+                "qwen_extraction_status": "pending_review",
+                "qwen_candidates": {"observations": []},
+                "qwen_analysis_id": "persisted-analysis-123",
+            },
+        )
+        with TestClient(app) as client:
+            headers, person_id, caregiver_id = create_authenticated_context(client, "analysis-id")
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={
+                    "caregiver_id": caregiver_id,
+                    "person_id": person_id,
+                    "raw_input": "The appointment was moved to Thursday.",
+                },
+            )
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["qwen_extraction_status"] == "pending_review"
+            assert data["qwen_analysis_id"] == "persisted-analysis-123"
+    finally:
+        teardown_db()
