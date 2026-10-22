@@ -1,6 +1,6 @@
 # SolenOS Qwen on Railway
 
-This deployment keeps SolenOS's FastAPI service and local Qwen inference runtime as **separate Railway services**. The backend calls Ollama's native `POST /api/chat` endpoint over Railway's private network. It does not use a hosted Qwen API or Qwen API key.
+This deployment keeps SolenOS's FastAPI service and Qwen inference runtime as **separate Railway services**. The backend calls Ollama's native `POST /api/chat` endpoint over Railway's private network. It does not use a hosted Qwen API or Qwen API key.
 
 ## Railway service setup
 
@@ -27,7 +27,7 @@ Set these variables on the **backend service**, not just on the Ollama service:
 
 Railway resolves the reference to the private hostname for the service named `ollama`. If you name the service differently, update the reference accordingly. Do not set the backend's `OLLAMA_BASE_URL` to `127.0.0.1`, `localhost`, or the developer's computer.
 
-The backend now treats a loopback Ollama URL as **not configured when Railway runtime variables are present**. This prevents the app from pretending its model connection is configured when the URL only points back at the backend container. Capture persistence can still report its own status; Companion/extraction must explicitly report that Qwen is not configured or unavailable.
+The backend rejects loopback and public Ollama URLs in every environment and treats them as **not configured**. It accepts only the private Railway service hostname. This prevents the app from pretending its model connection is configured when the URL only points back at the backend container. Capture persistence can still report its own status; Companion/extraction must explicitly report that Qwen is not configured or unavailable.
 
 ### 3. Resource and model choice
 
@@ -42,5 +42,7 @@ Railway does not provide GPU instances in its Open WebUI guide. A small quantize
 5. Test a missing model, stopped Ollama service, timeout, malformed model output, and emergency wording. Failures must not generate substitute answers.
 6. Confirm backend and Ollama services restart while the model remains available from the persistent volume.
 7. Verify logs and error responses do not expose secrets or care-record content.
+
+The shared Qwen gateway is the single backend transport used by Companion, Daily Capture extraction, text-bearing document extraction, Community peer-experience summaries, and read-only LCR explanations. Community output is restricted to published peer posts and never writes to the LCR. Text-bearing documents can be analyzed only after their text has been extracted and linked to a saved care event; uploaded images currently remain without OCR and therefore cannot be analyzed as document text.
 
 Mocked CI tests validate request contracts only; they do not prove Railway connectivity or a live model invocation. This repository change prepares the runtime image and backend configuration, but it does not create Railway services, attach volumes, set service variables, or deploy the services in the Railway dashboard.
