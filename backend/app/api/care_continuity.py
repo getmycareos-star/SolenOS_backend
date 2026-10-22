@@ -47,7 +47,7 @@ def list_care_assertions(person_id: str, db: Session = Depends(get_db)):
 def update_care_assertion_status(
     assertion_id: str, payload: CareAssertionStatusUpdate, db: Session = Depends(get_db)
 ):
-    return set_assertion_status(db, assertion_id, payload.person_id, payload.assertion_status)
+    return set_assertion_status(db, assertion_id, payload.person_id, payload.assertion_status, payload.updated_by_caregiver_id)
 
 
 @router.get("/freshness/{person_id}", response_model=List[FreshnessResponse])
