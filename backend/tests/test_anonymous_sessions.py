@@ -212,3 +212,40 @@ def test_situation_hydration_requires_session_and_ignores_spoofed_person_query()
         headers={"Authorization": f"Bearer {second['access_token']}"},
     )
     assert response.status_code == 403, response.text
+
+
+def test_care_recipient_name_update_is_scoped_to_session():
+    client = TestClient(app)
+    first = create_session(client, "First person")
+    second = create_session(client, "Second person")
+
+    denied = client.patch(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json={
+            "person_id": second["person"]["id"],
+            "caregiver_id": second["caregiver"]["id"],
+            "display_name": "Not allowed",
+        },
+    )
+    assert denied.status_code == 403, denied.text
+
+    allowed = client.patch(
+        "/api/situation",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+        json={
+            "person_id": first["person"]["id"],
+            "caregiver_id": first["caregiver"]["id"],
+            "display_name": "Preferred label",
+        },
+    )
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["care_recipient_display_name"] == "Preferred label"
+
+    from app.models.care import Person
+    db = TestSessionLocal()
+    try:
+        assert db.query(Person).filter_by(id=first["person"]["id"]).one().name == "Preferred label"
+        assert db.query(Person).filter_by(id=second["person"]["id"]).one().name == "Second person"
+    finally:
+        db.close()
