@@ -105,4 +105,6 @@ def create_signed_object_url(object_path: str, expires_in: int = 300) -> str:
         raise HTTPException(status_code=502, detail="Private photo storage returned an invalid viewing link")
     if signed_path.startswith("http://") or signed_path.startswith("https://"):
         return signed_path
-    return f"{base_url}/{signed_path.lstrip('/')}"
+    if signed_path.startswith("/storage/v1/"):
+        return f"{base_url}{signed_path}"
+    return f"{base_url}/storage/v1/{signed_path.lstrip('/')}"
