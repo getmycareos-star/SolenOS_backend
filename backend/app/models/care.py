@@ -18,7 +18,7 @@ class Caregiver(Base):
     __tablename__ = "caregivers"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True)
     relationship = Column(String, nullable=False)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False)
     timezone = Column(String, nullable=False, default="UTC")
