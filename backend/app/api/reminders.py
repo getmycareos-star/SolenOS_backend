@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.action import Action as ActionModel
 from app.models.care import Caregiver
-from app.models.reminder import CareReminder, ReminderDelivery
-from app.schemas.reminder import ReminderCreate, ReminderOut, ReminderDeliveryOut
+from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
+from app.schemas.reminder import ReminderCreate, ReminderOut, ReminderDeliveryOut, ReminderDeliveryAttemptOut
 
 router = APIRouter(prefix="/reminders", tags=["care-reminders"])
 
@@ -79,3 +79,25 @@ def list_reminder_deliveries(reminder_id: str, request: Request, db: Session = D
     if str(reminder.person_id) != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that reminder")
     return db.query(ReminderDelivery).filter(ReminderDelivery.reminder_id == reminder_id, ReminderDelivery.person_id == person_id).order_by(ReminderDelivery.scheduled_for.desc()).all()
+
+
+
+@router.get("/{reminder_id}/deliveries/{delivery_id}/attempts", response_model=list[ReminderDeliveryAttemptOut])
+def list_delivery_attempts(reminder_id: str, delivery_id: str, request: Request, db: Session = Depends(get_db)):
+    _, person_id = _session_scope(request)
+    reminder = db.query(CareReminder).filter(
+        CareReminder.id == reminder_id,
+        CareReminder.person_id == person_id,
+    ).first()
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    delivery = db.query(ReminderDelivery).filter(
+        ReminderDelivery.id == delivery_id,
+        ReminderDelivery.reminder_id == reminder_id,
+        ReminderDelivery.person_id == person_id,
+    ).first()
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="Reminder delivery receipt not found")
+    return db.query(ReminderDeliveryAttempt).filter(
+        ReminderDeliveryAttempt.delivery_id == delivery_id,
+    ).order_by(ReminderDeliveryAttempt.attempt_number.asc()).all()
