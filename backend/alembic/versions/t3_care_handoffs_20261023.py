@@ -1,14 +1,14 @@
 """Add durable family care handoffs and immutable handoff event history.
 
 Revision ID: t3_care_handoffs_20261023
-Revises: t2_delivery_attempts_20261023
+Revises: t2_auth_reconcile_20261023
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t3_care_handoffs_20261023"
-down_revision = "t2_delivery_attempts_20261023"
+down_revision = "t2_auth_reconcile_20261023"
 branch_labels = None
 depends_on = None
 
