@@ -9,6 +9,8 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.action import Action
+from app.models.care_continuity import CareActionOutcome, CareAssertion
+from app.models.memory import Observation
 from app.models.care import CareEvent, Evidence
 from app.models.time_location import Appointment, CareTransition
 
@@ -91,6 +93,32 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
         )
         db.add_all([event, appointment, transition])
         db.flush()
+        observation = Observation(
+            person_id=person_id,
+            observed_at=now - timedelta(hours=3),
+            original_text="Dizziness was reported before discharge.",
+            structured_data=[{"field": "symptom", "value": "dizziness"}],
+            tags=["symptom"],
+            time_provenance="caregiver_reported",
+            evidence_ids=[evidence.id],
+            caregiver_id=caregiver_id,
+        )
+        assertion = CareAssertion(
+            person_id=person_id,
+            subject_type="person",
+            subject_id=person_id,
+            field="mobility_support",
+            asserted_value="Use walker when walking",
+            assertion_kind="care_instruction",
+            source_event_id=event.id,
+            source_label="discharge instruction",
+            source_text="Use walker when walking.",
+            evidence_ids=[evidence.id],
+            assertion_status="reported",
+            observed_at=now - timedelta(hours=2),
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([observation, assertion])
         action = Action(
             person_id=person_id, source_evidence_id=evidence.id,
             source_passage="Call the clinic if dizziness worsens.",
@@ -104,8 +132,19 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
             has_condition=True, is_recurring=False, created_by_caregiver_id=caregiver_id,
         )
         db.add(action)
+        db.flush()
+        outcome = CareActionOutcome(
+            person_id=person_id,
+            action_id=action.id,
+            action_type="call",
+            outcome_status="pending",
+            notes="Call the clinic if dizziness worsens.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(outcome)
         db.commit()
-        event_id, evidence_id = event.id, evidence.id
+        event_id, evidence_id, action_id = event.id, evidence.id, action.id
     finally:
         db.close()
 
@@ -124,6 +163,13 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
     assert event_item["summary"] == "Returned home after discharge."
     assert event_item["evidence"][0]["id"] == evidence_id
     assert "call the clinic if dizziness worsens" in event_item["evidence"][0]["source_text"].lower()
+    assert event_item["related_observations"][0]["original_text"] == "Dizziness was reported before discharge."
+    assert event_item["assertions"][0]["asserted_value"] == "Use walker when walking"
+    assert body["counts"]["observations"] == 1
+    assert body["counts"]["care_assertions"] == 1
+    assert body["counts"]["action_outcomes"] == 1
+    action_item = next(item for item in body["timeline"] if item["source_id"] == action_id)
+    assert action_item["outcomes"][0]["notes"] == "Call the clinic if dizziness worsens."
     appointment_item = next(item for item in body["timeline"] if item["kind"] == "appointment")
     assert appointment_item["details"]["medication_questions"] == [
         "Confirm current medication instructions"
