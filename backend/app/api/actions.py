@@ -226,6 +226,8 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
+    if update_data.get("status") == ActionStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Use the completion endpoint so timestamp, caregiver attribution, and evidence are recorded atomically")
     if db_action.is_medication_action and update_data.get("status") == ActionStatus.ACTIVE and not db_action.source_authority_verified:
         raise HTTPException(
             status_code=409,
