@@ -135,3 +135,47 @@ def test_delta_parser_rejects_wrong_nested_field_types():
     with pytest.raises(HTTPException) as exc:
         delta_engine._parse_model_json(json.dumps(payload))
     assert exc.value.status_code == 502
+
+
+def test_unchanged_findings_are_not_promoted_to_new_active_assertions(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person
+    from app.models.care_continuity import CareAssertion
+
+    payload = json.loads(FakeResponse().json()["message"]["content"])
+    payload["medications"][0].update({
+        "change_type": "unchanged", "previous": "1000 mg", "current": "1000 mg",
+        "evidence_excerpt": "Increase metformin to 1000 mg",
+    })
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"message": {"content": json.dumps(payload)}}
+    class Client:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, *args, **kwargs): return Response()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://model.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-test-model")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(delta_engine.httpx, "Client", Client)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add(Person(id="unchanged-person", name="Care recipient"))
+    db.commit()
+    try:
+        delta_engine.reconcile_event(
+            db, person_id="unchanged-person", event_date=datetime(2026, 10, 22, tzinfo=timezone.utc),
+            source="Visit note", content="Increase metformin to 1000 mg. MRI ordered. follow-up in 2 weeks.",
+        )
+        assert db.query(CareAssertion).filter_by(person_id="unchanged-person").count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
