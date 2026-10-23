@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.care import Person, Caregiver, Evidence
 from app.models.action import Action as ActionModel
-from app.models.reminder import CareReminder, ReminderDelivery
+from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 from app.models.medication_authority import MedicationAuthorityVerification
 from app.services.reminder_scheduler import (
     materialize_due_reminders,
@@ -87,6 +87,10 @@ def test_due_reminder_creates_one_persistent_idempotent_delivery_receipt():
         assert receipt.status == "delivered"
         assert receipt.delivered_at is not None
         assert receipt.attempt_count == 1
+        attempt = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt.id).one()
+        assert attempt.attempt_number == 1
+        assert attempt.outcome == "delivered"
+        assert attempt.finished_at is not None
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
