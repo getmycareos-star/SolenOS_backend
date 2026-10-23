@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
+from app.models.care import Caregiver as CaregiverModel
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -192,6 +193,20 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
+
+    # An assignee must be an existing caregiver linked to this same care record.
+    # Never trust a client-supplied caregiver ID without verifying membership.
+    assignee_id = update_data.get("actor_id")
+    if assignee_id:
+        assignee = (
+            db.query(CaregiverModel)
+            .filter(CaregiverModel.id == assignee_id, CaregiverModel.person_id == db_action.person_id)
+            .first()
+        )
+        if not assignee:
+            raise HTTPException(status_code=422, detail="Assignee must be linked to this care record")
+        update_data["actor_type"] = "caregiver"
+        update_data["actor_label"] = assignee.name
 
     for field, value in update_data.items():
         if value is not None:
