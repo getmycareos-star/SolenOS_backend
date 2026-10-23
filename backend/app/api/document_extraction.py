@@ -27,6 +27,8 @@ from app.models.document_asset import DocumentAsset
 router = APIRouter(tags=["document-extraction"])
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
 MAX_PDF_PAGES = 10
+MAX_OCR_PIXELS = 20_000_000
+PDF_OCR_SCALE = 1.5
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {".pdf"}
@@ -35,13 +37,19 @@ LOW_CONFIDENCE_THRESHOLD = 0.65
 
 
 def _ocr_image(image: Any) -> tuple[str, float | None]:
+    width, height = image.size
+    if width <= 0 or height <= 0 or width * height > MAX_OCR_PIXELS:
+        raise ValueError("Image dimensions exceed the safe OCR processing limit. Resize the image and try again.")
     try:
         import pytesseract
         from pytesseract import Output
     except ImportError as exc:
         raise RuntimeError("OCR dependencies are not installed on this service.") from exc
 
-    data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 3")
+    try:
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 3")
+    except pytesseract.pytesseract.TesseractNotFoundError as exc:
+        raise RuntimeError("Tesseract OCR is not installed or is not available on this service.") from exc
     words: list[str] = []
     confidences: list[float] = []
     for word, raw_confidence in zip(data.get("text", []), data.get("conf", [])):
@@ -109,7 +117,12 @@ def extract_document_content(filename: str, content_type: str, data: bytes) -> d
                 ocr_parts: list[str] = []
                 page_confidences: list[float] = []
                 for page in document[:MAX_PDF_PAGES]:
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                    page_rect = page.rect
+                    rendered_width = int(page_rect.width * PDF_OCR_SCALE)
+                    rendered_height = int(page_rect.height * PDF_OCR_SCALE)
+                    if rendered_width <= 0 or rendered_height <= 0 or rendered_width * rendered_height > MAX_OCR_PIXELS:
+                        raise ValueError("A scanned PDF page exceeds the safe OCR processing limit. Export a smaller page and try again.")
+                    pixmap = page.get_pixmap(matrix=fitz.Matrix(PDF_OCR_SCALE, PDF_OCR_SCALE), alpha=False)
                     image_obj = Image.open(io.BytesIO(pixmap.tobytes("png")))
                     page_text_value, page_confidence = _ocr_image(image_obj)
                     if page_text_value:
@@ -122,6 +135,8 @@ def extract_document_content(filename: str, content_type: str, data: bytes) -> d
                 source = "pdf_ocr"
             except RuntimeError as exc:
                 raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.") from exc
+            except ValueError:
+                raise
             except Exception as exc:
                 raise ValueError("Text could not be extracted from this scanned PDF.") from exc
     else:
@@ -134,6 +149,8 @@ def extract_document_content(filename: str, content_type: str, data: bytes) -> d
             source = "image_ocr"
         except RuntimeError as exc:
             raise ValueError("OCR is unavailable on this service. Try a text-based PDF or text file.") from exc
+        except ValueError:
+            raise
         except Exception as exc:
             raise ValueError("This image could not be read. Try a clearer JPG, PNG, or TIFF image.") from exc
 
