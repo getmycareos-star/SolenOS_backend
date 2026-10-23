@@ -648,3 +648,29 @@ def test_action_creation_cannot_bypass_medication_authority_with_fabricated_quot
     )
     assert unverified_medication.status_code == 409, unverified_medication.text
     assert unverified_medication.json()["detail"]["requires_clinical_source_verification"] is True
+
+
+def test_reminder_routes_are_scoped_to_the_authenticated_care_recipient():
+    client = TestClient(app)
+    first = create_session(client, "First reminder recipient")
+    second = create_session(client, "Second reminder recipient")
+    own_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    own = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}",
+        headers=own_headers,
+    )
+    assert own.status_code == 200, own.text
+
+    cross_person = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}",
+        headers=other_headers,
+    )
+    assert cross_person.status_code == 403, cross_person.text
+
+    cross_person_inbox = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}/deliveries",
+        headers=other_headers,
+    )
+    assert cross_person_inbox.status_code == 403, cross_person_inbox.text
