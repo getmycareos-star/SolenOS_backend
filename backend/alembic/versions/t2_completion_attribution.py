@@ -1,14 +1,14 @@
 """Persist action completion time and the authenticated caregiver attribution.
 
 Revision ID: t2_completion_20261023
-Revises: 20261022_02
+Revises: 20261023_05
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t2_completion_20261023"
-down_revision = "20261022_02"
+down_revision = "20261023_05"
 branch_labels = None
 depends_on = None
 
