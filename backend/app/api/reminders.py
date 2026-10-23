@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,10 @@ router = APIRouter()
 
 
 @router.post("", response_model=ReminderResponse, status_code=201)
-def create_reminder(payload: ReminderCreate, db: Session = Depends(get_db)):
+def create_reminder(payload: ReminderCreate, request: Request, db: Session = Depends(get_db)):
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not session_caregiver_id or payload.caregiver_id != session_caregiver_id:
+        raise HTTPException(status_code=403, detail="Reminder attribution must match the authenticated caregiver session")
     person = db.query(Person).filter(Person.id == payload.person_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -115,7 +118,10 @@ def list_delivery_attempts(person_id: str, reminder_id: str, db: Session = Depen
 
 
 @router.post("/{person_id}/{reminder_id}/cancel", response_model=ReminderResponse)
-def cancel_reminder(person_id: str, reminder_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def cancel_reminder(person_id: str, reminder_id: str, caregiver_id: str, request: Request, db: Session = Depends(get_db)):
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not session_caregiver_id or caregiver_id != session_caregiver_id:
+        raise HTTPException(status_code=403, detail="Cancellation attribution must match the authenticated caregiver session")
     caregiver = db.query(Caregiver).filter(
         Caregiver.id == caregiver_id,
         Caregiver.person_id == person_id,
