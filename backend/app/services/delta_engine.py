@@ -254,7 +254,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 json={
                     "model": model,
                     "stream": False,
-                    "format": "json",
+                    "format": DELTA_JSON_CONTRACT,
                     "options": {"temperature": 0},
                     "messages": [
                         {"role": "system", "content": system_prompt},
