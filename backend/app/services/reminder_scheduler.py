@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 from app.models.action import Action as ActionModel
+from app.services.medication_authority import action_has_verified_medication_authority
 from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
 
 
@@ -140,10 +141,10 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             continue
 
         action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
-        if action is None or action.status not in ("active", "conditional"):
+        if action is None or action.status not in ("active", "conditional") or not action_has_verified_medication_authority(db, action):
             reminder.enabled = False
             receipt.status = "cancelled"
-            receipt.last_error = "Associated care action is no longer active"
+            receipt.last_error = "Associated care action is no longer active or its medication source is no longer verified"
             db.commit()
             continue
         if not _action_has_current_medication_authority(db, action):
