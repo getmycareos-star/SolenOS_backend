@@ -280,9 +280,9 @@ def _document_type_from_text(text: str, content_type: str) -> str:
 
 def _document_date_from_text(text: str) -> str | None:
     patterns = (
-        r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b",
-        r"\\b(\\d{1,2}/\\d{1,2}/20\\d{2})\\b",
-        r"\\b(\\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\\d{2})\\b",
+        r"\b(20\d{2}-\d{2}-\d{2})\\b",
+        r"\b(\d{1,2}/\d{1,2}/20\d{2})\\b",
+        r"\b(\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\d{2})\\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
@@ -300,7 +300,7 @@ def _extract_document_text(content: bytes, content_type: str) -> tuple[str, str,
             reader = PdfReader(BytesIO(content), strict=False)
             if len(reader.pages) > 100:
                 raise HTTPException(status_code=413, detail="PDF exceeds the 100-page intake limit")
-            text = "\\n".join((page.extract_text() or "") for page in reader.pages).strip()
+            text = "\n".join((page.extract_text() or "") for page in reader.pages).strip()
             return text[:100_000], "pdf_text_extraction", None if text else "no_text_detected"
         except HTTPException:
             raise
@@ -364,7 +364,7 @@ def intake_document(
         except (UnidentifiedImageError, OSError, ValueError):
             raise HTTPException(status_code=415, detail="Uploaded file is not a valid supported image")
 
-    raw_filename = (file.filename or "care-document").replace("\\\\", "/").split("/")[-1]
+    raw_filename = (file.filename or "care-document").replace("\\", "/").split("/")[-1]
     safe_filename = re.sub(r"[^A-Za-z0-9._ -]", "_", raw_filename).strip(" .")[:255] or "care-document"
     digest = hashlib.sha256(content).hexdigest()
     supplied_text = extracted_text.strip()
