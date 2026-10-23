@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
@@ -192,6 +192,8 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
+    if update_data.get("status") == ActionStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Use the completion endpoint to record evidence and authenticated caregiver attribution")
 
     for field, value in update_data.items():
         if value is not None:
@@ -204,9 +206,30 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
 
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
-def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
+def complete_action(
+    action_id: str,
+    evidence: ActionCompletionEvidence,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    person_id = getattr(request.state, "scoped_person_id", None)
+    if not caregiver_id or not person_id:
+        raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
+
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    if str(db_action.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care action")
+
+    try:
+        return lifecycle_service.record_completion(
+            db_action,
+            evidence,
+            db,
+            completed_by_caregiver_id=str(caregiver_id),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
