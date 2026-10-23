@@ -45,7 +45,9 @@ def authenticated_client():
         json={"name": "API route test", "caregiver_name": "API route caregiver"},
     )
     assert response.status_code == 201, response.text
-    return client, {"Authorization": f"Bearer {response.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+    client.headers.update(headers)
+    return client, headers
 
 
 def test_api_situation_route_is_mounted_and_rejects_unauthenticated_access():
