@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class MedicationAuthorityVerificationCreate(BaseModel):
+    person_id: str = Field(min_length=1)
     evidence_id: str = Field(min_length=1)
     authority_role: Literal["physician", "licensed_prescriber", "prescriber"]
     verifier_identity: str = Field(min_length=3, max_length=200)
