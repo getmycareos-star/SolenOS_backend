@@ -69,6 +69,15 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
             source_type="document",
         )
         db.add(evidence)
+        medication_list = Evidence(
+            person_id=person_id,
+            type="medication_list",
+            source_text="Current medication list: medicine A, one tablet daily (caregiver-provided list).",
+            uploaded_by_caregiver_id=caregiver_id,
+            time_provenance="document_date_unknown",
+            source_type="document",
+        )
+        db.add(medication_list)
         db.flush()
         event = CareEvent(
             person_id=person_id, event_type="hospital_discharge", status="recorded",
@@ -144,7 +153,7 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
         )
         db.add(outcome)
         db.commit()
-        event_id, evidence_id, action_id = event.id, evidence.id, action.id
+        event_id, evidence_id, medication_list_id, action_id = event.id, evidence.id, medication_list.id, action.id
     finally:
         db.close()
 
@@ -155,9 +164,9 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["person_id"] == person_id
-    assert body["returned_count"] == 4
+    assert body["returned_count"] == 5
     assert {item["kind"] for item in body["timeline"]} == {
-        "care_event", "appointment", "care_transition", "care_action",
+        "care_event", "appointment", "care_transition", "care_action", "evidence",
     }
     event_item = next(item for item in body["timeline"] if item["source_id"] == event_id)
     assert event_item["summary"] == "Returned home after discharge."
@@ -170,6 +179,10 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
     assert body["counts"]["action_outcomes"] == 1
     action_item = next(item for item in body["timeline"] if item["source_id"] == action_id)
     assert action_item["outcomes"][0]["notes"] == "Call the clinic if dizziness worsens."
+    medication_item = next(item for item in body["timeline"] if item["source_id"] == medication_list_id)
+    assert medication_item["kind"] == "evidence"
+    assert medication_item["title"] == "Medication List"
+    assert "medicine A" in medication_item["summary"]
     appointment_item = next(item for item in body["timeline"] if item["kind"] == "appointment")
     assert appointment_item["details"]["medication_questions"] == [
         "Confirm current medication instructions"
