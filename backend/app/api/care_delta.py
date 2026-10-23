@@ -22,4 +22,5 @@ def reconcile_care_event(payload: CareDeltaReconcileRequest, request: Request, d
         db, person_id=scoped_person_id, event_date=payload.event_date, source=payload.source,
         content=payload.content, source_event_id=payload.source_event_id,
         evidence_ids=payload.evidence_ids, persist=payload.persist,
+        created_by_caregiver_id=scoped_caregiver_id,
     )
