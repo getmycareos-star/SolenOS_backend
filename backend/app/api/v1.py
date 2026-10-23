@@ -733,13 +733,13 @@ def get_unified_care_record(
 
     for action in actions:
         source_evidence = evidence_by_id.get(action.source_evidence_id)
-        action_time = action.deadline or action.start_time or action.created_at
+        action_time = action.completed_at if action.status == "completed" and action.completed_at else (action.deadline or action.start_time or action.created_at)
         timeline.append({
             "id": f"action:{action.id}", "kind": "care_action", "source_id": action.id,
             "occurred_at": action_time, "recorded_at": action.created_at,
             "title": action.normalized_action or action.action_object or action.original_text,
             "summary": action.original_text, "status": action.status, "source_type": "care_action",
-            "time_provenance": "deadline" if action.deadline else ("scheduled_start" if action.start_time else "recorded_at"),
+            "time_provenance": "completed_at" if action.status == "completed" and action.completed_at else ("deadline" if action.deadline else ("scheduled_start" if action.start_time else "recorded_at")),
             "evidence": [evidence_projection(source_evidence)] if source_evidence else [],
             "details": {
                 "action_type": action.action_type, "actor_type": action.actor_type,
@@ -747,6 +747,11 @@ def get_unified_care_record(
                 "subject_label": action.subject_label, "modality": action.modality,
                 "condition_text": action.condition_text, "trigger_text": action.trigger_text,
                 "deadline": action.deadline, "risk_tier": action.risk_tier,
+                "completed_at": action.completed_at,
+                "completed_by_caregiver_id": action.completed_by_caregiver_id,
+                "completion_notes": action.completion_notes,
+                "completion_evidence_ids": normalized_ids(action.completion_evidence_ids),
+                "completion_confidence": action.completion_confidence,
                 "requires_confirmation": action.requires_confirmation,
                 "is_medication_action": action.is_medication_action,
                 "source_evidence_id": action.source_evidence_id,
