@@ -103,7 +103,7 @@ def test_handoff_rejects_cross_person_and_unlinked_assignee():
         )
         with pytest.raises(HTTPException) as exc:
             create_handoff(invalid_assignee, request, db)
-        assert exc.value.status_code == 422
+        assert exc.value.status_code == 403
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
@@ -131,7 +131,7 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
             db,
         )
         with pytest.raises(HTTPException) as exc:
-            close_handoff(item.id, request_for(person.id, backup.id), db)
+            close_handoff(item.id, CareHandoffCompletion(completion_report='Attempted by unauthorized caregiver'), request_for(person.id, backup.id), db)
         assert exc.value.status_code == 403
         with pytest.raises(HTTPException) as exc:
             acknowledge_handoff(item.id, request_for(person.id, caregiver.id), db)
