@@ -86,6 +86,21 @@ class CareActionOutcome(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class CareDeltaRun(Base):
+    __tablename__ = "care_delta_runs"
+    __table_args__ = (Index("ix_care_delta_runs_person_created", "person_id", "created_at"),)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    source = Column(String, nullable=False)
+    event_date = Column(DateTime(timezone=True), nullable=False)
+    source_event_id = Column(String, ForeignKey("care_events.id"), nullable=True)
+    evidence_ids = Column(JSONList, nullable=False, default=list)
+    delta_json = Column(Text, nullable=False)
+    model_name = Column(String, nullable=False)
+    created_by_caregiver_id = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 TRACKED_TABLES = {
     "persons", "caregivers", "evidence", "care_events", "temporal_facts", "temporal_reference_frames",
     "temporal_relations", "temporal_contradictions", "observations", "reasoning_memories",
