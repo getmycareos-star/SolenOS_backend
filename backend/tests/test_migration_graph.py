@@ -9,8 +9,8 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    # PR #21, Task 2, and Task 3 handoff persistence must form one linear chain.
-    assert script.get_heads() == ["t3_care_handoffs_20261023"]
+    # PR #21, Task 2, Task 3 handoffs, and Task 4 document assets must form one linear chain.
+    assert script.get_heads() == ["t4_document_assets_20261023"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
