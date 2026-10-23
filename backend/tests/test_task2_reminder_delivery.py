@@ -105,3 +105,37 @@ def test_recurring_reminder_creates_next_occurrence_in_local_timezone():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_monthly_recurrence_keeps_original_day_after_february_clamp():
+    engine, db = make_db()
+    try:
+        from datetime import datetime, timezone
+        first_due = datetime(2026, 1, 31, 8, 0, tzinfo=timezone.utc)
+        reminder = CareReminder(
+            id="r-monthly", person_id="p1", created_by_caregiver_id="c1",
+            title="Monthly check", message="Review the care plan",
+            due_at=first_due, timezone="Africa/Lagos", recurrence_rule="monthly",
+            recurrence_anchor_day=31, status="scheduled",
+            idempotency_key="monthly-series-0001", attempt_count=0,
+            max_attempts=3, next_attempt_at=first_due,
+        )
+        db.add(reminder)
+        db.commit()
+        sender = lambda item, key: {"provider": "test-provider", "receipt_id": "receipt-monthly"}
+        process_due_reminders(db, sender, now=datetime(2026, 1, 31, 8, 1, tzinfo=timezone.utc))
+        february = db.query(CareReminder).filter(
+            CareReminder.idempotency_key.like("monthly-series-0001:%")
+        ).one()
+        assert february.due_at == datetime(2026, 2, 28, 8, 0, tzinfo=timezone.utc)
+        assert february.recurrence_anchor_day == 31
+        process_due_reminders(db, sender, now=datetime(2026, 2, 28, 8, 1, tzinfo=timezone.utc))
+        march = db.query(CareReminder).filter(
+            CareReminder.idempotency_key.like("monthly-series-0001:%")
+        ).filter(CareReminder.id != february.id).one()
+        assert march.due_at == datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc)
+        assert march.recurrence_anchor_day == 31
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
