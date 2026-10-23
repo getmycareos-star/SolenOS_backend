@@ -224,6 +224,11 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
+    if db_action.is_medication_action and update_data.get("status") == ActionStatus.ACTIVE:
+        raise HTTPException(
+            status_code=409,
+            detail="Medication actions cannot be activated until a clinician-confirmation workflow verifies the instruction",
+        )
 
     # Assignment labels and actor types are derived from a validated caregiver ID;
     # callers cannot spoof them independently.
@@ -285,6 +290,11 @@ def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(g
 @router.post("/actions/{action_id}/activate", response_model=ActionSchema)
 def activate_action(action_id: str, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
+    if db_action.is_medication_action:
+        raise HTTPException(
+            status_code=409,
+            detail="Medication actions cannot be activated until a clinician-confirmation workflow verifies the instruction",
+        )
     return lifecycle_service.activate_action(db_action, db)
 
 
