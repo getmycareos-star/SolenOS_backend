@@ -223,7 +223,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                         target_person_id = str(action_owner)
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
-        # Document extraction has no caller-selected person ID; the validated bearer\n        # session is its only permitted care-record scope.\n        if path == "/api/v1/documents/extract" and method == "POST":\n            target_person_id = scoped_person_id\n\n        query_person_id = request.query_params.get("person_id")
+        # Document extraction has no caller-selected person ID; the validated bearer
+        # session is its only permitted care-record scope.
+        if path == "/api/v1/documents/extract" and method == "POST":
+            target_person_id = scoped_person_id
+
+        query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
