@@ -338,11 +338,22 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 for item in result[domain]:
                     name = str(item.get("name", "")).strip()
                     current = item.get("current")
+                    change_type = str(item.get("change_type") or "").casefold()
+                    if domain == "medications" and change_type == "discontinued" and current is None:
+                        current = "discontinued"
                     if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported"):
                         continue
-                    field = f"{domain.rstrip('s')}_reported_state"
+                    if domain == "medications":
+                        field = str(item.get("field") or ("dose" if "dose" in change_type else "medication_reported_state"))
+                        subject_id = name.casefold()
+                    elif domain == "conditions":
+                        field = str(item.get("field") or "condition_reported_state")
+                        subject_id = name
+                    else:
+                        field = str(item.get("field") or "symptom_reported_state")
+                        subject_id = name
                     create_assertion(db, CareAssertionCreate(
-                        person_id=person_id, subject_type=domain.rstrip("s"), subject_id=name,
+                        person_id=person_id, subject_type=domain.rstrip("s"), subject_id=subject_id,
                         field=field, assertion_kind="time_bound_observation" if domain == "symptoms" else "current_state",
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
