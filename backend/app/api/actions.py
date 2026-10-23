@@ -27,10 +27,26 @@ lifecycle_service = ActionLifecycleService()
 identity_service = ActionIdentityService()
 
 
+def _session_scope(request: Request):
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    person_id = getattr(request.state, "scoped_person_id", None)
+    if not caregiver_id or not person_id:
+        raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
+    return str(caregiver_id), str(person_id)
+
+
 def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
     action = db.query(ActionModel).filter(ActionModel.id == action_id).first()
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    return action
+
+
+def _get_scoped_action_or_404(db: Session, request: Request, action_id: str) -> ActionModel:
+    _, person_id = _session_scope(request)
+    action = _get_action_or_404(db, action_id)
+    if str(action.person_id) != person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care action")
     return action
 
 
@@ -71,7 +87,12 @@ def extract_actions_from_document(
         safety = normalization_service.safety_check(candidate)
         if not safety.is_safe_to_create and safety.blocked_reason:
             continue
-        if medication_instruction_requires_authority(candidate.original_text, candidate.is_medication_action):
+        if not (candidate.original_text or "").strip() or (candidate.original_text or "").strip() not in (source_evidence.source_text or ""):
+            continue
+        if not (candidate.source_passage or "").strip() or (candidate.source_passage or "").strip() not in (source_evidence.source_text or ""):
+            continue
+        medication_text = " ".join((candidate.original_text or "", candidate.source_passage or "", candidate.normalized_action or "", candidate.action_object or ""))
+        if medication_instruction_requires_authority(medication_text, candidate.is_medication_action):
             verification = get_verified_medication_authority(db, person_id=scoped_person_id, evidence_id=document_id, source_authority=source_authority)
             if verification is None:
                 continue
@@ -154,7 +175,13 @@ def create_action(action: ActionCreate, request: Request, db: Session = Depends(
     source_evidence = db.query(Evidence).filter(Evidence.id == action.source_evidence_id, Evidence.person_id == scoped_person_id).first()
     if source_evidence is None:
         raise HTTPException(status_code=422, detail="Source evidence must exist and belong to this care record")
-    if medication_instruction_requires_authority(candidate.original_text, candidate.is_medication_action):
+    stored_source = source_evidence.source_text or ""
+    if not (candidate.source_passage or "").strip() or candidate.source_passage.strip() not in stored_source:
+        raise HTTPException(status_code=422, detail="source_passage must quote the stored source evidence")
+    if not (candidate.original_text or "").strip() or candidate.original_text.strip() not in stored_source:
+        raise HTTPException(status_code=422, detail="original_text must quote the stored source evidence")
+    medication_text = " ".join((candidate.original_text or "", candidate.source_passage or "", candidate.normalized_action or "", candidate.action_object or ""))
+    if medication_instruction_requires_authority(medication_text, candidate.is_medication_action):
         verification = get_verified_medication_authority(db, person_id=scoped_person_id, evidence_id=action.source_evidence_id, source_authority=action.source_authority)
         if verification is None:
             raise HTTPException(status_code=409, detail={"blocked_reason": "Medication instructions are not authoritative until source evidence has a valid trusted prescriber verification", "requires_clinical_source_verification": True})
@@ -206,21 +233,24 @@ def create_action(action: ActionCreate, request: Request, db: Session = Depends(
 
 
 @router.get("/actions/{person_id}", response_model=List[ActionSchema])
-def list_actions(person_id: str, status: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(ActionModel).filter(ActionModel.person_id == person_id)
+def list_actions(person_id: str, request: Request, status: Optional[str] = None, db: Session = Depends(get_db)):
+    _, scoped_person_id = _session_scope(request)
+    if str(person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    query = db.query(ActionModel).filter(ActionModel.person_id == scoped_person_id)
     if status:
         query = query.filter(ActionModel.status == status)
     return query.order_by(ActionModel.created_at.desc()).all()
 
 
 @router.get("/actions/detail/{action_id}", response_model=ActionSchema)
-def get_action(action_id: str, db: Session = Depends(get_db)):
-    return _get_action_or_404(db, action_id)
+def get_action(action_id: str, request: Request, db: Session = Depends(get_db)):
+    return _get_scoped_action_or_404(db, request, action_id)
 
 
 @router.patch("/actions/{action_id}", response_model=ActionSchema)
-def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def update_action(action_id: str, update: ActionUpdate, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     update_data = update.model_dump(exclude_unset=True)
     if update_data.get("status") == ActionStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Use the completion endpoint to record evidence and authenticated caregiver attribution")
@@ -274,38 +304,39 @@ def complete_action(action_id: str, evidence: ActionCompletionEvidence, request:
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
-def cancel_action(action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def cancel_action(action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     return lifecycle_service.cancel_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/supersede", response_model=ActionSchema)
-def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.supersede_action(db_action, new_action_id, db)
+def supersede_action(action_id: str, new_action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
+    new_action = _get_scoped_action_or_404(db, request, new_action_id)
+    return lifecycle_service.supersede_action(db_action, new_action.id, db)
 
 
 @router.post("/actions/{action_id}/activate", response_model=ActionSchema)
-def activate_action(action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def activate_action(action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     return lifecycle_service.activate_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/block", response_model=ActionSchema)
-def block_action(action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def block_action(action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     return lifecycle_service.block_action(db_action, db)
 
 
 @router.post("/actions/{action_id}/expire", response_model=ActionSchema)
-def expire_action(action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def expire_action(action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     return lifecycle_service.expire_action(db_action, db)
 
 
 @router.get("/actions/{action_id}/duplicates", response_model=List[ActionDeduplicationResult])
-def find_duplicate_actions(action_id: str, db: Session = Depends(get_db)):
-    db_action = _get_action_or_404(db, action_id)
+def find_duplicate_actions(action_id: str, request: Request, db: Session = Depends(get_db)):
+    db_action = _get_scoped_action_or_404(db, request, action_id)
     existing = db.query(ActionModel).filter(ActionModel.person_id == db_action.person_id).all()
     duplicates = identity_service.find_duplicates(db_action, existing)
     return [ActionDeduplicationResult(**d) for d in duplicates]
@@ -317,11 +348,14 @@ def check_action_safety(candidate: ActionCandidate):
 
 
 @router.get("/actions/{person_id}/uncompleted", response_model=List[ActionSchema])
-def list_uncompleted_actions(person_id: str, db: Session = Depends(get_db)):
+def list_uncompleted_actions(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _, scoped_person_id = _session_scope(request)
+    if str(person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     active_statuses = ["active", "conditional", "pending_confirmation", "blocked"]
     return (
         db.query(ActionModel)
-        .filter(ActionModel.person_id == person_id, ActionModel.status.in_(active_statuses))
+        .filter(ActionModel.person_id == scoped_person_id, ActionModel.status.in_(active_statuses))
         .order_by(ActionModel.created_at.desc())
         .all()
     )
