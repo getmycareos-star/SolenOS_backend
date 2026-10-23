@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
+from app.models.action import Action as ActionModel
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,11 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
         .all()
     )
     for reminder in due:
+        action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=reminder.person_id).first()
+        if action is None or action.status in ("completed", "cancelled", "superseded", "expired"):
+            reminder.enabled = False
+            db.commit()
+            continue
         scheduled_for = _aware_utc(reminder.next_run_at)
         key = f"{reminder.id}:{scheduled_for.isoformat(timespec='seconds')}"
         receipt = ReminderDelivery(
@@ -117,6 +123,13 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
         if reminder is None:
             receipt.status = "failed"
             receipt.last_error = "Reminder definition no longer exists"
+            db.commit()
+            continue
+
+        action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
+        if action is None or action.status in ("completed", "cancelled", "superseded", "expired"):
+            receipt.status = "cancelled"
+            receipt.last_error = "Associated care action is no longer active"
             db.commit()
             continue
 
