@@ -79,3 +79,20 @@ def test_ocr_rejects_images_above_the_pixel_budget(monkeypatch):
     oversized = Image.new("RGB", (3, 2), "white")
     with pytest.raises(ValueError, match="safe OCR processing limit"):
         extraction._ocr_image(oversized)
+
+
+
+def test_one_source_sentence_can_yield_multiple_review_candidates_with_exact_spans():
+    from app.api.document_extraction import _extract_document_candidates
+
+    source = "Medication: take 5 mg daily and call the clinic for follow-up in two weeks."
+    candidates = _extract_document_candidates(source, "evidence-123")
+    kinds = {candidate["candidate_type"] for candidate in candidates}
+
+    assert {"medication", "instruction", "follow_up"} <= kinds
+    for candidate in candidates:
+        start = candidate["source_span_start"]
+        end = candidate["source_span_end"]
+        assert source[start:end] == candidate["source_quote"]
+        assert candidate["source_evidence_id"] == "evidence-123"
+        assert candidate["review_status"] == "pending_review"
