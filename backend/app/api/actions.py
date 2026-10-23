@@ -196,20 +196,24 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
     # An assignee must be an existing caregiver linked to this same care record.
     # Never trust a client-supplied caregiver ID without verifying membership.
-    assignee_id = update_data.get("actor_id")
-    if assignee_id:
-        assignee = (
-            db.query(CaregiverModel)
-            .filter(CaregiverModel.id == assignee_id, CaregiverModel.person_id == db_action.person_id)
-            .first()
-        )
-        if not assignee:
-            raise HTTPException(status_code=422, detail="Assignee must be linked to this care record")
-        update_data["actor_type"] = "caregiver"
-        update_data["actor_label"] = assignee.name
+    if "actor_id" in update_data:
+        assignee_id = update_data["actor_id"]
+        if assignee_id:
+            assignee = (
+                db.query(CaregiverModel)
+                .filter(CaregiverModel.id == assignee_id, CaregiverModel.person_id == db_action.person_id)
+                .first()
+            )
+            if not assignee:
+                raise HTTPException(status_code=422, detail="Assignee must be linked to this care record")
+            update_data["actor_type"] = "caregiver"
+            update_data["actor_label"] = assignee.name
+        else:
+            update_data["actor_type"] = "unknown"
+            update_data["actor_label"] = None
 
     for field, value in update_data.items():
-        if value is not None:
+        if value is not None or field in {"actor_id", "actor_label"}:
             setattr(db_action, field, value)
 
     db.add(db_action)
