@@ -119,3 +119,34 @@ def test_medication_action_cannot_be_activated_without_clinician_confirmation(db
     db.commit()
     with pytest.raises(ValueError, match="clinician confirmation"):
         ActionLifecycleService().activate_action(action, db)
+
+
+def test_unverified_medication_instruction_cannot_be_completed(db):
+    action = db.query(ActionModel).filter_by(id="action-a").one()
+    action.is_medication_action = True
+    action.status = "active"
+    action.source_authority_verified = False
+    db.commit()
+    with pytest.raises(ValueError, match="source authority is verified"):
+        ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(
+                caregiver_id="caregiver-a", evidence_ids=["evidence-a"],
+                completion_confidence=0.9,
+            ),
+            db,
+        )
+
+
+def test_action_outside_active_lifecycle_cannot_be_completed(db):
+    action = db.query(ActionModel).filter_by(id="action-a").one()
+    action.status = "pending_confirmation"
+    db.commit()
+    with pytest.raises(ValueError, match="activate or resolve"):
+        ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(
+                caregiver_id="caregiver-a", evidence_ids=[], completion_confidence=0.7,
+            ),
+            db,
+        )
