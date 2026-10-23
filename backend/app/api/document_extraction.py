@@ -194,9 +194,9 @@ def _classify_document_type(text: str, filename: str) -> str:
 
 def _document_date_candidate(text: str) -> str | None:
     patterns = (
-        r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b",
-        r"\\b(\\d{1,2}/\\d{1,2}/20\\d{2})\\b",
-        r"\\b(\\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\\d{2})\\b",
+        r"\b(20\d{2}-\d{2}-\d{2})\b",
+        r"\b(\d{1,2}/\d{1,2}/20\d{2})\b",
+        r"\b(\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\d{2})\b",
     )
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
