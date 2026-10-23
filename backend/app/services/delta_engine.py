@@ -18,16 +18,111 @@ from app.services.care_continuity import create_assertion
 
 DELTA_JSON_CONTRACT = {
     "type": "object",
-    "required": ["event_summary", "medications", "conditions", "symptoms", "tests", "follow_ups", "contradictions", "clinical_gaps", "caregiver_summary", "clinician_summary"],
+    "required": [
+        "event_summary", "medications", "conditions", "symptoms", "tests",
+        "follow_ups", "contradictions", "clinical_gaps", "caregiver_summary", "clinician_summary"
+    ],
     "properties": {
         "event_summary": {"type": "string"},
-        "medications": {"type": "array", "items": {"type": "object", "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"], "properties": {"change_type": {"type": "string", "enum": ["new", "dose_changed", "frequency_changed", "route_changed", "discontinued", "unchanged", "conflicting", "uncertain"]}, "name": {"type": "string"}, "previous": {"type": ["string", "null"]}, "current": {"type": ["string", "null"]}, "evidence_excerpt": {"type": "string"}, "certainty": {"type": "string", "enum": ["supported", "uncertain"]}}}},
-        "conditions": {"type": "array", "items": {"type": "object", "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"], "properties": {"change_type": {"type": "string"}, "name": {"type": "string"}, "previous": {"type": ["string", "null"]}, "current": {"type": ["string", "null"]}, "evidence_excerpt": {"type": "string"}, "certainty": {"type": "string", "enum": ["supported", "uncertain"]}}},
-        "symptoms": {"type": "array", "items": {"type": "object", "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"], "properties": {"change_type": {"type": "string"}, "name": {"type": "string"}, "previous": {"type": ["string", "null"]}, "current": {"type": ["string", "null"]}, "evidence_excerpt": {"type": "string"}, "certainty": {"type": "string", "enum": ["supported", "uncertain"]}}},
-        "tests": {"type": "array", "items": {"type": "object", "required": ["name", "status", "ordered_date", "result_present", "evidence_excerpt"], "properties": {"name": {"type": "string"}, "status": {"type": "string"}, "ordered_date": {"type": ["string", "null"]}, "result_present": {"type": "boolean"}, "evidence_excerpt": {"type": "string"}}}},
-        "follow_ups": {"type": "array", "items": {"type": "object", "required": ["action", "status", "due_date", "owner", "evidence_excerpt"], "properties": {"action": {"type": "string"}, "status": {"type": "string"}, "due_date": {"type": ["string", "null"]}, "owner": {"type": ["string", "null"]}, "evidence_excerpt": {"type": "string"}}}},
-        "contradictions": {"type": "array", "items": {"type": "object", "required": ["topic", "reports", "why_conflicting", "evidence_excerpts"], "properties": {"topic": {"type": "string"}, "reports": {"type": "array", "items": {"type": "string"}}, "why_conflicting": {"type": "string"}, "evidence_excerpts": {"type": "array", "items": {"type": "string"}}}},
-        "clinical_gaps": {"type": "array", "items": {"type": "object", "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"], "properties": {"gap": {"type": "string"}, "why_it_matters": {"type": "string"}, "next_question": {"type": "string"}, "evidence_excerpt": {"type": "string"}}}},
+        "medications": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
+                "properties": {
+                    "change_type": {"type": "string", "enum": ["new", "dose_changed", "frequency_changed", "route_changed", "discontinued", "unchanged", "conflicting", "uncertain"]},
+                    "name": {"type": "string"},
+                    "previous": {"type": ["string", "null"]},
+                    "current": {"type": ["string", "null"]},
+                    "evidence_excerpt": {"type": "string"},
+                    "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
+                }
+            }
+        },
+        "conditions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
+                "properties": {
+                    "change_type": {"type": "string"},
+                    "name": {"type": "string"},
+                    "previous": {"type": ["string", "null"]},
+                    "current": {"type": ["string", "null"]},
+                    "evidence_excerpt": {"type": "string"},
+                    "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
+                }
+            }
+        },
+        "symptoms": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
+                "properties": {
+                    "change_type": {"type": "string},
+                    "name": {"type": "string"},
+                    "previous": {"type": ["string", "null"]},
+                    "current": {"type": ["string", "null"]},
+                    "evidence_excerpt": {"type": "string"},
+                    "certainty": {"type": "string", "enum": ["supported", "uncertain"]}
+                }
+            }
+        },
+        "tests": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name", "status", "ordered_date", "result_present", "evidence_excerpt"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "status": {"type": "string"},
+                    "ordered_date": {"type": ["string", "null"]},
+                    "result_present": {"type": "boolean"},
+                    "evidence_excerpt": {"type": "string"}
+                }
+            }
+        },
+        "follow_ups": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["action", "status", "due_date", "owner", "evidence_excerpt"],
+                "properties": {
+                    "action": {"type": "string},
+                    "status": {"type": "string"},
+                    "due_date": {"type": ["string", "null"]},
+                    "owner": {"type": ["string", "null"]},
+                    "evidence_excerpt": {"type": "string"}
+                }
+            }
+        },
+        "contradictions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["topic", "reports", "why_conflicting", "evidence_excerpts"],
+                "properties": {
+                    "topic": {"type": "string},
+                    "reports": {"type": "array", "items": {"type": "string"}},
+                    "why_conflicting": {"type": "string},
+                    "evidence_excerpts": {"type": "array", "items": {"type": "string"}}
+                }
+            }
+        },
+        "clinical_gaps": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"],
+                "properties": {
+                    "gap": {"type": "string},
+                    "why_it_matters": {"type": "string"},
+                    "next_question": {"type": "string},
+                    "evidence_excerpt": {"type": "string"}
+                }
+            }
+        },
         "caregiver_summary": {"type": "string"},
         "clinician_summary": {"type": "string"}
     }
