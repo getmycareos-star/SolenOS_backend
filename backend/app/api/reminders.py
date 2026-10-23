@@ -46,6 +46,8 @@ def create_reminder(payload: ReminderCreate, request: Request, db: Session = Dep
             and existing.due_at == payload.due_at
             and existing.action_id == payload.action_id
             and existing.recurrence_rule == payload.recurrence_rule
+            and existing.timezone == payload.timezone
+            and existing.max_attempts == payload.max_attempts
             and existing.created_by_caregiver_id == payload.caregiver_id
         )
         if not same_request:
