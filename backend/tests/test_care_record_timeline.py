@@ -189,6 +189,48 @@ def test_unified_care_record_requires_token_and_enforces_record_scope():
     assert cross_record.status_code == 403
 
 
+
+def test_unified_care_record_paginates_without_repeating_items():
+    client = TestClient(app)
+    session = create_session(client)
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    now = datetime.now(timezone.utc)
+
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                occurred_at=now - timedelta(hours=hours),
+                title=f"Observation {hours}",
+                description=f"Recorded observation {hours}",
+                created_by_caregiver_id=caregiver_id,
+            )
+            for hours in (1, 2, 3)
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    first = client.get(f"/api/v1/care-record/{person_id}?limit=2&offset=0", headers=headers)
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert len(first_body["timeline"]) == 2
+    assert first_body["has_more"] is True
+
+    second = client.get(f"/api/v1/care-record/{person_id}?limit=2&offset=2", headers=headers)
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert len(second_body["timeline"]) == 1
+    assert second_body["has_more"] is False
+    first_ids = {item["id"] for item in first_body["timeline"]}
+    second_ids = {item["id"] for item in second_body["timeline"]}
+    assert first_ids.isdisjoint(second_ids)
+
+
 def test_unified_care_record_rejects_missing_person():
     client = TestClient(app)
     session = create_session(client)
