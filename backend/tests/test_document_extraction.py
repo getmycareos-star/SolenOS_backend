@@ -35,3 +35,37 @@ def test_rejects_pdf_with_mismatched_signature():
 def test_rejects_invalid_utf8_text_instead_of_silently_corrupting_it():
     with pytest.raises(ValueError, match="valid UTF-8"):
         extract_document_content("notes.txt", "text/plain", b"\xff\xfe\xfd")
+
+
+
+def test_extracts_text_from_a_real_pdf():
+    import fitz
+
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "Discharge summary follow-up in two weeks")
+    payload = pdf.tobytes()
+    pdf.close()
+
+    result = extract_document_content("discharge.pdf", "application/pdf", payload)
+    assert "Discharge summary" in result["document"]["extracted_text"]
+    assert result["document"]["extraction_source"] == "pdf_text"
+    assert result["document"]["sha256"]
+
+
+def test_image_ocr_low_confidence_is_explicit(monkeypatch):
+    import io
+    from PIL import Image
+    import app.api.document_extraction as extraction
+
+    image = Image.new("RGB", (120, 60), "white")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    monkeypatch.setattr(extraction, "_ocr_image", lambda image: ("Discharge follow-up", 0.42))
+
+    result = extract_document_content("scan.png", "image/png", buffer.getvalue())
+    document = result["document"]
+    assert document["extracted_text"] == "Discharge follow-up"
+    assert document["extraction_source"] == "image_ocr"
+    assert document["ocr_confidence"] == 0.42
+    assert any("confidence is low" in warning for warning in document["extraction_warnings"])
