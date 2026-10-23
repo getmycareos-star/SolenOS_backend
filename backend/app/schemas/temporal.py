@@ -27,7 +27,7 @@ class TemporalFactBase(BaseModel):
     time_provenance: Optional[str] = None
     source_assertion: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     created_by_caregiver_id: Optional[str] = None
 
 
@@ -146,7 +146,7 @@ class RelativeTimeResolution(BaseModel):
     reference_frame_name: Optional[str] = None
     resolved_point: Optional[datetime] = None
     is_resolved: bool
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
     derivation_method: Optional[str] = None
     lower_bound: Optional[datetime] = None
     upper_bound: Optional[datetime] = None
