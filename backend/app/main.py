@@ -28,6 +28,8 @@ from app.models.reminder import CareReminder
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.reminders import router as reminders_router
 from app.api.medication_authority import router as medication_authority_router
+from app.api.ops_events import router as ops_events_router
+from app.api.document_extract import router as document_extract_router
 from app.services.reminder_worker import reminder_scheduler_loop
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
@@ -108,7 +110,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
-    if not path.startswith("/api/v1/") and path != "/api/situation":
+    if not path.startswith("/api/v1/") and path not in {"/api/situation", "/api/extract"}:
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
