@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.action import Action as ActionModel
 from app.models.care import Caregiver
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
+from app.services.medication_authority import action_has_verified_medication_authority
 from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
 from app.schemas.reminder import ReminderCreate, ReminderOut, ReminderDeliveryOut, ReminderDeliveryAttemptOut
 
