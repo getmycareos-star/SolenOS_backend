@@ -1,6 +1,8 @@
 """End-to-end tests for private document storage, provenance, candidate review and access scope."""
 import json
 import importlib
+from io import BytesIO
+from unittest.mock import patch
 import pytest
 
 pytestmark = pytest.mark.session_security
@@ -8,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.core.database import Base, get_db
 from app.main import app
@@ -162,5 +165,44 @@ def test_document_extraction_rejects_mime_and_signature_mismatch():
                 files={"file": ("fake.pdf", b"not a PDF", "application/pdf")},
             )
             assert response.status_code == 415, response.text
+    finally:
+        teardown_db()
+
+
+def test_image_intake_uses_ocr_text_but_keeps_it_as_unverified_source_candidates():
+    setup_db()
+    try:
+        image_buffer = BytesIO()
+        Image.new("RGB", (3, 3), color=(100, 120, 140)).save(image_buffer, format="PNG")
+        image_bytes = image_buffer.getvalue()
+        ocr_text = (
+            "MEDICATION LIST\\n"
+            "Take Medication B 10 mg daily.\\n"
+            "Follow-up appointment: Call the clinic in two weeks."
+        )
+        with TestClient(app) as client:
+            headers, session = create_session(client, "Image Document Recipient")
+            with patch("app.api.document_extraction._ocr_image", return_value=(ocr_text, 0.91)):
+                response = client.post(
+                    "/api/v1/documents/intake",
+                    headers=headers,
+                    files={"file": ("medication.png", image_bytes, "image/png")},
+                )
+            assert response.status_code == 201, response.text
+            result = response.json()
+            assert result["extraction_status"] == "extracted"
+            assert result["extraction_source"] == "image_ocr"
+            assert result["ocr_confidence"] == 0.91
+            assert result["source_file_preserved"] is True
+            assert any(candidate["candidate_type"] == "medication" for candidate in result["document_candidates"])
+            assert any(candidate["candidate_type"] == "follow_up" for candidate in result["document_candidates"])
+            with TestingSessionLocal() as db:
+                asset = db.query(DocumentAsset).filter_by(evidence_id=result["evidence_id"]).one()
+                evidence = db.query(Evidence).filter_by(id=result["evidence_id"]).one()
+                assert asset.content == image_bytes
+                assert evidence.source_text == ocr_text
+                assert evidence.confidence == 0.91
+                assert evidence.evidence_status == "uploaded"
+                assert all(candidate["review_status"] == "pending_review" for candidate in json.loads(evidence.extra_metadata)["document_candidates"])
     finally:
         teardown_db()
