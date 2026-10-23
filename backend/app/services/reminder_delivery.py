@@ -30,6 +30,26 @@ def process_due_reminders(
     """
     now = now or datetime.now(timezone.utc)
     limit = max(1, min(int(limit), 200))
+    # Recover claims abandoned by a worker crash. The configured webhook timeout
+    # is 15 seconds, so a ten-minute lease safely distinguishes stale claims.
+    stale_before = now - timedelta(minutes=10)
+    stale_claims = db.query(CareReminder).filter(
+        CareReminder.status == "delivering",
+        CareReminder.updated_at.is_not(None),
+        CareReminder.updated_at < stale_before,
+    ).all()
+    for stale in stale_claims:
+        stale.last_error = "Recovered stale delivery claim after worker interruption"
+        if stale.attempt_count >= stale.max_attempts:
+            stale.status = "failed"
+            stale.next_attempt_at = None
+        else:
+            stale.status = "scheduled"
+            stale.next_attempt_at = now
+        db.add(stale)
+    if stale_claims:
+        db.commit()
+
     query = db.query(CareReminder).filter(
         CareReminder.status == "scheduled",
         CareReminder.due_at <= now,
