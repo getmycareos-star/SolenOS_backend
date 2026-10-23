@@ -5,7 +5,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
 from app.models.care import Caregiver as CaregiverModel, Evidence
-from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
+from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority, action_has_verified_medication_authority
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -254,6 +254,8 @@ def update_action(action_id: str, update: ActionUpdate, request: Request, db: Se
     update_data = update.model_dump(exclude_unset=True)
     if update_data.get("status") == ActionStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Use the completion endpoint to record evidence and authenticated caregiver attribution")
+    if update_data.get("status") == ActionStatus.ACTIVE and not action_has_verified_medication_authority(db, db_action):
+        raise HTTPException(status_code=409, detail="Medication source authority is missing, expired, or no longer matches the source evidence")
 
     # Assignment labels and actor types are derived from a validated caregiver ID;
     # callers cannot spoof them independently.
