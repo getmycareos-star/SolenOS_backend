@@ -2,7 +2,7 @@ import io
 import uuid
 from pathlib import PurePath
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
@@ -15,10 +15,16 @@ TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".xml", ".yaml", ".ym
 
 
 @router.post("/extract")
-async def extract_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    # The dependency is intentional: this route is covered by the scoped-session
-    # middleware in main.py. Do not accept anonymous uploads to the extractor.
+async def extract_document(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    # Defense in depth: the scoped-session middleware validates the bearer token
+    # and binds this request state. Never allow anonymous uploads to the extractor.
     del db
+    if not getattr(request.state, "anonymous_session_id", None):
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
     filename = (file.filename or "upload").strip()[:255] or "upload"
     suffix = PurePath(filename).suffix.lower()
     content_type = (file.content_type or "").lower()
