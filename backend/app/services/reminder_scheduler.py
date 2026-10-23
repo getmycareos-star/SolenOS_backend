@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta, time
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from app.models.reminder import CareReminder, ReminderDelivery
+from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 
 
 def utc_now():
@@ -89,7 +89,7 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
 
 
 def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_size: int = 100) -> int:
-    """Deliver through the durable in-app inbox; external push/email providers are not assumed."""
+    """Persist each attempt and deliver through the durable in-app inbox."""
     now = _aware_utc(now or utc_now())
     receipts = (
         db.query(ReminderDelivery)
@@ -110,26 +110,61 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             receipt.last_error = "Reminder definition no longer exists"
             db.commit()
             continue
-        receipt.attempt_count += 1
+
+        attempt_number = receipt.attempt_count + 1
+        attempt_key = f"{receipt.id}:{attempt_number}"
+        attempt = ReminderDeliveryAttempt(
+            delivery_id=receipt.id,
+            attempt_number=attempt_number,
+            channel="in_app",
+            started_at=now,
+            outcome="pending",
+            idempotency_key=attempt_key,
+        )
+        receipt.attempt_count = attempt_number
+        db.add(attempt)
         try:
-            # A persisted inbox receipt is the delivery channel implemented here.
-            # The unique idempotency key prevents duplicate records across retries.
+            # Commit the attempt before processing so a process crash leaves a
+            # durable record of the in-flight attempt for recovery/audit.
+            db.commit()
+
+            # In-app delivery is the implemented channel. A durable receipt
+            # becomes visible to authenticated clients via the scoped API.
+            receipt = db.query(ReminderDelivery).filter_by(id=receipt.id).with_for_update().first()
+            attempt = db.query(ReminderDeliveryAttempt).filter_by(id=attempt.id).first()
+            if receipt is None or attempt is None:
+                continue
             receipt.status = "delivered"
             receipt.delivered_at = now
             receipt.last_error = None
+            attempt.outcome = "delivered"
+            attempt.finished_at = now
             db.commit()
             delivered += 1
         except SQLAlchemyError as exc:
             db.rollback()
-            receipt = db.query(ReminderDelivery).filter_by(id=receipt.id).first()
-            if receipt is None:
-                continue
-            receipt.attempt_count += 1
-            receipt.last_error = type(exc).__name__
-            if receipt.attempt_count >= reminder.max_attempts:
-                receipt.status = "failed"
-            else:
-                receipt.status = "retry"
-                receipt.next_attempt_at = now + timedelta(seconds=min(3600, reminder.retry_delay_seconds * (2 ** max(0, receipt.attempt_count - 1))))
-            db.commit()
+            # If the first commit failed, no attempt is durable. The scheduler
+            # will revisit the still-pending receipt next cycle.
+            try:
+                receipt = db.query(ReminderDelivery).filter_by(id=receipt.id).first()
+                attempt = db.query(ReminderDeliveryAttempt).filter_by(id=attempt.id).first()
+                if receipt is None:
+                    continue
+                receipt.last_error = type(exc).__name__
+                if receipt.attempt_count >= reminder.max_attempts:
+                    receipt.status = "failed"
+                else:
+                    receipt.status = "retry"
+                    receipt.next_attempt_at = now + timedelta(
+                        seconds=min(3600, reminder.retry_delay_seconds * (2 ** max(0, receipt.attempt_count - 1)))
+                    )
+                if attempt is not None:
+                    attempt.outcome = receipt.status
+                    attempt.error_type = type(exc).__name__
+                    attempt.finished_at = now
+                db.commit()
+            except SQLAlchemyError:
+                db.rollback()
+                # Keep the persisted pending receipt recoverable; next poll retries.
+                logger.exception("Could not persist reminder retry state")
     return delivered
