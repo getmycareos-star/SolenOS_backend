@@ -23,6 +23,7 @@ from app.core.database import Base, database_schema_differences, get_db, Session
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.action import Action as ActionModel
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.reminders import router as reminders_router
 from app.api.medication_authority import router as medication_authority_router
@@ -180,6 +181,26 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 "revisions", "assertions", "freshness", "next-questions", "outcomes", "contradictions"
             }:
                 target_person_id = parts[-1]
+
+        if path.startswith("/api/v1/actions"):
+            # FastAPI's nested included-router wrappers do not consistently
+            # expose child path parameters to this middleware. Resolve action
+            # ownership explicitly so list/detail/mutation routes stay scoped.
+            parts = path.split("/")
+            suffix = parts[4:] if len(parts) > 4 else []
+            if path == "/api/v1/actions/safety-check":
+                target_person_id = scoped_person_id
+            elif method == "GET" and len(suffix) == 1 and suffix[0] not in {"detail", "safety-check"}:
+                # GET /actions/{person_id} is the care-record action collection.
+                target_person_id = suffix[0]
+            elif method == "GET" and len(suffix) == 2 and suffix[1] == "uncompleted":
+                target_person_id = suffix[0]
+            else:
+                action_id = suffix[1] if suffix and suffix[0] == "detail" and len(suffix) > 1 else (suffix[0] if suffix else None)
+                if action_id and action_id != "safety-check":
+                    action_owner = db.query(ActionModel.person_id).filter(ActionModel.id == action_id).scalar()
+                    if action_owner:
+                        target_person_id = str(action_owner)
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
