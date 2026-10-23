@@ -24,6 +24,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.action import Action as ActionModel
+from app.models.reminder import CareReminder
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.reminders import router as reminders_router
 from app.api.medication_authority import router as medication_authority_router
@@ -181,6 +182,21 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 "revisions", "assertions", "freshness", "next-questions", "outcomes", "contradictions"
             }:
                 target_person_id = parts[-1]
+
+        if path.startswith("/api/v1/reminders"):
+            # Resolve reminder and action ownership explicitly because nested
+            # router wrappers may not expose their path parameters here.
+            parts = path.split("/")
+            if len(parts) >= 6 and parts[4] == "people":
+                target_person_id = parts[5]
+            elif len(parts) >= 6 and parts[4] == "actions":
+                action_owner = db.query(ActionModel.person_id).filter(ActionModel.id == parts[5]).scalar()
+                if action_owner:
+                    target_person_id = str(action_owner)
+            elif len(parts) >= 5 and parts[4] not in {"people", "actions"}:
+                reminder_owner = db.query(CareReminder.person_id).filter(CareReminder.id == parts[4]).scalar()
+                if reminder_owner:
+                    target_person_id = str(reminder_owner)
 
         if path.startswith("/api/v1/actions"):
             # FastAPI's nested included-router wrappers do not consistently
