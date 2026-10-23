@@ -417,6 +417,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 expected_field = {"dose_changed": "dose", "frequency_changed": "frequency", "route_changed": "route"}[change_type]
             else:
                 expected_field = {"medications": "medication_reported_state", "conditions": "condition_reported_state", "symptoms": "symptom_reported_state"}[domain]
+            # Preserve the semantic field before the display label is normalized
+            # from dose_changed/frequency_changed into the generic "changed".
+            item.setdefault("field", expected_field)
             candidates = [
                 old for old in active_state
                 if _normalise(old["subject_type"]) == expected_subject_type
