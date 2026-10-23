@@ -6,6 +6,7 @@ quality metadata only. It does not diagnose, summarize, or authorize care.
 from __future__ import annotations
 
 import hashlib
+import shutil
 import io
 import json
 import re
@@ -280,6 +281,28 @@ def _document_date_candidate(text: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+@router.get("/documents/ocr-status")
+def document_ocr_runtime_status(request: Request):
+    """Report OCR runtime capability for authenticated staging/operations checks."""
+    if not getattr(request.state, "scoped_person_id", None) or not getattr(request.state, "scoped_caregiver_id", None):
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    executable = shutil.which("tesseract")
+    if not executable:
+        return {"available": False, "binary_found": False, "languages": [], "version": None}
+    try:
+        import pytesseract
+        version = str(pytesseract.get_tesseract_version())
+        languages = sorted(pytesseract.get_languages(config=""))
+    except Exception:
+        return {"available": False, "binary_found": True, "languages": [], "version": None}
+    return {
+        "available": "eng" in languages,
+        "binary_found": True,
+        "languages": languages,
+        "version": version,
+    }
 
 
 @router.post("/documents/intake", status_code=201)
