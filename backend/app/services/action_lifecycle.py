@@ -46,6 +46,10 @@ class ActionLifecycleService:
             raise ValueError(f"Cannot complete action in status {action.status}")
         if action.status == ActionStatus.COMPLETED:
             raise ValueError("Action is already completed; completion history cannot be overwritten")
+        if action.is_medication_action and not action.source_authority_verified:
+            raise ValueError("Cannot record medication completion until source authority is verified")
+        if action.status not in (ActionStatus.ACTIVE, ActionStatus.CONDITIONAL):
+            raise ValueError(f"Cannot complete action in status {action.status}; activate or resolve it first")
 
         caregiver = db.query(CaregiverModel).filter(
             CaregiverModel.id == evidence.caregiver_id,
