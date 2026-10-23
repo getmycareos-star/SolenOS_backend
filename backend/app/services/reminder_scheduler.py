@@ -92,7 +92,12 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
 
 
 def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_size: int = 100) -> int:
-    """Persist each attempt and deliver through the durable in-app inbox."""
+    """Deliver through the durable in-app inbox and persist each completed attempt.
+
+    The delivery and attempt record commit atomically while the receipt row lock
+    is held. A process crash before commit leaves the receipt retryable; concurrent
+    workers cannot both claim the same pending receipt.
+    """
     now = _aware_utc(now or utc_now())
     receipts = (
         db.query(ReminderDelivery)
@@ -107,6 +112,7 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
     )
     delivered = 0
     for receipt in receipts:
+        receipt_id = receipt.id
         reminder = db.query(CareReminder).filter_by(id=receipt.reminder_id).first()
         if reminder is None:
             receipt.status = "failed"
@@ -114,61 +120,59 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             db.commit()
             continue
 
-        receipt_id = receipt.id
         attempt_number = receipt.attempt_count + 1
-        attempt_key = f"{receipt.id}:{attempt_number}"
         attempt = ReminderDeliveryAttempt(
-            delivery_id=receipt.id,
+            delivery_id=receipt_id,
             attempt_number=attempt_number,
             channel="in_app",
             started_at=now,
-            outcome="pending",
-            idempotency_key=attempt_key,
+            finished_at=now,
+            outcome="delivered",
+            idempotency_key=f"{receipt_id}:{attempt_number}",
         )
         receipt.attempt_count = attempt_number
+        receipt.status = "delivered"
+        receipt.delivered_at = now
+        receipt.last_error = None
         db.add(attempt)
         try:
-            # Commit the attempt before processing so a process crash leaves a
-            # durable record of the in-flight attempt for recovery/audit.
-            db.commit()
-
-            # In-app delivery is the implemented channel. A durable receipt
-            # becomes visible to authenticated clients via the scoped API.
-            receipt = db.query(ReminderDelivery).filter_by(id=receipt_id).with_for_update().first()
-            attempt = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt_id, attempt_number=attempt_number).first()
-            if receipt is None or attempt is None:
-                continue
-            receipt.status = "delivered"
-            receipt.delivered_at = now
-            receipt.last_error = None
-            attempt.outcome = "delivered"
-            attempt.finished_at = now
+            # The inbox receipt itself is the in-app notification visible to the
+            # authenticated caregiver. Receipt state and attempt history commit
+            # together, preventing concurrent duplicate delivery processing.
             db.commit()
             delivered += 1
         except SQLAlchemyError as exc:
             db.rollback()
-            # If the first commit failed, no attempt is durable. The scheduler
-            # will revisit the still-pending receipt next cycle.
             try:
-                receipt = db.query(ReminderDelivery).filter_by(id=receipt_id).first()
-                attempt = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt_id, attempt_number=attempt_number).first()
-                if receipt is None:
+                receipt = db.query(ReminderDelivery).filter_by(id=receipt_id).with_for_update().first()
+                reminder = db.query(CareReminder).filter_by(id=receipt.reminder_id).first() if receipt else None
+                if receipt is None or reminder is None:
                     continue
+                attempt_number = receipt.attempt_count + 1
+                terminal = attempt_number >= reminder.max_attempts
+                attempt = ReminderDeliveryAttempt(
+                    delivery_id=receipt_id,
+                    attempt_number=attempt_number,
+                    channel="in_app",
+                    started_at=now,
+                    finished_at=now,
+                    outcome="failed" if terminal else "retry",
+                    error_type=type(exc).__name__,
+                    idempotency_key=f"{receipt_id}:{attempt_number}",
+                )
+                receipt.attempt_count = attempt_number
                 receipt.last_error = type(exc).__name__
-                if receipt.attempt_count >= reminder.max_attempts:
+                if terminal:
                     receipt.status = "failed"
                 else:
                     receipt.status = "retry"
                     receipt.next_attempt_at = now + timedelta(
-                        seconds=min(3600, reminder.retry_delay_seconds * (2 ** max(0, receipt.attempt_count - 1)))
+                        seconds=min(3600, reminder.retry_delay_seconds * (2 ** max(0, attempt_number - 1)))
                     )
-                if attempt is not None:
-                    attempt.outcome = receipt.status
-                    attempt.error_type = type(exc).__name__
-                    attempt.finished_at = now
+                db.add(attempt)
                 db.commit()
             except SQLAlchemyError:
                 db.rollback()
-                # Keep the persisted pending receipt recoverable; next poll retries.
+                # Receipt remains pending/retryable when persistence itself is unavailable.
                 logger.exception("Could not persist reminder retry state")
     return delivered
