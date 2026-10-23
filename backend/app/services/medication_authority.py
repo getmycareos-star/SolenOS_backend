@@ -54,3 +54,27 @@ def get_verified_medication_authority(
         if expiry <= now:
             return None
     return verification
+
+
+
+def action_has_verified_medication_authority(db: Session, action) -> bool:
+    """Revalidate the exact source evidence whenever a medication action is used."""
+    action_text = " ".join(
+        str(value or "")
+        for value in (
+            getattr(action, "original_text", None),
+            getattr(action, "source_passage", None),
+            getattr(action, "normalized_action", None),
+            getattr(action, "action_object", None),
+        )
+    )
+    if not medication_instruction_requires_authority(
+        action_text, bool(getattr(action, "is_medication_action", False))
+    ):
+        return True
+    return get_verified_medication_authority(
+        db,
+        person_id=str(action.person_id),
+        evidence_id=str(action.source_evidence_id),
+        source_authority=str(action.source_authority or "unknown"),
+    ) is not None
