@@ -114,6 +114,12 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
     engine, db = make_db()
     try:
         person, caregiver, assigned, _, _ = seed_people(db)
+        backup = Caregiver(
+            id="c-handoff-backup", name="Backup Caregiver", email="backup@example.test",
+            relationship="Family", person_id=person.id, timezone="UTC",
+        )
+        db.add(backup)
+        db.commit()
         item = create_handoff(
             CareHandoffCreate(
                 person_id=person.id,
@@ -124,6 +130,9 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
             request_for(person.id, caregiver.id),
             db,
         )
+        with pytest.raises(HTTPException) as exc:
+            close_handoff(item.id, request_for(person.id, backup.id), db)
+        assert exc.value.status_code == 403
         with pytest.raises(HTTPException) as exc:
             acknowledge_handoff(item.id, request_for(person.id, caregiver.id), db)
         assert exc.value.status_code == 403
