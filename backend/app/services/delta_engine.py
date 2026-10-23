@@ -203,12 +203,18 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     # Include the existing LCR's real source material as context too. Many older
     # records predate normalized assertions; they are evidence, not automatically
     # promoted into verified current-state facts.
-    prior_events = db.query(CareEvent).filter(
-        CareEvent.person_id == person_id
-    ).order_by(CareEvent.occurred_at.desc()).limit(100).all()
-    prior_evidence = db.query(Evidence).filter(
-        Evidence.person_id == person_id
-    ).order_by(Evidence.uploaded_at.desc()).limit(100).all()
+    prior_events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+    if source_event_id:
+        # Daily Capture may already have saved the event before invoking Delta.
+        # Do not let the event being reconciled masquerade as historical baseline.
+        prior_events_query = prior_events_query.filter(CareEvent.id != source_event_id)
+    prior_events = prior_events_query.order_by(CareEvent.occurred_at.desc()).limit(100).all()
+    prior_evidence_query = db.query(Evidence).filter(Evidence.person_id == person_id)
+    if evidence_ids:
+        # These evidence rows belong to the incoming event; the new-event text is
+        # supplied separately and must not be counted again as prior evidence.
+        prior_evidence_query = prior_evidence_query.filter(~Evidence.id.in_(evidence_ids))
+    prior_evidence = prior_evidence_query.order_by(Evidence.uploaded_at.desc()).limit(100).all()
     existing_record_context = {
         "events": [{
             "event_id": item.id, "date": item.occurred_at.isoformat() if item.occurred_at else None,
