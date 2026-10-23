@@ -29,8 +29,13 @@ def upgrade():
         op.add_column("actions", sa.Column("completed_by_caregiver_id", sa.String(), nullable=True))
 
     inspector = inspect(bind)
-    foreign_keys = {fk.get("name") for fk in inspector.get_foreign_keys("actions")}
-    if FK_NAME not in foreign_keys:
+    foreign_keys = inspector.get_foreign_keys("actions")
+    has_completion_fk = any(
+        fk.get("referred_table") == "caregivers"
+        and fk.get("constrained_columns") == ["completed_by_caregiver_id"]
+        for fk in foreign_keys
+    )
+    if not has_completion_fk:
         with op.batch_alter_table("actions") as batch_op:
             batch_op.create_foreign_key(
                 FK_NAME,
@@ -56,8 +61,14 @@ def downgrade():
         op.drop_index(INDEX_NAME, table_name="actions")
 
     inspector = inspect(bind)
-    foreign_keys = {fk.get("name") for fk in inspector.get_foreign_keys("actions")}
-    if FK_NAME in foreign_keys:
+    foreign_keys = inspector.get_foreign_keys("actions")
+    completion_fk = next((
+        fk for fk in foreign_keys
+        if fk.get("name") == FK_NAME
+        or (fk.get("referred_table") == "caregivers"
+            and fk.get("constrained_columns") == ["completed_by_caregiver_id"])
+    ), None)
+    if completion_fk:
         with op.batch_alter_table("actions") as batch_op:
             batch_op.drop_constraint(FK_NAME, type_="foreignkey")
 
