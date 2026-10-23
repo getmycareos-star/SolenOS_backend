@@ -50,6 +50,7 @@ class ReminderResponse(BaseModel):
     due_at: datetime
     timezone: str
     recurrence_rule: Optional[str] = None
+    recurrence_anchor_day: Optional[int] = None
     status: str
     idempotency_key: str
     attempt_count: int
