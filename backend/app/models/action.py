@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -130,6 +131,7 @@ class Action(Base):
     completion_confidence = Column(Float, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     completed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True, index=True)
+    completed_by_caregiver = relationship("Caregiver", foreign_keys=[completed_by_caregiver_id], lazy="joined")
     superseded_by_action_id = Column(String, ForeignKey("actions.id"), nullable=True)
     cancelled_at = Column(DateTime(timezone=True), nullable=True)
     expired_at = Column(DateTime(timezone=True), nullable=True)
@@ -144,3 +146,7 @@ class Action(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+
+    @property
+    def completed_by_caregiver_label(self):
+        return self.completed_by_caregiver.name if self.completed_by_caregiver else None
