@@ -148,6 +148,35 @@ def _local_ollama_url() -> tuple[str, str, float]:
     return base_url, model, timeout
 
 
+
+def _validate_schema(value: Any, schema: dict[str, Any], path: str = "$") -> None:
+    expected = schema.get("type")
+    valid = {
+        "object": lambda v: isinstance(v, dict),
+        "array": lambda v: isinstance(v, list),
+        "string": lambda v: isinstance(v, str),
+        "boolean": lambda v: isinstance(v, bool),
+        "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
+        "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+        "null": lambda v: v is None,
+    }
+    allowed = expected if isinstance(expected, list) else [expected]
+    if expected and not any(kind in valid and valid[kind](value) for kind in allowed):
+        raise HTTPException(status_code=502, detail=f"The local model returned an invalid Delta field at {path}; no delta was persisted.")
+    if "enum" in schema and value not in schema["enum"]:
+        raise HTTPException(status_code=502, detail=f"The local model returned an unsupported Delta value at {path}; no delta was persisted.")
+    if isinstance(value, dict):
+        for key in schema.get("required", []):
+            if key not in value:
+                raise HTTPException(status_code=502, detail=f"The local model omitted required Delta field {path}.{key}; no delta was persisted.")
+        for key, child in schema.get("properties", {}).items():
+            if key in value:
+                _validate_schema(value[key], child, f"{path}.{key}")
+    elif isinstance(value, list) and isinstance(schema.get("items"), dict):
+        for index, item in enumerate(value):
+            _validate_schema(item, schema["items"], f"{path}[{index}]")
+
+
 def _parse_model_json(content: str) -> dict[str, Any]:
     text = content.strip()
     if text.startswith("```"):
@@ -159,12 +188,7 @@ def _parse_model_json(content: str) -> dict[str, Any]:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=502, detail="The local model returned invalid JSON; no delta was persisted.") from exc
-    required = {"event_summary", "medications", "conditions", "symptoms", "tests", "follow_ups", "contradictions", "clinical_gaps", "caregiver_summary", "clinician_summary"}
-    if not isinstance(data, dict) or not required.issubset(data):
-        raise HTTPException(status_code=502, detail="The local model response did not satisfy the Delta Engine contract; no delta was persisted.")
-    for key in required - {"event_summary", "caregiver_summary", "clinician_summary"}:
-        if not isinstance(data[key], list):
-            raise HTTPException(status_code=502, detail=f"The local model returned an invalid {key} collection; no delta was persisted.")
+    _validate_schema(data, DELTA_JSON_CONTRACT)
     return data
 
 
