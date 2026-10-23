@@ -111,3 +111,11 @@ def test_completion_cannot_be_overwritten(db):
             ActionCompletionEvidence(caregiver_id="caregiver-a", evidence_ids=[], completion_confidence=0.9),
             db,
         )
+
+def test_medication_action_cannot_be_activated_without_clinician_confirmation(db):
+    action = db.query(ActionModel).filter_by(id="action-a").one()
+    action.is_medication_action = True
+    action.status = "pending_confirmation"
+    db.commit()
+    with pytest.raises(ValueError, match="clinician confirmation"):
+        ActionLifecycleService().activate_action(action, db)
