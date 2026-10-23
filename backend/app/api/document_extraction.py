@@ -270,8 +270,11 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
     if caregiver is None:
         raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
 
-    data = await file.read(MAX_DOCUMENT_BYTES + 1)
-    filename = (file.filename or "care-document").replace("\\\\", "/").split("/")[-1][:255]
+    try:
+        data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    finally:
+        await file.close()
+    filename = (file.filename or "care-document").replace("\\", "/").split("/")[-1][:255]
     content_type = (file.content_type or "application/octet-stream").lower().strip()
     if len(data) > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="The selected file exceeds the 10 MiB limit.")
