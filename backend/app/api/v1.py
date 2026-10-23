@@ -278,7 +278,27 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
 
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
-    return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
+    rows = (
+        db.query(EvidenceModel)
+        .filter(EvidenceModel.person_id == person_id)
+        .order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc())
+        .all()
+    )
+    results = []
+    for row in rows:
+        item = {column.name: getattr(row, column.name) for column in EvidenceModel.__table__.columns}
+        raw_metadata = item.get("extra_metadata")
+        if raw_metadata:
+            try:
+                item["extra_metadata"] = json.loads(raw_metadata)
+            except (TypeError, ValueError):
+                # Preserve the evidence record while explicitly surfacing metadata
+                # corruption; never expose raw serialized internals as structured facts.
+                item["extra_metadata"] = {"metadata_unreadable": True}
+        else:
+            item["extra_metadata"] = None
+        results.append(item)
+    return results
 
 
 def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Session):
