@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 
 
 class CareHandoffCreate(BaseModel):
@@ -15,6 +15,13 @@ class CareHandoffCreate(BaseModel):
     due_at: Optional[datetime] = None
     reminder_at: Optional[datetime] = None
     access_scope: Literal["care_circle", "assigned_only"] = "care_circle"
+
+    @field_validator("due_at", "reminder_at")
+    @classmethod
+    def require_timezone_aware(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("due_at and reminder_at must include a timezone offset")
+        return value
 
     @model_validator(mode="after")
     def validate_schedule(self):
