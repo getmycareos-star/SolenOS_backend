@@ -251,6 +251,246 @@ def list_daily_captures(
     )
 
 
+
+MAX_DOCUMENT_UPLOAD_BYTES = 20 * 1024 * 1024
+ALLOWED_DOCUMENT_TYPES = {
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+}
+
+
+def _document_type_from_text(text: str, content_type: str) -> str:
+    lowered = text.casefold()
+    if any(term in lowered for term in ("discharge summary", "discharge instructions", "discharged from")):
+        return "discharge_instructions"
+    if any(term in lowered for term in ("prescription", "medication list", "dosage", "take one tablet")):
+        return "medication_document"
+    if any(term in lowered for term in ("laboratory result", "lab results", "reference range", "test result")):
+        return "test_result"
+    if any(term in lowered for term in ("appointment", "follow-up visit", "clinic visit")):
+        return "appointment_document"
+    if any(term in lowered for term in ("care plan", "care instructions", "treatment plan")):
+        return "care_plan"
+    if content_type == "application/pdf":
+        return "pdf_document"
+    return "image_document"
+
+
+def _document_date_from_text(text: str) -> str | None:
+    patterns = (
+        r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b",
+        r"\\b(\\d{1,2}/\\d{1,2}/20\\d{2})\\b",
+        r"\\b(\\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\\d{2})\\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _extract_document_text(content: bytes, content_type: str) -> tuple[str, str, str | None]:
+    """Extract text when a local parser/OCR engine is available; never invent text."""
+    if content_type == "application/pdf":
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(BytesIO(content), strict=False)
+            if len(reader.pages) > 100:
+                raise HTTPException(status_code=413, detail="PDF exceeds the 100-page intake limit")
+            text = "\\n".join((page.extract_text() or "") for page in reader.pages).strip()
+            return text[:100_000], "pdf_text_extraction", None if text else "no_text_detected"
+        except HTTPException:
+            raise
+        except Exception:
+            return "", "pdf_text_extraction", "extraction_failed"
+    try:
+        import pytesseract
+
+        with Image.open(BytesIO(content)) as image:
+            image = image.convert("RGB")
+            text = pytesseract.image_to_string(image).strip()
+            return text[:100_000], "tesseract_ocr", None if text else "no_text_detected"
+    except ImportError:
+        return "", "ocr_unavailable", "pending_ocr"
+    except Exception:
+        return "", "tesseract_ocr", "ocr_failed"
+
+
+def _document_signature_matches(content_type: str, content: bytes) -> bool:
+    if content_type == "application/pdf":
+        return content.startswith(b"%PDF-")
+    return _image_signature_matches(content_type, content)
+
+
+@router.post("/documents/intake", status_code=201)
+def intake_document(
+    file: UploadFile = File(...),
+    person_id: str = Form(...),
+    caregiver_id: str = Form(...),
+    extracted_text: str = Form(default=""),
+    extraction_source: str = Form(default="server"),
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Persist an uploaded document, its extraction provenance, and review-only candidates."""
+    assert_person_access(db, account.id, person_id, "write")
+    caregiver = _verified_caregiver(db, account, person_id, caregiver_id)
+    content_type = (file.content_type or "").lower().strip()
+    if content_type not in ALLOWED_DOCUMENT_TYPES:
+        raise HTTPException(status_code=415, detail="Upload a PDF, JPEG, PNG, or WebP document")
+    content = file.file.read(MAX_DOCUMENT_UPLOAD_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded document is empty")
+    if len(content) > MAX_DOCUMENT_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Document exceeds the 20 MiB upload limit")
+    if not _document_signature_matches(content_type, content):
+        raise HTTPException(status_code=415, detail="File content does not match its declared type")
+
+    if content_type.startswith("image/"):
+        expected_format = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}[content_type]
+        try:
+            with Image.open(BytesIO(content)) as image:
+                if image.format != expected_format:
+                    raise HTTPException(status_code=415, detail="Image content does not match its declared type")
+                width, height = image.size
+                if width < 1 or height < 1 or width * height > 40_000_000:
+                    raise HTTPException(status_code=413, detail="Image dimensions exceed the allowed limit")
+                image.verify()
+        except HTTPException:
+            raise
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise HTTPException(status_code=415, detail="Uploaded file is not a valid supported image")
+
+    raw_filename = (file.filename or "care-document").replace("\\\\", "/").split("/")[-1]
+    safe_filename = re.sub(r"[^A-Za-z0-9._ -]", "_", raw_filename).strip(" .")[:255] or "care-document"
+    digest = hashlib.sha256(content).hexdigest()
+    supplied_text = extracted_text.strip()
+    if len(supplied_text) > 100_000:
+        raise HTTPException(status_code=413, detail="Extracted text exceeds the 100,000-character limit")
+    if supplied_text:
+        document_text = supplied_text
+        engine = extraction_source[:80] if extraction_source.strip() else "client_extraction"
+        extraction_status = "extracted"
+    else:
+        document_text, engine, extraction_error = _extract_document_text(content, content_type)
+        extraction_status = "extracted" if document_text else (extraction_error or "pending_extraction")
+
+    detected_type = _document_type_from_text(document_text, content_type)
+    detected_date = _document_date_from_text(document_text) if document_text else None
+    metadata = {
+        "original_filename": safe_filename,
+        "mime_type": content_type,
+        "size_bytes": len(content),
+        "sha256": digest,
+        "document_type": detected_type,
+        "document_date_candidate": detected_date,
+        "document_date_review_status": "pending_review" if detected_date else "not_detected",
+        "extraction_status": extraction_status,
+        "extraction_engine": engine,
+        "extraction_version": "document-intake-v1",
+        "extracted_character_count": len(document_text),
+        "review_status": "pending_review",
+        "source_file_preserved": True,
+    }
+    evidence = EvidenceModel(
+        person_id=person_id,
+        type="document",
+        source_text=document_text if document_text else "Document stored; text extraction is pending or unavailable. No document facts have been verified.",
+        original_file_path="pending",
+        uploaded_by_caregiver_id=caregiver.id,
+        extra_metadata=json.dumps(metadata, ensure_ascii=False),
+        confidence=None,
+        evidence_status="uploaded",
+        source_type="document_upload",
+    )
+    db.add(evidence)
+    db.flush()
+    evidence.original_file_path = f"db://evidence-files/{evidence.id}"
+    db.add(EvidenceFile(
+        evidence_id=evidence.id,
+        uploaded_by_account_id=account.id,
+        original_filename=safe_filename,
+        content_type=content_type,
+        size_bytes=len(content),
+        sha256=digest,
+        content=content,
+    ))
+    event = CareEventModel(
+        person_id=person_id,
+        event_type="document_intake",
+        status="recorded",
+        occurred_at=datetime.now(timezone.utc),
+        occurred_at_timezone=caregiver.timezone,
+        title=f"Document added: {safe_filename}"[:200],
+        description=(
+            f"Document uploaded. Extraction status: {extraction_status}. "
+            "Detected type/date and extracted facts are candidates for caregiver review, not verified facts."
+        ),
+        evidence_ids=[evidence.id],
+        created_by_caregiver_id=caregiver.id,
+        tags=[f"document_type:{detected_type}", f"document_extraction:{extraction_status}"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(evidence)
+    db.refresh(event)
+
+    analysis = None
+    if document_text:
+        analysis = analyze_saved_care_event(db, event.id)
+    return {
+        "evidence_id": evidence.id,
+        "care_event_id": event.id,
+        "person_id": person_id,
+        "filename": safe_filename,
+        "content_type": content_type,
+        "size_bytes": len(content),
+        "sha256": digest,
+        "document_type_candidate": detected_type,
+        "document_date_candidate": detected_date,
+        "document_date_review_status": metadata["document_date_review_status"],
+        "extraction_status": extraction_status,
+        "extraction_engine": engine,
+        "extraction_version": metadata["extraction_version"],
+        "extracted_character_count": len(document_text),
+        "source_file_preserved": True,
+        "review_required": True,
+        "qwen_extraction_status": analysis["qwen_extraction_status"] if analysis else "not_run_no_text",
+        "qwen_candidates": analysis["qwen_candidates"] if analysis else None,
+        "qwen_analysis_id": analysis.get("qwen_analysis_id") if analysis else None,
+    }
+
+
+@router.get("/documents/{evidence_id}")
+def get_document_intake_record(
+    evidence_id: str,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    evidence = db.query(EvidenceModel).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.type == "document",
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Document evidence not found")
+    assert_person_access(db, account.id, evidence.person_id, "read")
+    try:
+        metadata = json.loads(evidence.extra_metadata or "{}")
+    except (TypeError, json.JSONDecodeError):
+        metadata = {}
+    return {
+        "evidence_id": evidence.id,
+        "person_id": evidence.person_id,
+        "source_text": evidence.source_text,
+        "metadata": metadata,
+        "evidence_status": evidence.evidence_status,
+        "source_type": evidence.source_type,
+    }
+
+
 @router.post("/upload", response_model=UploadOutput, status_code=201)
 def upload_image_evidence(
     file: UploadFile = File(...),
