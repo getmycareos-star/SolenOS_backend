@@ -353,3 +353,77 @@ def test_reminder_contract_rejects_blank_text_and_naive_datetime():
         assert False, "naive scheduled_at should be rejected"
     except ValidationError:
         pass
+
+
+def test_changed_medication_source_blocks_action_completion_even_after_prior_verification():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        action.is_medication_action = True
+        action.source_authority = "physician"
+        db.add(MedicationAuthorityVerification(
+            id="v-stale-completion",
+            evidence_id=evidence.id,
+            person_id=person.id,
+            source_text_sha256=hashlib.sha256(evidence.source_text.encode("utf-8")).hexdigest(),
+            authority_role="physician",
+            verifier_identity="Trusted prescriber",
+            verification_method="signed_prescription",
+            verified_by_caregiver_id=caregiver.id,
+            verified_at=datetime.now(timezone.utc),
+        ))
+        db.commit()
+        evidence.source_text = "Source content changed after review."
+        db.commit()
+        try:
+            ActionLifecycleService().record_completion(
+                action,
+                ActionCompletionEvidence(evidence_ids=[], completion_confidence=0.6, notes="Caregiver report."),
+                db,
+                completed_by_caregiver_id=caregiver.id,
+            )
+            assert False, "changed medication source must not be completed as authoritative"
+        except ValueError as exc:
+            assert "source authority" in str(exc).lower()
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_changed_medication_source_suppresses_due_reminder():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        action.is_medication_action = True
+        action.source_authority = "physician"
+        db.add(MedicationAuthorityVerification(
+            id="v-stale-reminder",
+            evidence_id=evidence.id,
+            person_id=person.id,
+            source_text_sha256=hashlib.sha256(evidence.source_text.encode("utf-8")).hexdigest(),
+            authority_role="physician",
+            verifier_identity="Trusted prescriber",
+            verification_method="signed_prescription",
+            verified_by_caregiver_id=caregiver.id,
+            verified_at=datetime.now(timezone.utc),
+        ))
+        reminder = CareReminder(
+            id="r-stale-medication", person_id=person.id, action_id=action.id,
+            created_by_caregiver_id=caregiver.id, title="Medication reminder",
+            message="Follow verified directions", timezone="UTC", recurrence="once",
+            next_run_at=datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc),
+            local_time="10:00", enabled=True,
+        )
+        db.add(reminder)
+        db.commit()
+        evidence.source_text = "Source content changed after review."
+        db.commit()
+        assert materialize_due_reminders(db, datetime(2026, 10, 23, 11, 0, tzinfo=timezone.utc)) == 0
+        db.refresh(reminder)
+        assert reminder.enabled is False
+        assert db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
