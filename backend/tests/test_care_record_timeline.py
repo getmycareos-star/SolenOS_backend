@@ -78,6 +78,15 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
             source_type="document",
         )
         db.add(medication_list)
+        assertion_evidence = Evidence(
+            person_id=person_id,
+            type="care_instruction",
+            source_text="Use walker when walking.",
+            uploaded_by_caregiver_id=caregiver_id,
+            time_provenance="document_date_unknown",
+            source_type="document",
+        )
+        db.add(assertion_evidence)
         db.flush()
         event = CareEvent(
             person_id=person_id, event_type="hospital_discharge", status="recorded",
@@ -122,7 +131,7 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
             source_event_id=event.id,
             source_label="discharge instruction",
             source_text="Use walker when walking.",
-            evidence_ids=[evidence.id],
+            evidence_ids=[assertion_evidence.id],
             assertion_status="reported",
             observed_at=now - timedelta(hours=2),
             created_by_caregiver_id=caregiver_id,
@@ -153,7 +162,7 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
         )
         db.add(outcome)
         db.commit()
-        event_id, evidence_id, medication_list_id, action_id = event.id, evidence.id, medication_list.id, action.id
+        event_id, evidence_id, medication_list_id, assertion_evidence_id, action_id = event.id, evidence.id, medication_list.id, assertion_evidence.id, action.id
     finally:
         db.close()
 
@@ -174,6 +183,8 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
     assert "call the clinic if dizziness worsens" in event_item["evidence"][0]["source_text"].lower()
     assert event_item["related_observations"][0]["original_text"] == "Dizziness was reported before discharge."
     assert event_item["assertions"][0]["asserted_value"] == "Use walker when walking"
+    assert event_item["assertions"][0]["evidence"][0]["id"] == assertion_evidence_id
+    assert event_item["assertions"][0]["evidence"][0]["source_text"] == "Use walker when walking."
     assert body["counts"]["observations"] == 1
     assert body["counts"]["care_assertions"] == 1
     assert body["counts"]["action_outcomes"] == 1
