@@ -22,6 +22,7 @@ from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.reminders import router as reminders_router
+from app.api.medication_authority import router as medication_authority_router
 from app.services.reminder_worker import reminder_scheduler_loop
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
@@ -66,6 +67,7 @@ app.add_middleware(
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(medication_authority_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
