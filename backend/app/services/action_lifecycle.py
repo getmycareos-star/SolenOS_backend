@@ -1,6 +1,6 @@
 import hashlib
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.action import Action as ActionModel, ActionStatus
@@ -67,7 +67,7 @@ class ActionLifecycleService:
         action.completion_confidence = evidence.completion_confidence
         action.completion_notes = evidence.notes
         action.completed_by_caregiver_id = caregiver.id
-        action.completed_at = datetime.now().astimezone()
+        action.completed_at = datetime.now(timezone.utc)
 
         db.add(action)
         db.commit()
