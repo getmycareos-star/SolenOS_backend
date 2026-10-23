@@ -48,3 +48,31 @@ def test_delta_contract_keeps_missing_result_and_follow_up_open(monkeypatch):
     assert parsed["tests"][0]["result_present"] is False
     assert parsed["follow_ups"][0]["status"] == "pending"
     assert parsed["clinical_gaps"][0]["next_question"] == "Has the MRI been completed?"
+
+
+def test_delta_run_migration_adds_durable_history_table():
+    import importlib.util
+    from pathlib import Path
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import Column, MetaData, String, Table, inspect, create_engine
+
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    Table("persons", metadata, Column("id", String, primary_key=True))
+    Table("care_events", metadata, Column("id", String, primary_key=True))
+    metadata.create_all(engine)
+    path = Path(__file__).parents[1] / "alembic" / "versions" / "20261023_04_delta_runs.py"
+    spec = importlib.util.spec_from_file_location("delta_runs_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(migration)
+    with engine.begin() as connection:
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            migration.upgrade()
+    inspector = inspect(engine)
+    assert inspector.has_table("care_delta_runs")
+    columns = {column["name"] for column in inspector.get_columns("care_delta_runs")}
+    assert {"person_id", "delta_json", "source_event_id", "evidence_ids", "model_name"} <= columns
+    engine.dispose()
