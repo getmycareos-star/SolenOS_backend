@@ -22,6 +22,7 @@ class CareReminder(Base):
     due_at = Column(DateTime(timezone=True), nullable=False)
     timezone = Column(String, nullable=False, default="UTC")
     recurrence_rule = Column(String, nullable=True)  # none | daily | weekly | monthly
+    recurrence_anchor_day = Column(Integer, nullable=True)
     status = Column(String, nullable=False, default="scheduled")
     idempotency_key = Column(String, nullable=False)
     attempt_count = Column(Integer, nullable=False, default=0)
