@@ -19,6 +19,18 @@ class SituationDocument(BaseModel):
     ocr_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
+CaptureCategory = Literal[
+    "symptom",
+    "behavior",
+    "sleep",
+    "meal",
+    "appointment",
+    "medication_observation",
+    "other",
+]
+TimeProvenance = Literal["caregiver_reported_event_time", "entry_time_defaulted"]
+
+
 class SituationInput(BaseModel):
     caregiver_id: str
     client_care_key: Optional[str] = None
@@ -27,6 +39,7 @@ class SituationInput(BaseModel):
     documents: Optional[List[SituationDocument]] = None
     provenance: Optional[SituationProvenance] = None
     timestamp: Optional[str] = None
+    capture_category: Optional[CaptureCategory] = None
     # Explicit command for interaction lifecycle only; never resolves or deletes care reality.
     action: Optional[Literal["pause_active_care_situation"]] = None
     care_session_id: Optional[str] = Field(None, max_length=128)
@@ -38,6 +51,7 @@ class SituationEvent(BaseModel):
     title: str
     description: Optional[str] = None
     occurred_at: datetime
+    time_provenance: Optional[TimeProvenance] = None
     evidence_ids: Optional[List[str]] = None
 
 
