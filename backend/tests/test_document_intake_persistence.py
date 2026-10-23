@@ -1,5 +1,7 @@
 """End-to-end tests for private document storage, provenance, candidate review and access scope."""
+pytestmark = pytest.mark.session_security
 import json
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
