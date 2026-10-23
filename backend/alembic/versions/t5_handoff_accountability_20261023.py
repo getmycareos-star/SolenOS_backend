@@ -66,6 +66,9 @@ def downgrade():
         op.drop_index("ix_care_handoffs_due_at", table_name="care_handoffs")
     existing = {column["name"] for column in inspect(bind).get_columns("care_handoffs")}
     if inspector.has_table("care_reminders"):
+        reminder_columns_before = {column["name"] for column in inspect(bind).get_columns("care_reminders")}
+        if "handoff_id" in reminder_columns_before:
+            op.execute(sa.text("DELETE FROM care_reminders WHERE handoff_id IS NOT NULL"))
         reminder_indexes = {item["name"] for item in inspect(bind).get_indexes("care_reminders")}
         for index_name in ("ix_care_reminders_handoff_id", "ix_care_reminders_recipient_caregiver_id"):
             if index_name in reminder_indexes:
