@@ -137,9 +137,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         try:
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
+                # ISO timestamps without an offset are interpreted as UTC explicitly;
+                # never silently reinterpret them in the server's local timezone.
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError:
-            occurred_at = _utc_now()
+        except (TypeError, ValueError):
+            raise ValueError("timestamp must be a valid ISO 8601 datetime")
     else:
         occurred_at = _utc_now()
 
