@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.document_asset import DocumentAsset
-from app.services.situation import analyze_saved_care_event
 
 router = APIRouter(tags=["document-extraction"])
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -176,6 +175,57 @@ async def extract_document(request: Request, file: UploadFile = File(...)):
     return result
 
 
+
+
+def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, Any]]:
+    """Create exact-source, review-only candidates; this is not clinical interpretation."""
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    medication = re.compile(r"\\b(medication|prescription|tablet|capsule|dosage|dose|\\d+(?:\\.\\d+)?\\s?(?:mg|mcg|g|ml|mL|units?)|take\\s+\\d+)\\b", re.IGNORECASE)
+    result = re.compile(r"\\b(result|test|laboratory|lab|reference range|positive|negative|elevated|low|high|normal|abnormal|mmol|mg/dl|mmhg|bpm)\\b", re.IGNORECASE)
+    follow_up = re.compile(r"\\b(follow[- ]?up|appointment|return (?:to|in)|recheck|contact|call (?:the|your|clinic|doctor)|schedule|refer(?:ral)?|within \\d+ (?:day|week|month)s?)\\b", re.IGNORECASE)
+    instruction = re.compile(r"\\b(instruct(?:ion|ed|ions)?|continue|stop|avoid|monitor|keep taking|do not|don't|must|should|call|seek care|return if)\\b", re.IGNORECASE)
+
+    # Preserve exact source spans as short line/sentence quotes. Do not merge facts
+    # across unrelated sections or infer a date, dose, diagnosis, or action.
+    fragments = [part.strip() for part in re.split(r"(?<=[.!?])\\s+|\\n+", text) if part.strip()]
+    for fragment in fragments:
+        quote = fragment[:1000]
+        kind = None
+        if follow_up.search(quote):
+            kind = "follow_up"
+        elif medication.search(quote):
+            kind = "medication"
+        elif result.search(quote):
+            kind = "result"
+        elif instruction.search(quote):
+            kind = "instruction"
+        if not kind:
+            continue
+        key = (kind, quote.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        candidates.append({
+            "candidate_id": f"{evidence_id}:{len(candidates)}",
+            "candidate_type": kind,
+            "subject": {
+                "medication": "Medication reference",
+                "instruction": "Care instruction",
+                "result": "Test or result reference",
+                "follow_up": "Follow-up reference",
+            }[kind],
+            "observation": quote,
+            "source_quote": quote,
+            "source_evidence_id": evidence_id,
+            "confidence": None,
+            "review_status": "pending_review",
+        })
+        if len(candidates) >= 30:
+            break
+    return candidates
+
+
 def _classify_document_type(text: str, filename: str) -> str:
     lowered = text.casefold()
     if any(term in lowered for term in ("discharge summary", "discharge instructions", "discharged from")):
@@ -251,6 +301,10 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
 
     document_type = _classify_document_type(extracted_text, filename)
     document_date = _document_date_candidate(extracted_text) if extracted_text else None
+    # Evidence ID is generated before candidate IDs so every candidate can point back to its source.
+    import uuid
+    evidence_id = str(uuid.uuid4())
+    document_candidates = _extract_document_candidates(extracted_text, evidence_id) if extracted_text else []
     metadata = {
         "original_filename": filename,
         "mime_type": content_type,
@@ -267,9 +321,11 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
         "extraction_error": extraction_error,
         "extracted_char_count": len(extracted_text),
         "review_status": "pending_review",
+        "document_candidates": document_candidates,
         "source_file_preserved": True,
     }
     evidence = Evidence(
+        id=evidence_id,
         person_id=person_id,
         type="document",
         source_text=extracted_text if extracted_text else "Document source preserved; readable text is not currently available. No document facts have been verified.",
@@ -315,7 +371,6 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
     db.refresh(evidence)
     db.refresh(event)
 
-    analysis = analyze_saved_care_event(db, event.id) if extracted_text else None
     return {
         "evidence_id": evidence.id,
         "care_event_id": event.id,
@@ -336,9 +391,8 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
         "extracted_char_count": len(extracted_text),
         "source_file_preserved": True,
         "review_required": True,
-        "qwen_extraction_status": analysis["qwen_extraction_status"] if analysis else "not_run_no_text",
-        "qwen_candidates": analysis["qwen_candidates"] if analysis else None,
-        "qwen_analysis_id": analysis.get("qwen_analysis_id") if analysis else None,
+        "document_candidates": document_candidates,
+        "candidate_count": len(document_candidates),
     }
 
 
@@ -447,4 +501,69 @@ async def store_document_asset(
         "sha256": asset.sha256,
         "size_bytes": asset.size_bytes,
         "already_archived": False,
+    }
+
+
+@router.post("/documents/{evidence_id}/candidates/{candidate_index}/review")
+async def review_document_candidate(
+    evidence_id: str,
+    candidate_index: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Persist a review decision without promoting candidate content to care facts."""
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.type == "document",
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Document evidence not found for this care record.")
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="A review decision is required.") from exc
+    decision = payload.get("decision") if isinstance(payload, dict) else None
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=422, detail="Decision must be accept or reject.")
+    try:
+        metadata = __import__("json").loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Document metadata is unreadable; review cannot be safely saved.")
+    candidates = metadata.get("document_candidates")
+    if not isinstance(candidates, list) or candidate_index < 0 or candidate_index >= len(candidates):
+        raise HTTPException(status_code=404, detail="Document candidate not found.")
+    candidate = dict(candidates[candidate_index])
+    if candidate.get("review_status") != "pending_review":
+        raise HTTPException(status_code=409, detail="This candidate already has a review decision.")
+    now = datetime.now(timezone.utc).isoformat()
+    candidate["review_status"] = "accepted_by_caregiver" if decision == "accept" else "rejected_by_caregiver"
+    candidate["reviewed_at"] = now
+    candidate["reviewed_by_caregiver_id"] = caregiver_id
+    candidates[candidate_index] = candidate
+    history = list(metadata.get("document_review_history") or [])
+    history.append({
+        "candidate_index": candidate_index,
+        "decision": decision,
+        "reviewed_at": now,
+        "reviewed_by_caregiver_id": caregiver_id,
+        "source_evidence_id": evidence.id,
+    })
+    metadata["document_candidates"] = candidates
+    metadata["document_review_history"] = history
+    metadata["review_notice"] = (
+        "Review is a caregiver decision only. It does not verify the source or write a fact into the Living Care Record."
+    )
+    evidence.extra_metadata = __import__("json").dumps(metadata, ensure_ascii=False)
+    db.commit()
+    return {
+        "evidence_id": evidence.id,
+        "candidate_index": candidate_index,
+        "candidate": candidate,
+        "authoritative_lcr_write": False,
+        "message": "Review decision saved. The original document remains preserved and the Living Care Record was not changed.",
     }
