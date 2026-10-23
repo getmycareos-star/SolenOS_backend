@@ -111,3 +111,27 @@ def list_person_delivery_inbox(person_id: str, request: Request, db: Session = D
     return db.query(ReminderDelivery).filter(
         ReminderDelivery.person_id == scoped_person_id,
     ).order_by(ReminderDelivery.scheduled_for.desc()).limit(200).all()
+
+
+
+@router.delete("/{reminder_id}", response_model=ReminderOut)
+def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(get_db)):
+    _, person_id = _session_scope(request)
+    reminder = db.query(CareReminder).filter(
+        CareReminder.id == reminder_id,
+        CareReminder.person_id == person_id,
+    ).first()
+    if reminder is None:
+        raise HTTPException(status_code=404, detail="Reminder not found")
+    reminder.enabled = False
+    pending = db.query(ReminderDelivery).filter(
+        ReminderDelivery.reminder_id == reminder_id,
+        ReminderDelivery.person_id == person_id,
+        ReminderDelivery.status.in_(("pending", "retry")),
+    ).all()
+    for receipt in pending:
+        receipt.status = "cancelled"
+        receipt.last_error = "Reminder cancelled by authorised caregiver"
+    db.commit()
+    db.refresh(reminder)
+    return reminder
