@@ -257,11 +257,43 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             "type": item.type, "source_text": (item.source_text or "")[:4000],
         } for item in prior_evidence],
     }
+    open_gaps = db.query(InformationGap).filter(
+        InformationGap.person_id == person_id,
+        InformationGap.lifecycle_status.in_([
+            GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED,
+            GapLifecycleStatus.PARTIALLY_RESOLVED,
+        ]),
+    ).order_by(InformationGap.created_at.desc()).limit(100).all()
+    open_questions = db.query(OpenQuestion).filter(
+        OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
+    ).order_by(OpenQuestion.asked_at.desc()).limit(100).all()
+    unresolved_contradictions = db.query(Contradiction).filter(
+        Contradiction.person_id == person_id,
+        Contradiction.resolution_status.in_(["unresolved", "qualified"]),
+    ).order_by(Contradiction.created_at.desc()).limit(100).all()
+    existing_unresolved_care_loops = {
+        "gaps": [{
+            "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
+            "field": item.field, "status": item.lifecycle_status.value if hasattr(item.lifecycle_status, "value") else str(item.lifecycle_status),
+            "description": item.description, "expected_by": item.expected_by.isoformat() if item.expected_by else None,
+            "evidence_ids": item.evidence_ids or [],
+        } for item in open_gaps],
+        "questions": [{
+            "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
+            "question": item.question, "status": item.status, "priority": item.priority.value if hasattr(item.priority, "value") else str(item.priority),
+            "evidence_ids": item.evidence_ids or [],
+        } for item in open_questions],
+        "contradictions": [{
+            "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
+            "field": item.field, "description": item.description, "status": item.resolution_status,
+            "evidence_ids": item.evidence_ids or [],
+        } for item in unresolved_contradictions],
+    }
 
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
-        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE and EXISTING_RECORD_CONTEXT; do not summarize the event in isolation. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. "
+        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE, EXISTING_RECORD_CONTEXT, and EXISTING_UNRESOLVED_CARE_LOOPS; do not summarize the event in isolation. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. EXISTING_UNRESOLVED_CARE_LOOPS contains previously recorded gaps, questions, and unresolved contradictions that must be reconciled with the new event. Do not silently close a loop because the new event omits it; do not mark a loop verified complete based only on model inference. "
         "Return only one JSON object matching the supplied schema. Do not emit markdown. "
         "Never invent a diagnosis, medication order, date, test result, follow-up completion, or causal explanation. "
         "Distinguish new information from a meaningful state change. Use unchanged only when the source supports it. "
@@ -275,6 +307,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     user_payload = {
         "existing_active_state": active_state,
         "existing_record_context": existing_record_context,
+        "existing_unresolved_care_loops": existing_unresolved_care_loops,
         "new_care_event": {
             "date": (event_date or datetime.now(timezone.utc)).isoformat(),
             "source": source,
