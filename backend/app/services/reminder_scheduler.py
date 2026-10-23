@@ -5,6 +5,19 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 from app.models.action import Action as ActionModel
+from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
+
+
+def _action_has_current_medication_authority(db: Session, action: ActionModel) -> bool:
+    text = " ".join((action.original_text or "", action.source_passage or "", action.normalized_action or "", action.action_object or ""))
+    if not medication_instruction_requires_authority(text, action.is_medication_action):
+        return True
+    return get_verified_medication_authority(
+        db,
+        person_id=str(action.person_id),
+        evidence_id=str(action.source_evidence_id or ""),
+        source_authority=action.source_authority or "unknown",
+    ) is not None
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +72,7 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
     )
     for reminder in due:
         action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=reminder.person_id).first()
-        if action is None or action.status not in ("active", "conditional"):
+        if action is None or action.status not in ("active", "conditional") or not _action_has_current_medication_authority(db, action):
             reminder.enabled = False
             db.commit()
             continue
@@ -131,6 +144,12 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             reminder.enabled = False
             receipt.status = "cancelled"
             receipt.last_error = "Associated care action is no longer active"
+            db.commit()
+            continue
+        if not _action_has_current_medication_authority(db, action):
+            reminder.enabled = False
+            receipt.status = "cancelled"
+            receipt.last_error = "Medication source verification is missing, expired, or no longer matches the stored evidence"
             db.commit()
             continue
 
