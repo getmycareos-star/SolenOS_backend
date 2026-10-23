@@ -369,6 +369,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     name = str(item.get("name", "")).strip()
                     current = item.get("current")
                     change_type = str(item.get("change_type") or "").casefold()
+                    # A repeated unchanged report is useful in this run's audit
+                    # result but must not manufacture another active-state fact.
+                    # Competing/uncertain values remain visible for review and are
+                    # never promoted into normalized active state.
+                    if change_type in {"unchanged", "conflicting", "uncertain"}:
+                        continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
                     if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported"):
