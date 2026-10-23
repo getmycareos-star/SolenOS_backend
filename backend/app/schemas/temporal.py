@@ -89,7 +89,7 @@ class TemporalRelationBase(BaseModel):
     fact_a_id: str
     fact_b_id: str
     relation_type: TemporalRelationType
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     is_derived: bool = False
     derivation_method: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
