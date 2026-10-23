@@ -341,8 +341,9 @@ def test_daily_capture_event_is_not_used_as_its_own_baseline_or_duplicated(monke
         CareAssertion(
             person_id="delta-person", subject_type="medication", subject_id="metformin",
             field="dose", assertion_kind="current_state", asserted_value="500 mg",
-            source_event_id=None, source_label="Earlier visit", source_text="metformin 500 mg",
-            evidence_ids=[], assertion_status="accepted", created_by_caregiver_id="session-caregiver",
+            source_event_id=None, source_label="Later-dated state report", source_text="metformin 500 mg",
+            evidence_ids=[], assertion_status="accepted", observed_at=datetime(2026, 10, 23, tzinfo=timezone.utc),
+            created_by_caregiver_id="session-caregiver",
         ),
         CareAssertion(
             person_id="delta-person", subject_type="medication", subject_id="metformin",
@@ -363,6 +364,8 @@ def test_daily_capture_event_is_not_used_as_its_own_baseline_or_duplicated(monke
         metformin = next(row for row in result["computed_changes"] if row["name"] == "metformin")
         assert metformin["change_type"] == "changed"
         assert metformin["previous"] == "500 mg"
+        assert next(item for item in result["medications"] if item["name"] == "metformin")["historical_only"] is True
+        assert "not promoted as current state" in next(item for item in result["medications"] if item["name"] == "metformin")["promotion_warning"]
         assert db.query(CareAssertion).filter_by(
             person_id="delta-person", source_event_id="incoming-event",
             subject_type="medication", subject_id="metformin", field="dose",
