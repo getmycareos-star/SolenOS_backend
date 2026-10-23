@@ -364,8 +364,10 @@ def test_daily_capture_event_is_not_used_as_its_own_baseline_or_duplicated(monke
         metformin = next(row for row in result["computed_changes"] if row["name"] == "metformin")
         assert metformin["change_type"] == "changed"
         assert metformin["previous"] == "500 mg"
-        assert next(item for item in result["medications"] if item["name"] == "metformin")["historical_only"] is True
-        assert "not promoted as current state" in next(item for item in result["medications"] if item["name"] == "metformin")["promotion_warning"]
+        metformin_delta = next(item for item in result["medications"] if item["name"] == "metformin")
+        assert metformin_delta["field"] == "dose"
+        assert metformin_delta["historical_only"] is True
+        assert "not promoted as current state" in metformin_delta["promotion_warning"]
         assert db.query(CareAssertion).filter_by(
             person_id="delta-person", source_event_id="incoming-event",
             subject_type="medication", subject_id="metformin", field="dose",
