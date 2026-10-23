@@ -57,7 +57,7 @@ async def extract_document(file: UploadFile = File(...), db: Session = Depends(g
     else:
         raise HTTPException(
             status_code=415,
-            detail="This file type is not supported by the deployed extractor. Use a UTF-8 text file or a text-based PDF; scanned images and Office files need a separately deployed extractor.",
+            detail="This file type is not supported by the deployed extractor. Use a UTF-8 text file or a text-based PDF; scanned images require OCR, and Office files need a separately deployed extractor.",
         )
 
     if not extracted:
