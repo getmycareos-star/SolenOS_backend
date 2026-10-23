@@ -149,7 +149,7 @@ def _form_change_situation(
         pattern_ids=[p.id for p in relevant_patterns],
         change_ids=[c.id for c in changes],
         significance_assessment_id=primary.id if primary else None,
-        confidence=_situation_confidence(changes, relevant_patterns),
+        confidence=_situation_confidence(changes),
         alternative_interpretations=alternative_interpretations,
         context=context,
         attention_candidate=attention,
@@ -175,13 +175,10 @@ def _primary_significance(db: Session, change: Change) -> Optional[SignificanceA
     )
 
 
-def _situation_confidence(changes: List[Change], patterns: List[Pattern]) -> Optional[float]:
-    # Pattern confidence is intentionally unknown until calibrated. Only use
-    # confidence values supplied by the change detector's evidence-based method.
-    vals = [c.confidence for c in changes if c.confidence is not None]
-    if not vals:
-        return None
-    return round(min(vals), 3)
+def _situation_confidence(changes: List[Change]) -> Optional[float]:
+    # Change and pattern scores are currently uncalibrated; do not synthesize a
+    # situation score from them. Preserve unknown until calibrated evidence exists.
+    return None
 
 
 def _build_situation_context(db: Session, person_id: str, changes: List[Change],
