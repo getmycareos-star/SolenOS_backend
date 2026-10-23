@@ -4,6 +4,7 @@ import hashlib
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import Base
 from app.models.care import Person, Caregiver, Evidence
@@ -124,6 +125,49 @@ def test_medication_action_requires_separate_matching_source_verification():
         assert get_verified_medication_authority(
             db, person_id=person.id, evidence_id=evidence.id, source_authority="physician"
         ) is None
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_failed_delivery_attempt_is_persisted_and_retried():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        due = datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc)
+        reminder = CareReminder(
+            id="r-retry", person_id=person.id, action_id=action.id,
+            created_by_caregiver_id=caregiver.id, title="Retry",
+            message="Retry delivery", timezone="UTC", recurrence="once",
+            next_run_at=due, local_time="10:00", enabled=True,
+            max_attempts=3, retry_delay_seconds=10,
+        )
+        db.add(reminder)
+        db.commit()
+        materialize_due_reminders(db, datetime(2026, 10, 23, 11, 0, tzinfo=timezone.utc))
+        original_commit = db.commit
+        calls = {"count": 0}
+
+        def fail_once():
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise SQLAlchemyError("simulated transient failure")
+            original_commit()
+
+        db.commit = fail_once
+        assert deliver_pending_receipts(db, datetime(2026, 10, 23, 11, 1, tzinfo=timezone.utc)) == 0
+        db.commit = original_commit
+        receipt = db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).one()
+        assert receipt.status == "retry"
+        attempt_one = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt.id, attempt_number=1).one()
+        assert attempt_one.outcome == "retry"
+        retry_time = receipt.next_attempt_at
+        assert deliver_pending_receipts(db, retry_time + __import__("datetime").timedelta(seconds=1)) == 1
+        db.refresh(receipt)
+        assert receipt.status == "delivered"
+        attempts = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt.id).order_by(ReminderDeliveryAttempt.attempt_number).all()
+        assert [item.outcome for item in attempts] == ["retry", "delivered"]
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
