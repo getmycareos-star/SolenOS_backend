@@ -57,7 +57,7 @@ class Change(Base):
     comparison_window_end = Column(DateTime(timezone=True), nullable=True)
     persistence_days = Column(Integer, nullable=True)
     is_persistent = Column(Boolean, nullable=True)
-    confidence = Column(Float, nullable=False, default=1.0)
+    confidence = Column(Float, nullable=True, default=None)
     evidence_ids = Column(JSONList, nullable=False)
     explanation = Column(Text, nullable=True)
     time_provenance = Column(String, nullable=True)
