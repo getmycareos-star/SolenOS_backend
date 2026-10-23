@@ -1,8 +1,11 @@
 from datetime import datetime, timezone, timedelta, time
+import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now():
@@ -111,6 +114,7 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             db.commit()
             continue
 
+        receipt_id = receipt.id
         attempt_number = receipt.attempt_count + 1
         attempt_key = f"{receipt.id}:{attempt_number}"
         attempt = ReminderDeliveryAttempt(
@@ -130,8 +134,8 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
 
             # In-app delivery is the implemented channel. A durable receipt
             # becomes visible to authenticated clients via the scoped API.
-            receipt = db.query(ReminderDelivery).filter_by(id=receipt.id).with_for_update().first()
-            attempt = db.query(ReminderDeliveryAttempt).filter_by(id=attempt.id).first()
+            receipt = db.query(ReminderDelivery).filter_by(id=receipt_id).with_for_update().first()
+            attempt = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt_id, attempt_number=attempt_number).first()
             if receipt is None or attempt is None:
                 continue
             receipt.status = "delivered"
@@ -146,8 +150,8 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             # If the first commit failed, no attempt is durable. The scheduler
             # will revisit the still-pending receipt next cycle.
             try:
-                receipt = db.query(ReminderDelivery).filter_by(id=receipt.id).first()
-                attempt = db.query(ReminderDeliveryAttempt).filter_by(id=attempt.id).first()
+                receipt = db.query(ReminderDelivery).filter_by(id=receipt_id).first()
+                attempt = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt_id, attempt_number=attempt_number).first()
                 if receipt is None:
                     continue
                 receipt.last_error = type(exc).__name__
