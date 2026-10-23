@@ -9,6 +9,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import Base
 from app.models.care import Person, Caregiver, Evidence
 from app.models.action import Action as ActionModel
+from app.services.action_lifecycle import ActionLifecycleService
+from app.schemas.action import ActionCompletionEvidence
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 from app.models.medication_authority import MedicationAuthorityVerification
 from app.services.reminder_scheduler import (
@@ -168,6 +170,27 @@ def test_failed_delivery_attempt_is_persisted_and_retried():
         assert receipt.status == "delivered"
         attempts = db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt.id).order_by(ReminderDeliveryAttempt.attempt_number).all()
         assert [item.outcome for item in attempts] == ["retry", "delivered"]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_action_completion_persists_timestamp_and_caregiver_attribution():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        result = ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(evidence_ids=[evidence.id], completion_confidence=0.9),
+            db,
+            completed_by_caregiver_id=caregiver.id,
+        )
+        assert result.status == "completed"
+        assert result.completed_at is not None
+        assert result.completed_by_caregiver_id == caregiver.id
+        assert result.completed_by_caregiver_label == caregiver.name
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
