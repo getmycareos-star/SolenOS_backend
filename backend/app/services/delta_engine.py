@@ -174,7 +174,8 @@ def _normalise(value: Any) -> str:
 
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
-                    evidence_ids: list[str] | None = None, persist: bool = True) -> dict[str, Any]:
+                    evidence_ids: list[str] | None = None, persist: bool = True,
+                    created_by_caregiver_id: str | None = None) -> dict[str, Any]:
     if not content.strip():
         raise HTTPException(status_code=422, detail="Care event content is required.")
     if len(content) > 100_000:
@@ -315,6 +316,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
                         evidence_ids=evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
+                        created_by_caregiver_id=created_by_caregiver_id,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
 
@@ -371,7 +373,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     result["computed_changes"] = computed
     result["provenance"] = {
-        "person_id": person_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
+        "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
