@@ -69,3 +69,13 @@ def test_image_ocr_low_confidence_is_explicit(monkeypatch):
     assert document["extraction_source"] == "image_ocr"
     assert document["ocr_confidence"] == 0.42
     assert any("confidence is low" in warning for warning in document["extraction_warnings"])
+
+
+def test_ocr_rejects_images_above_the_pixel_budget(monkeypatch):
+    from PIL import Image
+    import app.api.document_extraction as extraction
+
+    monkeypatch.setattr(extraction, "MAX_OCR_PIXELS", 4)
+    oversized = Image.new("RGB", (3, 2), "white")
+    with pytest.raises(ValueError, match="safe OCR processing limit"):
+        extraction._ocr_image(oversized)
