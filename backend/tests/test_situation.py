@@ -144,6 +144,16 @@ def test_post_situation_with_documents():
         assert stored.source_type == "document"
         assert stored.confidence == 0.95
         evidence_db.close()
+
+        hydrated = client.get(
+            f"/api/v1/evidence/{created['person']['id']}",
+            headers=headers,
+        )
+        assert hydrated.status_code == 200, hydrated.text
+        saved_document = hydrated.json()[0]
+        assert saved_document["extra_metadata"]["extraction_source"] == "pdf_ocr"
+        assert saved_document["extra_metadata"]["sha256"] == "a" * 64
+        assert saved_document["source_type"] == "document"
     finally:
         teardown_db()
 
