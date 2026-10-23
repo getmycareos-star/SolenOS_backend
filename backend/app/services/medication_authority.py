@@ -38,7 +38,7 @@ def get_verified_medication_authority(
     verification = db.query(MedicationAuthorityVerification).filter(
         MedicationAuthorityVerification.evidence_id == evidence_id,
         MedicationAuthorityVerification.person_id == person_id,
-        MedicationAuthorityVerification.authority_role.in_(TRUSTED_PRESCRIBER_ROLES),
+        MedicationAuthorityVerification.authority_role == (source_authority or "").strip().lower(),
         MedicationAuthorityVerification.verification_method.in_(VERIFICATION_METHODS),
         MedicationAuthorityVerification.source_text_sha256 == hashlib.sha256(
             (evidence.source_text or "").encode("utf-8")
