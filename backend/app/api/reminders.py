@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -60,6 +61,7 @@ def create_reminder(payload: ReminderCreate, request: Request, db: Session = Dep
         due_at=payload.due_at.astimezone(timezone.utc),
         timezone=payload.timezone,
         recurrence_rule=payload.recurrence_rule,
+        recurrence_anchor_day=(payload.due_at.astimezone(ZoneInfo(payload.timezone)).day if payload.recurrence_rule == "monthly" else None),
         idempotency_key=payload.idempotency_key,
         max_attempts=payload.max_attempts,
         status="scheduled",
