@@ -84,6 +84,7 @@ def test_post_situation_creates_evidence_and_event():
         assert data["analysis_warning"] is None
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
+        assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
         assert data["evidence_id"] is not None
         assert data["care_event_id"] is not None
     finally:
@@ -128,6 +129,7 @@ def test_post_situation_with_documents():
         assert data["ok"] is True
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Document observation"
+        assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
     finally:
         teardown_db()
 
@@ -203,7 +205,6 @@ def test_post_situation_empty_input_and_no_documents():
         teardown_db()
 
 
-
 def test_analysis_failure_is_reported_as_partial_after_evidence_is_saved(monkeypatch):
     setup_db()
     try:
@@ -276,3 +277,118 @@ def test_invalid_observation_timestamp_is_rejected_not_replaced_with_now():
         db.close()
     finally:
         teardown_db()
+
+
+def test_quick_capture_persists_category_and_caregiver_reported_event_time():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        with TestClient(app) as client:
+            created, headers = create_authenticated_session(client, "Quick Capture Reported Time")
+            event_time = "2026-10-20T08:30:00+00:00"
+            original_report = "Caregiver observed restless sleep."
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={
+                    "caregiver_id": created["caregiver"]["id"],
+                    "person_id": created["person"]["id"],
+                    "raw_input": original_report,
+                    "capture_category": "sleep",
+                    "timestamp": event_time,
+                    "provenance": {
+                        "input_type": "caregiver_observation",
+                        "entry_method": "quick_entry",
+                        "captured_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                },
+            )
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
+            assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
+            with TestingSessionLocal() as db:
+                event = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+                evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
+                assert "capture_category:sleep" in event.tags
+                assert event.time_provenance == "caregiver_reported_event_time"
+                assert evidence.source_text == original_report
+    finally:
+        teardown_db()
+
+
+def test_quick_capture_without_event_time_marks_entry_time_fallback():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="default-time-person", name="Default Time Person")
+        caregiver = Caregiver(
+            id="default-time-caregiver",
+            name="Default Time Caregiver",
+            email="default-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                raw_input="Ate breakfast.",
+                capture_category="meal",
+            ),
+        )
+        assert response.events[0].time_provenance == "entry_time_defaulted"
+        event = db.query(CareEvent).filter_by(id=response.care_event_id).one()
+        assert "capture_category:meal" in event.tags
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_quick_capture_rejects_invalid_event_timestamp_without_saving():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="bad-time-person", name="Bad Time Person")
+        caregiver = Caregiver(
+            id="bad-time-caregiver",
+            name="Bad Time Caregiver",
+            email="bad-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        with pytest.raises(ValueError, match="Invalid timestamp"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id=caregiver.id,
+                    person_id=person.id,
+                    raw_input="A reported care observation.",
+                    capture_category="symptom",
+                    timestamp="yesterday morning",
+                ),
+            )
+        assert db.query(Evidence).filter_by(person_id=person.id).count() == 0
+        assert db.query(CareEvent).filter_by(person_id=person.id).count() == 0
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_quick_capture_rejects_unsupported_category():
+    with pytest.raises(Exception):
+        SituationInput(
+            caregiver_id="caregiver",
+            person_id="person",
+            raw_input="Observed a change.",
+            capture_category="unsupported-category",
+        )
