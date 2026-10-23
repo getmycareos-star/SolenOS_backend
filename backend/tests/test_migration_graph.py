@@ -10,4 +10,4 @@ def test_alembic_migrations_have_one_deployable_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    assert script.get_heads() == ["20261023_08"]
+    assert script.get_heads() == ["20261023_09"]
