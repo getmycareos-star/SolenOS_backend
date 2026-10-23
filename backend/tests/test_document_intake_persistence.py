@@ -160,6 +160,6 @@ def test_document_extraction_rejects_mime_and_signature_mismatch():
                 headers=headers,
                 files={"file": ("fake.pdf", b"not a PDF", "application/pdf")},
             )
-            assert response.status_code == 422, response.text
+            assert response.status_code == 415, response.text
     finally:
         teardown_db()
