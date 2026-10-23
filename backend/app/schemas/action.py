@@ -9,6 +9,7 @@ class ActionBase(BaseModel):
     source_passage: str
     source_document_type: Optional[str] = None
     source_authority: str = "unknown"
+    source_authority_verified: bool = False
     extraction_confidence: float = Field(ge=0.0, le=1.0, default=1.0)
     provenance_notes: Optional[str] = None
 
