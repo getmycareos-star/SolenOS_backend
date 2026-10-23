@@ -9,7 +9,7 @@ from app.services.baseline import (
     get_longitudinal_event_counts,
     _ensure_utc,
 )
-from app.core.change_enums import ChangeType, ChangeDirection, BaselineConfidence
+from app.core.change_enums import ChangeType, ChangeDirection
 
 
 def detect_event_changes(
