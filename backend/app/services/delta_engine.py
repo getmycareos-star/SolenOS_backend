@@ -214,12 +214,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     active_assertions = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
-        CareAssertion.assertion_kind == "current_state",
+        CareAssertion.assertion_kind.in_(["current_state", "time_bound_observation"]),
         CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
     ).order_by(CareAssertion.recorded_at.asc()).limit(500).all()
     active_state = [{
         "assertion_id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
         "field": item.field, "value": item.asserted_value, "source": item.source_label,
+        "assertion_kind": item.assertion_kind,
         "observed_at": item.observed_at.isoformat() if item.observed_at else None,
         "status": item.assertion_status, "evidence_ids": item.evidence_ids or [],
     } for item in active_assertions]
@@ -327,36 +328,50 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     # Add a deterministic comparison annotation without letting a model's label
     # overwrite contradictory source reports or assert that an item is verified.
-    known = {}
-    for item in active_state:
-        key = (_normalise(item["subject_type"]), _normalise(item["subject_id"]), _normalise(item["field"]))
-        known.setdefault(key, []).append(item)
     computed = []
     for domain in ("medications", "conditions", "symptoms"):
+        expected_subject_type = {"medications": "medication", "conditions": "condition", "symptoms": "symptom"}[domain]
         for item in result[domain]:
             name = str(item.get("name", "")).strip()
             if not name:
                 item["change_type"] = "uncertain"
                 item["certainty"] = "uncertain"
                 continue
-            field = f"{domain.rstrip('s')}_reported_state"
-            candidates = [old for old in active_state if _normalise(old["subject_id"]) == _normalise(name) or _normalise(old["field"]) == _normalise(name)]
+            change_type = str(item.get("change_type") or "").casefold()
+            if domain == "medications" and change_type in {"dose_changed", "frequency_changed", "route_changed"}:
+                expected_field = {"dose_changed": "dose", "frequency_changed": "frequency", "route_changed": "route"}[change_type]
+            else:
+                expected_field = {"medications": "medication_reported_state", "conditions": "condition_reported_state", "symptoms": "symptom_reported_state"}[domain]
+            candidates = [
+                old for old in active_state
+                if _normalise(old["subject_type"]) == expected_subject_type
+                and _normalise(old["subject_id"]) == _normalise(name)
+                and (domain == "symptoms" or _normalise(old["field"]) == expected_field)
+                and (domain != "symptoms" or old.get("assertion_kind") == "time_bound_observation")
+            ]
+            # A symptom trend compares with the most recent observation, not all
+            # historical observations (which may legitimately differ over time).
+            if domain == "symptoms" and candidates:
+                candidates.sort(key=lambda old: str(old.get("observed_at") or ""), reverse=True)
+                candidates = candidates[:1]
             prior_values = list(dict.fromkeys(old["value"] for old in candidates))
             item["existing_assertions"] = [old["assertion_id"] for old in candidates]
             distinct_prior = list(dict.fromkeys(_normalise(value) for value in prior_values))
-            if len(distinct_prior) > 1:
+            if domain != "symptoms" and len(distinct_prior) > 1:
                 item["change_type"] = "conflicting"
                 item["certainty"] = "uncertain"
                 item["prior_state_candidates"] = prior_values
-                item["comparison_warning"] = "Existing normalized assertions disagree; no prior value was selected."
+                item["comparison_warning"] = "Existing assertions for this care-state field disagree; no prior value was selected."
             elif prior_values and item.get("current") is not None and _normalise(item.get("current")) == distinct_prior[0]:
                 item["change_type"] = "unchanged"
+                item["previous"] = prior_values[0]
             elif prior_values and item.get("current") is not None:
-                if item.get("change_type") not in {"discontinued", "conflicting", "uncertain"}:
-                    item["change_type"] = "changed"
+                if change_type not in {"discontinued", "conflicting", "uncertain"}:
+                    item["change_type"] = "changed" if domain != "symptoms" else item.get("change_type", "changed")
+                item["previous"] = prior_values[0]
                 item["prior_state_candidates"] = prior_values
             else:
-                item["comparison_basis"] = "No normalized prior assertion; compare against the supplied historical LCR source context."
+                item["comparison_basis"] = "No matching normalized prior assertion; historical source context is provided separately and is not promoted to verified state."
                 if not item.get("change_type"):
                     item["change_type"] = "uncertain"
                     item["certainty"] = "uncertain"
