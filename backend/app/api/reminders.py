@@ -82,7 +82,16 @@ def create_reminder(payload: ReminderCreate, request: Request, db: Session = Dep
 
 
 @router.get("/{person_id}", response_model=list[ReminderResponse])
-def list_reminders(person_id: str, status: str | None = None, db: Session = Depends(get_db)):
+def list_reminders(person_id: str, caregiver_id: str, request: Request, status: str | None = None, db: Session = Depends(get_db)):
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not session_caregiver_id or caregiver_id != session_caregiver_id:
+        raise HTTPException(status_code=403, detail="Reminder access must match the authenticated caregiver session")
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care recipient")
     query = db.query(CareReminder).filter(CareReminder.person_id == person_id)
     if status:
         if status not in {"scheduled", "pending", "delivering", "delivered", "failed", "cancelled"}:
@@ -92,7 +101,16 @@ def list_reminders(person_id: str, status: str | None = None, db: Session = Depe
 
 
 @router.get("/{person_id}/{reminder_id}/attempts")
-def list_delivery_attempts(person_id: str, reminder_id: str, db: Session = Depends(get_db)):
+def list_delivery_attempts(person_id: str, reminder_id: str, caregiver_id: str, request: Request, db: Session = Depends(get_db)):
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not session_caregiver_id or caregiver_id != session_caregiver_id:
+        raise HTTPException(status_code=403, detail="Delivery history access must match the authenticated caregiver session")
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care recipient")
     reminder = db.query(CareReminder).filter(
         CareReminder.id == reminder_id,
         CareReminder.person_id == person_id,
