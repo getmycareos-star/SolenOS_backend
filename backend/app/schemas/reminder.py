@@ -65,3 +65,19 @@ class ReminderDeliveryOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+
+class ReminderDeliveryAttemptOut(BaseModel):
+    id: str
+    delivery_id: str
+    attempt_number: int
+    channel: str
+    started_at: datetime
+    finished_at: Optional[datetime] = None
+    outcome: str
+    error_type: Optional[str] = None
+    idempotency_key: str
+
+    class Config:
+        from_attributes = True
