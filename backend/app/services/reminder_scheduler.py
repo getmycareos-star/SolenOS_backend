@@ -59,7 +59,7 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
     )
     for reminder in due:
         action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=reminder.person_id).first()
-        if action is None or action.status in ("completed", "cancelled", "superseded", "expired"):
+        if action is None or action.status not in ("active", "conditional"):
             reminder.enabled = False
             db.commit()
             continue
@@ -127,7 +127,7 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             continue
 
         action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
-        if action is None or action.status in ("completed", "cancelled", "superseded", "expired"):
+        if action is None or action.status not in ("active", "conditional"):
             receipt.status = "cancelled"
             receipt.last_error = "Associated care action is no longer active"
             db.commit()
