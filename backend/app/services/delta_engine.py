@@ -222,7 +222,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         CareAssertion.person_id == person_id,
         CareAssertion.assertion_kind.in_(["current_state", "time_bound_observation"]),
         CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
-    ).order_by(CareAssertion.recorded_at.asc()).limit(500).all()
+    ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
     active_state = [{
         "assertion_id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
         "field": item.field, "value": item.asserted_value, "source": item.source_label,
@@ -239,13 +239,13 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         # Daily Capture may already have saved the event before invoking Delta.
         # Do not let the event being reconciled masquerade as historical baseline.
         prior_events_query = prior_events_query.filter(CareEvent.id != source_event_id)
-    prior_events = prior_events_query.order_by(CareEvent.occurred_at.desc()).limit(100).all()
+    prior_events = prior_events_query.order_by(CareEvent.occurred_at.desc()).limit(25).all()
     prior_evidence_query = db.query(Evidence).filter(Evidence.person_id == person_id)
     if evidence_ids:
         # These evidence rows belong to the incoming event; the new-event text is
         # supplied separately and must not be counted again as prior evidence.
         prior_evidence_query = prior_evidence_query.filter(~Evidence.id.in_(evidence_ids))
-    prior_evidence = prior_evidence_query.order_by(Evidence.uploaded_at.desc()).limit(100).all()
+    prior_evidence = prior_evidence_query.order_by(Evidence.uploaded_at.desc()).limit(25).all()
     existing_record_context = {
         "events": [{
             "event_id": item.id, "date": item.occurred_at.isoformat() if item.occurred_at else None,
@@ -254,7 +254,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         } for item in prior_events],
         "evidence": [{
             "evidence_id": item.id, "date": item.uploaded_at.isoformat() if item.uploaded_at else None,
-            "type": item.type, "source_text": (item.source_text or "")[:4000],
+            "type": item.type, "source_text": (item.source_text or "")[:1500],
         } for item in prior_evidence],
     }
     open_gaps = db.query(InformationGap).filter(
@@ -263,14 +263,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED,
             GapLifecycleStatus.PARTIALLY_RESOLVED,
         ]),
-    ).order_by(InformationGap.created_at.desc()).limit(100).all()
+    ).order_by(InformationGap.created_at.desc()).limit(50).all()
     open_questions = db.query(OpenQuestion).filter(
         OpenQuestion.person_id == person_id, OpenQuestion.status == "open",
-    ).order_by(OpenQuestion.asked_at.desc()).limit(100).all()
+    ).order_by(OpenQuestion.asked_at.desc()).limit(50).all()
     unresolved_contradictions = db.query(Contradiction).filter(
         Contradiction.person_id == person_id,
         Contradiction.resolution_status.in_(["unresolved", "qualified"]),
-    ).order_by(Contradiction.created_at.desc()).limit(100).all()
+    ).order_by(Contradiction.created_at.desc()).limit(50).all()
     existing_unresolved_care_loops = {
         "gaps": [{
             "id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
