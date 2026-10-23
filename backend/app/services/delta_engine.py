@@ -479,9 +479,25 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     else:
                         field = str(item.get("field") or "symptom_reported_state")
                         subject_id = name
+                    assertion_kind = "time_bound_observation" if domain == "symptoms" else "current_state"
+                    if source_event_id:
+                        # Daily Capture may already have created a source assertion
+                        # for the same field. Reuse that provenance rather than
+                        # duplicating the same fact during its Delta pass.
+                        same_event_assertion = db.query(CareAssertion.id).filter(
+                            CareAssertion.person_id == person_id,
+                            CareAssertion.source_event_id == source_event_id,
+                            CareAssertion.subject_type == domain.rstrip("s"),
+                            CareAssertion.subject_id == subject_id,
+                            CareAssertion.field == field,
+                            CareAssertion.assertion_kind == assertion_kind,
+                            CareAssertion.asserted_value == str(current),
+                        ).first()
+                        if same_event_assertion:
+                            continue
                     create_assertion(db, CareAssertionCreate(
                         person_id=person_id, subject_type=domain.rstrip("s"), subject_id=subject_id,
-                        field=field, assertion_kind="time_bound_observation" if domain == "symptoms" else "current_state",
+                        field=field, assertion_kind=assertion_kind,
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
                         evidence_ids=evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
