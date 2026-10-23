@@ -534,3 +534,62 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     }
     assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
     assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()
+
+
+
+def test_action_routes_are_scoped_to_the_authenticated_care_recipient():
+    client = TestClient(app)
+    first = create_session(client, "First care recipient")
+    second = create_session(client, "Second care recipient")
+
+    from app.models.action import Action as ActionModel
+
+    db = TestSessionLocal()
+    try:
+        action = ActionModel(
+            id="action-scope-regression",
+            person_id=first["person"]["id"],
+            source_evidence_id="evidence-scope-regression",
+            source_passage="Arrange a follow-up appointment",
+            original_text="Arrange a follow-up appointment",
+            normalized_action="Arrange a follow-up appointment",
+            created_by_caregiver_id=first["caregiver"]["id"],
+            status="active",
+        )
+        db.add(action)
+        db.commit()
+    finally:
+        db.close()
+
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    own_actions = client.get(
+        f"/api/v1/actions/{first['person']['id']}",
+        headers=first_headers,
+    )
+    assert own_actions.status_code == 200, own_actions.text
+    assert any(item["id"] == "action-scope-regression" for item in own_actions.json())
+
+    cross_person_list = client.get(
+        f"/api/v1/actions/{first['person']['id']}",
+        headers=second_headers,
+    )
+    assert cross_person_list.status_code == 403, cross_person_list.text
+
+    cross_person_update = client.patch(
+        f"/api/v1/actions/action-scope-regression",
+        headers=second_headers,
+        json={"normalized_action": "Unauthorised change"},
+    )
+    assert cross_person_update.status_code == 403, cross_person_update.text
+
+    unauthenticated = client.get(f"/api/v1/actions/{first['person']['id']}")
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
+
+def test_action_router_has_no_duplicate_actions_prefix():
+    registered_paths = {route.path for route in app.routes}
+    assert "/api/v1/actions/{person_id}" in registered_paths
+    assert "/api/v1/actions/{action_id}/complete" in registered_paths
+    assert "/api/v1/actions/actions/{person_id}" not in registered_paths
