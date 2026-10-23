@@ -5,6 +5,8 @@ stable idempotency key to the downstream provider so a worker crash after send
 but before receipt persistence cannot create duplicate notifications.
 """
 from datetime import datetime, timedelta, timezone
+from calendar import monthrange
+from zoneinfo import ZoneInfo
 from typing import Callable, Any
 import json
 import os
@@ -14,6 +16,23 @@ from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.models.reminder import CareReminder, ReminderDeliveryAttempt
+
+
+def _next_occurrence(reminder: CareReminder):
+    if reminder.recurrence_rule not in {"daily", "weekly", "monthly"}:
+        return None
+    zone = ZoneInfo(reminder.timezone or "UTC")
+    local_due = reminder.due_at.astimezone(zone)
+    if reminder.recurrence_rule == "daily":
+        next_local = local_due + timedelta(days=1)
+    elif reminder.recurrence_rule == "weekly":
+        next_local = local_due + timedelta(weeks=1)
+    else:
+        year = local_due.year + (1 if local_due.month == 12 else 0)
+        month = 1 if local_due.month == 12 else local_due.month + 1
+        day = min(local_due.day, monthrange(year, month)[1])
+        next_local = local_due.replace(year=year, month=month, day=day)
+    return next_local, next_local.astimezone(timezone.utc)
 
 
 def process_due_reminders(
@@ -99,6 +118,30 @@ def process_due_reminders(
             reminder.next_attempt_at = None
             reminder.last_error = None
             summary["delivered"] += 1
+            occurrence = _next_occurrence(reminder)
+            if occurrence:
+                next_local, next_utc = occurrence
+                next_key = f"{reminder.idempotency_key}:{next_local.isoformat()}"
+                next_exists = db.query(CareReminder.id).filter(
+                    CareReminder.person_id == reminder.person_id,
+                    CareReminder.idempotency_key == next_key,
+                ).first()
+                if not next_exists:
+                    db.add(CareReminder(
+                        person_id=reminder.person_id,
+                        action_id=reminder.action_id,
+                        created_by_caregiver_id=reminder.created_by_caregiver_id,
+                        title=reminder.title,
+                        message=reminder.message,
+                        due_at=next_utc,
+                        timezone=reminder.timezone,
+                        recurrence_rule=reminder.recurrence_rule,
+                        status="scheduled",
+                        idempotency_key=next_key,
+                        attempt_count=0,
+                        max_attempts=reminder.max_attempts,
+                        next_attempt_at=next_utc,
+                    ))
         except Exception as exc:
             error = str(exc)[:2000] or exc.__class__.__name__
             db.add(ReminderDeliveryAttempt(
