@@ -8,6 +8,8 @@ import pytest
 from app.core.database import Base
 from app.models.care import Person, Caregiver
 from app.models.care_handoff import CareHandoff, CareHandoffEvent
+from app.models.reminder import CareReminder, ReminderDelivery
+from app.services.reminder_scheduler import materialize_due_reminders, deliver_pending_receipts
 from app.schemas.care_handoff import CareHandoffCompletion, CareHandoffCreate
 from app.api.care_handoffs import (
     create_handoff,
@@ -195,6 +197,55 @@ def test_handoff_requires_assignee_for_restricted_visibility():
         with pytest.raises(HTTPException) as exc:
             create_handoff(CareHandoffCreate(person_id=person.id, title='Restricted without recipient', summary='Should fail', access_scope='assigned_only'), request_for(person.id, creator.id), db)
         assert exc.value.status_code == 422
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_handoff_reminder_is_durably_delivered_and_cancelled_on_completion():
+    from datetime import datetime, timezone, timedelta
+
+    engine, db = make_db()
+    try:
+        person, creator, assigned, _, _ = seed_people(db)
+        now = datetime(2026, 10, 23, 18, 0, tzinfo=timezone.utc)
+        item = create_handoff(
+            CareHandoffCreate(
+                person_id=person.id,
+                assigned_to_caregiver_id=assigned.id,
+                title="Reminder handoff",
+                summary="Review the outstanding appointment.",
+                due_at=now + timedelta(hours=3),
+                reminder_at=now - timedelta(minutes=1),
+                access_scope="assigned_only",
+            ),
+            request_for(person.id, creator.id),
+            db,
+        )
+        reminder = db.query(CareReminder).filter_by(handoff_id=item.id).one()
+        assert reminder.action_id is None
+        assert reminder.recipient_caregiver_id == assigned.id
+        assert reminder.enabled is True
+
+        assert materialize_due_reminders(db, now=now) == 1
+        receipt = db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).one()
+        assert receipt.status == "pending"
+        assert deliver_pending_receipts(db, now=now) == 1
+        db.refresh(receipt)
+        assert receipt.status == "delivered"
+        assert receipt.delivered_at is not None
+
+        closed = close_handoff(
+            item.id,
+            CareHandoffCompletion(completion_report="Appointment follow-up assigned to the clinic team."),
+            request_for(person.id, assigned.id),
+            db,
+        )
+        assert closed.status == "closed"
+        db.refresh(reminder)
+        assert reminder.enabled is False
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
