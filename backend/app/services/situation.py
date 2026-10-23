@@ -194,6 +194,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         ),
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        time_provenance='caregiver_reported_event_time' if timestamp else 'entry_time_defaulted',
+        tags=[f'capture_category:{payload.capture_category}'] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
     )
     db.add(care_event)
@@ -210,6 +212,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             title=saved_event.title,
             description=saved_event.description,
             occurred_at=saved_event.occurred_at,
+            time_provenance=saved_event.time_provenance,
             evidence_ids=saved_event.evidence_ids or [],
         )
     ]
