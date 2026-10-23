@@ -43,6 +43,17 @@ def extract_actions_from_document(
     caregiver_id: str = None,
     db: Session = Depends(get_db),
 ):
+    if not caregiver_id:
+        raise HTTPException(status_code=422, detail="caregiver_id is required")
+    evidence_record = db.query(EvidenceModel).filter(EvidenceModel.id == document_id).first()
+    if evidence_record is None:
+        raise HTTPException(status_code=404, detail="Source evidence not found")
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.id == caregiver_id,
+        CaregiverModel.person_id == evidence_record.person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
     ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
 
     candidates = extraction_engine.extract(
@@ -61,8 +72,12 @@ def extract_actions_from_document(
         if not safety.is_safe_to_create and safety.blocked_reason:
             continue
 
+        # Extracted medication actions are never treated as verified clinical
+        # instructions merely because a document parser found them. Require a
+        # separate clinician-confirmation workflow before activation.
+        medication_pending = bool(candidate.is_medication_action)
         action_model = ActionModel(
-            person_id=None,
+            person_id=evidence_record.person_id,
             source_evidence_id=candidate.source_evidence_id,
             source_passage=candidate.source_passage,
             source_document_type=source_document_type,
@@ -86,7 +101,9 @@ def extract_actions_from_document(
             risk_tier=candidate.risk_tier,
             requires_confirmation=candidate.requires_confirmation,
             is_recurring=candidate.is_recurring,
-            status=ActionStatus.PENDING_CONFIRMATION if candidate.requires_confirmation else ActionStatus.ACTIVE,
+            status=ActionStatus.PENDING_CONFIRMATION if (candidate.requires_confirmation or medication_pending) else ActionStatus.ACTIVE,
+            requires_confirmation=bool(candidate.requires_confirmation or medication_pending),
+            risk_tier="high" if medication_pending else candidate.risk_tier,
             created_by_caregiver_id=caregiver_id,
         )
         db.add(action_model)
@@ -174,14 +191,14 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db)):
         reference_frame_id=action.reference_frame_id,
         prerequisite_action_ids=action.prerequisite_action_ids,
         depends_on_event_id=action.depends_on_event_id,
-        status=ActionStatus.PENDING_CONFIRMATION if candidate.requires_confirmation else ActionStatus.ACTIVE,
+        status=ActionStatus.PENDING_CONFIRMATION if (candidate.requires_confirmation or candidate.is_medication_action) else ActionStatus.ACTIVE,
         completion_evidence_ids=action.completion_evidence_ids,
         completion_confidence=action.completion_confidence,
         superseded_by_action_id=action.superseded_by_action_id,
         is_explicit=candidate.is_explicit,
         is_medication_action=candidate.is_medication_action,
-        risk_tier=candidate.risk_tier,
-        requires_confirmation=candidate.requires_confirmation,
+        risk_tier="high" if candidate.is_medication_action else candidate.risk_tier,
+        requires_confirmation=bool(candidate.requires_confirmation or candidate.is_medication_action),
         has_condition=candidate.has_condition,
         is_recurring=candidate.is_recurring,
         created_by_caregiver_id=action.created_by_caregiver_id,
