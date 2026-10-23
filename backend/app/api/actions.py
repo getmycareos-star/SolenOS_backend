@@ -194,6 +194,11 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
 
+    # Assignment labels and actor types are derived from a validated caregiver ID;
+    # callers cannot spoof them independently.
+    if ("actor_type" in update_data or "actor_label" in update_data) and "actor_id" not in update_data:
+        raise HTTPException(status_code=422, detail="Assignment identity must be updated through a linked caregiver ID")
+
     # An assignee must be an existing caregiver linked to this same care record.
     # Never trust a client-supplied caregiver ID without verifying membership.
     if "actor_id" in update_data:
