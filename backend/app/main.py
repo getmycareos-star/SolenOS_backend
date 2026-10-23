@@ -15,6 +15,7 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
+from app.api.care_circle import router as care_circle_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -60,6 +61,7 @@ app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
+app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
