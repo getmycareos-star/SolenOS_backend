@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 
 
 class CareHandoffCreate(BaseModel):
@@ -12,6 +12,28 @@ class CareHandoffCreate(BaseModel):
     outstanding_items: List[str] = Field(default_factory=list, max_length=100)
     recent_changes: List[str] = Field(default_factory=list, max_length=100)
     safety_concerns: List[str] = Field(default_factory=list, max_length=100)
+    due_at: Optional[datetime] = None
+    reminder_at: Optional[datetime] = None
+    access_scope: Literal["care_circle", "assigned_only"] = "care_circle"
+
+    @field_validator("due_at", "reminder_at")
+    @classmethod
+    def require_timezone_aware(cls, value):
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("due_at and reminder_at must include a timezone offset")
+        return value
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.reminder_at and not self.due_at:
+            raise ValueError("A reminder time requires a due date")
+        if self.reminder_at and self.due_at and self.reminder_at > self.due_at:
+            raise ValueError("The reminder must be scheduled at or before the due date")
+        return self
+
+
+class CareHandoffCompletion(BaseModel):
+    completion_report: str = Field(min_length=1, max_length=5000)
 
 
 class CareHandoffRead(BaseModel):
@@ -27,6 +49,12 @@ class CareHandoffRead(BaseModel):
     recent_changes: List[str]
     safety_concerns: List[str]
     status: str
+    access_scope: str = "care_circle"
+    due_at: Optional[datetime] = None
+    reminder_at: Optional[datetime] = None
+    completion_report: Optional[str] = None
+    completed_by_caregiver_id: Optional[str] = None
+    completed_at: Optional[datetime] = None
     acknowledged_by_caregiver_id: Optional[str] = None
     acknowledged_at: Optional[datetime] = None
     closed_by_caregiver_id: Optional[str] = None

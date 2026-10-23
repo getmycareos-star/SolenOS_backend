@@ -10,6 +10,7 @@ class CareHandoff(Base):
     __tablename__ = "care_handoffs"
     __table_args__ = (
         Index("ix_care_handoffs_person_status_created", "person_id", "status", "created_at"),
+        Index("ix_care_handoffs_due_at", "person_id", "due_at"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -22,6 +23,12 @@ class CareHandoff(Base):
     recent_changes = Column(JSON, nullable=False, default=list)
     safety_concerns = Column(JSON, nullable=False, default=list)
     status = Column(String, nullable=False, default="open", index=True)  # open, acknowledged, closed
+    access_scope = Column(String, nullable=False, default="care_circle")  # care_circle, assigned_only
+    due_at = Column(DateTime(timezone=True), nullable=True)
+    reminder_at = Column(DateTime(timezone=True), nullable=True)
+    completion_report = Column(Text, nullable=True)
+    completed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     acknowledged_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
     closed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
@@ -40,6 +47,6 @@ class CareHandoffEvent(Base):
     handoff_id = Column(String, ForeignKey("care_handoffs.id"), nullable=False, index=True)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     actor_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
-    event_type = Column(String, nullable=False)  # created, acknowledged, closed
+    event_type = Column(String, nullable=False)  # created, acknowledged, closed, completion_reported
     details = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
