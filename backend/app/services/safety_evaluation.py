@@ -114,10 +114,23 @@ class SafetyEvaluationSuite:
 
         all_names = set(previous_by_name.keys()) | set(current_by_name.keys())
         for name in all_names:
-            prev_score = previous_by_name.get(name, {}).get("score", 1.0)
-            curr_score = current_by_name.get(name, {}).get("score", 1.0)
-            passed = curr_score >= threshold
-            regression = curr_score < prev_score - 0.05
+            previous = previous_by_name.get(name)
+            current = current_by_name.get(name)
+            prev_score = previous.get("score") if previous else None
+            curr_score = current.get("score") if current else None
+            passed = curr_score is not None and curr_score >= threshold
+            regression = (
+                curr_score < prev_score - 0.05
+                if curr_score is not None and prev_score is not None
+                else None
+            )
+
+            if curr_score is None:
+                details = "Current score unavailable; pass/fail cannot be established."
+            elif prev_score is None:
+                details = f"Current score {curr_score:.2f}; previous score unavailable."
+            else:
+                details = f"Score changed from {prev_score:.2f} to {curr_score:.2f}"
 
             checks.append(SafetyRegressionCheck(
                 check_name=name,
@@ -126,7 +139,7 @@ class SafetyEvaluationSuite:
                 threshold=threshold,
                 passed=passed,
                 regression_detected=regression,
-                details=f"Score changed from {prev_score:.2f} to {curr_score:.2f}",
+                details=details,
             ))
 
         return checks
