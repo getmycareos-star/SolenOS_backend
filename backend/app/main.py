@@ -19,6 +19,17 @@ from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.care_handoffs import router as care_handoffs_router
 from app.api.document_extraction import router as document_extraction_router
+from app.api.authentication import router as authentication_router, current_account
+from app.api.capture import router as capture_router
+from app.api.collaboration import (
+    community_router,
+    conversation_router,
+    team_router,
+    professional_router,
+    router as collaboration_router,
+)
+from app.core.authz import assert_person_access, assert_account_is_caregiver
+from app.models.auth_identity import AuthAccount
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -95,6 +106,13 @@ app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 app.include_router(care_handoffs_router, prefix="/api/v1")
 app.include_router(document_extraction_router, prefix="/api/v1")
+app.include_router(authentication_router, prefix="/api/v1")
+app.include_router(capture_router, prefix="/api/v1")
+app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(community_router, prefix="/api/v1")
+app.include_router(conversation_router, prefix="/api/v1")
+app.include_router(team_router, prefix="/api/v1")
+app.include_router(professional_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -115,6 +133,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
+        return await call_next(request)
+    # Account-authenticated routes enforce their own bearer/account/person grants
+    # through FastAPI dependencies. Do not force these requests through the
+    # legacy anonymous-session resolver.
+    if (
+        path.startswith("/api/v1/auth/")
+        or path.startswith("/api/v1/daily/")
+        or path.startswith("/api/v1/community")
+        or path.startswith("/api/v1/conversation")
+        or path.startswith("/api/v1/team")
+        or path.startswith("/api/v1/professional-dashboard")
+    ):
         return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
