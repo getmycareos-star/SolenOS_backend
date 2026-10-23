@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 
 
 class SituationProvenance(BaseModel):
@@ -26,6 +26,7 @@ class SituationInput(BaseModel):
     documents: Optional[List[SituationDocument]] = None
     provenance: Optional[SituationProvenance] = None
     timestamp: Optional[str] = None
+    capture_category: Optional[Literal['symptom', 'behavior', 'sleep', 'meal', 'appointment', 'medication_observation', 'other']] = None
 
 
 class SituationEvent(BaseModel):
@@ -34,6 +35,7 @@ class SituationEvent(BaseModel):
     title: str
     description: Optional[str] = None
     occurred_at: datetime
+    time_provenance: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
 
 
