@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
-from app.models.care import Caregiver as CaregiverModel
+from app.models.care import Caregiver as CaregiverModel, Evidence as EvidenceModel, Person as PersonModel
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -101,6 +101,22 @@ def extract_actions_from_document(
 def create_action(action: ActionCreate, db: Session = Depends(get_db)):
     if not action.person_id:
         raise HTTPException(status_code=400, detail="person_id is required")
+
+    person = db.query(PersonModel).filter(PersonModel.id == action.person_id).first()
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    caregiver = db.query(CaregiverModel).filter(
+        CaregiverModel.id == action.created_by_caregiver_id,
+        CaregiverModel.person_id == action.person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Creating caregiver is not linked to this care record")
+    source_evidence = db.query(EvidenceModel).filter(
+        EvidenceModel.id == action.source_evidence_id,
+        EvidenceModel.person_id == action.person_id,
+    ).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=422, detail="Source evidence must belong to the same care recipient")
 
     candidate = ActionCandidate(
         source_evidence_id=action.source_evidence_id,
@@ -230,7 +246,13 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
 def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    try:
+        return lifecycle_service.record_completion(db_action, evidence, db)
+    except ValueError as exc:
+        db.rollback()
+        message = str(exc)
+        status_code = 403 if "care recipient" in message else (409 if "already completed" in message else 422)
+        raise HTTPException(status_code=status_code, detail=message) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
