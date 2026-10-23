@@ -191,3 +191,69 @@ def test_local_model_config_rejects_public_host_in_production(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         delta_engine._local_ollama_url()
     assert exc.value.status_code == 503
+
+
+def test_delta_receives_existing_open_loops_as_context_not_verified_facts(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person
+    from app.models.uncertainty import InformationGap, OpenQuestion, Contradiction, GapLifecycleStatus, GapReason, EpistemicState, Priority
+
+    captured = {}
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return FakeResponse().json()
+    class Client:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, url, json, **kwargs):
+            captured.update(json)
+            return Response()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://model.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-test-model")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setattr(delta_engine.httpx, "Client", Client)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add(Person(id="loop-person", name="Care recipient"))
+    db.commit()
+    db.add(InformationGap(
+        person_id="loop-person", subject_type="test", subject_id="MRI",
+        field="result_missing", epistemic_state=EpistemicState.UNKNOWN,
+        gap_reason=GapReason.ABSENT, priority=Priority.HIGH,
+        lifecycle_status=GapLifecycleStatus.OPEN, description="MRI result not present",
+    ))
+    db.add(OpenQuestion(
+        person_id="loop-person", subject_type="test", subject_id="MRI",
+        question="Has the MRI result been received?", status="open",
+        priority=Priority.HIGH,
+    ))
+    db.add(Contradiction(
+        person_id="loop-person", subject_type="medication", subject_id="metformin",
+        field="medication_status", description="Two sources disagree about metformin",
+        resolution_status="unresolved",
+    ))
+    db.commit()
+    try:
+        delta_engine.reconcile_event(
+            db, person_id="loop-person", event_date=datetime(2026, 10, 22, tzinfo=timezone.utc),
+            source="Visit note", content="MRI ordered. Increase metformin to 1000 mg. follow-up in 2 weeks.",
+            persist=False,
+        )
+        payload = json.loads(captured["messages"][-1]["content"])
+        loops = payload["existing_unresolved_care_loops"]
+        assert any(item["subject_id"] == "MRI" for item in loops["gaps"])
+        assert any("MRI result" in item["question"] for item in loops["questions"])
+        assert any(item["subject_id"] == "metformin" for item in loops["contradictions"])
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
