@@ -46,15 +46,34 @@ class ActionLifecycleService:
             raise ValueError("Completion caregiver must be linked to this care record")
         requested_evidence_ids = set(evidence.evidence_ids or [])
         if not requested_evidence_ids:
-            raise ValueError("At least one completion evidence record is required")
+            # A caregiver's explicit completion note is itself a source-attributed
+            # report. Persist it as evidence in the same transaction as completion.
+            note = (evidence.notes or "").strip()
+            if not note:
+                raise ValueError("Provide a completion note or link supporting evidence")
+            report = Evidence(
+                person_id=action.person_id,
+                type="caregiver_report",
+                source_text=note,
+                uploaded_by_caregiver_id=completed_by_caregiver_id,
+                time_provenance="server_recorded_at",
+                confidence=evidence.completion_confidence,
+                evidence_status="reported",
+                source_type="action_completion",
+            )
+            db.add(report)
+            db.flush()
+            requested_evidence_ids = {report.id}
         valid_evidence_ids = {row[0] for row in db.query(Evidence.id).filter(Evidence.id.in_(requested_evidence_ids), Evidence.person_id == action.person_id).all()}
         if valid_evidence_ids != requested_evidence_ids:
             raise ValueError("Completion evidence must exist and belong to the same care record")
         if action.status in ("cancelled", "superseded", "expired"):
             raise ValueError(f"Cannot complete action in status {action.status}")
+        if action.status == ActionStatus.COMPLETED:
+            raise ValueError("Action is already completed; completion history cannot be overwritten")
 
         action.status = ActionStatus.COMPLETED
-        action.completion_evidence_ids = evidence.evidence_ids
+        action.completion_evidence_ids = sorted(requested_evidence_ids)
         action.completion_confidence = evidence.completion_confidence
         action.completed_at = datetime.now(timezone.utc)
         action.completed_by_caregiver_id = completed_by_caregiver_id
