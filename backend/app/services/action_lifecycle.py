@@ -22,6 +22,8 @@ class ActionLifecycleService:
     }
 
     def transition_status(self, action: ActionModel, new_status: str, db: Session) -> ActionModel:
+        if action.is_medication_action and new_status == ActionStatus.ACTIVE:
+            raise ValueError("Medication actions require clinician confirmation before activation")
         allowed = self.STATUS_TRANSITIONS.get(action.status, [])
         if new_status not in allowed:
             raise ValueError(f"Cannot transition action {action.id} from {action.status} to {new_status}. Allowed: {allowed}")
