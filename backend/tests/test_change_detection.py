@@ -110,6 +110,9 @@ def test_change_detection_onset():
         assert changes[0].change_type.value == "onset"
         assert changes[0].previous_count == 0
         assert changes[0].current_count == 3
+        assert changes[0].confidence is None, (
+            "Change confidence must remain unknown until a calibrated score exists."
+        )
         db.close()
     finally:
         teardown_db()
