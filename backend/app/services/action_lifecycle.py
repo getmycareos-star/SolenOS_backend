@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.action import Action as ActionModel, ActionStatus
+from app.models.care import Caregiver as CaregiverModel, Evidence as EvidenceModel
 from app.schemas.action import ActionCompletionEvidence
 
 
@@ -41,11 +42,32 @@ class ActionLifecycleService:
     def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session) -> ActionModel:
         if action.status in ("cancelled", "superseded", "expired"):
             raise ValueError(f"Cannot complete action in status {action.status}")
+        if action.status == ActionStatus.COMPLETED:
+            raise ValueError("Action is already completed; completion history cannot be overwritten")
+
+        caregiver = db.query(CaregiverModel).filter(
+            CaregiverModel.id == evidence.caregiver_id,
+            CaregiverModel.person_id == action.person_id,
+        ).first()
+        if caregiver is None:
+            raise ValueError("Completing caregiver is not linked to this care recipient")
+
+        evidence_ids = list(dict.fromkeys(evidence.evidence_ids or []))
+        if evidence_ids:
+            rows = db.query(EvidenceModel.id).filter(
+                EvidenceModel.person_id == action.person_id,
+                EvidenceModel.id.in_(evidence_ids),
+            ).all()
+            valid_ids = {row[0] for row in rows}
+            if valid_ids != set(evidence_ids):
+                raise ValueError("Completion evidence must belong to the same care recipient")
 
         action.status = ActionStatus.COMPLETED
-        action.completion_evidence_ids = evidence.evidence_ids
+        action.completion_evidence_ids = evidence_ids
         action.completion_confidence = evidence.completion_confidence
-        action.completed_at = datetime.utcnow()
+        action.completion_notes = evidence.notes
+        action.completed_by_caregiver_id = caregiver.id
+        action.completed_at = datetime.now().astimezone()
 
         db.add(action)
         db.commit()
