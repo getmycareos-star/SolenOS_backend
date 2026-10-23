@@ -593,3 +593,58 @@ def test_action_router_has_no_duplicate_actions_prefix():
     assert "/api/v1/actions/{person_id}" in registered_paths
     assert "/api/v1/actions/{action_id}/complete" in registered_paths
     assert "/api/v1/actions/actions/{person_id}" not in registered_paths
+
+
+
+def test_action_creation_cannot_bypass_medication_authority_with_fabricated_quote():
+    client = TestClient(app)
+    created = create_session(client, "Medication safety recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    from app.models.care import Evidence
+
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            id="medication-source-safety-regression",
+            person_id=created["person"]["id"],
+            type="document",
+            source_text="Prescriber instruction: take medication 5 mg daily.",
+            uploaded_by_caregiver_id=created["caregiver"]["id"],
+            evidence_status="uploaded",
+        )
+        db.add(evidence)
+        db.commit()
+    finally:
+        db.close()
+
+    fabricated = client.post(
+        "/api/v1/actions",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "source_evidence_id": "medication-source-safety-regression",
+            "source_passage": "Schedule an appointment",
+            "original_text": "Schedule an appointment",
+            "normalized_action": "Schedule an appointment",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert fabricated.status_code == 422, fabricated.text
+
+    unverified_medication = client.post(
+        "/api/v1/actions",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "source_evidence_id": "medication-source-safety-regression",
+            "source_passage": "Prescriber instruction: take medication 5 mg daily.",
+            "original_text": "Prescriber instruction: take medication 5 mg daily.",
+            "normalized_action": "Take medication 5 mg daily",
+            "is_medication_action": False,
+            "source_authority": "physician",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert unverified_medication.status_code == 409, unverified_medication.text
+    assert unverified_medication.json()["detail"]["requires_clinical_source_verification"] is True
