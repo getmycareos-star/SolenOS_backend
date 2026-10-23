@@ -181,14 +181,14 @@ def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, 
     """Create exact-source, review-only candidates; this is not clinical interpretation."""
     candidates: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
-    medication = re.compile(r"\\b(medication|prescription|tablet|capsule|dosage|dose|\\d+(?:\\.\\d+)?\\s?(?:mg|mcg|g|ml|mL|units?)|take\\s+\\d+)\\b", re.IGNORECASE)
-    result = re.compile(r"\\b(result|test|laboratory|lab|reference range|positive|negative|elevated|low|high|normal|abnormal|mmol|mg/dl|mmhg|bpm)\\b", re.IGNORECASE)
-    follow_up = re.compile(r"\\b(follow[- ]?up|appointment|return (?:to|in)|recheck|contact|call (?:the|your|clinic|doctor)|schedule|refer(?:ral)?|within \\d+ (?:day|week|month)s?)\\b", re.IGNORECASE)
-    instruction = re.compile(r"\\b(instruct(?:ion|ed|ions)?|continue|stop|avoid|monitor|keep taking|do not|don't|must|should|call|seek care|return if)\\b", re.IGNORECASE)
+    medication = re.compile(r"\b(medication|prescription|tablet|capsule|dosage|dose|\d+(?:\.\d+)?\s?(?:mg|mcg|g|ml|mL|units?)|take\s+\d+)\b", re.IGNORECASE)
+    result = re.compile(r"\b(result|test|laboratory|lab|reference range|positive|negative|elevated|low|high|normal|abnormal|mmol|mg/dl|mmhg|bpm)\b", re.IGNORECASE)
+    follow_up = re.compile(r"\b(follow[- ]?up|appointment|return (?:to|in)|recheck|contact|call (?:the|your|clinic|doctor)|schedule|refer(?:ral)?|within \d+ (?:day|week|month)s?)\b", re.IGNORECASE)
+    instruction = re.compile(r"\b(instruct(?:ion|ed|ions)?|continue|stop|avoid|monitor|keep taking|do not|don't|must|should|call|seek care|return if)\b", re.IGNORECASE)
 
     # Preserve exact source spans as short line/sentence quotes. Do not merge facts
     # across unrelated sections or infer a date, dose, diagnosis, or action.
-    fragments = [part.strip() for part in re.split(r"(?<=[.!?])\\s+|\\n+", text) if part.strip()]
+    fragments = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
     for fragment in fragments:
         quote = fragment[:1000]
         kind = None
