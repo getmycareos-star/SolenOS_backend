@@ -26,13 +26,17 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         try:
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
+                # Treat offset-free ISO timestamps as UTC explicitly; never use the
+                # server's local timezone to reinterpret a caregiver-provided time.
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             raise ValueError(
                 "Invalid timestamp; provide a valid ISO-8601 timestamp or omit it."
             ) from exc
+        time_provenance = "caregiver_reported_event_time"
     else:
         occurred_at = _utc_now()
+        time_provenance = "entry_time_defaulted"
 
     evidence_ids: List[str] = []
     event_ids: List[str] = []
@@ -81,6 +85,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         title=payload.raw_input.strip()[:200] if payload.raw_input and payload.raw_input.strip() else "Document observation",
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        time_provenance=time_provenance,
+        tags=[f"capture_category:{payload.capture_category}"] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
     )
     db.add(care_event)
@@ -151,6 +157,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             title=e.title,
             description=e.description,
             occurred_at=e.occurred_at,
+            time_provenance=e.time_provenance,
             evidence_ids=e.evidence_ids or [],
         )
         for e in db.query(CareEvent).filter(CareEvent.id.in_(event_ids)).all()
