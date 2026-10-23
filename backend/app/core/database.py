@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -129,6 +131,6 @@ def database_schema_differences(bind=None):
 # Local development keeps its low-friction SQLite bootstrap. Railway production
 # must run reviewed Alembic migrations before ASGI startup; create_all() cannot
 # alter existing PostgreSQL tables and must not silently mutate production schema.
-if not RAILWAY_RUNTIME:
+if not RAILWAY_RUNTIME and os.getenv("ALEMBIC_RUNNING") != "1":
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()
