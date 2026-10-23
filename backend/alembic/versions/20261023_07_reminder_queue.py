@@ -68,7 +68,7 @@ def upgrade():
     indexes = {item["name"] for item in inspect(bind).get_indexes("reminder_delivery_attempts")}
     for name, columns in (
         ("ix_reminder_delivery_attempts_reminder_id", ["reminder_id"]),
-        ("ix_reminder_delivery_attempts_reminder_created", ["reminder_id", "created_at"]),
+        ("ix_reminder_delivery_attempts_reminder_created", ["reminder_id", "attempted_at"]),
     ):
         if name not in indexes:
             op.create_index(name, "reminder_delivery_attempts", columns)
