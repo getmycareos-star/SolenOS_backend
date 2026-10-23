@@ -98,8 +98,6 @@ def extract_actions_from_document(
             has_condition=candidate.has_condition,
             is_explicit=candidate.is_explicit,
             is_medication_action=candidate.is_medication_action,
-            risk_tier=candidate.risk_tier,
-            requires_confirmation=candidate.requires_confirmation,
             is_recurring=candidate.is_recurring,
             status=ActionStatus.PENDING_CONFIRMATION if (candidate.requires_confirmation or medication_pending) else ActionStatus.ACTIVE,
             requires_confirmation=bool(candidate.requires_confirmation or medication_pending),
