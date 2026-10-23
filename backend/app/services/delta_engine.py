@@ -344,14 +344,39 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
 
     result = _parse_model_json(content_json)
 
-    # Verify that quoted evidence exists in the supplied source or active state.
+    # Verify both the quotation and the claim before allowing a finding to
+    # become a normalized assertion. A real quote alone must not legitimize an
+    # unrelated or invented value.
     context_text = [str(item.get("title") or "") + " " + str(item.get("description") or "") for item in existing_record_context["events"]]
     context_text += [str(item.get("source_text") or "") for item in existing_record_context["evidence"]]
     source_corpus = "\n".join([content] + [str(item.get("value", "")) for item in active_state] + context_text).casefold()
+    active_claim_corpus = "\n".join([content] + [str(item.get("value", "")) for item in active_state]).casefold()
     for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps"):
         for item in result[domain]:
             excerpt = str(item.get("evidence_excerpt") or "").strip()
             item["evidence_supported"] = bool(excerpt and excerpt.casefold() in source_corpus)
+            if domain in {"medications", "conditions", "symptoms"}:
+                name = str(item.get("name") or "").strip().casefold()
+                current = str(item.get("current") or "").strip().casefold()
+                change_type = str(item.get("change_type") or "").casefold()
+                claim_supported = bool(name and name in active_claim_corpus)
+                if current:
+                    if domain == "medications" and change_type == "discontinued":
+                        claim_supported = claim_supported and any(
+                            marker in active_claim_corpus
+                            for marker in ("stop ", "stopped ", "discontinue", "discontinued", "hold ", "held ", "no longer", "cease")
+                        )
+                    else:
+                        claim_supported = claim_supported and current in active_claim_corpus
+                elif domain == "medications" and change_type == "discontinued":
+                    claim_supported = claim_supported and any(
+                        marker in active_claim_corpus
+                        for marker in ("stop ", "stopped ", "discontinue", "discontinued", "hold ", "held ", "no longer", "cease")
+                    )
+                item["claim_supported"] = claim_supported
+                if not claim_supported:
+                    item["certainty"] = "uncertain"
+                    item["provenance_warning"] = "The reported value or state change could not be independently matched to the new event or current-state evidence."
             if not item["evidence_supported"]:
                 item["provenance_warning"] = "Evidence excerpt could not be verified against supplied source text."
                 if domain in {"medications", "conditions", "symptoms"}:
@@ -431,7 +456,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
-                    if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported"):
+                    if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported") or not item.get("claim_supported"):
                         continue
                     if domain == "medications":
                         inferred_field = {
