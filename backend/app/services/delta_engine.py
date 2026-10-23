@@ -452,6 +452,39 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     item["certainty"] = "uncertain"
             computed.append({"domain": domain, "name": name, "change_type": item.get("change_type"), "previous": item.get("previous"), "current": item.get("current"), "certainty": item.get("certainty", "uncertain"), "comparison_basis": item.get("comparison_basis")})
 
+    # Historical imports may explain what was true then, but must not regress
+    # the active state if a later-dated assertion already exists. Annotate every
+    # affected finding before persistence gating so the UI still explains why.
+    if event_date is not None:
+        incoming_day = event_date.date()
+        for domain in ("medications", "conditions"):
+            subject_type = {"medications": "medication", "conditions": "condition"}[domain]
+            for item in result[domain]:
+                name = str(item.get("name") or "").strip()
+                if not name:
+                    continue
+                change_type = str(item.get("change_type") or "").casefold()
+                field = str(item.get("field") or {
+                    "dose_changed": "dose", "frequency_changed": "frequency",
+                    "route_changed": "route",
+                }.get(change_type, "medication_reported_state" if domain == "medications" else "condition_reported_state"))
+                subject_id = name.casefold() if domain == "medications" else name
+                if any(
+                    peer.assertion_kind == "current_state"
+                    and peer.subject_type == subject_type
+                    and _normalise(peer.subject_id) == _normalise(subject_id)
+                    and peer.field == field
+                    and peer.observed_at is not None
+                    and peer.observed_at.date() > incoming_day
+                    and peer.assertion_status in {"reported", "review_required", "accepted"}
+                    for peer in active_assertions
+                ):
+                    item["historical_only"] = True
+                    item["promotion_warning"] = "This event predates a later-dated care-state report. It is preserved in reconciliation history but not promoted as current state."
+                    for computed_item in computed:
+                        if computed_item.get("domain") == domain and _normalise(computed_item.get("name")) == _normalise(name):
+                            computed_item["historical_only"] = True
+
     if persist:
         try:
             for domain in ("medications", "conditions", "symptoms"):
@@ -463,7 +496,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     # result but must not manufacture another active-state fact.
                     # Competing/uncertain values remain visible for review and are
                     # never promoted into normalized active state.
-                    if change_type in {"unchanged", "conflicting", "uncertain"}:
+                    if change_type in {"unchanged", "conflicting", "uncertain"} or item.get("historical_only"):
                         continue
                     if domain == "medications" and change_type == "discontinued" and current is None:
                         current = "discontinued"
