@@ -30,7 +30,8 @@ def _next_occurrence(reminder: CareReminder):
     else:
         year = local_due.year + (1 if local_due.month == 12 else 0)
         month = 1 if local_due.month == 12 else local_due.month + 1
-        day = min(local_due.day, monthrange(year, month)[1])
+        anchor_day = reminder.recurrence_anchor_day or local_due.day
+        day = min(anchor_day, monthrange(year, month)[1])
         next_local = local_due.replace(year=year, month=month, day=day)
     return next_local, next_local.astimezone(timezone.utc)
 
@@ -136,6 +137,7 @@ def process_due_reminders(
                         due_at=next_utc,
                         timezone=reminder.timezone,
                         recurrence_rule=reminder.recurrence_rule,
+                        recurrence_anchor_day=reminder.recurrence_anchor_day or (local_due.day if reminder.recurrence_rule == "monthly" else None),
                         status="scheduled",
                         idempotency_key=next_key,
                         attempt_count=0,
