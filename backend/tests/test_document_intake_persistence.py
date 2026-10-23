@@ -118,6 +118,7 @@ def test_intake_preserves_original_source_and_extracts_review_only_candidates():
             assert review.status_code == 200, review.text
             assert review.json()["authoritative_lcr_write"] is False
             assert review.json()["candidate"]["review_status"] == "accepted_by_caregiver"
+            assert review.json()["candidate"]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
 
             with TestingSessionLocal() as db:
                 saved = db.query(Evidence).filter_by(id=result["evidence_id"]).one()
