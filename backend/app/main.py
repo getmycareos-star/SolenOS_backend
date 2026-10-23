@@ -28,6 +28,7 @@ from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
+from app.services.reminder_scheduler import start_reminder_scheduler, stop_reminder_scheduler
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -573,6 +574,16 @@ def post_situation(
 
 
 app.include_router(situation_router, prefix="/api")
+
+
+@app.on_event("startup")
+async def start_persistent_reminder_worker():
+    await start_reminder_scheduler()
+
+
+@app.on_event("shutdown")
+async def stop_persistent_reminder_worker():
+    await stop_reminder_scheduler()
 
 
 @app.get("/health")
