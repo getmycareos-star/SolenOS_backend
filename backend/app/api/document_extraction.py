@@ -11,7 +11,17 @@ import re
 from pathlib import PurePath
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from datetime import datetime, timezone
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.document_asset import DocumentAsset
+from app.services.situation import analyze_saved_care_event
 
 router = APIRouter(tags=["document-extraction"])
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -164,3 +174,192 @@ async def extract_document(request: Request, file: UploadFile = File(...)):
     finally:
         await file.close()
     return result
+
+
+def _classify_document_type(text: str, filename: str) -> str:
+    lowered = text.casefold()
+    if any(term in lowered for term in ("discharge summary", "discharge instructions", "discharged from")):
+        return "discharge_instructions"
+    if any(term in lowered for term in ("medication list", "prescription", "drug name", "dosage")):
+        return "medication_document"
+    if any(term in lowered for term in ("laboratory result", "lab results", "reference range", "test result")):
+        return "test_result"
+    if any(term in lowered for term in ("care plan", "care instructions", "treatment plan")):
+        return "care_plan"
+    if any(term in lowered for term in ("appointment", "follow-up visit", "clinic visit")):
+        return "appointment_document"
+    suffix = PurePath(filename).suffix.lower()
+    return "pdf_document" if suffix == ".pdf" else ("image_document" if suffix in IMAGE_EXTENSIONS else "text_document")
+
+
+def _document_date_candidate(text: str) -> str | None:
+    patterns = (
+        r"\\b(20\\d{2}-\\d{2}-\\d{2})\\b",
+        r"\\b(\\d{1,2}/\\d{1,2}/20\\d{2})\\b",
+        r"\\b(\\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\\d{2})\\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+@router.post("/documents/intake", status_code=201)
+async def intake_document(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Extract and persist both original source bytes and review-only text candidates."""
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
+
+    data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    filename = PurePath(file.filename or "care-document").name[:255]
+    content_type = (file.content_type or "application/octet-stream").lower().strip()
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="The selected file exceeds the 10 MiB limit.")
+    try:
+        extraction = extract_document_content(filename, content_type, data)
+        document = extraction["document"]
+        extracted_text = document["extracted_text"]
+        extraction_source = document["extraction_source"]
+        ocr_confidence = document["ocr_confidence"]
+        warnings = document["extraction_warnings"]
+        extraction_status = "extracted"
+        extraction_error = None
+        digest = document["sha256"]
+    except ValueError as exc:
+        # Unsupported types, empty files, and oversized files are rejected. A supported
+        # but unreadable/scanned file is still retained with an explicit extraction failure.
+        suffix = PurePath(filename).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS or not data or len(data) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        digest = hashlib.sha256(data).hexdigest()
+        extracted_text = ""
+        extraction_source = "failed"
+        ocr_confidence = None
+        warnings = [str(exc)]
+        extraction_status = "pending_ocr" if "OCR is unavailable" in str(exc) else "extraction_failed"
+        extraction_error = str(exc)
+
+    document_type = _classify_document_type(extracted_text, filename)
+    document_date = _document_date_candidate(extracted_text) if extracted_text else None
+    metadata = {
+        "original_filename": filename,
+        "mime_type": content_type,
+        "size_bytes": len(data),
+        "sha256": digest,
+        "document_type_candidate": document_type,
+        "document_date_candidate": document_date,
+        "document_date_review_status": "pending_review" if document_date else "not_detected",
+        "extraction_status": extraction_status,
+        "extraction_source": extraction_source,
+        "extraction_version": "document-intake-v1",
+        "ocr_confidence": ocr_confidence,
+        "extraction_warnings": warnings,
+        "extraction_error": extraction_error,
+        "extracted_char_count": len(extracted_text),
+        "review_status": "pending_review",
+        "source_file_preserved": True,
+    }
+    evidence = Evidence(
+        person_id=person_id,
+        type="document",
+        source_text=extracted_text if extracted_text else "Document source preserved; readable text is not currently available. No document facts have been verified.",
+        original_file_path="pending",
+        uploaded_by_caregiver_id=caregiver_id,
+        extra_metadata=__import__("json").dumps(metadata, ensure_ascii=False),
+        confidence=ocr_confidence,
+        evidence_status="uploaded",
+        source_type="document_upload",
+    )
+    db.add(evidence)
+    db.flush()
+    evidence.original_file_path = f"db://document-assets/{evidence.id}"
+    db.add(DocumentAsset(
+        evidence_id=evidence.id,
+        person_id=person_id,
+        uploaded_by_caregiver_id=caregiver_id,
+        original_filename=filename,
+        content_type=content_type,
+        size_bytes=len(data),
+        sha256=digest,
+        content=data,
+    ))
+    now = datetime.now(timezone.utc)
+    event = CareEvent(
+        person_id=person_id,
+        event_type="document_intake",
+        status="recorded",
+        occurred_at=now,
+        occurred_at_timezone=caregiver.timezone,
+        time_provenance="document_upload_time_not_document_date",
+        title=f"Document added: {filename}"[:200],
+        description=(
+            f"Document uploaded. Text extraction status: {extraction_status}. "
+            "Detected type/date and extracted content are unverified candidates pending caregiver review."
+        ),
+        evidence_ids=[evidence.id],
+        created_by_caregiver_id=caregiver_id,
+        tags=[f"document_type:{document_type}", f"document_extraction:{extraction_status}"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(evidence)
+    db.refresh(event)
+
+    analysis = analyze_saved_care_event(db, event.id) if extracted_text else None
+    return {
+        "evidence_id": evidence.id,
+        "care_event_id": event.id,
+        "person_id": person_id,
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": len(data),
+        "sha256": digest,
+        "document_type_candidate": document_type,
+        "document_date_candidate": document_date,
+        "document_date_review_status": metadata["document_date_review_status"],
+        "extraction_status": extraction_status,
+        "extraction_source": extraction_source,
+        "extraction_version": metadata["extraction_version"],
+        "ocr_confidence": ocr_confidence,
+        "extraction_warnings": warnings,
+        "extraction_error": extraction_error,
+        "extracted_char_count": len(extracted_text),
+        "source_file_preserved": True,
+        "review_required": True,
+        "qwen_extraction_status": analysis["qwen_extraction_status"] if analysis else "not_run_no_text",
+        "qwen_candidates": analysis["qwen_candidates"] if analysis else None,
+        "qwen_analysis_id": analysis.get("qwen_analysis_id") if analysis else None,
+    }
+
+
+@router.get("/documents/{evidence_id}/file")
+def download_document_file(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id = getattr(request.state, "scoped_person_id", None)
+    if not person_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    asset = db.query(DocumentAsset).filter(
+        DocumentAsset.evidence_id == evidence_id,
+        DocumentAsset.person_id == person_id,
+    ).first()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Document file not found for this care record.")
+    filename = quote(asset.original_filename, safe="")
+    return Response(
+        content=asset.content,
+        media_type=asset.content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
