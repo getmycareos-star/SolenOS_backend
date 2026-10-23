@@ -1,5 +1,6 @@
 """End-to-end tests for private document storage, provenance, candidate review and access scope."""
 import json
+import importlib
 import pytest
 
 pytestmark = pytest.mark.session_security
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_db
 from app.main import app
-import app.main as main_module
+main_module = importlib.import_module("app.main")
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.document_asset import DocumentAsset
 
