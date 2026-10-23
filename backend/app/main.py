@@ -128,6 +128,17 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    if path == "/api/v1/documents/extract" and method == "POST":
+        raw_length = request.headers.get("content-length")
+        try:
+            request_length = int(raw_length) if raw_length is not None else None
+        except ValueError:
+            request_length = None
+        if request_length is None or request_length < 1:
+            return JSONResponse(status_code=411, content={"detail": "Content-Length is required for document uploads"})
+        if request_length > 11 * 1024 * 1024:
+            return JSONResponse(status_code=413, content={"detail": "Document upload exceeds the request size limit"})
+
     token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
     with SessionLocal() as db:
@@ -233,7 +244,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
         payload = {}
-        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if path == "/api/v1/documents/extract" and method == "POST":
+            # Preserve the multipart stream for FastAPI's bounded upload parser.
+            # Do not buffer the full binary document in this middleware.
+            pass
+        elif method in {"POST", "PUT", "PATCH", "DELETE"}:
             body = await request.body()
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}
