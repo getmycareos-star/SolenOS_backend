@@ -306,7 +306,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 for item in result[domain]:
                     name = str(item.get("name", "")).strip()
                     current = item.get("current")
-                    if not name or current is None or item.get("certainty") != "supported":
+                    if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported"):
                         continue
                     field = f"{domain.rstrip('s')}_reported_state"
                     create_assertion(db, CareAssertionCreate(
@@ -317,6 +317,53 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         evidence_ids=evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
+
+            def add_open_loop(subject_type: str, subject_id: str, field: str, description: str, question_text: str, priority: Priority) -> None:
+                gap = db.query(InformationGap).filter(
+                    InformationGap.person_id == person_id,
+                    InformationGap.subject_type == subject_type,
+                    InformationGap.subject_id == subject_id,
+                    InformationGap.field == field,
+                    InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
+                ).first()
+                if gap is None:
+                    db.add(InformationGap(
+                        person_id=person_id, subject_type=subject_type, subject_id=subject_id,
+                        field=field, epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
+                        priority=priority, lifecycle_status=GapLifecycleStatus.OPEN,
+                        description=description, evidence_ids=evidence_ids,
+                    ))
+                question = db.query(OpenQuestion).filter(
+                    OpenQuestion.person_id == person_id, OpenQuestion.subject_type == subject_type,
+                    OpenQuestion.subject_id == subject_id, OpenQuestion.question == question_text,
+                    OpenQuestion.status == "open",
+                ).first()
+                if question is None:
+                    db.add(OpenQuestion(
+                        person_id=person_id, question=question_text, subject_type=subject_type,
+                        subject_id=subject_id, status="open", priority=priority, evidence_ids=evidence_ids,
+                        context=[{"source": source, "source_event_id": source_event_id}],
+                    ))
+
+            for item in result["tests"]:
+                if item.get("evidence_supported") and item.get("result_present") is False:
+                    name = str(item.get("name") or "ordered test").strip()
+                    add_open_loop("test", name, "result_missing",
+                        f"{name} is referenced but no result is present in the supplied record.",
+                        f"Has the result for {name} been received and reviewed?", Priority.HIGH)
+            for item in result["follow_ups"]:
+                status = str(item.get("status") or "unknown").casefold()
+                if item.get("evidence_supported") and status not in {"completed", "done", "cancelled", "canceled"}:
+                    action = str(item.get("action") or "follow-up action").strip()
+                    add_open_loop("follow_up", action, "follow_up_status",
+                        f"Follow-up is reported as {status}; completion is not established.",
+                        f"Has this follow-up been completed: {action}?", Priority.MEDIUM)
+            for item in result["clinical_gaps"]:
+                if item.get("evidence_supported"):
+                    gap = str(item.get("gap") or "missing care information").strip()
+                    question_text = str(item.get("next_question") or f"What is known about {gap}?").strip()
+                    add_open_loop("care_gap", gap, "missing_information",
+                        str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM)
             db.commit()
         except Exception:
             db.rollback()
