@@ -502,31 +502,31 @@ def get_unified_care_record(
     )
     evidence_items = (
         db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
-        .order_by(EvidenceModel.uploaded_at.desc()).limit(page_limit).all()
+        .order_by(EvidenceModel.uploaded_at.desc()).limit(fetch_limit).all()
     )
     appointments = (
         db.query(AppointmentModel).filter(AppointmentModel.person_id == person_id)
-        .order_by(AppointmentModel.scheduled_at.desc()).limit(page_limit).all()
+        .order_by(AppointmentModel.scheduled_at.desc()).limit(fetch_limit).all()
     )
     transitions = (
         db.query(CareTransitionModel).filter(CareTransitionModel.person_id == person_id)
-        .order_by(CareTransitionModel.occurred_at.desc()).limit(page_limit).all()
+        .order_by(CareTransitionModel.occurred_at.desc()).limit(fetch_limit).all()
     )
     actions = (
         db.query(ActionModel).filter(ActionModel.person_id == person_id)
-        .order_by(ActionModel.created_at.desc()).limit(page_limit).all()
+        .order_by(func.coalesce(ActionModel.deadline, ActionModel.start_time, ActionModel.created_at).desc()).limit(fetch_limit).all()
     )
     observations = (
         db.query(ObservationModel).filter(ObservationModel.person_id == person_id)
-        .order_by(ObservationModel.observed_at.desc()).limit(page_limit).all()
+        .order_by(func.coalesce(ObservationModel.observed_at, ObservationModel.recorded_at).desc()).limit(fetch_limit).all()
     )
     assertions = (
         db.query(CareAssertionModel).filter(CareAssertionModel.person_id == person_id)
-        .order_by(CareAssertionModel.recorded_at.desc()).limit(page_limit).all()
+        .order_by(func.coalesce(CareAssertionModel.observed_at, CareAssertionModel.recorded_at).desc()).limit(fetch_limit).all()
     )
     outcomes = (
         db.query(CareActionOutcomeModel).filter(CareActionOutcomeModel.person_id == person_id)
-        .order_by(CareActionOutcomeModel.created_at.desc()).limit(page_limit).all()
+        .order_by(CareActionOutcomeModel.created_at.desc()).limit(fetch_limit).all()
     )
 
     evidence_by_id = {item.id: item for item in evidence_items}
