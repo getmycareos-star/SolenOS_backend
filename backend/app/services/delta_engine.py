@@ -484,6 +484,22 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         field = str(item.get("field") or "symptom_reported_state")
                         subject_id = name
                     assertion_kind = "time_bound_observation" if domain == "symptoms" else "current_state"
+                    if assertion_kind == "current_state" and event_date is not None:
+                        incoming_day = event_date.date()
+                        later_state_exists = any(
+                            peer.assertion_kind == "current_state"
+                            and peer.subject_type == domain.rstrip("s")
+                            and _normalise(peer.subject_id) == _normalise(subject_id)
+                            and peer.field == field
+                            and peer.observed_at is not None
+                            and peer.observed_at.date() > incoming_day
+                            and peer.assertion_status in {"reported", "review_required", "accepted"}
+                            for peer in active_assertions
+                        )
+                        if later_state_exists:
+                            item["historical_only"] = True
+                            item["promotion_warning"] = "This event predates a later-dated care-state report. It is preserved in reconciliation history but not promoted as current state."
+                            continue
                     if source_event_id:
                         # Daily Capture may already have created a source assertion
                         # for the same field. Reuse that provenance rather than
