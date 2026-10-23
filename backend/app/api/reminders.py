@@ -76,7 +76,6 @@ def list_reminders(person_id: str, request: Request, db: Session = Depends(get_d
     caregiver_id, scoped_person_id = _session_scope(request)
     if str(person_id) != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
-    caregiver_id, _ = _session_scope(request)
     return db.query(CareReminder).filter(
         CareReminder.person_id == scoped_person_id,
         or_(
@@ -117,6 +116,8 @@ def list_delivery_attempts(reminder_id: str, delivery_id: str, request: Request,
     ).first()
     if delivery is None:
         raise HTTPException(status_code=404, detail="Reminder delivery receipt not found")
+    if reminder.recipient_caregiver_id and caregiver_id not in {reminder.recipient_caregiver_id, reminder.created_by_caregiver_id}:
+        raise HTTPException(status_code=403, detail="This reminder is restricted to its recipient and creator")
     return db.query(ReminderDeliveryAttempt).filter(
         ReminderDeliveryAttempt.delivery_id == delivery_id,
     ).order_by(ReminderDeliveryAttempt.attempt_number.asc()).all()
@@ -124,7 +125,7 @@ def list_delivery_attempts(reminder_id: str, delivery_id: str, request: Request,
 
 @router.get("/people/{person_id}/deliveries", response_model=list[ReminderDeliveryOut])
 def list_person_delivery_inbox(person_id: str, request: Request, db: Session = Depends(get_db)):
-    _, scoped_person_id = _session_scope(request)
+    caregiver_id, scoped_person_id = _session_scope(request)
     if str(person_id) != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     return db.query(ReminderDelivery).join(
@@ -142,7 +143,7 @@ def list_person_delivery_inbox(person_id: str, request: Request, db: Session = D
 
 @router.delete("/{reminder_id}", response_model=ReminderOut)
 def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(get_db)):
-    _, person_id = _session_scope(request)
+    caregiver_id, person_id = _session_scope(request)
     reminder = db.query(CareReminder).filter(
         CareReminder.id == reminder_id,
         CareReminder.person_id == person_id,
