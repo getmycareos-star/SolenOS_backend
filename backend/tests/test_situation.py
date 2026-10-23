@@ -392,3 +392,97 @@ def test_quick_capture_rejects_unsupported_category():
             raw_input="Observed a change.",
             capture_category="unsupported-category",
         )
+
+
+
+def test_document_evidence_preserves_extraction_provenance_without_inventing_confidence():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="document-provenance-person", name="Document Provenance Person")
+        caregiver = Caregiver(
+            id="document-provenance-caregiver",
+            name="Document Provenance Caregiver",
+            email="document-provenance@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                documents=[
+                    {
+                        "id": "scan-1",
+                        "name": "discharge-scan.png",
+                        "extracted_text": "Follow up with cardiology in two weeks.",
+                        "mime_type": "image/png",
+                        "extraction_source": "ocr",
+                        "ocr_confidence": 0.87,
+                    }
+                ],
+                provenance={
+                    "input_type": "document",
+                    "entry_method": "upload",
+                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                },
+            ),
+        )
+
+        evidence = db.query(Evidence).filter_by(id=response.evidence_id).one()
+        metadata = __import__("json").loads(evidence.extra_metadata)
+        assert evidence.source_type == "document_ocr"
+        assert evidence.confidence == 0.87
+        assert metadata["extraction_source"] == "ocr"
+        assert metadata["mime_type"] == "image/png"
+        assert metadata["document_time_status"] == "not_extracted"
+        assert metadata["document_id"] == "scan-1"
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_document_without_ocr_score_keeps_confidence_unknown():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="document-unknown-confidence-person", name="Document Unknown Confidence")
+        caregiver = Caregiver(
+            id="document-unknown-confidence-caregiver",
+            name="Document Unknown Confidence Caregiver",
+            email="document-unknown-confidence@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                documents=[
+                    {
+                        "id": "pdf-1",
+                        "name": "discharge.pdf",
+                        "extracted_text": "Follow up in two weeks.",
+                        "mime_type": "application/pdf",
+                        "extraction_source": "tika",
+                    }
+                ],
+            ),
+        )
+        evidence = db.query(Evidence).filter_by(id=response.evidence_id).one()
+        metadata = __import__("json").loads(evidence.extra_metadata)
+        assert evidence.source_type == "document_text_extraction"
+        assert evidence.confidence is None
+        assert metadata["ocr_confidence"] is None
+        assert metadata["document_time_status"] == "not_extracted"
+        db.close()
+    finally:
+        teardown_db()
