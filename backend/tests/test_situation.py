@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -112,6 +113,10 @@ def test_post_situation_with_documents():
                         "extracted_text": "Patient cleared for discharge with follow-up in 1 week.",
                         "mime_type": "application/pdf",
                         "ocr_confidence": 0.95,
+                        "extraction_source": "pdf_ocr",
+                        "extraction_warnings": ["Low OCR confidence; verify against original."],
+                        "sha256": "a".repeat(64),
+                        "extracted_char_count": 58,
                     }
                 ],
                 "provenance": {
@@ -128,6 +133,15 @@ def test_post_situation_with_documents():
         assert data["ok"] is True
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Document observation"
+        evidence_db = TestingSessionLocal()
+        stored = evidence_db.query(Evidence).filter_by(id=data["evidence_id"]).first()
+        metadata = json.loads(stored.extra_metadata)
+        assert metadata["extraction_source"] == "pdf_ocr"
+        assert metadata["sha256"] == "a" * 64
+        assert metadata["ocr_confidence"] == 0.95
+        assert metadata["extraction_warnings"] == ["Low OCR confidence; verify against original."]
+        assert metadata["extracted_char_count"] == 58
+        evidence_db.close()
     finally:
         teardown_db()
 
