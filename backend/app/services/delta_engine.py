@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion
+from app.models.uncertainty import InformationGap, OpenQuestion
+from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 
@@ -248,6 +250,28 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         raise HTTPException(status_code=503, detail="The local SolenOS model could not complete reconciliation. No fallback model was used and no delta was persisted.") from exc
 
     result = _parse_model_json(content_json)
+
+    # Verify that quoted evidence exists in the supplied source or active state.
+    source_corpus = "\n".join(
+        [content] + [str(item.get("value", "")) for item in active_state]
+    ).casefold()
+    for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps"):
+        for item in result[domain]:
+            excerpt = str(item.get("evidence_excerpt") or "").strip()
+            item["evidence_supported"] = bool(excerpt and excerpt.casefold() in source_corpus)
+            if not item["evidence_supported"]:
+                item["provenance_warning"] = "Evidence excerpt could not be verified against supplied source text."
+                if domain in {"medications", "conditions", "symptoms"}:
+                    item["certainty"] = "uncertain"
+    for item in result["contradictions"]:
+        excerpts = item.get("evidence_excerpts") or []
+        item["evidence_supported"] = bool(excerpts) and all(
+            isinstance(excerpt, str) and excerpt.strip() and excerpt.casefold() in source_corpus
+            for excerpt in excerpts
+        )
+        if not item["evidence_supported"]:
+            item["provenance_warning"] = "Conflicting-source excerpts require human verification."
+
     # Add a deterministic comparison annotation without letting a model's label
     # overwrite contradictory source reports or assert that an item is verified.
     known = {}
