@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -28,13 +29,23 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Production CORS is explicitly controlled by CORS_ORIGINS. Keep local
+# development origins only when no production allowlist is configured.
+_cors_env = os.getenv("CORS_ORIGINS", "").strip()
+if _cors_env:
+    _allowed_origins = [origin.strip().rstrip("/") for origin in _cors_env.split(",") if origin.strip()]
+elif settings.is_production:
+    _allowed_origins = ["https://solenosai.netlify.app"]
+else:
+    _allowed_origins = [
         "http://localhost:5173",
         "http://localhost:3000",
         "https://solenosai.netlify.app",
-    ],
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
