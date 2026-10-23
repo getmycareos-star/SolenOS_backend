@@ -164,7 +164,7 @@ class SituationResponse(BaseModel):
     description: Optional[str] = None
     situation_type: SituationType
     state: SituationState
-    confidence: float
+    confidence: Optional[float] = None
     explanation: Optional[str] = None
     signals: List[dict[str, Any]]
     patterns: Optional[List[dict[str, Any]]] = None
