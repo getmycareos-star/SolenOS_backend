@@ -271,10 +271,36 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
         raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
 
     data = await file.read(MAX_DOCUMENT_BYTES + 1)
-    filename = PurePath(file.filename or "care-document").name[:255]
+    filename = (file.filename or "care-document").replace("\\\\", "/").split("/")[-1][:255]
     content_type = (file.content_type or "application/octet-stream").lower().strip()
     if len(data) > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="The selected file exceeds the 10 MiB limit.")
+    suffix = PurePath(filename).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported document format.")
+    if suffix == ".pdf" and (not data.startswith(PDF_MAGIC) or content_type not in {"application/pdf", "application/octet-stream"}):
+        raise HTTPException(status_code=415, detail="PDF signature or declared content type is invalid.")
+    if suffix in IMAGE_EXTENSIONS:
+        expected_image_mime = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+            ".webp": "image/webp", ".tif": "image/tiff", ".tiff": "image/tiff",
+            ".bmp": "image/bmp",
+        }[suffix]
+        if content_type not in {expected_image_mime, "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail="Image extension and declared content type do not match.")
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image_obj:
+                image_obj.verify()
+        except Exception as exc:
+            raise HTTPException(status_code=415, detail="The uploaded image is invalid or unreadable.") from exc
+    if suffix in TEXT_EXTENSIONS:
+        if content_type not in {"text/plain", "text/markdown", "text/csv", "application/json", "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail="Text extension and declared content type do not match.")
+        try:
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Text document is not valid UTF-8.") from exc
     try:
         extraction = extract_document_content(filename, content_type, data)
         document = extraction["document"]
