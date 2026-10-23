@@ -628,6 +628,11 @@ def get_unified_care_record(
                     "time_provenance": item.time_provenance, "tags": item.tags or [],
                     "structured_data": item.structured_data or [],
                     "caregiver_id": item.caregiver_id,
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(item.evidence_ids)
+                        if eid in evidence_by_id and eid not in ids
+                    ],
                 }
                 for item in observations_by_event.get(event.id, [])
             ],
@@ -639,6 +644,11 @@ def get_unified_care_record(
                     "observed_at": item.observed_at, "recorded_at": item.recorded_at,
                     "subject_type": item.subject_type, "subject_id": item.subject_id,
                     "evidence_ids": normalized_ids(item.evidence_ids),
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(item.evidence_ids)
+                        if eid in evidence_by_id and eid not in ids
+                    ],
                 }
                 for item in assertions_by_event.get(event.id, [])
             ],
@@ -747,6 +757,11 @@ def get_unified_care_record(
                     "id": outcome.id, "outcome_status": outcome.outcome_status,
                     "notes": outcome.notes, "correction_text": outcome.correction_text,
                     "created_at": outcome.created_at, "evidence_ids": normalized_ids(outcome.evidence_ids),
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(outcome.evidence_ids)
+                        if eid in evidence_by_id and eid != action.source_evidence_id
+                    ],
                 }
                 for outcome in outcomes_by_action.get(action.id, [])
             ],
