@@ -72,3 +72,36 @@ def test_reminder_delivery_failure_schedules_exponential_retry():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_recurring_reminder_creates_next_occurrence_in_local_timezone():
+    engine, db = make_db()
+    try:
+        now = datetime.now(timezone.utc)
+        reminder = CareReminder(
+            id="r-recurring", person_id="p1", created_by_caregiver_id="c1",
+            title="Daily check-in", message="Record today's update",
+            due_at=now - timedelta(minutes=1), timezone="Africa/Lagos",
+            recurrence_rule="daily", status="scheduled",
+            idempotency_key="series-daily-0001", attempt_count=0,
+            max_attempts=3, next_attempt_at=now - timedelta(minutes=1),
+        )
+        db.add(reminder)
+        db.commit()
+        result = process_due_reminders(
+            db, lambda item, key: {"provider": "test-provider", "receipt_id": "receipt-recurring"}, now=now,
+        )
+        next_item = db.query(CareReminder).filter(
+            CareReminder.person_id == "p1",
+            CareReminder.idempotency_key.like("series-daily-0001:%"),
+        ).one()
+        assert result["delivered"] == 1
+        assert reminder.status == "delivered"
+        assert next_item.status == "scheduled"
+        assert next_item.recurrence_rule == "daily"
+        assert next_item.due_at > reminder.due_at
+        assert next_item.timezone == "Africa/Lagos"
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
