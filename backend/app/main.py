@@ -93,6 +93,8 @@ app.include_router(causal_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
+app.include_router(ops_events_router, prefix="/api")
+app.include_router(document_extract_router, prefix="/api")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
