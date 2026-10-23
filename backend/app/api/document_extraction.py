@@ -218,6 +218,8 @@ def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, 
             "observation": quote,
             "source_quote": quote,
             "source_evidence_id": evidence_id,
+            "source_span_start": source_start if source_start >= 0 else None,
+            "source_span_end": min(source_start + len(quote), source_end) if source_start >= 0 and source_end is not None else None,
             "confidence": None,
             "review_status": "pending_review",
         })
