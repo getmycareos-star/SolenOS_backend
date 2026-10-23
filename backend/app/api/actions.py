@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
-from app.models.care import Caregiver as CaregiverModel
+from app.models.care import Caregiver as CaregiverModel, Evidence
+from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -36,6 +37,7 @@ def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
 @router.post("/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
 def extract_actions_from_document(
     document_id: str,
+    request: Request,
     document_text: str,
     source_document_type: Optional[str] = None,
     source_authority: str = "unknown",
@@ -43,7 +45,16 @@ def extract_actions_from_document(
     caregiver_id: str = None,
     db: Session = Depends(get_db),
 ):
-    ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
+    source_evidence = db.query(Evidence).filter(Evidence.id == document_id, Evidence.person_id == scoped_person_id).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=404, detail="Source evidence not found in this care record")
+    if (document_text or "").strip() != (source_evidence.source_text or "").strip():
+        raise HTTPException(status_code=422, detail="Action extraction must use the stored source evidence text")
+    ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.now().astimezone()
 
     candidates = extraction_engine.extract(
         document_text=document_text,
@@ -60,9 +71,13 @@ def extract_actions_from_document(
         safety = normalization_service.safety_check(candidate)
         if not safety.is_safe_to_create and safety.blocked_reason:
             continue
+        if medication_instruction_requires_authority(candidate.original_text, candidate.is_medication_action):
+            verification = get_verified_medication_authority(db, person_id=scoped_person_id, evidence_id=document_id, source_authority=source_authority)
+            if verification is None:
+                continue
 
         action_model = ActionModel(
-            person_id=None,
+            person_id=scoped_person_id,
             source_evidence_id=candidate.source_evidence_id,
             source_passage=candidate.source_passage,
             source_document_type=source_document_type,
@@ -87,7 +102,7 @@ def extract_actions_from_document(
             requires_confirmation=candidate.requires_confirmation,
             is_recurring=candidate.is_recurring,
             status=ActionStatus.PENDING_CONFIRMATION if candidate.requires_confirmation else ActionStatus.ACTIVE,
-            created_by_caregiver_id=caregiver_id,
+            created_by_caregiver_id=scoped_caregiver_id,
         )
         db.add(action_model)
         db.commit()
@@ -98,7 +113,13 @@ def extract_actions_from_document(
 
 
 @router.post("/actions", response_model=ActionSchema)
-def create_action(action: ActionCreate, db: Session = Depends(get_db)):
+def create_action(action: ActionCreate, request: Request, db: Session = Depends(get_db)):
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
+    if str(action.person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if not action.person_id:
         raise HTTPException(status_code=400, detail="person_id is required")
 
@@ -129,6 +150,14 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db)):
 
     if not safety.is_safe_to_create:
         raise HTTPException(status_code=400, detail={"blocked_reason": safety.blocked_reason, "warnings": safety.warnings})
+
+    source_evidence = db.query(Evidence).filter(Evidence.id == action.source_evidence_id, Evidence.person_id == scoped_person_id).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=422, detail="Source evidence must exist and belong to this care record")
+    if medication_instruction_requires_authority(candidate.original_text, candidate.is_medication_action):
+        verification = get_verified_medication_authority(db, person_id=scoped_person_id, evidence_id=action.source_evidence_id, source_authority=action.source_authority)
+        if verification is None:
+            raise HTTPException(status_code=409, detail={"blocked_reason": "Medication instructions are not authoritative until source evidence has a valid trusted prescriber verification", "requires_clinical_source_verification": True})
 
     db_action = ActionModel(
         person_id=action.person_id,
@@ -168,7 +197,7 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db)):
         requires_confirmation=candidate.requires_confirmation,
         has_condition=candidate.has_condition,
         is_recurring=candidate.is_recurring,
-        created_by_caregiver_id=action.created_by_caregiver_id,
+        created_by_caregiver_id=scoped_caregiver_id,
     )
     db.add(db_action)
     db.commit()
@@ -193,6 +222,8 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
+    if update_data.get("status") == ActionStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="Use the completion endpoint to record evidence and authenticated caregiver attribution")
 
     # Assignment labels and actor types are derived from a validated caregiver ID;
     # callers cannot spoof them independently.
@@ -228,9 +259,18 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
 
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
-def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
+def complete_action(action_id: str, evidence: ActionCompletionEvidence, request: Request, db: Session = Depends(get_db)):
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    person_id = getattr(request.state, "scoped_person_id", None)
+    if not caregiver_id or not person_id:
+        raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    if str(db_action.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care action")
+    try:
+        return lifecycle_service.record_completion(db_action, evidence, db, completed_by_caregiver_id=str(caregiver_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
