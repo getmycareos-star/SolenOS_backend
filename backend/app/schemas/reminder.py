@@ -13,6 +13,14 @@ class ReminderCreate(BaseModel):
     max_attempts: int = Field(default=5, ge=1, le=10)
     retry_delay_seconds: int = Field(default=60, ge=10, le=3600)
 
+    @field_validator("title", "message")
+    @classmethod
+    def require_nonblank_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("title and message must not be blank")
+        return normalized
+
     @field_validator("scheduled_at")
     @classmethod
     def require_timezone_aware(cls, value: datetime) -> datetime:
