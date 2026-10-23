@@ -60,7 +60,7 @@ def extract_actions_from_document(
         document_text=document_text,
         source_evidence_id=document_id,
         source_document_type=source_document_type,
-        source_authority=source_authority,
+        source_authority="unknown",
         reference_date=ref_dt,
     )
 
@@ -81,7 +81,8 @@ def extract_actions_from_document(
             source_evidence_id=candidate.source_evidence_id,
             source_passage=candidate.source_passage,
             source_document_type=source_document_type,
-            source_authority=source_authority,
+            source_authority="unknown",
+            source_authority_verified=False,
             extraction_confidence=candidate.extraction_confidence,
             provenance_notes=candidate.provenance_notes,
             actor_type=candidate.actor_type,
@@ -166,7 +167,8 @@ def create_action(action: ActionCreate, db: Session = Depends(get_db)):
         source_evidence_id=candidate.source_evidence_id,
         source_passage=candidate.source_passage,
         source_document_type=action.source_document_type,
-        source_authority=action.source_authority,
+        source_authority="unknown" if candidate.is_medication_action else action.source_authority,
+        source_authority_verified=False,
         extraction_confidence=candidate.extraction_confidence,
         provenance_notes=candidate.provenance_notes,
         actor_type=candidate.actor_type,
@@ -224,7 +226,7 @@ def get_action(action_id: str, db: Session = Depends(get_db)):
 def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
-    if db_action.is_medication_action and update_data.get("status") == ActionStatus.ACTIVE:
+    if db_action.is_medication_action and update_data.get("status") == ActionStatus.ACTIVE and not db_action.source_authority_verified:
         raise HTTPException(
             status_code=409,
             detail="Medication actions cannot be activated until a clinician-confirmation workflow verifies the instruction",
@@ -290,10 +292,10 @@ def supersede_action(action_id: str, new_action_id: str, db: Session = Depends(g
 @router.post("/actions/{action_id}/activate", response_model=ActionSchema)
 def activate_action(action_id: str, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
-    if db_action.is_medication_action:
+    if db_action.is_medication_action and not db_action.source_authority_verified:
         raise HTTPException(
             status_code=409,
-            detail="Medication actions cannot be activated until a clinician-confirmation workflow verifies the instruction",
+            detail="Medication actions remain blocked until source authority is verified through an authorized clinical workflow",
         )
     return lifecycle_service.activate_action(db_action, db)
 
