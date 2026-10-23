@@ -38,7 +38,15 @@ class ActionLifecycleService:
         db.refresh(action)
         return action
 
-    def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session) -> ActionModel:
+    def record_completion(
+        self,
+        action: ActionModel,
+        evidence: ActionCompletionEvidence,
+        db: Session,
+        completed_by_caregiver_id: str,
+    ) -> ActionModel:
+        if not completed_by_caregiver_id:
+            raise ValueError("An authenticated caregiver is required to record completion")
         if action.status in ("cancelled", "superseded", "expired"):
             raise ValueError(f"Cannot complete action in status {action.status}")
 
@@ -46,6 +54,7 @@ class ActionLifecycleService:
         action.completion_evidence_ids = evidence.evidence_ids
         action.completion_confidence = evidence.completion_confidence
         action.completed_at = datetime.utcnow()
+        action.completed_by_caregiver_id = completed_by_caregiver_id
 
         db.add(action)
         db.commit()
