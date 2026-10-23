@@ -60,7 +60,7 @@ DELTA_JSON_CONTRACT = {
                 "type": "object",
                 "required": ["change_type", "name", "previous", "current", "evidence_excerpt", "certainty"],
                 "properties": {
-                    "change_type": {"type": "string},
+                    "change_type": {"type": "string"},
                     "name": {"type": "string"},
                     "previous": {"type": ["string", "null"]},
                     "current": {"type": ["string", "null"]},
@@ -89,7 +89,7 @@ DELTA_JSON_CONTRACT = {
                 "type": "object",
                 "required": ["action", "status", "due_date", "owner", "evidence_excerpt"],
                 "properties": {
-                    "action": {"type": "string},
+                    "action": {"type": "string"},
                     "status": {"type": "string"},
                     "due_date": {"type": ["string", "null"]},
                     "owner": {"type": ["string", "null"]},
@@ -103,9 +103,9 @@ DELTA_JSON_CONTRACT = {
                 "type": "object",
                 "required": ["topic", "reports", "why_conflicting", "evidence_excerpts"],
                 "properties": {
-                    "topic": {"type": "string},
+                    "topic": {"type": "string"},
                     "reports": {"type": "array", "items": {"type": "string"}},
-                    "why_conflicting": {"type": "string},
+                    "why_conflicting": {"type": "string"},
                     "evidence_excerpts": {"type": "array", "items": {"type": "string"}}
                 }
             }
@@ -116,9 +116,9 @@ DELTA_JSON_CONTRACT = {
                 "type": "object",
                 "required": ["gap", "why_it_matters", "next_question", "evidence_excerpt"],
                 "properties": {
-                    "gap": {"type": "string},
+                    "gap": {"type": "string"},
                     "why_it_matters": {"type": "string"},
-                    "next_question": {"type": "string},
+                    "next_question": {"type": "string"},
                     "evidence_excerpt": {"type": "string"}
                 }
             }
