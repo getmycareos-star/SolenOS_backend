@@ -39,11 +39,16 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
             metadata = {
                 "ocr_confidence": doc.ocr_confidence,
                 "mime_type": doc.mime_type,
+                "extraction_source": doc.extraction_source,
+                "extraction_warnings": doc.extraction_warnings or [],
+                "sha256": doc.sha256,
+                "extracted_char_count": doc.extracted_char_count if doc.extracted_char_count is not None else len(source_text),
             }
+            metadata = {key: value for key, value in metadata.items() if value is not None}
         evidence = Evidence(
             person_id=payload.person_id,
             type="note" if not doc else "document",
