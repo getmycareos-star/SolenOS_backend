@@ -257,3 +257,50 @@ def test_delta_receives_existing_open_loops_as_context_not_verified_facts(monkey
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_delta_does_not_persist_value_unmatched_to_source_even_with_valid_quote(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person
+    from app.models.care_continuity import CareAssertion
+
+    payload = json.loads(FakeResponse().json()["message"]["content"])
+    payload["medications"][0]["current"] = "900 mg"
+
+    class Response:
+        def raise_for_status(self): return None
+        def json(self): return {"message": {"content": json.dumps(payload)}}
+    class Client:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, url, json, **kwargs): return Response()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://model.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-test-model")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setattr(delta_engine.httpx, "Client", Client)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add(Person(id="unsupported-value-person", name="Care recipient"))
+    db.commit()
+    try:
+        result = delta_engine.reconcile_event(
+            db, person_id="unsupported-value-person", event_date=datetime(2026, 10, 22, tzinfo=timezone.utc),
+            source="Visit note", content="Increase metformin to 1000 mg. MRI ordered. follow-up in 2 weeks.",
+        )
+        assert result["medications"][0]["evidence_supported"] is True
+        assert result["medications"][0]["claim_supported"] is False
+        assert result["medications"][0]["certainty"] == "uncertain"
+        assert db.query(CareAssertion).filter_by(person_id="unsupported-value-person").count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
