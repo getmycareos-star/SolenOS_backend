@@ -36,7 +36,7 @@ class CareReminder(Base):
 class ReminderDeliveryAttempt(Base):
     __tablename__ = "reminder_delivery_attempts"
     __table_args__ = (
-        Index("ix_reminder_delivery_attempts_reminder_created", "reminder_id", "created_at"),
+        Index("ix_reminder_delivery_attempts_reminder_created", "reminder_id", "attempted_at"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
