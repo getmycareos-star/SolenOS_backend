@@ -141,6 +141,8 @@ def test_post_situation_with_documents():
         assert metadata["ocr_confidence"] == 0.95
         assert metadata["extraction_warnings"] == ["Low OCR confidence; verify against original."]
         assert metadata["extracted_char_count"] == 54
+        assert stored.source_type == "document"
+        assert stored.confidence == 0.95
         evidence_db.close()
     finally:
         teardown_db()
