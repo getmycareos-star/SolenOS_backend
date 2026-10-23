@@ -124,3 +124,5 @@ def database_schema_differences(bind=None):
 if not RAILWAY_RUNTIME:
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()
+
+import app.models.reminder  # noqa: E402, F401
