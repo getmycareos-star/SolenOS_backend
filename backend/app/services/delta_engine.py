@@ -395,7 +395,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     if not name or current is None or item.get("certainty") != "supported" or not item.get("evidence_supported"):
                         continue
                     if domain == "medications":
-                        field = str(item.get("field") or ("dose" if "dose" in change_type else "medication_reported_state"))
+                        inferred_field = {
+                            "dose_changed": "dose",
+                            "frequency_changed": "frequency",
+                            "route_changed": "route",
+                        }.get(change_type, "medication_reported_state")
+                        field = str(item.get("field") or inferred_field)
                         subject_id = name.casefold()
                     elif domain == "conditions":
                         field = str(item.get("field") or "condition_reported_state")
