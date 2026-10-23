@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import CareAssertion
-from app.models.uncertainty import InformationGap, OpenQuestion
+from app.models.care_continuity import CareAssertion, CareDeltaRun
+from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -397,7 +397,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     question_text = str(item.get("next_question") or f"What is known about {gap}?").strip()
                     add_open_loop("care_gap", gap, "missing_information",
                         str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM)
-            db.commit()
+            db.flush()
         except Exception:
             db.rollback()
             raise HTTPException(status_code=500, detail="The reconciliation could not be persisted; the transaction was rolled back.")
@@ -409,4 +409,40 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "model_provider": "configured_local_ollama", "model": model,
         "persisted": persist, "current_state_authority": "existing SolenOS care-continuity records; this delta is an interpretation, not a verified clinical fact",
     }
+    if persist:
+        try:
+            # Persist model-detected conflicts with the same source-bound transaction.
+            for item in result["contradictions"]:
+                if not item.get("evidence_supported"):
+                    continue
+                topic = str(item.get("topic") or "unspecified conflict").strip()
+                description = str(item.get("why_conflicting") or "Competing source reports require human review.")
+                description += " Reports: " + " | ".join(str(value) for value in (item.get("reports") or []))
+                existing = db.query(Contradiction).filter(
+                    Contradiction.person_id == person_id,
+                    Contradiction.subject_type == "delta_engine_report",
+                    Contradiction.subject_id == topic,
+                    Contradiction.resolution_status == "unresolved",
+                ).first()
+                if existing is None:
+                    db.add(Contradiction(
+                        person_id=person_id, subject_type="delta_engine_report", subject_id=topic,
+                        field=topic, description=description, evidence_ids=evidence_ids,
+                        source_assertion_ids=[], resolution_status="unresolved",
+                    ))
+            run = CareDeltaRun(
+                person_id=person_id, source=source,
+                event_date=event_date or datetime.now(timezone.utc),
+                source_event_id=source_event_id, evidence_ids=evidence_ids,
+                delta_json="{}", model_name=model,
+                created_by_caregiver_id=created_by_caregiver_id,
+            )
+            db.add(run)
+            db.flush()
+            result["provenance"]["delta_run_id"] = run.id
+            run.delta_json = json.dumps(result, ensure_ascii=False, default=str)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=500, detail="The reconciliation could not be persisted; the transaction was rolled back.")
     return result
