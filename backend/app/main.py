@@ -128,7 +128,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if path == "/api/v1/documents/extract" and method == "POST":
+    if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
         raw_length = request.headers.get("content-length")
         try:
             request_length = int(raw_length) if raw_length is not None else None
@@ -236,7 +236,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             target_person_id = scoped_person_id
         # Document extraction has no caller-selected person ID; the validated bearer
         # session is its only permitted care-record scope.
-        if path == "/api/v1/documents/extract" and method == "POST":
+        if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
             target_person_id = scoped_person_id
 
         query_person_id = request.query_params.get("person_id")
@@ -244,7 +244,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
         payload = {}
-        if path == "/api/v1/documents/extract" and method == "POST":
+        if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
             # Preserve the multipart stream for FastAPI's bounded upload parser.
             # Do not buffer the full binary document in this middleware.
             pass
