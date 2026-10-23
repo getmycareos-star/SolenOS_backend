@@ -154,7 +154,7 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
         assert closed.completed_by_caregiver_id == assigned.id
         assert closed.completed_at is not None
         events = list_handoff_events(item.id, request_for(person.id, assigned.id), db)
-        assert [event.event_type for event in events] == ["created", "acknowledged", "closed"]
+        assert [event.event_type for event in events] == ["created", "acknowledged", "completion_reported", "closed"]
         assert all(event.actor_caregiver_id for event in events)
     finally:
         db.close()
