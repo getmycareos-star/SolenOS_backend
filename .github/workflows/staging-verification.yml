@@ -1,0 +1,73 @@
+name: Staging PostgreSQL and document integration verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_target:
+        description: "This applies Alembic migrations to the configured STAGING database and creates/deletes synthetic smoke-test records."
+        required: true
+        type: choice
+        options:
+          - DO_NOT_RUN
+          - APPLY_MIGRATIONS_AND_RUN_STAGING_SMOKE
+        default: DO_NOT_RUN
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solenos-staging-verification
+  cancel-in-progress: false
+
+jobs:
+  staging-verification:
+    if: inputs.confirm_target == 'APPLY_MIGRATIONS_AND_RUN_STAGING_SMOKE'
+    runs-on: ubuntu-latest
+    environment: staging
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+      STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+    steps:
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and smoke-test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e backend httpx
+
+      - name: Validate staging targets without printing secrets
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          url = os.environ.get("DATABASE_URL", "").strip()
+          api = os.environ.get("STAGING_API_BASE_URL", "").strip()
+          if not url.startswith(("postgresql://", "postgresql+psycopg2://")):
+              raise SystemExit("STAGING_DATABASE_URL must be a PostgreSQL SQLAlchemy URL.")
+          if not urlparse(url).hostname:
+              raise SystemExit("STAGING_DATABASE_URL has no database host.")
+          if not api.startswith("https://"):
+              raise SystemExit("STAGING_API_BASE_URL must be an HTTPS staging API origin.")
+          print("Staging database and HTTPS API target are configured; secret values withheld.")
+          PY
+
+      - name: Apply the integrated Alembic chain to staging PostgreSQL
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Verify one migration head and required schema
+        working-directory: backend
+        run: python scripts/verify_staging_schema.py
+
+      - name: Test deployed OCR, authenticated upload, original download, isolation and review attribution
+        working-directory: backend
+        run: python scripts/staging_document_smoke.py
