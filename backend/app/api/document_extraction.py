@@ -217,38 +217,43 @@ def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, 
         source_end = source_start + len(fragment) if source_start >= 0 else None
         cursor = source_end if source_end is not None else cursor
         quote = fragment[:1000]
-        kind = None
+        # A single source sentence can legitimately mention more than one
+        # review category. Preserve separate candidates against the same exact
+        # quote instead of silently dropping medication/instruction signals when
+        # a follow-up phrase appears in that sentence.
+        matched_kinds = []
         if follow_up.search(quote):
-            kind = "follow_up"
-        elif medication.search(quote):
-            kind = "medication"
-        elif result.search(quote):
-            kind = "result"
-        elif instruction.search(quote):
-            kind = "instruction"
-        if not kind:
-            continue
-        key = (kind, quote.casefold())
-        if key in seen:
-            continue
-        seen.add(key)
-        candidates.append({
-            "candidate_id": f"{evidence_id}:{len(candidates)}",
-            "candidate_type": kind,
-            "subject": {
-                "medication": "Medication reference",
-                "instruction": "Care instruction",
-                "result": "Test or result reference",
-                "follow_up": "Follow-up reference",
-            }[kind],
-            "observation": quote,
-            "source_quote": quote,
-            "source_evidence_id": evidence_id,
-            "source_span_start": source_start if source_start >= 0 else None,
-            "source_span_end": min(source_start + len(quote), source_end) if source_start >= 0 and source_end is not None else None,
-            "confidence": None,
-            "review_status": "pending_review",
-        })
+            matched_kinds.append("follow_up")
+        if medication.search(quote):
+            matched_kinds.append("medication")
+        if result.search(quote):
+            matched_kinds.append("result")
+        if instruction.search(quote):
+            matched_kinds.append("instruction")
+        for kind in matched_kinds:
+            key = (kind, quote.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append({
+                "candidate_id": f"{evidence_id}:{len(candidates)}",
+                "candidate_type": kind,
+                "subject": {
+                    "medication": "Medication reference",
+                    "instruction": "Care instruction",
+                    "result": "Test or result reference",
+                    "follow_up": "Follow-up reference",
+                }[kind],
+                "observation": quote,
+                "source_quote": quote,
+                "source_evidence_id": evidence_id,
+                "source_span_start": source_start if source_start >= 0 else None,
+                "source_span_end": min(source_start + len(quote), source_end) if source_start >= 0 and source_end is not None else None,
+                "confidence": None,
+                "review_status": "pending_review",
+            })
+            if len(candidates) >= 30:
+                break
         if len(candidates) >= 30:
             break
     return candidates
