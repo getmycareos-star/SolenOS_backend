@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -121,6 +121,8 @@ from app.services.temporal_intelligence import (
     classify_temporal_status,
     check_temporal_conflict,
 )
+import hashlib
+from app.models.anonymous_session import AnonymousSession as AnonymousSessionModel
 from app.models.action import Action as ActionModel
 from app.api.actions import router as actions_router
 
@@ -442,8 +444,48 @@ def list_events(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/care-record/{person_id}")
-def get_unified_care_record(person_id: str, limit: int = 200, db: Session = Depends(get_db)):
-    """Return one source-linked timeline over canonical care tables."""
+def get_unified_care_record(
+    person_id: str,
+    request: Request,
+    limit: int = 200,
+    db: Session = Depends(get_db),
+):
+    """Return one source-linked timeline over canonical care tables.
+
+    Validate scope here as well as in middleware: a new record route must fail
+    closed even if middleware route-parameter resolution cannot identify it.
+    """
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, raw_token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not raw_token.strip():
+            raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+        token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+        session = (
+            db.query(AnonymousSessionModel)
+            .filter(
+                AnonymousSessionModel.token_hash == token_hash,
+                AnonymousSessionModel.revoked_at.is_(None),
+                AnonymousSessionModel.expires_at > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+        if session is None:
+            raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+        scoped_person_id = session.person_id
+        scoped_caregiver_id = session.caregiver_id
+    if str(scoped_person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.id == scoped_caregiver_id, CaregiverModel.person_id == person_id)
+        .first()
+    )
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Session caregiver is not linked to this care record")
+
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if person is None:
         raise HTTPException(status_code=404, detail="Person not found")
