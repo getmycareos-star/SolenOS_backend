@@ -37,12 +37,12 @@ def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
 @router.post("/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
 def extract_actions_from_document(
     document_id: str,
+    request: Request,
     document_text: str,
     source_document_type: Optional[str] = None,
     source_authority: str = "unknown",
     reference_date: Optional[str] = None,
     caregiver_id: str = None,
-    request: Request = None,
     db: Session = Depends(get_db),
 ):
     scoped_person_id = getattr(request.state, "scoped_person_id", None) if request else None
