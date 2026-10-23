@@ -119,3 +119,19 @@ def test_reconcile_persists_result_and_open_loops(monkeypatch):
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_delta_parser_rejects_malformed_nested_items_before_persistence():
+    payload = json.loads(FakeResponse().json()["message"]["content"])
+    del payload["medications"][0]["evidence_excerpt"]
+    with pytest.raises(HTTPException) as exc:
+        delta_engine._parse_model_json(json.dumps(payload))
+    assert exc.value.status_code == 502
+
+
+def test_delta_parser_rejects_wrong_nested_field_types():
+    payload = json.loads(FakeResponse().json()["message"]["content"])
+    payload["tests"][0]["result_present"] = "false"
+    with pytest.raises(HTTPException) as exc:
+        delta_engine._parse_model_json(json.dumps(payload))
+    assert exc.value.status_code == 502
