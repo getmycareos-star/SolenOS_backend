@@ -300,3 +300,32 @@ def test_medication_authority_expiry_cancels_already_materialized_delivery():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_completion_note_is_saved_as_caregiver_report_evidence_atomically():
+    engine, db = make_db()
+    try:
+        person, caregiver, source_evidence, action = seed_action(db)
+        result = ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(
+                evidence_ids=[], completion_confidence=0.6,
+                notes="I completed the clinic follow-up and documented the response.",
+            ),
+            db,
+            completed_by_caregiver_id=caregiver.id,
+        )
+        assert result.status == "completed"
+        assert result.completed_by_caregiver_id == caregiver.id
+        report = db.query(Evidence).filter(
+            Evidence.person_id == person.id,
+            Evidence.type == "caregiver_report",
+            Evidence.source_type == "action_completion",
+        ).one()
+        assert report.id in result.completion_evidence_ids
+        assert report.uploaded_by_caregiver_id == caregiver.id
+        assert "completed the clinic follow-up" in report.source_text
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
