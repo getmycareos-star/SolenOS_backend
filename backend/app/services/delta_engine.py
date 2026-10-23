@@ -200,6 +200,27 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "status": item.assertion_status, "evidence_ids": item.evidence_ids or [],
     } for item in active_assertions]
 
+    # Include the existing LCR's real source material as context too. Many older
+    # records predate normalized assertions; they are evidence, not automatically
+    # promoted into verified current-state facts.
+    prior_events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id
+    ).order_by(CareEvent.occurred_at.desc()).limit(100).all()
+    prior_evidence = db.query(Evidence).filter(
+        Evidence.person_id == person_id
+    ).order_by(Evidence.uploaded_at.desc()).limit(100).all()
+    existing_record_context = {
+        "events": [{
+            "event_id": item.id, "date": item.occurred_at.isoformat() if item.occurred_at else None,
+            "type": item.event_type, "title": item.title, "description": item.description,
+            "evidence_ids": item.evidence_ids or [],
+        } for item in prior_events],
+        "evidence": [{
+            "evidence_id": item.id, "date": item.uploaded_at.isoformat() if item.uploaded_at else None,
+            "type": item.type, "source_text": (item.source_text or "")[:4000],
+        } for item in prior_evidence],
+    }
+
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
