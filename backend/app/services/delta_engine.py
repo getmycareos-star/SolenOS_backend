@@ -313,15 +313,24 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             candidates = [old for old in active_state if _normalise(old["subject_id"]) == _normalise(name) or _normalise(old["field"]) == _normalise(name)]
             prior_values = list(dict.fromkeys(old["value"] for old in candidates))
             item["existing_assertions"] = [old["assertion_id"] for old in candidates]
-            if prior_values and item.get("current") is not None and _normalise(item.get("current")) in {_normalise(v) for v in prior_values}:
-                item["change_type"] = "unchanged"
-            elif prior_values and item.get("current") is not None and all(_normalise(item.get("current")) != _normalise(v) for v in prior_values):
-                item["change_type"] = "changed" if item.get("change_type") not in {"discontinued", "conflicting", "uncertain"} else item["change_type"]
+            distinct_prior = list(dict.fromkeys(_normalise(value) for value in prior_values))
+            if len(distinct_prior) > 1:
+                item["change_type"] = "conflicting"
+                item["certainty"] = "uncertain"
                 item["prior_state_candidates"] = prior_values
-            elif not prior_values and item.get("current") is not None:
-                if item.get("change_type") not in {"conflicting", "uncertain"}:
-                    item["change_type"] = "new"
-            computed.append({"domain": domain, "name": name, "change_type": item.get("change_type"), "previous": item.get("previous"), "current": item.get("current"), "certainty": item.get("certainty", "uncertain")})
+                item["comparison_warning"] = "Existing normalized assertions disagree; no prior value was selected."
+            elif prior_values and item.get("current") is not None and _normalise(item.get("current")) == distinct_prior[0]:
+                item["change_type"] = "unchanged"
+            elif prior_values and item.get("current") is not None:
+                if item.get("change_type") not in {"discontinued", "conflicting", "uncertain"}:
+                    item["change_type"] = "changed"
+                item["prior_state_candidates"] = prior_values
+            else:
+                item["comparison_basis"] = "No normalized prior assertion; compare against the supplied historical LCR source context."
+                if not item.get("change_type"):
+                    item["change_type"] = "uncertain"
+                    item["certainty"] = "uncertain"
+            computed.append({"domain": domain, "name": name, "change_type": item.get("change_type"), "previous": item.get("previous"), "current": item.get("current"), "certainty": item.get("certainty", "uncertain"), "comparison_basis": item.get("comparison_basis")})
 
     if persist:
         try:
