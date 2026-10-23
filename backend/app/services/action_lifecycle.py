@@ -1,9 +1,10 @@
 import hashlib
 from difflib import SequenceMatcher
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.action import Action as ActionModel, ActionStatus
+from app.models.care import Caregiver, Evidence
 from app.schemas.action import ActionCompletionEvidence
 
 
@@ -21,6 +22,8 @@ class ActionLifecycleService:
     }
 
     def transition_status(self, action: ActionModel, new_status: str, db: Session) -> ActionModel:
+        if new_status == "completed":
+            raise ValueError("Use record_completion to persist evidence and authenticated caregiver attribution")
         allowed = self.STATUS_TRANSITIONS.get(action.status, [])
         if new_status not in allowed:
             raise ValueError(f"Cannot transition action {action.id} from {action.status} to {new_status}. Allowed: {allowed}")
@@ -30,22 +33,31 @@ class ActionLifecycleService:
             action.cancelled_at = datetime.utcnow()
         elif new_status == "expired":
             action.expired_at = datetime.utcnow()
-        elif new_status == "completed":
-            action.completed_at = datetime.utcnow()
-
         db.add(action)
         db.commit()
         db.refresh(action)
         return action
 
-    def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session) -> ActionModel:
+    def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session, completed_by_caregiver_id: str) -> ActionModel:
+        if not completed_by_caregiver_id:
+            raise ValueError("An authenticated caregiver is required to record completion")
+        caregiver = db.query(Caregiver).filter(Caregiver.id == completed_by_caregiver_id, Caregiver.person_id == action.person_id).first()
+        if caregiver is None:
+            raise ValueError("Completion caregiver must be linked to this care record")
+        requested_evidence_ids = set(evidence.evidence_ids or [])
+        if not requested_evidence_ids:
+            raise ValueError("At least one completion evidence record is required")
+        valid_evidence_ids = {row[0] for row in db.query(Evidence.id).filter(Evidence.id.in_(requested_evidence_ids), Evidence.person_id == action.person_id).all()}
+        if valid_evidence_ids != requested_evidence_ids:
+            raise ValueError("Completion evidence must exist and belong to the same care record")
         if action.status in ("cancelled", "superseded", "expired"):
             raise ValueError(f"Cannot complete action in status {action.status}")
 
         action.status = ActionStatus.COMPLETED
         action.completion_evidence_ids = evidence.evidence_ids
         action.completion_confidence = evidence.completion_confidence
-        action.completed_at = datetime.utcnow()
+        action.completed_at = datetime.now(timezone.utc)
+        action.completed_by_caregiver_id = completed_by_caregiver_id
 
         db.add(action)
         db.commit()
