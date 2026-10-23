@@ -150,6 +150,10 @@ def close_handoff(handoff_id: str, request: Request, db: Session = Depends(get_d
     person_id, caregiver_id = _scope(request)
     item = _handoff(db, handoff_id, person_id)
     _caregiver_for_person(db, caregiver_id, person_id)
+    if item.assigned_to_caregiver_id and caregiver_id not in {
+        item.assigned_to_caregiver_id, item.created_by_caregiver_id
+    }:
+        raise HTTPException(status_code=403, detail="Only the handoff creator or assigned caregiver can close this handoff")
     if item.status == "closed":
         if item.closed_by_caregiver_id == caregiver_id:
             return item
