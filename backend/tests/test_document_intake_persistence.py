@@ -80,6 +80,7 @@ def test_intake_preserves_original_source_and_extracts_review_only_candidates():
             }
             assert all(item["review_status"] == "pending_review" for item in result["document_candidates"])
             assert all(item["source_quote"] in source.decode() for item in result["document_candidates"])
+            assert all(source.decode()[item["source_span_start"]:item["source_span_end"]] == item["source_quote"] for item in result["document_candidates"])
 
             with TestingSessionLocal() as db:
                 evidence = db.query(Evidence).filter_by(id=result["evidence_id"]).one()
