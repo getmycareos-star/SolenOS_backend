@@ -46,6 +46,9 @@ def _event(db: Session, handoff: CareHandoff, actor_id: str, event_type: str, de
         actor_caregiver_id=actor_id,
         event_type=event_type,
         details=details,
+        # Explicit UTC event time preserves chronological order on databases
+        # whose server-side timestamp default has only second precision.
+        created_at=datetime.now(timezone.utc),
     ))
 
 
