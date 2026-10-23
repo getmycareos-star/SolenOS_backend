@@ -179,3 +179,15 @@ def test_unchanged_findings_are_not_promoted_to_new_active_assertions(monkeypatc
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_local_model_config_rejects_public_host_in_production(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://public-model.example.com")
+    monkeypatch.setenv("OLLAMA_MODEL", "test-model")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    with pytest.raises(HTTPException) as exc:
+        delta_engine._local_ollama_url()
+    assert exc.value.status_code == 503
