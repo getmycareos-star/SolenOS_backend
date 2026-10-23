@@ -39,14 +39,14 @@ def seed_action(db):
     )
     evidence = Evidence(
         id="e-task2", person_id=person.id, type="document",
-        source_text="Prescriber order: take medication according to attached directions.",
+        source_text="Care plan: confirm the follow-up appointment on the scheduled date.",
         uploaded_by_caregiver_id=caregiver.id, evidence_status="uploaded",
     )
     action = ActionModel(
         id="a-task2", person_id=person.id, source_evidence_id=evidence.id,
-        source_passage="take medication according to attached directions",
-        normalized_action="Take medication according to verified prescriber directions",
-        original_text="Take medication according to attached directions",
+        source_passage="confirm the follow-up appointment on the scheduled date",
+        normalized_action="Confirm the follow-up appointment",
+        original_text="Confirm the follow-up appointment on the scheduled date",
         created_by_caregiver_id=caregiver.id, status="active",
     )
     db.add_all([person, caregiver, evidence, action])
@@ -104,6 +104,12 @@ def test_medication_action_requires_separate_matching_source_verification():
     engine, db = make_db()
     try:
         person, caregiver, evidence, action = seed_action(db)
+        evidence.source_text = "Prescriber order: take medication according to attached directions."
+        action.source_passage = "take medication according to attached directions"
+        action.original_text = "Take medication according to attached directions"
+        action.normalized_action = "Take medication according to verified prescriber directions"
+        action.is_medication_action = True
+        db.commit()
         assert get_verified_medication_authority(
             db, person_id=person.id, evidence_id=evidence.id, source_authority="physician"
         ) is None
@@ -216,6 +222,79 @@ def test_terminal_action_suppresses_due_reminders():
         db.refresh(reminder)
         assert reminder.enabled is False
         assert db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_medication_reminder_is_suppressed_without_current_source_authority():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        evidence.source_text = "Prescriber instruction: take medication 5 mg daily."
+        action.source_passage = "Prescriber instruction: take medication 5 mg daily."
+        action.original_text = "Prescriber instruction: take medication 5 mg daily."
+        action.normalized_action = "Take medication 5 mg daily"
+        action.is_medication_action = True
+        due = datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc)
+        reminder = CareReminder(
+            id="r-med-no-authority", person_id=person.id, action_id=action.id,
+            created_by_caregiver_id=caregiver.id, title="Medication reminder",
+            message="Medication reminder must be held until verified", timezone="UTC",
+            recurrence="once", next_run_at=due, local_time="10:00", enabled=True,
+        )
+        db.add(reminder)
+        db.commit()
+
+        assert materialize_due_reminders(db, datetime(2026, 10, 23, 11, 0, tzinfo=timezone.utc)) == 0
+        db.refresh(reminder)
+        assert reminder.enabled is False
+        assert db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_medication_authority_expiry_cancels_already_materialized_delivery():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        evidence.source_text = "Prescriber instruction: take medication 5 mg daily."
+        action.source_passage = "Prescriber instruction: take medication 5 mg daily."
+        action.original_text = "Prescriber instruction: take medication 5 mg daily."
+        action.normalized_action = "Take medication 5 mg daily"
+        action.is_medication_action = True
+        verification = MedicationAuthorityVerification(
+            id="v-expiry-task2", evidence_id=evidence.id, person_id=person.id,
+            source_text_sha256=hashlib.sha256(evidence.source_text.encode("utf-8")).hexdigest(),
+            authority_role="physician", verifier_identity="Dr Test",
+            verification_method="signed_prescription",
+            verified_by_caregiver_id=caregiver.id,
+            verified_at=datetime.now(timezone.utc),
+            expires_at=datetime(2026, 10, 24, 0, 0, tzinfo=timezone.utc),
+        )
+        due = datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc)
+        reminder = CareReminder(
+            id="r-med-expiry", person_id=person.id, action_id=action.id,
+            created_by_caregiver_id=caregiver.id, title="Medication reminder",
+            message="Authority may expire before delivery", timezone="UTC",
+            recurrence="once", next_run_at=due, local_time="10:00", enabled=True,
+        )
+        db.add_all([verification, reminder])
+        db.commit()
+        assert materialize_due_reminders(db, datetime(2026, 10, 23, 11, 0, tzinfo=timezone.utc)) == 1
+
+        verification.expires_at = datetime(2026, 10, 23, 10, 30, tzinfo=timezone.utc)
+        db.commit()
+        assert deliver_pending_receipts(db, datetime(2026, 10, 23, 11, 1, tzinfo=timezone.utc)) == 0
+        receipt = db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).one()
+        db.refresh(reminder)
+        assert receipt.status == "cancelled"
+        assert reminder.enabled is False
+        assert db.query(ReminderDeliveryAttempt).filter_by(delivery_id=receipt.id).count() == 0
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
