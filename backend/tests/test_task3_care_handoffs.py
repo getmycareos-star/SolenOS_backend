@@ -8,7 +8,7 @@ import pytest
 from app.core.database import Base
 from app.models.care import Person, Caregiver
 from app.models.care_handoff import CareHandoff, CareHandoffEvent
-from app.schemas.care_handoff import CareHandoffCreate
+from app.schemas.care_handoff import CareHandoffCompletion, CareHandoffCreate
 from app.api.care_handoffs import (
     create_handoff,
     acknowledge_handoff,
@@ -146,13 +146,55 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
         again = acknowledge_handoff(item.id, request_for(person.id, assigned.id), db)
         assert again.status == "acknowledged"
 
-        closed = close_handoff(item.id, request_for(person.id, assigned.id), db)
+        closed = close_handoff(item.id, CareHandoffCompletion(completion_report='Clinic contacted; next appointment confirmed.'), request_for(person.id, assigned.id), db)
         assert closed.status == "closed"
         assert closed.closed_by_caregiver_id == assigned.id
         assert closed.closed_at is not None
+        assert closed.completion_report == 'Clinic contacted; next appointment confirmed.'
+        assert closed.completed_by_caregiver_id == assigned.id
+        assert closed.completed_at is not None
         events = list_handoff_events(item.id, request_for(person.id, assigned.id), db)
         assert [event.event_type for event in events] == ["created", "acknowledged", "closed"]
         assert all(event.actor_caregiver_id for event in events)
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+
+def test_handoff_deadline_reminder_and_recipient_scope_are_persisted_and_enforced():
+    from datetime import datetime, timezone, timedelta
+
+    engine, db = make_db()
+    try:
+        person, creator, assigned, _, _ = seed_people(db)
+        backup = Caregiver(id='c-handoff-backup-scope', name='Backup', email='backup-scope@example.test', relationship='Family', person_id=person.id, timezone='UTC')
+        db.add(backup)
+        db.commit()
+        due = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+        reminder = due - timedelta(hours=2)
+        item = create_handoff(CareHandoffCreate(person_id=person.id, assigned_to_caregiver_id=assigned.id, title='Restricted handoff', summary='Only the assigned recipient should see this.', due_at=due, reminder_at=reminder, access_scope='assigned_only'), request_for(person.id, creator.id), db)
+        assert item.due_at is not None
+        assert item.reminder_at is not None
+        assert item.access_scope == 'assigned_only'
+        assert len(list_handoff_events(item.id, request_for(person.id, creator.id), db)) == 1
+        with pytest.raises(HTTPException) as exc:
+            list_handoff_events(item.id, request_for(person.id, backup.id), db)
+        assert exc.value.status_code == 403
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
+
+
+def test_handoff_requires_assignee_for_restricted_visibility():
+    engine, db = make_db()
+    try:
+        person, creator, _, _, _ = seed_people(db)
+        with pytest.raises(HTTPException) as exc:
+            create_handoff(CareHandoffCreate(person_id=person.id, title='Restricted without recipient', summary='Should fail', access_scope='assigned_only'), request_for(person.id, creator.id), db)
+        assert exc.value.status_code == 422
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
