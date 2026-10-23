@@ -104,7 +104,6 @@ def _build_recurrence_pattern(
     else:
         pattern_type = PatternType.RECURRENCE
     strength = PatternStrength.ESTABLISHED if len(recent_changes) >= 3 else PatternStrength.EMERGING
-    confidence = 0.7 if len(recent_changes) >= 3 else 0.5
     pattern = Pattern(
         person_id=person_id,
         subject_type=subject_type,
@@ -118,7 +117,7 @@ def _build_recurrence_pattern(
         frequency=frequency,
         rate_per_period=frequency * 30,
         direction=direction,
-        confidence=confidence,
+        confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=[],
     )
@@ -164,7 +163,7 @@ def _build_trend_pattern(
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         direction=direction,
-        confidence=0.6,
+        confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=[],
     )
@@ -204,7 +203,7 @@ def _build_instability_pattern(
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         direction=ChangeDirection.FLUCTUATING,
-        confidence=0.5,
+        confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=[],
     )
