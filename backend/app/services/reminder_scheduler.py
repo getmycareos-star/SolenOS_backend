@@ -128,6 +128,7 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
 
         action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
         if action is None or action.status not in ("active", "conditional"):
+            reminder.enabled = False
             receipt.status = "cancelled"
             receipt.last_error = "Associated care action is no longer active"
             db.commit()
