@@ -1,14 +1,14 @@
 """Add deadlines, recipient access scope, and completion reporting to handoffs.
 
 Revision ID: t5_handoff_accountability_20261023
-Revises: t3_care_handoffs_20261023
+Revises: t4_document_assets_20261023
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t5_handoff_accountability_20261023"
-down_revision = "t3_care_handoffs_20261023"
+down_revision = "t4_document_assets_20261023"
 branch_labels = None
 depends_on = None
 
