@@ -259,6 +259,7 @@ def test_completion_records_timestamp_and_authenticated_caregiver():
         assert result.status == "completed"
         assert result.completed_at is not None
         assert result.completed_by_caregiver_id == caregiver.id
+        assert result.completed_by_caregiver_label == caregiver.name
         db.close()
     finally:
         teardown_db()
