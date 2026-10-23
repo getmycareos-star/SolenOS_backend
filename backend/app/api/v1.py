@@ -447,6 +447,21 @@ def get_unified_care_record(person_id: str, limit: int = 200, db: Session = Depe
         action.source_evidence_id for action in actions if action.source_evidence_id
     )
 
+    # A source document can be older than the recent evidence page while still
+    # being linked to a current event/action. Fetch those references explicitly
+    # so the timeline never silently drops provenance for a linked record.
+    missing_linked_ids = linked_evidence_ids.difference(evidence_by_id)
+    if missing_linked_ids:
+        linked_items = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.id.in_(missing_linked_ids),
+            )
+            .all()
+        )
+        evidence_by_id.update({item.id: item for item in linked_items})
+
     timeline = []
 
     for event in events:
