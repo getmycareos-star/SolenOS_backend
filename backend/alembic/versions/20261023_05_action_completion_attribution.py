@@ -1,0 +1,69 @@
+"""Persist action completion time and the authenticated caregiver attribution.
+
+Revision ID: 20261023_05
+Revises: 20261022_02
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy import inspect
+
+revision = "20261023_05"
+down_revision = "20261022_02"
+branch_labels = None
+depends_on = None
+
+FK_NAME = "fk_actions_completed_by_caregiver_id_caregivers"
+INDEX_NAME = "ix_actions_completed_by_caregiver_id"
+
+
+def upgrade():
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("actions"):
+        raise RuntimeError("Cannot add completion attribution: actions table is missing")
+
+    columns = {column["name"] for column in inspector.get_columns("actions")}
+    if "completed_at" not in columns:
+        op.add_column("actions", sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True))
+    if "completed_by_caregiver_id" not in columns:
+        op.add_column("actions", sa.Column("completed_by_caregiver_id", sa.String(), nullable=True))
+
+    inspector = inspect(bind)
+    foreign_keys = {fk.get("name") for fk in inspector.get_foreign_keys("actions")}
+    if FK_NAME not in foreign_keys:
+        with op.batch_alter_table("actions") as batch_op:
+            batch_op.create_foreign_key(
+                FK_NAME,
+                "caregivers",
+                ["completed_by_caregiver_id"],
+                ["id"],
+            )
+
+    inspector = inspect(bind)
+    indexes = {index["name"] for index in inspector.get_indexes("actions")}
+    if INDEX_NAME not in indexes:
+        op.create_index(INDEX_NAME, "actions", ["completed_by_caregiver_id"], unique=False)
+
+
+def downgrade():
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("actions"):
+        return
+
+    indexes = {index["name"] for index in inspector.get_indexes("actions")}
+    if INDEX_NAME in indexes:
+        op.drop_index(INDEX_NAME, table_name="actions")
+
+    inspector = inspect(bind)
+    foreign_keys = {fk.get("name") for fk in inspector.get_foreign_keys("actions")}
+    if FK_NAME in foreign_keys:
+        with op.batch_alter_table("actions") as batch_op:
+            batch_op.drop_constraint(FK_NAME, type_="foreignkey")
+
+    inspector = inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("actions")}
+    if "completed_by_caregiver_id" in columns:
+        op.drop_column("actions", "completed_by_caregiver_id")
+    if "completed_at" in columns:
+        op.drop_column("actions", "completed_at")
