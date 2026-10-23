@@ -18,6 +18,7 @@ from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.care_handoffs import router as care_handoffs_router
+from app.api.document_extraction import router as document_extraction_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -93,6 +94,7 @@ app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 app.include_router(care_handoffs_router, prefix="/api/v1")
+app.include_router(document_extraction_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -221,7 +223,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                         target_person_id = str(action_owner)
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
-        query_person_id = request.query_params.get("person_id")
+        # Document extraction has no caller-selected person ID; the validated bearer\n        # session is its only permitted care-record scope.\n        if path == "/api/v1/documents/extract" and method == "POST":\n            target_person_id = scoped_person_id\n\n        query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
