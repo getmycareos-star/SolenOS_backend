@@ -34,6 +34,7 @@ import app.models.safety  # noqa: E402, F401
 import app.models.care_continuity  # noqa: E402, F401
 import app.models.care_circle  # noqa: E402, F401
 import app.models.care_handoff  # noqa: E402, F401
+import app.models.document_asset  # noqa: E402, F401
 
 
 def get_db():
