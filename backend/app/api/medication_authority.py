@@ -31,6 +31,8 @@ def verify_medication_source(
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if not person_id or not caregiver_id:
         raise HTTPException(status_code=401, detail="An authenticated caregiver session is required")
+    if str(payload.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id, Caregiver.person_id == person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
