@@ -1,13 +1,13 @@
 """Add minimal operational event storage.
 
 Revision ID: 20261023_06
-Revises: 20261023_05
+Revises: 20261023_05, t2_delivery_attempts_20261023
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "20261023_06"
-down_revision = "20261023_05"
+down_revision = ("20261023_05", "t2_delivery_attempts_20261023")
 branch_labels = None
 depends_on = None
 
