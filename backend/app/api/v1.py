@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
@@ -121,6 +122,10 @@ from app.services.temporal_intelligence import (
     classify_temporal_status,
     check_temporal_conflict,
 )
+import hashlib
+from app.models.anonymous_session import AnonymousSession as AnonymousSessionModel
+from app.models.action import Action as ActionModel
+from app.models.care_continuity import CareActionOutcome as CareActionOutcomeModel, CareAssertion as CareAssertionModel
 from app.api.actions import router as actions_router
 
 router = APIRouter()
@@ -438,6 +443,390 @@ def list_events(person_id: str, db: Session = Depends(get_db)):
         .order_by(CareEventModel.occurred_at.desc())
         .all()
     )
+
+
+@router.get("/care-record/{person_id}")
+def get_unified_care_record(
+    person_id: str,
+    request: Request,
+    limit: int = 200,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+):
+    """Return one source-linked timeline over canonical care tables.
+
+    Validate scope here as well as in middleware: a new record route must fail
+    closed even if middleware route-parameter resolution cannot identify it.
+    """
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, raw_token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not raw_token.strip():
+            raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+        token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+        session = (
+            db.query(AnonymousSessionModel)
+            .filter(
+                AnonymousSessionModel.token_hash == token_hash,
+                AnonymousSessionModel.revoked_at.is_(None),
+                AnonymousSessionModel.expires_at > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+        if session is None:
+            raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+        scoped_person_id = session.person_id
+        scoped_caregiver_id = session.caregiver_id
+    if str(scoped_person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(CaregiverModel.id == scoped_caregiver_id, CaregiverModel.person_id == person_id)
+        .first()
+    )
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Session caregiver is not linked to this care record")
+
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+
+    page_limit = max(1, min(limit, 500))
+    page_offset = max(0, min(offset, 5000))
+    fetch_limit = page_offset + page_limit + 1
+    events = (
+        db.query(CareEventModel).filter(CareEventModel.person_id == person_id)
+        .order_by(CareEventModel.occurred_at.desc()).limit(fetch_limit).all()
+    )
+    evidence_items = (
+        db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
+        .order_by(EvidenceModel.uploaded_at.desc()).limit(fetch_limit).all()
+    )
+    appointments = (
+        db.query(AppointmentModel).filter(AppointmentModel.person_id == person_id)
+        .order_by(AppointmentModel.scheduled_at.desc()).limit(fetch_limit).all()
+    )
+    transitions = (
+        db.query(CareTransitionModel).filter(CareTransitionModel.person_id == person_id)
+        .order_by(CareTransitionModel.occurred_at.desc()).limit(fetch_limit).all()
+    )
+    actions = (
+        db.query(ActionModel).filter(ActionModel.person_id == person_id)
+        .order_by(func.coalesce(ActionModel.deadline, ActionModel.start_time, ActionModel.created_at).desc()).limit(fetch_limit).all()
+    )
+    observations = (
+        db.query(ObservationModel).filter(ObservationModel.person_id == person_id)
+        .order_by(func.coalesce(ObservationModel.observed_at, ObservationModel.recorded_at).desc()).limit(fetch_limit).all()
+    )
+    assertions = (
+        db.query(CareAssertionModel).filter(CareAssertionModel.person_id == person_id)
+        .order_by(func.coalesce(CareAssertionModel.observed_at, CareAssertionModel.recorded_at).desc()).limit(fetch_limit).all()
+    )
+    outcomes = (
+        db.query(CareActionOutcomeModel).filter(CareActionOutcomeModel.person_id == person_id)
+        .order_by(CareActionOutcomeModel.created_at.desc()).limit(fetch_limit).all()
+    )
+
+    evidence_by_id = {item.id: item for item in evidence_items}
+
+    def normalized_ids(value):
+        return list(value) if isinstance(value, (list, tuple)) else []
+
+    def evidence_projection(item):
+        return {
+            "id": item.id, "type": item.type, "source_text": item.source_text,
+            "uploaded_at": item.uploaded_at, "source_type": item.source_type,
+            "time_provenance": item.time_provenance, "location": item.location,
+            "uploaded_by_caregiver_id": item.uploaded_by_caregiver_id,
+            "confidence": item.confidence, "evidence_status": item.evidence_status,
+            "source_span_start": item.source_span_start, "source_span_end": item.source_span_end,
+        }
+
+    linked_evidence_ids = set()
+    for event in events:
+        linked_evidence_ids.update(normalized_ids(event.evidence_ids))
+    for appointment in appointments:
+        linked_evidence_ids.update(normalized_ids(appointment.evidence_ids))
+    for transition in transitions:
+        linked_evidence_ids.update(normalized_ids(transition.evidence_ids))
+    linked_evidence_ids.update(action.source_evidence_id for action in actions if action.source_evidence_id)
+    for observation in observations:
+        linked_evidence_ids.update(normalized_ids(observation.evidence_ids))
+    for assertion in assertions:
+        linked_evidence_ids.update(normalized_ids(assertion.evidence_ids))
+    for outcome in outcomes:
+        linked_evidence_ids.update(normalized_ids(outcome.evidence_ids))
+
+    event_by_id = {event.id: event for event in events}
+    event_evidence_ids = {
+        event.id: set(normalized_ids(event.evidence_ids)) for event in events
+    }
+    observations_by_event = {}
+    observation_parent_ids = set()
+    for observation in observations:
+        observation_evidence_ids = set(normalized_ids(observation.evidence_ids))
+        matching_events = [
+            event for event in events
+            if observation_evidence_ids and observation_evidence_ids.intersection(event_evidence_ids[event.id])
+        ]
+        if matching_events:
+            parent = max(
+                matching_events,
+                key=lambda event: event.occurred_at.timestamp() if event.occurred_at else 0,
+            )
+            observations_by_event.setdefault(parent.id, []).append(observation)
+            observation_parent_ids.add(observation.id)
+
+    assertions_by_event = {}
+    assertion_parent_ids = set()
+    for assertion in assertions:
+        if assertion.source_event_id and assertion.source_event_id in event_by_id:
+            assertions_by_event.setdefault(assertion.source_event_id, []).append(assertion)
+            assertion_parent_ids.add(assertion.id)
+
+    action_by_id = {action.id: action for action in actions}
+    outcomes_by_action = {}
+    outcome_parent_ids = set()
+    for outcome in outcomes:
+        if outcome.action_id in action_by_id:
+            outcomes_by_action.setdefault(outcome.action_id, []).append(outcome)
+            outcome_parent_ids.add(outcome.id)
+
+    # Preserve provenance for older source documents linked to recent records.
+    missing_linked_ids = linked_evidence_ids.difference(evidence_by_id)
+    if missing_linked_ids:
+        linked_items = (
+            db.query(EvidenceModel)
+            .filter(EvidenceModel.person_id == person_id, EvidenceModel.id.in_(missing_linked_ids))
+            .all()
+        )
+        evidence_by_id.update({item.id: item for item in linked_items})
+
+    timeline = []
+    for event in events:
+        ids = normalized_ids(event.evidence_ids)
+        timeline.append({
+            "id": f"event:{event.id}", "kind": "care_event", "source_id": event.id,
+            "occurred_at": event.occurred_at, "recorded_at": event.recorded_at,
+            "title": event.title, "summary": event.description or event.title,
+            "status": event.status, "source_type": "care_event",
+            "time_provenance": event.time_provenance,
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "event_type": event.event_type, "tags": event.tags or [],
+                "location": event.location, "location_provenance": event.location_provenance,
+                "confidence": event.confidence, "significance_verdict": event.significance_verdict,
+                "attention_candidate": event.attention_candidate, "follow_up_candidate": event.follow_up_candidate,
+                "created_by_caregiver_id": event.created_by_caregiver_id,
+            },
+            "related_observations": [
+                {
+                    "id": item.id, "original_text": item.original_text,
+                    "observed_at": item.observed_at, "recorded_at": item.recorded_at,
+                    "time_provenance": item.time_provenance, "tags": item.tags or [],
+                    "structured_data": item.structured_data or [],
+                    "caregiver_id": item.caregiver_id,
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(item.evidence_ids)
+                        if eid in evidence_by_id and eid not in ids
+                    ],
+                }
+                for item in observations_by_event.get(event.id, [])
+            ],
+            "assertions": [
+                {
+                    "id": item.id, "field": item.field, "asserted_value": item.asserted_value,
+                    "assertion_kind": item.assertion_kind, "assertion_status": item.assertion_status,
+                    "source_label": item.source_label, "source_text": item.source_text,
+                    "observed_at": item.observed_at, "recorded_at": item.recorded_at,
+                    "subject_type": item.subject_type, "subject_id": item.subject_id,
+                    "evidence_ids": normalized_ids(item.evidence_ids),
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(item.evidence_ids)
+                        if eid in evidence_by_id and eid not in ids
+                    ],
+                }
+                for item in assertions_by_event.get(event.id, [])
+            ],
+        })
+
+    for observation in observations:
+        if observation.id in observation_parent_ids:
+            continue
+        ids = normalized_ids(observation.evidence_ids)
+        timeline.append({
+            "id": f"observation:{observation.id}", "kind": "observation",
+            "source_id": observation.id, "occurred_at": observation.observed_at,
+            "recorded_at": observation.recorded_at, "title": "Care observation",
+            "summary": observation.original_text, "status": "recorded",
+            "source_type": "observation", "time_provenance": observation.time_provenance,
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "observed_at_timezone": observation.observed_at_timezone,
+                "structured_data": observation.structured_data or [], "tags": observation.tags or [],
+                "location": observation.location, "location_provenance": observation.location_provenance,
+                "caregiver_id": observation.caregiver_id,
+            },
+        })
+
+    for assertion in assertions:
+        if assertion.id in assertion_parent_ids:
+            continue
+        ids = normalized_ids(assertion.evidence_ids)
+        timeline.append({
+            "id": f"assertion:{assertion.id}", "kind": "care_assertion",
+            "source_id": assertion.id, "occurred_at": assertion.observed_at or assertion.recorded_at,
+            "recorded_at": assertion.recorded_at, "title": assertion.asserted_value,
+            "summary": assertion.source_text or assertion.asserted_value,
+            "status": assertion.assertion_status, "source_type": "care_assertion",
+            "time_provenance": "observed_at" if assertion.observed_at else "recorded_at",
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "field": assertion.field, "subject_type": assertion.subject_type,
+                "subject_id": assertion.subject_id, "assertion_kind": assertion.assertion_kind,
+                "source_label": assertion.source_label, "source_event_id": assertion.source_event_id,
+                "review_after_days": assertion.review_after_days,
+                "created_by_caregiver_id": assertion.created_by_caregiver_id,
+            },
+        })
+
+    for appointment in appointments:
+        ids = normalized_ids(appointment.evidence_ids)
+        timeline.append({
+            "id": f"appointment:{appointment.id}", "kind": "appointment", "source_id": appointment.id,
+            "occurred_at": appointment.scheduled_at, "recorded_at": appointment.created_at,
+            "title": appointment.title, "summary": appointment.preparation_notes or appointment.title,
+            "status": appointment.status, "source_type": "appointment",
+            "time_provenance": appointment.time_provenance,
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "provider": appointment.provider, "healthcare_org": appointment.healthcare_org,
+                "location": appointment.location, "scheduled_at_timezone": appointment.scheduled_at_timezone,
+                "documents_to_bring": appointment.documents_to_bring or [],
+                "medication_questions": appointment.medication_questions or [],
+                "travel_notes": appointment.travel_notes,
+                "created_by_caregiver_id": appointment.created_by_caregiver_id,
+            },
+        })
+
+    for transition in transitions:
+        ids = normalized_ids(transition.evidence_ids)
+        timeline.append({
+            "id": f"transition:{transition.id}", "kind": "care_transition", "source_id": transition.id,
+            "occurred_at": transition.occurred_at, "recorded_at": transition.created_at,
+            "title": transition.transition_type.replace("_", " ").title(),
+            "summary": transition.notes or f"Care setting changed to {transition.to_location}",
+            "status": "recorded", "source_type": "care_transition",
+            "time_provenance": transition.time_provenance,
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "from_location": transition.from_location, "to_location": transition.to_location,
+                "transition_type": transition.transition_type, "location_provenance": transition.location_provenance,
+                "triggered_by_event_id": transition.triggered_by_event_id,
+                "created_by_caregiver_id": transition.created_by_caregiver_id,
+            },
+        })
+
+    for action in actions:
+        source_evidence = evidence_by_id.get(action.source_evidence_id)
+        action_time = action.deadline or action.start_time or action.created_at
+        timeline.append({
+            "id": f"action:{action.id}", "kind": "care_action", "source_id": action.id,
+            "occurred_at": action_time, "recorded_at": action.created_at,
+            "title": action.normalized_action or action.action_object or action.original_text,
+            "summary": action.original_text, "status": action.status, "source_type": "care_action",
+            "time_provenance": "deadline" if action.deadline else ("scheduled_start" if action.start_time else "recorded_at"),
+            "evidence": [evidence_projection(source_evidence)] if source_evidence else [],
+            "details": {
+                "action_type": action.action_type, "actor_type": action.actor_type,
+                "actor_label": action.actor_label, "subject_type": action.subject_type,
+                "subject_label": action.subject_label, "modality": action.modality,
+                "condition_text": action.condition_text, "trigger_text": action.trigger_text,
+                "deadline": action.deadline, "risk_tier": action.risk_tier,
+                "requires_confirmation": action.requires_confirmation,
+                "is_medication_action": action.is_medication_action,
+                "source_evidence_id": action.source_evidence_id,
+                "created_by_caregiver_id": action.created_by_caregiver_id,
+            },
+            "outcomes": [
+                {
+                    "id": outcome.id, "outcome_status": outcome.outcome_status,
+                    "notes": outcome.notes, "correction_text": outcome.correction_text,
+                    "created_at": outcome.created_at, "evidence_ids": normalized_ids(outcome.evidence_ids),
+                    "evidence": [
+                        evidence_projection(evidence_by_id[eid])
+                        for eid in normalized_ids(outcome.evidence_ids)
+                        if eid in evidence_by_id and eid != action.source_evidence_id
+                    ],
+                }
+                for outcome in outcomes_by_action.get(action.id, [])
+            ],
+        })
+
+    for outcome in outcomes:
+        if outcome.id in outcome_parent_ids:
+            continue
+        ids = normalized_ids(outcome.evidence_ids)
+        timeline.append({
+            "id": f"outcome:{outcome.id}", "kind": "care_action_outcome",
+            "source_id": outcome.id, "occurred_at": outcome.created_at,
+            "recorded_at": outcome.created_at, "title": f"Action outcome: {outcome.outcome_status.replace('_', ' ')}",
+            "summary": outcome.notes or outcome.correction_text or outcome.outcome_status,
+            "status": outcome.outcome_status, "source_type": "care_action_outcome",
+            "time_provenance": "recorded_at",
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "action_id": outcome.action_id, "action_type": outcome.action_type,
+                "correction_text": outcome.correction_text,
+                "created_by_caregiver_id": outcome.created_by_caregiver_id,
+            },
+        })
+
+    for item in evidence_items:
+        if item.id in linked_evidence_ids:
+            continue
+        timeline.append({
+            "id": f"evidence:{item.id}", "kind": "evidence", "source_id": item.id,
+            "occurred_at": item.uploaded_at, "recorded_at": item.uploaded_at,
+            "title": item.type.replace("_", " ").title(), "summary": item.source_text,
+            "status": item.evidence_status or "recorded", "source_type": item.source_type or "evidence",
+            "time_provenance": item.time_provenance or "uploaded_at",
+            "evidence": [evidence_projection(item)],
+            "details": {
+                "location": item.location, "confidence": item.confidence,
+            },
+        })
+
+    timeline.sort(
+        key=lambda item: (
+            item["occurred_at"].timestamp() if item["occurred_at"] else 0,
+            item["recorded_at"].timestamp() if item["recorded_at"] else 0,
+        ),
+        reverse=True,
+    )
+    has_more = len(timeline) > page_offset + page_limit
+    timeline = timeline[page_offset:page_offset + page_limit]
+    return {
+        "person_id": person.id, "person_name": person.name,
+        "generated_at": datetime.now(timezone.utc), "limit": page_limit,
+        "offset": page_offset, "has_more": has_more,
+        "returned_count": len(timeline),
+        "counts": {
+            "care_events": sum(1 for item in timeline if item["kind"] == "care_event"),
+            "evidence": sum(1 for item in timeline if item["kind"] == "evidence"),
+            "appointments": sum(1 for item in timeline if item["kind"] == "appointment"),
+            "care_transitions": sum(1 for item in timeline if item["kind"] == "care_transition"),
+            "care_actions": sum(1 for item in timeline if item["kind"] == "care_action"),
+            "observations": sum(1 for item in timeline if item["kind"] == "observation") + sum(len(item.get("related_observations", [])) for item in timeline),
+            "care_assertions": sum(1 for item in timeline if item["kind"] == "care_assertion") + sum(len(item.get("assertions", [])) for item in timeline),
+            "action_outcomes": sum(1 for item in timeline if item["kind"] == "care_action_outcome") + sum(len(item.get("outcomes", [])) for item in timeline),
+        },
+        "timeline": timeline,
+    }
 
 
 @router.post("/insights", response_model=InsightSchema)
