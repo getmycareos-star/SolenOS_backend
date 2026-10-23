@@ -189,7 +189,13 @@ def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, 
     # Preserve exact source spans as short line/sentence quotes. Do not merge facts
     # across unrelated sections or infer a date, dose, diagnosis, or action.
     fragments = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+    cursor = 0
     for fragment in fragments:
+        source_start = text.find(fragment, cursor)
+        if source_start < 0:
+            source_start = text.find(fragment)
+        source_end = source_start + len(fragment) if source_start >= 0 else None
+        cursor = source_end if source_end is not None else cursor
         quote = fragment[:1000]
         kind = None
         if follow_up.search(quote):
