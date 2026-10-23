@@ -238,6 +238,9 @@ def test_situation_update_on_new_event():
         detect_event_changes(db, person.id, "fall", None, now)
         situations = detect_situations(db, person.id, now)
         assert len(situations) >= 1
+        assert all(situation.confidence is None for situation in situations), (
+            "Situation confidence must remain unknown when its inputs are uncalibrated."
+        )
         new_event = CareEvent(
             person_id=person.id,
             event_type="fall",
