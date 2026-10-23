@@ -176,8 +176,8 @@ def test_image_intake_uses_ocr_text_but_keeps_it_as_unverified_source_candidates
         Image.new("RGB", (3, 3), color=(100, 120, 140)).save(image_buffer, format="PNG")
         image_bytes = image_buffer.getvalue()
         ocr_text = (
-            "MEDICATION LIST\\n"
-            "Take Medication B 10 mg daily.\\n"
+            "MEDICATION LIST\n"
+            "Take Medication B 10 mg daily.\n"
             "Follow-up appointment: Call the clinic in two weeks."
         )
         with TestClient(app) as client:
