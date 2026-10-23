@@ -15,6 +15,15 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
 
+    down_revisions = {
+        revision.revision: revision.down_revision
+        for revision in revisions
+    }
+    assert down_revisions["20261022_01"] == "20261022_0005"
+    assert down_revisions["t2_completion_20261023"] == "20261023_05"
+    assert down_revisions["t3_care_handoffs_20261023"] == "t2_delivery_attempts_20261023"
+    assert down_revisions["t4_document_assets_20261023"] == "t3_care_handoffs_20261023"
+
 
 def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
     backend_dir = Path(__file__).resolve().parents[1]
