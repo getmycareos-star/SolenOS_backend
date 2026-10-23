@@ -7,11 +7,13 @@ from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_db
 from app.main import app
+import app.main as main_module
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.document_asset import DocumentAsset
 
 engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestingSessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+_original_session_local = main_module.SessionLocal
 
 
 def override_get_db():
@@ -25,10 +27,12 @@ def override_get_db():
 def setup_db():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = TestingSessionLocal
 
 
 def teardown_db():
     app.dependency_overrides.pop(get_db, None)
+    main_module.SessionLocal = _original_session_local
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
 
