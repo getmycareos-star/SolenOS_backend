@@ -238,6 +238,17 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # session is its only permitted care-record scope.
         if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
             target_person_id = scoped_person_id
+        elif path.startswith("/api/v1/documents/"):
+            # Binary download and candidate review are scoped through the owning
+            # evidence row; never trust an evidence ID as proof of access.
+            parts = path.split("/")
+            if len(parts) >= 6 and parts[4] not in {"extract", "intake"}:
+                document_owner = db.query(Evidence.person_id).filter(
+                    Evidence.id == parts[4],
+                    Evidence.type == "document",
+                ).scalar()
+                if document_owner:
+                    target_person_id = str(document_owner)
 
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
