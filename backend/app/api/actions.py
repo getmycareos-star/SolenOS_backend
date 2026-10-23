@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
@@ -266,8 +266,11 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
 
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
-def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
+def complete_action(action_id: str, evidence: ActionCompletionEvidence, request: Request, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not session_caregiver_id or evidence.caregiver_id != session_caregiver_id:
+        raise HTTPException(status_code=403, detail="Completion attribution must match the authenticated caregiver session")
     try:
         return lifecycle_service.record_completion(db_action, evidence, db)
     except ValueError as exc:
