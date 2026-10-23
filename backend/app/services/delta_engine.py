@@ -237,6 +237,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     )
     user_payload = {
         "existing_active_state": active_state,
+        "existing_record_context": existing_record_context,
         "new_care_event": {
             "date": (event_date or datetime.now(timezone.utc)).isoformat(),
             "source": source,
@@ -274,9 +275,9 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result = _parse_model_json(content_json)
 
     # Verify that quoted evidence exists in the supplied source or active state.
-    source_corpus = "\n".join(
-        [content] + [str(item.get("value", "")) for item in active_state]
-    ).casefold()
+    context_text = [str(item.get("title") or "") + " " + str(item.get("description") or "") for item in existing_record_context["events"]]
+    context_text += [str(item.get("source_text") or "") for item in existing_record_context["evidence"]]
+    source_corpus = "\n".join([content] + [str(item.get("value", "")) for item in active_state] + context_text).casefold()
     for domain in ("medications", "conditions", "symptoms", "tests", "follow_ups", "clinical_gaps"):
         for item in result[domain]:
             excerpt = str(item.get("evidence_excerpt") or "").strip()
