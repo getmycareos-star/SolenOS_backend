@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
@@ -449,6 +450,7 @@ def get_unified_care_record(
     person_id: str,
     request: Request,
     limit: int = 200,
+    offset: int = 0,
     db: Session = Depends(get_db),
 ):
     """Return one source-linked timeline over canonical care tables.
@@ -492,9 +494,11 @@ def get_unified_care_record(
         raise HTTPException(status_code=404, detail="Person not found")
 
     page_limit = max(1, min(limit, 500))
+    page_offset = max(0, min(offset, 5000))
+    fetch_limit = page_offset + page_limit + 1
     events = (
         db.query(CareEventModel).filter(CareEventModel.person_id == person_id)
-        .order_by(CareEventModel.occurred_at.desc()).limit(page_limit).all()
+        .order_by(CareEventModel.occurred_at.desc()).limit(fetch_limit).all()
     )
     evidence_items = (
         db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
@@ -790,10 +794,12 @@ def get_unified_care_record(
         ),
         reverse=True,
     )
-    timeline = timeline[:page_limit]
+    has_more = len(timeline) > page_offset + page_limit
+    timeline = timeline[page_offset:page_offset + page_limit]
     return {
         "person_id": person.id, "person_name": person.name,
         "generated_at": datetime.now(timezone.utc), "limit": page_limit,
+        "offset": page_offset, "has_more": has_more,
         "returned_count": len(timeline),
         "counts": {
             "care_events": sum(1 for item in timeline if item["kind"] == "care_event"),
