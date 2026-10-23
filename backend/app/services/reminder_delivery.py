@@ -50,26 +50,37 @@ def process_due_reminders(
     if stale_claims:
         db.commit()
 
-    query = db.query(CareReminder).filter(
+    query = db.query(CareReminder.id).filter(
         CareReminder.status == "scheduled",
         CareReminder.due_at <= now,
         CareReminder.next_attempt_at <= now,
         CareReminder.attempt_count < CareReminder.max_attempts,
     ).order_by(CareReminder.next_attempt_at.asc(), CareReminder.created_at.asc())
-    if db.bind and db.bind.dialect.name == "postgresql":
-        query = query.with_for_update(skip_locked=True)
-    reminders = query.limit(limit).all()
-    summary = {"selected": len(reminders), "delivered": 0, "retry_scheduled": 0, "failed": 0}
+    candidate_ids = [row[0] for row in query.limit(limit).all()]
+    summary = {"selected": 0, "delivered": 0, "retry_scheduled": 0, "failed": 0}
 
-    for reminder in reminders:
-        attempt_number = reminder.attempt_count + 1
-        # Commit the claim before external I/O. Provider-side idempotency is
-        # required to cover a crash between sending and saving the receipt.
-        reminder.status = "delivering"
-        reminder.attempt_count = attempt_number
-        db.add(reminder)
+    for reminder_id in candidate_ids:
+        # Atomic compare-and-set claim prevents two workers from delivering the
+        # same reminder, including on SQLite where SKIP LOCKED is unavailable.
+        claimed = db.query(CareReminder).filter(
+            CareReminder.id == reminder_id,
+            CareReminder.status == "scheduled",
+            CareReminder.due_at <= now,
+            CareReminder.next_attempt_at <= now,
+            CareReminder.attempt_count < CareReminder.max_attempts,
+        ).update({
+            "status": "delivering",
+            "attempt_count": CareReminder.attempt_count + 1,
+            "updated_at": now,
+        }, synchronize_session=False)
         db.commit()
-        db.refresh(reminder)
+        if claimed != 1:
+            continue
+        reminder = db.query(CareReminder).filter(CareReminder.id == reminder_id).first()
+        if reminder is None:
+            continue
+        summary["selected"] += 1
+        attempt_number = reminder.attempt_count
         try:
             receipt = sender(reminder, reminder.idempotency_key) or {}
             provider = receipt.get("provider") if isinstance(receipt, dict) else None
