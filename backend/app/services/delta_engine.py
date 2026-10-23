@@ -218,11 +218,18 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     if source_event_id and not db.query(CareEvent.id).filter(CareEvent.id == source_event_id, CareEvent.person_id == person_id).first():
         raise HTTPException(status_code=422, detail="source_event_id must belong to this care record.")
 
-    active_assertions = db.query(CareAssertion).filter(
+    active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.assertion_kind.in_(["current_state", "time_bound_observation"]),
         CareAssertion.assertion_status.in_(["reported", "review_required", "accepted"]),
-    ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
+    )
+    if source_event_id:
+        # Exclude assertions created by the incoming Daily Capture event itself;
+        # otherwise the "before" state contains the new values and hides the delta.
+        active_assertions_query = active_assertions_query.filter(
+            CareAssertion.source_event_id != source_event_id
+        )
+    active_assertions = active_assertions_query.order_by(CareAssertion.recorded_at.desc()).limit(250).all()
     active_state = [{
         "assertion_id": item.id, "subject_type": item.subject_type, "subject_id": item.subject_id,
         "field": item.field, "value": item.asserted_value, "source": item.source_label,
