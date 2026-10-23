@@ -304,3 +304,71 @@ def test_delta_does_not_persist_value_unmatched_to_source_even_with_valid_quote(
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_daily_capture_event_is_not_used_as_its_own_baseline_or_duplicated(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person, CareEvent
+    from app.models.care_continuity import CareAssertion
+
+    class Client:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, *args, **kwargs): return FakeResponse()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://model.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-test-model")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(delta_engine.httpx, "Client", Client)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add(Person(id="delta-person", name="Care recipient"))
+    db.flush()
+    incoming = CareEvent(
+        id="incoming-event", person_id="delta-person", event_type="structured_daily_capture",
+        status="recorded", occurred_at=datetime(2026, 10, 22, tzinfo=timezone.utc),
+        title="Structured daily capture", description="metformin dose 1000 mg",
+        created_by_caregiver_id="session-caregiver",
+    )
+    db.add(incoming)
+    db.flush()
+    db.add_all([
+        CareAssertion(
+            person_id="delta-person", subject_type="medication", subject_id="metformin",
+            field="dose", assertion_kind="current_state", asserted_value="500 mg",
+            source_event_id=None, source_label="Earlier visit", source_text="metformin 500 mg",
+            evidence_ids=[], assertion_status="accepted", created_by_caregiver_id="session-caregiver",
+        ),
+        CareAssertion(
+            person_id="delta-person", subject_type="medication", subject_id="metformin",
+            field="dose", assertion_kind="current_state", asserted_value="1000 mg",
+            source_event_id="incoming-event", source_label="Structured daily capture",
+            source_text="metformin dose 1000 mg", evidence_ids=[], assertion_status="reported",
+            created_by_caregiver_id="session-caregiver",
+        ),
+    ])
+    db.commit()
+    try:
+        result = delta_engine.reconcile_event(
+            db, person_id="delta-person", event_date=datetime(2026, 10, 22, tzinfo=timezone.utc),
+            source="SolenOS Daily Capture",
+            content='Increase metformin to 1000 mg. MRI ordered. follow-up in 2 weeks.',
+            source_event_id="incoming-event", created_by_caregiver_id="session-caregiver",
+        )
+        metformin = next(row for row in result["computed_changes"] if row["name"] == "metformin")
+        assert metformin["change_type"] == "changed"
+        assert metformin["previous"] == "500 mg"
+        assert db.query(CareAssertion).filter_by(
+            person_id="delta-person", source_event_id="incoming-event",
+            subject_type="medication", subject_id="metformin", field="dose",
+            asserted_value="1000 mg",
+        ).count() == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
