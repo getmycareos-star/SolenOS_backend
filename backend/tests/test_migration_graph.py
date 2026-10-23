@@ -10,7 +10,7 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     script = ScriptDirectory.from_config(config)
 
     # PR #21, Task 2, Task 3 handoffs, and Task 4 document assets must form one linear chain.
-    assert script.get_heads() == ["t4_document_assets_20261023"]
+    assert script.get_heads() == ["t5_handoff_accountability_20261023"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
@@ -24,6 +24,7 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     assert down_revisions["t2_auth_reconcile_20261023"] == "t2_delivery_attempts_20261023"
     assert down_revisions["t3_care_handoffs_20261023"] == "t2_auth_reconcile_20261023"
     assert down_revisions["t4_document_assets_20261023"] == "t3_care_handoffs_20261023"
+    assert down_revisions["t5_handoff_accountability_20261023"] == "t4_document_assets_20261023"
 
 
 def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
