@@ -27,8 +27,8 @@ def create_reminder(action_id: str, payload: ReminderCreate, request: Request, d
         raise HTTPException(status_code=404, detail="Care action not found")
     if str(action.person_id) != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care action")
-    if action.status in ("completed", "cancelled", "superseded", "expired"):
-        raise HTTPException(status_code=409, detail="Cannot schedule a reminder for a terminal care action")
+    if action.status not in ("active", "conditional"):
+        raise HTTPException(status_code=409, detail="Reminders require an active or conditional care action that is no longer awaiting confirmation")
     if action.is_medication_action and action.requires_confirmation:
         raise HTTPException(status_code=409, detail="Medication action requires verified clinical source review before reminders can be scheduled")
     caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id, Caregiver.person_id == person_id).first()
