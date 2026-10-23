@@ -151,6 +151,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.scoped_caregiver_id = scoped_caregiver_id
         if path.endswith("/sessions/refresh") and method == "POST":
             return await call_next(request)
+        if path == "/api/extract" and method == "POST":
+            # Extraction is a per-request utility, not a care-record read/write.
+            # A valid server-issued session is required, but no client person ID
+            # is needed to read the uploaded file.
+            return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved
