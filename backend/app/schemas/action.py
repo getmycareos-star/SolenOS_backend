@@ -41,6 +41,9 @@ class ActionBase(BaseModel):
     status: str = "detected"
     completion_evidence_ids: Optional[List[str]] = None
     completion_confidence: Optional[float] = Field(ge=0.0, le=1.0, default=None)
+    completed_at: Optional[datetime] = None
+    completed_by_caregiver_id: Optional[str] = None
+    completion_notes: Optional[str] = None
     superseded_by_action_id: Optional[str] = None
     cancelled_at: Optional[datetime] = None
     expired_at: Optional[datetime] = None
@@ -96,7 +99,8 @@ class ActionCandidate(BaseModel):
 
 
 class ActionCompletionEvidence(BaseModel):
-    evidence_ids: List[str]
+    caregiver_id: str = Field(min_length=1)
+    evidence_ids: List[str] = Field(default_factory=list)
     completion_confidence: float = Field(ge=0.0, le=1.0)
     notes: Optional[str] = None
 
