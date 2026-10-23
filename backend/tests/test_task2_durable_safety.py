@@ -19,6 +19,8 @@ from app.services.reminder_scheduler import (
     next_local_occurrence,
 )
 from app.services.medication_authority import get_verified_medication_authority
+from app.schemas.reminder import ReminderCreate
+from pydantic import ValidationError
 
 
 def make_db():
@@ -329,3 +331,25 @@ def test_completion_note_is_saved_as_caregiver_report_evidence_atomically():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+def test_reminder_contract_rejects_blank_text_and_naive_datetime():
+    base = {
+        "title": "Follow-up",
+        "message": "Call the clinic",
+        "scheduled_at": datetime(2026, 10, 24, 10, 0, tzinfo=timezone.utc),
+        "timezone": "Africa/Lagos",
+        "recurrence": "daily",
+        "local_time": "11:00",
+    }
+    assert ReminderCreate(**base).title == "Follow-up"
+    try:
+        ReminderCreate(**{**base, "title": "   "})
+        assert False, "blank reminder title should be rejected"
+    except ValidationError:
+        pass
+    try:
+        ReminderCreate(**{**base, "scheduled_at": datetime(2026, 10, 24, 10, 0)})
+        assert False, "naive scheduled_at should be rejected"
+    except ValidationError:
+        pass
