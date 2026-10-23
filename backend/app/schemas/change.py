@@ -62,7 +62,7 @@ class ChangeBase(BaseModel):
     comparison_window_end: Optional[datetime] = None
     persistence_days: Optional[int] = None
     is_persistent: Optional[bool] = None
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_ids: List[str]
     explanation: Optional[str] = None
     time_provenance: Optional[str] = None
