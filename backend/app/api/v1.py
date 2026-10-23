@@ -124,6 +124,7 @@ from app.services.temporal_intelligence import (
 import hashlib
 from app.models.anonymous_session import AnonymousSession as AnonymousSessionModel
 from app.models.action import Action as ActionModel
+from app.models.care_continuity import CareActionOutcome as CareActionOutcomeModel, CareAssertion as CareAssertionModel
 from app.api.actions import router as actions_router
 
 router = APIRouter()
@@ -511,6 +512,18 @@ def get_unified_care_record(
         db.query(ActionModel).filter(ActionModel.person_id == person_id)
         .order_by(ActionModel.created_at.desc()).limit(page_limit).all()
     )
+    observations = (
+        db.query(ObservationModel).filter(ObservationModel.person_id == person_id)
+        .order_by(ObservationModel.observed_at.desc()).limit(page_limit).all()
+    )
+    assertions = (
+        db.query(CareAssertionModel).filter(CareAssertionModel.person_id == person_id)
+        .order_by(CareAssertionModel.recorded_at.desc()).limit(page_limit).all()
+    )
+    outcomes = (
+        db.query(CareActionOutcomeModel).filter(CareActionOutcomeModel.person_id == person_id)
+        .order_by(CareActionOutcomeModel.created_at.desc()).limit(page_limit).all()
+    )
 
     evidence_by_id = {item.id: item for item in evidence_items}
 
@@ -535,6 +548,47 @@ def get_unified_care_record(
     for transition in transitions:
         linked_evidence_ids.update(normalized_ids(transition.evidence_ids))
     linked_evidence_ids.update(action.source_evidence_id for action in actions if action.source_evidence_id)
+    for observation in observations:
+        linked_evidence_ids.update(normalized_ids(observation.evidence_ids))
+    for assertion in assertions:
+        linked_evidence_ids.update(normalized_ids(assertion.evidence_ids))
+    for outcome in outcomes:
+        linked_evidence_ids.update(normalized_ids(outcome.evidence_ids))
+
+    event_by_id = {event.id: event for event in events}
+    event_evidence_ids = {
+        event.id: set(normalized_ids(event.evidence_ids)) for event in events
+    }
+    observations_by_event = {}
+    observation_parent_ids = set()
+    for observation in observations:
+        observation_evidence_ids = set(normalized_ids(observation.evidence_ids))
+        matching_events = [
+            event for event in events
+            if observation_evidence_ids and observation_evidence_ids.intersection(event_evidence_ids[event.id])
+        ]
+        if matching_events:
+            parent = max(
+                matching_events,
+                key=lambda event: event.occurred_at.timestamp() if event.occurred_at else 0,
+            )
+            observations_by_event.setdefault(parent.id, []).append(observation)
+            observation_parent_ids.add(observation.id)
+
+    assertions_by_event = {}
+    assertion_parent_ids = set()
+    for assertion in assertions:
+        if assertion.source_event_id and assertion.source_event_id in event_by_id:
+            assertions_by_event.setdefault(assertion.source_event_id, []).append(assertion)
+            assertion_parent_ids.add(assertion.id)
+
+    action_by_id = {action.id: action for action in actions}
+    outcomes_by_action = {}
+    outcome_parent_ids = set()
+    for outcome in outcomes:
+        if outcome.action_id in action_by_id:
+            outcomes_by_action.setdefault(outcome.action_id, []).append(outcome)
+            outcome_parent_ids.add(outcome.id)
 
     # Preserve provenance for older source documents linked to recent records.
     missing_linked_ids = linked_evidence_ids.difference(evidence_by_id)
@@ -562,6 +616,67 @@ def get_unified_care_record(
                 "confidence": event.confidence, "significance_verdict": event.significance_verdict,
                 "attention_candidate": event.attention_candidate, "follow_up_candidate": event.follow_up_candidate,
                 "created_by_caregiver_id": event.created_by_caregiver_id,
+            },
+            "related_observations": [
+                {
+                    "id": item.id, "original_text": item.original_text,
+                    "observed_at": item.observed_at, "recorded_at": item.recorded_at,
+                    "time_provenance": item.time_provenance, "tags": item.tags or [],
+                    "structured_data": item.structured_data or [],
+                    "caregiver_id": item.caregiver_id,
+                }
+                for item in observations_by_event.get(event.id, [])
+            ],
+            "assertions": [
+                {
+                    "id": item.id, "field": item.field, "asserted_value": item.asserted_value,
+                    "assertion_kind": item.assertion_kind, "assertion_status": item.assertion_status,
+                    "source_label": item.source_label, "source_text": item.source_text,
+                    "observed_at": item.observed_at, "recorded_at": item.recorded_at,
+                    "subject_type": item.subject_type, "subject_id": item.subject_id,
+                    "evidence_ids": normalized_ids(item.evidence_ids),
+                }
+                for item in assertions_by_event.get(event.id, [])
+            ],
+        })
+
+    for observation in observations:
+        if observation.id in observation_parent_ids:
+            continue
+        ids = normalized_ids(observation.evidence_ids)
+        timeline.append({
+            "id": f"observation:{observation.id}", "kind": "observation",
+            "source_id": observation.id, "occurred_at": observation.observed_at,
+            "recorded_at": observation.recorded_at, "title": "Care observation",
+            "summary": observation.original_text, "status": "recorded",
+            "source_type": "observation", "time_provenance": observation.time_provenance,
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "observed_at_timezone": observation.observed_at_timezone,
+                "structured_data": observation.structured_data or [], "tags": observation.tags or [],
+                "location": observation.location, "location_provenance": observation.location_provenance,
+                "caregiver_id": observation.caregiver_id,
+            },
+        })
+
+    for assertion in assertions:
+        if assertion.id in assertion_parent_ids:
+            continue
+        ids = normalized_ids(assertion.evidence_ids)
+        timeline.append({
+            "id": f"assertion:{assertion.id}", "kind": "care_assertion",
+            "source_id": assertion.id, "occurred_at": assertion.observed_at or assertion.recorded_at,
+            "recorded_at": assertion.recorded_at, "title": assertion.asserted_value,
+            "summary": assertion.source_text or assertion.asserted_value,
+            "status": assertion.assertion_status, "source_type": "care_assertion",
+            "time_provenance": "observed_at" if assertion.observed_at else "recorded_at",
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "field": assertion.field, "subject_type": assertion.subject_type,
+                "subject_id": assertion.subject_id, "assertion_kind": assertion.assertion_kind,
+                "source_label": assertion.source_label, "source_event_id": assertion.source_event_id,
+                "review_after_days": assertion.review_after_days,
+                "created_by_caregiver_id": assertion.created_by_caregiver_id,
             },
         })
 
@@ -623,6 +738,33 @@ def get_unified_care_record(
                 "source_evidence_id": action.source_evidence_id,
                 "created_by_caregiver_id": action.created_by_caregiver_id,
             },
+            "outcomes": [
+                {
+                    "id": outcome.id, "outcome_status": outcome.outcome_status,
+                    "notes": outcome.notes, "correction_text": outcome.correction_text,
+                    "created_at": outcome.created_at, "evidence_ids": normalized_ids(outcome.evidence_ids),
+                }
+                for outcome in outcomes_by_action.get(action.id, [])
+            ],
+        })
+
+    for outcome in outcomes:
+        if outcome.id in outcome_parent_ids:
+            continue
+        ids = normalized_ids(outcome.evidence_ids)
+        timeline.append({
+            "id": f"outcome:{outcome.id}", "kind": "care_action_outcome",
+            "source_id": outcome.id, "occurred_at": outcome.created_at,
+            "recorded_at": outcome.created_at, "title": f"Action outcome: {outcome.outcome_status.replace('_', ' ')}",
+            "summary": outcome.notes or outcome.correction_text or outcome.outcome_status,
+            "status": outcome.outcome_status, "source_type": "care_action_outcome",
+            "time_provenance": "recorded_at",
+            "evidence": [evidence_projection(evidence_by_id[eid]) for eid in ids if eid in evidence_by_id],
+            "details": {
+                "action_id": outcome.action_id, "action_type": outcome.action_type,
+                "correction_text": outcome.correction_text,
+                "created_by_caregiver_id": outcome.created_by_caregiver_id,
+            },
         })
 
     for item in evidence_items:
@@ -659,6 +801,9 @@ def get_unified_care_record(
             "appointments": sum(1 for item in timeline if item["kind"] == "appointment"),
             "care_transitions": sum(1 for item in timeline if item["kind"] == "care_transition"),
             "care_actions": sum(1 for item in timeline if item["kind"] == "care_action"),
+            "observations": sum(1 for item in timeline if item["kind"] == "observation") + sum(len(item.get("related_observations", [])) for item in timeline),
+            "care_assertions": sum(1 for item in timeline if item["kind"] == "care_assertion") + sum(len(item.get("assertions", [])) for item in timeline),
+            "action_outcomes": sum(1 for item in timeline if item["kind"] == "care_action_outcome") + sum(len(item.get("outcomes", [])) for item in timeline),
         },
         "timeline": timeline,
     }
