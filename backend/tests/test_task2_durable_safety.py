@@ -151,7 +151,7 @@ def test_failed_delivery_attempt_is_persisted_and_retried():
 
         def fail_once():
             calls["count"] += 1
-            if calls["count"] == 2:
+            if calls["count"] == 1:
                 raise SQLAlchemyError("simulated transient failure")
             original_commit()
 
