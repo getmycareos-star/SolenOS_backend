@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.care import Caregiver
 from app.models.care_handoff import CareHandoff, CareHandoffEvent
-from app.models.reminder import CareReminder
+from app.models.reminder import CareReminder, ReminderDelivery
 from app.schemas.care_handoff import (
     CareHandoffCompletion, CareHandoffCreate, CareHandoffRead, CareHandoffEventRead,
 )
@@ -223,6 +223,20 @@ def close_handoff(
     item.completed_at = now
     item.closed_by_caregiver_id = caregiver_id
     item.closed_at = now
+    handoff_reminder = db.query(CareReminder).filter(
+        CareReminder.handoff_id == item.id,
+        CareReminder.person_id == person_id,
+    ).first()
+    if handoff_reminder is not None:
+        handoff_reminder.enabled = False
+        pending_receipts = db.query(ReminderDelivery).filter(
+            ReminderDelivery.reminder_id == handoff_reminder.id,
+            ReminderDelivery.person_id == person_id,
+            ReminderDelivery.status.in_(("pending", "retry")),
+        ).all()
+        for receipt in pending_receipts:
+            receipt.status = "cancelled"
+            receipt.last_error = "Handoff closed before reminder delivery"
     _event(db, item, caregiver_id, "completion_reported", {
         "completion_report": report,
         "completed_at": now.isoformat(),
