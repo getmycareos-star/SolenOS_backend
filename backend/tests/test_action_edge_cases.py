@@ -10,7 +10,7 @@ from app.models.action import Action as ActionModel
 from app.services.action_extraction import ActionExtractionEngine
 from app.services.action_normalization import ActionNormalizationService
 from app.services.action_lifecycle import ActionLifecycleService, ActionIdentityService
-from app.schemas.action import ActionCandidate
+from app.schemas.action import ActionCandidate, ActionCompletionEvidence
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -210,6 +210,89 @@ def test_near_duplicate_detection():
         identity = ActionIdentityService()
         result = identity.is_duplicate(action_a, action_b)
         assert result["is_duplicate"] is True
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_completion_records_timestamp_and_authenticated_caregiver():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-completion-1", name="Completion Test Person")
+        caregiver = Caregiver(
+            id="caregiver-completion-1",
+            name="Completion Test Caregiver",
+            email="completion-test@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-completion-1",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="Caregiver reports that the follow-up call was completed.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        action = ActionModel(
+            id="action-completion-1",
+            person_id=person.id,
+            status="active",
+            normalized_action="Complete follow-up call",
+            source_evidence_id=evidence.id,
+            source_passage="Complete follow-up call",
+            original_text="Complete follow-up call",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, action])
+        db.commit()
+
+        result = ActionLifecycleService().record_completion(
+            action,
+            ActionCompletionEvidence(evidence_ids=[evidence.id], completion_confidence=0.6),
+            db,
+            completed_by_caregiver_id=caregiver.id,
+        )
+
+        assert result.status == "completed"
+        assert result.completed_at is not None
+        assert result.completed_by_caregiver_id == caregiver.id
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_completion_rejects_missing_caregiver_attribution():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        action = ActionModel(
+            id="action-no-attribution",
+            person_id="p1",
+            status="active",
+            normalized_action="Complete follow-up call",
+            source_evidence_id="ev1",
+            source_passage="Complete follow-up call",
+            original_text="Complete follow-up call",
+            created_by_caregiver_id="c1",
+        )
+        db.add(action)
+        db.commit()
+
+        try:
+            ActionLifecycleService().record_completion(
+                action,
+                ActionCompletionEvidence(evidence_ids=["ev1"], completion_confidence=0.6),
+                db,
+                completed_by_caregiver_id="",
+            )
+            assert False, "Missing caregiver attribution must be rejected"
+        except ValueError as exc:
+            assert "authenticated caregiver" in str(exc)
         db.close()
     finally:
         teardown_db()
