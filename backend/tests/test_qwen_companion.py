@@ -48,6 +48,10 @@ def test_qwen_citations_are_restricted_to_authorized_evidence_ids():
         )
     qwen_call.assert_called_once()
     assert "real-evidence" in qwen_call.call_args.kwargs["user_prompt"]
+    system_prompt = qwen_call.call_args.kwargs["system_prompt"]
+    assert "what the caregiver just said" in system_prompt
+    assert "what the authorized Living Care Record actually records" in system_prompt
+    assert "what remains unknown" in system_prompt
     assert result.ai_generated is True
     assert result.provider_status == "connected"
     assert result.evidence_ids == ["real-evidence"]
