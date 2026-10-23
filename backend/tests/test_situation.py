@@ -115,7 +115,7 @@ def test_post_situation_with_documents():
                         "ocr_confidence": 0.95,
                         "extraction_source": "pdf_ocr",
                         "extraction_warnings": ["Low OCR confidence; verify against original."],
-                        "sha256": "a".repeat(64),
+                        "sha256": "a" * 64,
                         "extracted_char_count": 54,
                     }
                 ],
