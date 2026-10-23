@@ -141,10 +141,16 @@ def _local_ollama_url() -> tuple[str, str, float]:
     if not base_url or not model:
         raise HTTPException(status_code=503, detail="The configured local SolenOS model is unavailable: OLLAMA_BASE_URL and OLLAMA_MODEL must be configured.")
     parsed = urlparse(base_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
         raise HTTPException(status_code=503, detail="Local model configuration must use an HTTP(S) service URL.")
-    if os.getenv("RAILWAY_ENVIRONMENT_NAME", "").strip().lower() in {"production", "prod"} and parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
-        raise HTTPException(status_code=503, detail="Production must use the configured private model service, not loopback.")
+    environment = (
+        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
+    ).strip().lower()
+    if environment in {"production", "prod"}:
+        hostname = parsed.hostname.casefold()
+        if hostname in {"localhost", "127.0.0.1", "::1"} or not hostname.endswith(".railway.internal"):
+            raise HTTPException(status_code=503, detail="Production Delta inference must use the private SolenOS model service; loopback and public model hosts are rejected.")
     return base_url, model, timeout
 
 
