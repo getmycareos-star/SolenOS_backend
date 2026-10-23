@@ -1,4 +1,6 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
+import asyncio
+import os
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -19,12 +21,36 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
+from app.api.reminders import router as reminders_router
+from app.services.reminder_worker import reminder_scheduler_loop
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
+_reminder_task = None
+
+
+@app.on_event("startup")
+async def start_reminder_scheduler():
+    global _reminder_task
+    enabled = os.getenv("ENABLE_REMINDER_SCHEDULER", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if enabled and (_reminder_task is None or _reminder_task.done()):
+        _reminder_task = asyncio.create_task(reminder_scheduler_loop(), name="solenos-reminder-scheduler")
+
+
+@app.on_event("shutdown")
+async def stop_reminder_scheduler():
+    global _reminder_task
+    if _reminder_task is not None:
+        _reminder_task.cancel()
+        try:
+            await _reminder_task
+        except asyncio.CancelledError:
+            pass
+        _reminder_task = None
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +65,7 @@ app.add_middleware(
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
+app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
