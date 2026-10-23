@@ -18,9 +18,10 @@ def upgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
     if not inspector.has_table("auth_accounts"):
-        raise RuntimeError(
-            "Cannot mark anonymous sessions: required auth_accounts table is missing"
-        )
+        # On a fresh database the later durable-schema baseline creates the
+        # complete auth_accounts table from ORM metadata, including is_anonymous.
+        # Do not fail the migration chain before that bootstrap can run.
+        return
 
     columns = {column["name"] for column in inspector.get_columns("auth_accounts")}
     if "is_anonymous" not in columns:
