@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
+from app.api.actions import router as actions_router
 from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
@@ -55,6 +56,7 @@ app.add_middleware(
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
+app.include_router(actions_router, prefix="/api/v1", tags=["actions"])
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
