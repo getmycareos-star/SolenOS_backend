@@ -76,3 +76,46 @@ def test_delta_run_migration_adds_durable_history_table():
     columns = {column["name"] for column in inspector.get_columns("care_delta_runs")}
     assert {"person_id", "delta_json", "source_event_id", "evidence_ids", "model_name"} <= columns
     engine.dispose()
+
+
+def test_reconcile_persists_result_and_open_loops(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person
+    from app.models.care_continuity import CareAssertion, CareDeltaRun
+    from app.models.uncertainty import InformationGap, OpenQuestion
+
+    class Client:
+        def __init__(self, timeout): pass
+        def __enter__(self): return self
+        def __exit__(self, *args): return False
+        def post(self, *args, **kwargs): return FakeResponse()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://model.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "local-test-model")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.setattr(delta_engine.httpx, "Client", Client)
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add(Person(id="delta-person", name="Care recipient"))
+    db.commit()
+    try:
+        result = delta_engine.reconcile_event(
+            db, person_id="delta-person", event_date=datetime(2026, 10, 22, tzinfo=timezone.utc),
+            source="Visit note", content="Increase metformin to 1000 mg. MRI ordered. follow-up in 2 weeks.",
+            created_by_caregiver_id="caregiver-from-session",
+        )
+        saved = db.query(CareDeltaRun).filter_by(person_id="delta-person").one()
+        assert saved.id == result["provenance"]["delta_run_id"]
+        assert "event_summary" in json.loads(saved.delta_json)
+        assert saved.created_by_caregiver_id == "caregiver-from-session"
+        assert db.query(CareAssertion).filter_by(person_id="delta-person").count() == 1
+        assert db.query(InformationGap).filter_by(person_id="delta-person").count() >= 3
+        assert db.query(OpenQuestion).filter_by(person_id="delta-person", status="open").count() >= 3
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
