@@ -8,7 +8,9 @@ class CareReminder(Base):
     __tablename__ = "care_reminders"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
-    action_id = Column(String, ForeignKey("actions.id"), nullable=False, index=True)
+    action_id = Column(String, ForeignKey("actions.id"), nullable=True, index=True)
+    handoff_id = Column(String, ForeignKey("care_handoffs.id"), nullable=True, index=True, unique=True)
+    recipient_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True, index=True)
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     title = Column(String, nullable=False)
     message = Column(Text, nullable=False)
