@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -6,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.care import Caregiver
 from app.models.care_handoff import CareHandoff, CareHandoffEvent
+from app.models.reminder import CareReminder
 from app.schemas.care_handoff import (
     CareHandoffCompletion, CareHandoffCreate, CareHandoffRead, CareHandoffEventRead,
 )
@@ -104,12 +106,36 @@ def create_handoff(payload: CareHandoffCreate, request: Request, db: Session = D
         raise HTTPException(status_code=422, detail="Restricted handoffs require an assigned caregiver")
     db.add(item)
     db.flush()
+    if reminder_at is not None:
+        try:
+            reminder_zone = ZoneInfo(_caregiver_for_person(db, caregiver_id, person_id).timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise HTTPException(status_code=422, detail="Caregiver timezone must be a valid IANA timezone to schedule a handoff reminder") from exc
+        scheduled = reminder_at.astimezone(timezone.utc)
+        recipient_id = assigned_id or caregiver_id
+        db.add(CareReminder(
+            person_id=person_id,
+            action_id=None,
+            handoff_id=item.id,
+            recipient_caregiver_id=recipient_id,
+            created_by_caregiver_id=caregiver_id,
+            title=f"Handoff due: {item.title}",
+            message=item.summary,
+            timezone=str(reminder_zone),
+            recurrence="once",
+            next_run_at=scheduled,
+            local_time=scheduled.astimezone(reminder_zone).strftime("%H:%M"),
+            enabled=True,
+            max_attempts=5,
+            retry_delay_seconds=60,
+        ))
     _event(db, item, caregiver_id, "created", {
         "title": item.title,
         "assigned_to_caregiver_id": assigned_id,
         "access_scope": item.access_scope,
         "due_at": item.due_at.isoformat() if item.due_at else None,
         "reminder_at": item.reminder_at.isoformat() if item.reminder_at else None,
+        "durable_reminder_created": bool(reminder_at),
         "outstanding_count": len(item.outstanding_items),
         "recent_change_count": len(item.recent_changes),
         "safety_concern_count": len(item.safety_concerns),
