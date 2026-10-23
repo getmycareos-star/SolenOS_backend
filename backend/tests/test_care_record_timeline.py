@@ -145,7 +145,10 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
             actor_label="Family caregiver", subject_type="patient", action_type="call",
             action_object="Call the clinic", normalized_action="Call the clinic if dizziness worsens",
             original_text="Call the clinic if dizziness worsens.", modality="conditional",
-            condition_text="If dizziness worsens", status="active", is_explicit=True,
+            condition_text="If dizziness worsens", status="completed",
+            completed_at=now - timedelta(minutes=30), completed_by_caregiver_id=caregiver_id,
+            completion_notes="Confirmed by caregiver", completion_confidence=0.9,
+            completion_evidence_ids=[evidence.id], is_explicit=True,
             is_medication_action=False, risk_tier="moderate", requires_confirmation=False,
             has_condition=True, is_recurring=False, created_by_caregiver_id=caregiver_id,
         )
@@ -190,6 +193,11 @@ def test_unified_care_record_aggregates_domains_and_keeps_source_evidence():
     assert body["counts"]["action_outcomes"] == 1
     action_item = next(item for item in body["timeline"] if item["source_id"] == action_id)
     assert action_item["outcomes"][0]["notes"] == "Call the clinic if dizziness worsens."
+    assert action_item["status"] == "completed"
+    assert action_item["time_provenance"] == "completed_at"
+    assert action_item["details"]["completed_by_caregiver_id"] == caregiver_id
+    assert action_item["details"]["completion_notes"] == "Confirmed by caregiver"
+    assert action_item["details"]["completion_evidence_ids"] == [evidence_id]
     medication_item = next(item for item in body["timeline"] if item["source_id"] == medication_list_id)
     assert medication_item["kind"] == "evidence"
     assert medication_item["title"] == "Medication List"
