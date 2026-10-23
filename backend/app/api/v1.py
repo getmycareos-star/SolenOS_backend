@@ -783,7 +783,6 @@ def get_unified_care_record(
             "evidence": [evidence_projection(item)],
             "details": {
                 "location": item.location, "confidence": item.confidence,
-                "original_file_path": item.original_file_path,
             },
         })
 
