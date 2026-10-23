@@ -429,6 +429,18 @@ class TestSafetyEvaluationSuite:
         assert results["total_adversarial_tests"] == 5
         assert len(results["results"]) == 5
 
+    def test_missing_regression_scores_are_unavailable_not_perfect(self):
+        checks = self.suite.run_regression_check(
+            current_results=[],
+            previous_results=[{"check_name": "safety-coverage", "score": 0.8}],
+        )
+        assert len(checks) == 1
+        assert checks[0].previous_score == 0.8
+        assert checks[0].current_score is None
+        assert checks[0].passed is False
+        assert checks[0].regression_detected is None
+        assert "unavailable" in (checks[0].details or "").lower()
+
     def test_benchmark_passing(self):
         cases = [
             SafetyBenchmarkCase(
