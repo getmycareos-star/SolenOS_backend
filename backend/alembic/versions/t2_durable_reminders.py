@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t2_reminders_20261023"
-down_revision = "t2_reminders_20261023"
+down_revision = "t2_completion_20261023"
 branch_labels = None
 depends_on = None
 
