@@ -68,9 +68,9 @@ def downgrade():
         or (fk.get("referred_table") == "caregivers"
             and fk.get("constrained_columns") == ["completed_by_caregiver_id"])
     ), None)
-    if completion_fk:
+    if completion_fk and completion_fk.get("name"):
         with op.batch_alter_table("actions") as batch_op:
-            batch_op.drop_constraint(FK_NAME, type_="foreignkey")
+            batch_op.drop_constraint(completion_fk["name"], type_="foreignkey")
 
     inspector = inspect(bind)
     columns = {column["name"] for column in inspector.get_columns("actions")}
