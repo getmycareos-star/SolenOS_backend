@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.action import Action as ActionModel
 from app.models.care import Caregiver
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
+from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
 from app.schemas.reminder import ReminderCreate, ReminderOut, ReminderDeliveryOut, ReminderDeliveryAttemptOut
 
 router = APIRouter(prefix="/reminders", tags=["care-reminders"])
@@ -29,8 +30,14 @@ def create_reminder(action_id: str, payload: ReminderCreate, request: Request, d
         raise HTTPException(status_code=403, detail="This session is not authorised for that care action")
     if action.status not in ("active", "conditional"):
         raise HTTPException(status_code=409, detail="Reminders require an active or conditional care action that is no longer awaiting confirmation")
-    if action.is_medication_action and action.requires_confirmation:
-        raise HTTPException(status_code=409, detail="Medication action requires verified clinical source review before reminders can be scheduled")
+    medication_text = " ".join((action.original_text or "", action.source_passage or "", action.normalized_action or "", action.action_object or ""))
+    if medication_instruction_requires_authority(medication_text, action.is_medication_action):
+        verification = get_verified_medication_authority(
+            db, person_id=person_id, evidence_id=action.source_evidence_id,
+            source_authority=action.source_authority,
+        )
+        if verification is None:
+            raise HTTPException(status_code=409, detail="Medication reminders require a current trusted prescriber-source verification")
     caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id, Caregiver.person_id == person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
