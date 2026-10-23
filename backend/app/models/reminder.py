@@ -41,3 +41,20 @@ class ReminderDelivery(Base):
         UniqueConstraint("reminder_id", "scheduled_for", name="uq_reminder_delivery_occurrence"),
         Index("ix_reminder_delivery_due", "status", "next_attempt_at"),
     )
+
+
+
+class ReminderDeliveryAttempt(Base):
+    __tablename__ = "reminder_delivery_attempts"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    delivery_id = Column(String, ForeignKey("reminder_deliveries.id"), nullable=False, index=True)
+    attempt_number = Column(Integer, nullable=False)
+    channel = Column(String, nullable=False, default="in_app")
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    outcome = Column(String, nullable=False, default="pending")  # pending, delivered, retry, failed
+    error_type = Column(String, nullable=True)
+    idempotency_key = Column(String, nullable=False, unique=True)
+    __table_args__ = (
+        UniqueConstraint("delivery_id", "attempt_number", name="uq_reminder_attempt_number"),
+    )
