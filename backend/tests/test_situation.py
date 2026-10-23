@@ -116,7 +116,7 @@ def test_post_situation_with_documents():
                         "extraction_source": "pdf_ocr",
                         "extraction_warnings": ["Low OCR confidence; verify against original."],
                         "sha256": "a".repeat(64),
-                        "extracted_char_count": 58,
+                        "extracted_char_count": 54,
                     }
                 ],
                 "provenance": {
@@ -140,7 +140,7 @@ def test_post_situation_with_documents():
         assert metadata["sha256"] == "a" * 64
         assert metadata["ocr_confidence"] == 0.95
         assert metadata["extraction_warnings"] == ["Low OCR confidence; verify against original."]
-        assert metadata["extracted_char_count"] == 58
+        assert metadata["extracted_char_count"] == 54
         evidence_db.close()
     finally:
         teardown_db()
