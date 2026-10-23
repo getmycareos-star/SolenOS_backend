@@ -278,3 +278,27 @@ def test_post_situation_returns_persisted_qwen_analysis_id(monkeypatch):
             assert data["qwen_analysis_id"] == "persisted-analysis-123"
     finally:
         teardown_db()
+
+def test_quick_capture_rejects_invalid_event_timestamp_instead_of_falsely_attributing_it():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, person_id, caregiver_id = create_authenticated_context(client, "quick-capture-invalid-time")
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={
+                    "caregiver_id": caregiver_id,
+                    "person_id": person_id,
+                    "raw_input": "Caregiver reported a change.",
+                    "capture_category": "symptom",
+                    "timestamp": "yesterday morning",
+                },
+            )
+            assert response.status_code == 400, response.text
+            assert "valid ISO 8601 datetime" in response.text
+            with TestingSessionLocal() as db:
+                from app.models.care import CareEvent
+                assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+    finally:
+        teardown_db()
