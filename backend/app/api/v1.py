@@ -522,6 +522,7 @@ def get_unified_care_record(
             "id": item.id, "type": item.type, "source_text": item.source_text,
             "uploaded_at": item.uploaded_at, "source_type": item.source_type,
             "time_provenance": item.time_provenance, "location": item.location,
+            "uploaded_by_caregiver_id": item.uploaded_by_caregiver_id,
             "confidence": item.confidence, "evidence_status": item.evidence_status,
             "source_span_start": item.source_span_start, "source_span_end": item.source_span_end,
         }
@@ -560,6 +561,7 @@ def get_unified_care_record(
                 "location": event.location, "location_provenance": event.location_provenance,
                 "confidence": event.confidence, "significance_verdict": event.significance_verdict,
                 "attention_candidate": event.attention_candidate, "follow_up_candidate": event.follow_up_candidate,
+                "created_by_caregiver_id": event.created_by_caregiver_id,
             },
         })
 
@@ -578,6 +580,7 @@ def get_unified_care_record(
                 "documents_to_bring": appointment.documents_to_bring or [],
                 "medication_questions": appointment.medication_questions or [],
                 "travel_notes": appointment.travel_notes,
+                "created_by_caregiver_id": appointment.created_by_caregiver_id,
             },
         })
 
@@ -595,6 +598,7 @@ def get_unified_care_record(
                 "from_location": transition.from_location, "to_location": transition.to_location,
                 "transition_type": transition.transition_type, "location_provenance": transition.location_provenance,
                 "triggered_by_event_id": transition.triggered_by_event_id,
+                "created_by_caregiver_id": transition.created_by_caregiver_id,
             },
         })
 
@@ -617,6 +621,7 @@ def get_unified_care_record(
                 "requires_confirmation": action.requires_confirmation,
                 "is_medication_action": action.is_medication_action,
                 "source_evidence_id": action.source_evidence_id,
+                "created_by_caregiver_id": action.created_by_caregiver_id,
             },
         })
 
