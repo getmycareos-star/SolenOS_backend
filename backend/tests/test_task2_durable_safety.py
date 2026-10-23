@@ -267,6 +267,7 @@ def test_medication_authority_expiry_cancels_already_materialized_delivery():
         action.original_text = "Prescriber instruction: take medication 5 mg daily."
         action.normalized_action = "Take medication 5 mg daily"
         action.is_medication_action = True
+        action.source_authority = "physician"
         verification = MedicationAuthorityVerification(
             id="v-expiry-task2", evidence_id=evidence.id, person_id=person.id,
             source_text_sha256=hashlib.sha256(evidence.source_text.encode("utf-8")).hexdigest(),
