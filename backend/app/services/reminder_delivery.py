@@ -6,6 +6,11 @@ but before receipt persistence cannot create duplicate notifications.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Any
+import json
+import os
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 
 from app.models.reminder import CareReminder, ReminderDeliveryAttempt
@@ -84,3 +89,66 @@ def process_due_reminders(
         db.add(reminder)
         db.commit()
     return summary
+
+
+def configured_webhook_sender(reminder: CareReminder, idempotency_key: str) -> dict:
+    """Deliver through an explicitly configured HTTPS webhook.
+
+    The receiving provider must honor the Idempotency-Key header and return
+    JSON containing a durable receipt_id. No successful delivery is inferred
+    from HTTP status alone.
+    """
+    endpoint = os.getenv("REMINDER_DELIVERY_URL", "").strip()
+    token = os.getenv("REMINDER_DELIVERY_TOKEN", "").strip()
+    parsed = urlparse(endpoint)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise RuntimeError("REMINDER_DELIVERY_URL must be a configured HTTPS endpoint")
+    if not token:
+        raise RuntimeError("REMINDER_DELIVERY_TOKEN is not configured")
+    payload = {
+        "reminder_id": reminder.id,
+        "person_id": reminder.person_id,
+        "action_id": reminder.action_id,
+        "title": reminder.title,
+        "message": reminder.message,
+        "due_at": reminder.due_at.isoformat(),
+        "timezone": reminder.timezone,
+        "idempotency_key": idempotency_key,
+    }
+    request = Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "Idempotency-Key": idempotency_key,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"Reminder provider returned HTTP {response.status}")
+            data = json.loads(response.read(65536).decode("utf-8"))
+    except HTTPError as exc:
+        raise RuntimeError(f"Reminder provider returned HTTP {exc.code}") from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise RuntimeError(f"Reminder provider request failed: {exc.__class__.__name__}") from exc
+    if not isinstance(data, dict) or not data.get("receipt_id"):
+        raise RuntimeError("Reminder provider response must include receipt_id")
+    return {"provider": data.get("provider") or parsed.hostname, "receipt_id": str(data["receipt_id"])}
+
+
+def run_configured_reminder_worker(limit: int = 50) -> dict:
+    """One-shot worker entry point suitable for a managed cron/scheduler."""
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        return process_due_reminders(db, configured_webhook_sender, limit=limit)
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    result = run_configured_reminder_worker()
+    print(json.dumps(result, sort_keys=True))
