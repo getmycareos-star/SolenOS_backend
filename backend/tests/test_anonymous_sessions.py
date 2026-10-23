@@ -589,7 +589,7 @@ def test_action_routes_are_scoped_to_the_authenticated_care_recipient():
 
 
 def test_action_router_has_no_duplicate_actions_prefix():
-    registered_paths = {route.path for route in app.routes}
+    registered_paths = set(app.openapi()["paths"])
     assert "/api/v1/actions/{person_id}" in registered_paths
     assert "/api/v1/actions/{action_id}/complete" in registered_paths
     assert "/api/v1/actions/actions/{person_id}" not in registered_paths
