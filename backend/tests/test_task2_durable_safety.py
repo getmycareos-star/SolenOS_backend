@@ -195,3 +195,28 @@ def test_action_completion_persists_timestamp_and_caregiver_attribution():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+
+def test_terminal_action_suppresses_due_reminders():
+    engine, db = make_db()
+    try:
+        person, caregiver, evidence, action = seed_action(db)
+        action.status = "completed"
+        reminder = CareReminder(
+            id="r-terminal", person_id=person.id, action_id=action.id,
+            created_by_caregiver_id=caregiver.id, title="No longer needed",
+            message="This must not be delivered", timezone="UTC", recurrence="daily",
+            next_run_at=datetime(2026, 10, 23, 10, 0, tzinfo=timezone.utc),
+            local_time="10:00", enabled=True,
+        )
+        db.add(reminder)
+        db.commit()
+        assert materialize_due_reminders(db, datetime(2026, 10, 23, 11, 0, tzinfo=timezone.utc)) == 0
+        db.refresh(reminder)
+        assert reminder.enabled is False
+        assert db.query(ReminderDelivery).filter_by(reminder_id=reminder.id).count() == 0
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
