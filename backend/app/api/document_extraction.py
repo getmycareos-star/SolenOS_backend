@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import re
+import uuid
 from pathlib import PurePath
 from typing import Any
 
@@ -339,7 +341,6 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
     document_type = _classify_document_type(extracted_text, filename)
     document_date = _document_date_candidate(extracted_text) if extracted_text else None
     # Evidence ID is generated before candidate IDs so every candidate can point back to its source.
-    import uuid
     evidence_id = str(uuid.uuid4())
     document_candidates = _extract_document_candidates(extracted_text, evidence_id) if extracted_text else []
     metadata = {
@@ -368,7 +369,7 @@ async def intake_document(request: Request, file: UploadFile = File(...), db: Se
         source_text=extracted_text if extracted_text else "Document source preserved; readable text is not currently available. No document facts have been verified.",
         original_file_path="pending",
         uploaded_by_caregiver_id=caregiver_id,
-        extra_metadata=__import__("json").dumps(metadata, ensure_ascii=False),
+        extra_metadata=json.dumps(metadata, ensure_ascii=False),
         confidence=ocr_confidence,
         evidence_status="uploaded",
         source_type="document_upload",
@@ -484,7 +485,7 @@ async def review_document_candidate(
     if decision not in {"accept", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept or reject.")
     try:
-        metadata = __import__("json").loads(evidence.extra_metadata or "{}")
+        metadata = json.loads(evidence.extra_metadata or "{}")
     except (TypeError, ValueError):
         raise HTTPException(status_code=409, detail="Document metadata is unreadable; review cannot be safely saved.")
     candidates = metadata.get("document_candidates")
