@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import httpx
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence
@@ -227,7 +228,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         # Exclude assertions created by the incoming Daily Capture event itself;
         # otherwise the "before" state contains the new values and hides the delta.
         active_assertions_query = active_assertions_query.filter(
-            CareAssertion.source_event_id != source_event_id
+            or_(
+                CareAssertion.source_event_id.is_(None),
+                CareAssertion.source_event_id != source_event_id,
+            )
         )
     active_assertions = active_assertions_query.order_by(CareAssertion.recorded_at.desc()).limit(250).all()
     active_state = [{
