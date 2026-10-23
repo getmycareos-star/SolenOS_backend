@@ -156,6 +156,9 @@ def test_pattern_detection_recurrence():
         assert len(patterns) >= 1
         pattern_types = [p.pattern_type.value for p in patterns]
         assert "frequency_increase" in pattern_types or "recurrence" in pattern_types
+        assert all(p.confidence is None for p in patterns), (
+            "Pattern confidence must remain unknown until a calibrated score exists."
+        )
         db.close()
     finally:
         teardown_db()
