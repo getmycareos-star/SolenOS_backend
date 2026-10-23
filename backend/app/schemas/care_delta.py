@@ -11,3 +11,4 @@ class CareDeltaReconcileRequest(BaseModel):
     source_event_id: Optional[str] = Field(default=None, max_length=160)
     evidence_ids: List[str] = Field(default_factory=list, max_length=100)
     persist: bool = True
+    created_by_caregiver_id: Optional[str] = None
