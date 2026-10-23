@@ -226,7 +226,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
         payload = {}
-        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if method in {"POST", "PUT", "PATCH", "DELETE"} and path != "/api/extract":
             body = await request.body()
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}
