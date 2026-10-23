@@ -89,6 +89,53 @@ def test_post_situation_creates_evidence_and_event():
         teardown_db()
 
 
+
+def test_quick_capture_persists_category_and_distinguishes_event_time_from_entry_time():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, person_id, caregiver_id = create_authenticated_context(client, "quick-capture-time")
+            event_time = "2026-10-20T08:30:00+00:00"
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={
+                    "caregiver_id": caregiver_id,
+                    "person_id": person_id,
+                    "raw_input": "Caregiver observed restless sleep.",
+                    "capture_category": "sleep",
+                    "timestamp": event_time,
+                    "provenance": {"input_type": "caregiver_observation", "entry_method": "quick_entry", "captured_at": datetime.now(timezone.utc).isoformat()},
+                },
+            )
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
+            assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
+            with TestingSessionLocal() as db:
+                from app.models.care import CareEvent
+                event = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+                assert "capture_category:sleep" in event.tags
+                assert event.time_provenance == "caregiver_reported_event_time"
+    finally:
+        teardown_db()
+
+
+def test_quick_capture_without_event_time_marks_entry_time_fallback():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, person_id, caregiver_id = create_authenticated_context(client, "quick-capture-default-time")
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={"caregiver_id": caregiver_id, "person_id": person_id, "raw_input": "Ate breakfast.", "capture_category": "meal"},
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["events"][0]["time_provenance"] == "entry_time_defaulted"
+    finally:
+        teardown_db()
+
 def test_post_situation_with_documents():
     setup_db()
     try:
