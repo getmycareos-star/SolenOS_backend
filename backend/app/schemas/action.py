@@ -63,6 +63,9 @@ class Action(ActionBase):
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    completed_by_caregiver_id: Optional[str] = None
+    completed_by_caregiver_label: Optional[str] = None
 
     class Config:
         from_attributes = True
