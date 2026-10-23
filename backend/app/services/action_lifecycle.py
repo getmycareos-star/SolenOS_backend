@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.action import Action as ActionModel, ActionStatus
 from app.models.care import Caregiver, Evidence
 from app.schemas.action import ActionCompletionEvidence
+from app.services.medication_authority import action_has_verified_medication_authority
 
 
 class ActionLifecycleService:
@@ -24,6 +25,8 @@ class ActionLifecycleService:
     def transition_status(self, action: ActionModel, new_status: str, db: Session) -> ActionModel:
         if new_status == "completed":
             raise ValueError("Use record_completion to persist evidence and authenticated caregiver attribution")
+        if new_status == ActionStatus.ACTIVE and not action_has_verified_medication_authority(db, action):
+            raise ValueError("Medication source authority is missing, expired, or no longer matches the source evidence")
         allowed = self.STATUS_TRANSITIONS.get(action.status, [])
         if new_status not in allowed:
             raise ValueError(f"Cannot transition action {action.id} from {action.status} to {new_status}. Allowed: {allowed}")
@@ -44,6 +47,8 @@ class ActionLifecycleService:
         caregiver = db.query(Caregiver).filter(Caregiver.id == completed_by_caregiver_id, Caregiver.person_id == action.person_id).first()
         if caregiver is None:
             raise ValueError("Completion caregiver must be linked to this care record")
+        if not action_has_verified_medication_authority(db, action):
+            raise ValueError("Medication source authority is missing, expired, or no longer matches the source evidence")
         requested_evidence_ids = set(evidence.evidence_ids or [])
         if not requested_evidence_ids:
             # A caregiver's explicit completion note is itself a source-attributed
