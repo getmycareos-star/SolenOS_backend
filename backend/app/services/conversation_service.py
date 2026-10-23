@@ -197,7 +197,12 @@ def _call_qwen(
         "medication. Do not claim to have changed the care record. If a question needs a clinician or "
         "the record is insufficient, say what is unknown and suggest a specific question to ask a "
         "qualified professional. For general non-care questions, label general information as such. "
-        "Potential emergencies must be directed to local emergency services immediately. Return only "
+        "When it materially helps avoid confusion, clearly separate what the caregiver just said, what "
+        "the authorized Living Care Record actually records, your interpretation or general information, "
+        "what remains unknown, and a useful next question/action. Do not invent a category's contents; "
+        "say when no relevant record evidence was found or cited. Keep this distinction concise and "
+        "do not repeat headings that add no value. Potential emergencies must be directed to local "
+        "emergency services immediately. Return only "
         "valid JSON with keys reply (string), evidence_ids (array copied exactly from supplied context, "
         "or []), and safety_note (string or null). Do not include a confidence score."
     )
