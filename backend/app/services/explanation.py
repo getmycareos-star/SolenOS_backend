@@ -39,10 +39,8 @@ def explain_pattern(pattern: Pattern) -> str:
     if pattern.direction:
         parts.append(f"Direction: {pattern.direction.value}.")
     parts.append(f"Evidence count: {pattern.evidence_count}.")
-    if pattern.confidence < 0.7:
-        parts.append(
-            f"Pattern confidence is {pattern.confidence:.2f} due to limited evidence."
-        )
+    if pattern.confidence is not None:
+        parts.append(f"Pattern confidence: {pattern.confidence:.2f} (calibration metadata available).")
     return " ".join(parts)
 
 
