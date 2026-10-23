@@ -372,3 +372,47 @@ def test_daily_capture_event_is_not_used_as_its_own_baseline_or_duplicated(monke
         db.close()
         Base.metadata.drop_all(engine)
         engine.dispose()
+
+
+def test_delta_rejects_cross_person_source_event_and_evidence_ids_before_model_call():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    from app.core.database import Base
+    from app.models.care import Person, CareEvent, Evidence
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine, expire_on_commit=False)()
+    db.add_all([
+        Person(id="person-a", name="Care recipient A"),
+        Person(id="person-b", name="Care recipient B"),
+    ])
+    db.flush()
+    db.add(CareEvent(
+        id="event-b", person_id="person-b", event_type="note", status="recorded",
+        occurred_at=datetime(2026, 10, 22, tzinfo=timezone.utc), title="Other person's event",
+        description="private care information", created_by_caregiver_id="caregiver-b",
+    ))
+    db.add(Evidence(
+        id="evidence-b", person_id="person-b", type="document", source_text="private document",
+        uploaded_by_caregiver_id="caregiver-b",
+    ))
+    db.commit()
+    try:
+        with pytest.raises(HTTPException) as event_error:
+            delta_engine.reconcile_event(
+                db, person_id="person-a", event_date=None, source="test", content="new event",
+                source_event_id="event-b",
+            )
+        assert event_error.value.status_code == 422
+        with pytest.raises(HTTPException) as evidence_error:
+            delta_engine.reconcile_event(
+                db, person_id="person-a", event_date=None, source="test", content="new event",
+                evidence_ids=["evidence-b"],
+            )
+        assert evidence_error.value.status_code == 422
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
