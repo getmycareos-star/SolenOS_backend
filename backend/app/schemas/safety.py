@@ -154,11 +154,11 @@ class SafetyEvaluationResult(BaseModel):
 
 class SafetyRegressionCheck(BaseModel):
     check_name: str
-    previous_score: float
-    current_score: float
+    previous_score: Optional[float] = None
+    current_score: Optional[float] = None
     threshold: float
     passed: bool
-    regression_detected: bool
+    regression_detected: Optional[bool] = None
     details: Optional[str] = None
 
 
