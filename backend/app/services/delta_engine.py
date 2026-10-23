@@ -255,7 +255,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
         "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
-        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE; do not summarize the event in isolation. "
+        "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE and EXISTING_RECORD_CONTEXT; do not summarize the event in isolation. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. "
         "Return only one JSON object matching the supplied schema. Do not emit markdown. "
         "Never invent a diagnosis, medication order, date, test result, follow-up completion, or causal explanation. "
         "Distinguish new information from a meaningful state change. Use unchanged only when the source supports it. "
@@ -264,7 +264,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "Mark uncertainty explicitly. A test ordered without a result present in the provided record is an open loop, not a negative result. "
         "For symptoms, compare only when comparable prior observations exist; do not infer trends from incomparable reports. "
         "Clinical gaps and follow-ups must be grounded in supplied text/state. caregiver_summary uses clear plain language; clinician_summary preserves exact clinical terms. "
-        "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT or EXISTING_ACTIVE_STATE."
+        "Do not diagnose, recommend treatment, or replace a clinician. Evidence excerpts must be short verbatim snippets from NEW_CARE_EVENT, EXISTING_ACTIVE_STATE, or EXISTING_RECORD_CONTEXT. When citing historical context, do not claim it is current unless its date/status supports that interpretation."
     )
     user_payload = {
         "existing_active_state": active_state,
