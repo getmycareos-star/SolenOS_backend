@@ -41,6 +41,7 @@ def create_reminder(payload: ReminderCreate, db: Session = Depends(get_db)):
             and existing.message == payload.message
             and existing.due_at == payload.due_at
             and existing.action_id == payload.action_id
+            and existing.recurrence_rule == payload.recurrence_rule
             and existing.created_by_caregiver_id == payload.caregiver_id
         )
         if not same_request:
@@ -55,6 +56,7 @@ def create_reminder(payload: ReminderCreate, db: Session = Depends(get_db)):
         message=payload.message,
         due_at=payload.due_at.astimezone(timezone.utc),
         timezone=payload.timezone,
+        recurrence_rule=payload.recurrence_rule,
         idempotency_key=payload.idempotency_key,
         max_attempts=payload.max_attempts,
         status="scheduled",
