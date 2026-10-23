@@ -127,13 +127,13 @@ def test_monthly_recurrence_keeps_original_day_after_february_clamp():
         february = db.query(CareReminder).filter(
             CareReminder.idempotency_key.like("monthly-series-0001:%")
         ).one()
-        assert february.due_at == datetime(2026, 2, 28, 8, 0, tzinfo=timezone.utc)
+        assert february.due_at.replace(tzinfo=timezone.utc) == datetime(2026, 2, 28, 8, 0, tzinfo=timezone.utc)
         assert february.recurrence_anchor_day == 31
         process_due_reminders(db, sender, now=datetime(2026, 2, 28, 8, 1, tzinfo=timezone.utc))
         march = db.query(CareReminder).filter(
             CareReminder.idempotency_key.like("monthly-series-0001:%")
         ).filter(CareReminder.id != february.id).one()
-        assert march.due_at == datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc)
+        assert march.due_at.replace(tzinfo=timezone.utc) == datetime(2026, 3, 31, 8, 0, tzinfo=timezone.utc)
         assert march.recurrence_anchor_day == 31
     finally:
         db.close()
