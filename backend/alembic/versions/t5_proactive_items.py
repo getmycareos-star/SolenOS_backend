@@ -1,14 +1,14 @@
 """Persist proactive care coordination cues on daily intelligence snapshots.
 
 Revision ID: t5_proactive_items_20261024
-Revises: t2_med_auth_20261023
+Revises: t2_delivery_attempts_20261023
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t5_proactive_items_20261024"
-down_revision = "t2_med_auth_20261023"
+down_revision = "t2_delivery_attempts_20261023"
 branch_labels = None
 depends_on = None
 
