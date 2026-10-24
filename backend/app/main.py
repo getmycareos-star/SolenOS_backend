@@ -28,16 +28,22 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
+# CORS is configurable per deployment. The Netlify production site is the
+# default; additional origins must be explicitly listed in CORS_ORIGINS.
+# This is an origin allowlist, not a wildcard. Comma-separated values are
+# normalized and empty entries ignored.
+cors_origins_env = os.getenv("CORS_ORIGINS", "https://solenosai.netlify.app")
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in cors_origins_env.split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://solenosai.netlify.app",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
