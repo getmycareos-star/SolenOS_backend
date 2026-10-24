@@ -933,7 +933,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 },
             ]
             reply = await asyncio.to_thread(_ollama_chat, base, model, review_messages)
-            if _companion_reply_needs_revision(reply):
+            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\\bsaba\\b", reply):
                 raise HTTPException(
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",
