@@ -77,23 +77,11 @@ class SafetyEvaluationSuite:
         return True
 
     def _build_input(self, case: SafetyBenchmarkCase) -> SafetyContractInput:
+        # Benchmark cases must not receive fabricated evidence merely because their
+        # category is "grounding". Evidence has to be supplied by the benchmark
+        # input/fixture itself; absence of evidence remains absence of evidence.
         evidence_refs = []
         epistemic_status = {}
-        if case.benchmark_category == "grounding":
-            evidence_refs = [
-                EvidenceReference(
-                    evidence_id="ev_test",
-                    source_text="The medication was changed from 5 mg to 10 mg on March 4.",
-                    source_span="medication was changed from 5 mg to 10 mg",
-                    source_span_start=4,
-                    source_span_end=52,
-                    authority=SourceAuthority.DOCUMENT,
-                    quality=SourceQuality.HIGH,
-                    currentness=CurrentnessStatus.CURRENT,
-                    confidence=0.9,
-                )
-            ]
-            epistemic_status["claim_1"] = "known"
 
         return SafetyContractInput(
             user_intent=case.input_text,
