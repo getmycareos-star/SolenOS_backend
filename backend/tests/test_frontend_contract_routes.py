@@ -124,14 +124,14 @@ def test_social_greeting_cannot_be_saved_as_care_evidence(monkeypatch):
         teardown()
 
 
-def test_companion_greeting_uses_qwen_prompt_and_never_writes_lcr(monkeypatch):
+def test_companion_greeting_uses_qwen_review_and_never_writes_lcr(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
-    captured = {}
+    captured = []
 
     def fake_ollama_chat(base, model, messages):
-        captured["base"] = base
-        captured["model"] = model
-        captured["messages"] = messages
+        captured.append({"base": base, "model": model, "messages": messages})
+        if len(captured) == 1:
+            return "Saba, saba, saba."
         return "Hi! I'm here. What would you like to talk about?"
 
     import app.api.collaboration as collaboration_api
@@ -147,11 +147,14 @@ def test_companion_greeting_uses_qwen_prompt_and_never_writes_lcr(monkeypatch):
         data = response.json()
         assert data["ai_generated"] is True
         assert data["reply"] == "Hi! I'm here. What would you like to talk about?"
-        system_prompt = captured["messages"][0]["content"].lower()
+        assert len(captured) == 2
+        system_prompt = captured[0]["messages"][0]["content"].lower()
         assert "do not use a fixed or hardcoded greeting template" in system_prompt
         assert "do not automatically ask 'how are you doing?'" in system_prompt
         assert "plain, clear language" in system_prompt
         assert "unfamiliar foreign terms" in system_prompt
+        review_prompt = captured[1]["messages"][0]["content"].lower()
+        assert "remove unfamiliar foreign terms" in review_prompt
         assert "saba" not in data["reply"].lower()
         db = TestingSessionLocal()
         assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
