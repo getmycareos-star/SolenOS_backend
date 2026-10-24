@@ -174,6 +174,32 @@ def main():
         action_id = action["id"]
         require(action["status"] == "active", f"action was not activated for reminder test: {action['status']}")
 
+        # The same endpoint used by the frontend dashboard must persist a
+        # source-linked proactive item and update today's snapshot idempotently.
+        status, intelligence = request("GET", f"/api/v1/daily-intelligence/{person_id}", token=token_a)
+        require(status == 200, f"daily intelligence endpoint failed: {status} {intelligence}")
+        proactive = [item for item in intelligence.get("proactive_items", []) if item.get("source_id") == action_id]
+        require(len(proactive) == 1, f"active action did not produce one source-linked proactive cue: {proactive}")
+        cue = proactive[0]
+        require(cue.get("title") and cue.get("message"), "proactive cue is missing its title or explanation")
+        require(cue.get("source_evidence_ids") == [evidence["id"]], "proactive cue lost its source evidence reference")
+        require(cue.get("time_provenance") == "no_deadline_recorded", "proactive cue misstated deadline provenance")
+
+        status, intelligence_again = request("GET", f"/api/v1/daily-intelligence/{person_id}", token=token_a)
+        require(status == 200, f"second daily intelligence read failed: {status} {intelligence_again}")
+        require(intelligence_again["id"] == intelligence["id"], "daily intelligence endpoint created duplicate daily snapshots")
+        second_action_cues = [item for item in intelligence_again.get("proactive_items", []) if item.get("source_id") == action_id]
+        require(len(second_action_cues) == 1, "repeated dashboard read duplicated the same proactive cue")
+
+        from app.models.time_location import DailyIntelligence
+        db = SessionLocal()
+        try:
+            saved_snapshots = db.query(DailyIntelligence).filter(DailyIntelligence.person_id == person_id).all()
+            require(len(saved_snapshots) == 1, f"expected one persisted daily snapshot, got {len(saved_snapshots)}")
+            require(any(row.id == intelligence["id"] and row.proactive_items for row in saved_snapshots), "proactive items were not persisted in PostgreSQL")
+        finally:
+            db.close()
+
         status, action_reminder = request(
             "POST", f"/api/v1/reminders/actions/{action_id}", token=token_a,
             body={
