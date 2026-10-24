@@ -100,6 +100,39 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
         teardown()
 
 
+def test_companion_greeting_uses_model_with_natural_language_contract(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration_api
+        captured = {}
+
+        def fake_ollama_chat(base, model, messages):
+            captured["base"] = base
+            captured["model"] = model
+            captured["messages"] = messages
+            return "Hi! What would you like to talk about today?"
+
+        monkeypatch.setattr(collaboration_api, "_ollama_url", lambda: ("http://ollama:11434", "qwen2.5:1.5b"))
+        monkeypatch.setattr(collaboration_api, "_ollama_chat", fake_ollama_chat)
+
+        response = client.post("/api/v1/conversation/message", headers={
+            "Authorization": f"Bearer {token}",
+        }, json={"person_id": person_id, "text": "hi"})
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["reply"] == "Hi! What would you like to talk about today?"
+        system_prompt = captured["messages"][0]["content"].lower()
+        assert "do not use a fixed or hardcoded greeting template" in system_prompt
+        assert "do not automatically ask 'how are you doing?'" in system_prompt
+        assert "plain, clear language" in system_prompt
+        assert "saba" in system_prompt
+        assert "saba" not in data["reply"].lower()
+        assert len(data["messages"]) == 2
+    finally:
+        teardown()
+
+
 def test_companion_emergency_response_is_scoped_and_persisted_without_model(monkeypatch):
     client, token, person_id, _, other_token, other_person_id = setup_client(monkeypatch)
     try:
