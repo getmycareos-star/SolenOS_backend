@@ -251,12 +251,23 @@ def community_experience(payload: dict, request: Request, db: Session = Depends(
 def _ollama_url() -> tuple[str, str]:
     base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
     model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b").strip()
-    if not base:
+    if not base or not model:
         raise HTTPException(status_code=503, detail="Companion model is not configured on the backend")
     parsed = urlparse(base)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme != "http" or not (host.endswith(".railway.internal") or host.endswith(".railway.app")) or host in {"localhost", "127.0.0.1"}:
-        raise HTTPException(status_code=503, detail="Companion model endpoint is not an accepted private service URL")
+    environment = (
+        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
+    ).strip().lower()
+    if environment in {"production", "prod"}:
+        accepted = parsed.scheme == "http" and host.endswith(".railway.internal")
+    else:
+        accepted = (
+            parsed.scheme == "http"
+            and (host.endswith(".railway.internal") or host in {"localhost", "127.0.0.1"})
+        )
+    if not accepted:
+        raise HTTPException(status_code=503, detail="Companion model must use the private backend model service; public model endpoints are not accepted")
     return base, model
 
 
@@ -290,7 +301,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         session = ConversationSession(person_id=person_id, caregiver_id=caregiver_id, title=payload.text.strip()[:80])
         db.add(session)
-        db.commit()
+        # Keep session creation in the same transaction as the first message.
+        # If the model is unavailable, no empty conversation is left behind.
+        db.flush()
         db.refresh(session)
 
     lowered = payload.text.lower()
@@ -316,10 +329,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Community posts are not authoritative care-record facts.\n\n"
             "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
-        reply = await asyncio.to_thread(_ollama_chat, base, model, [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": payload.text.strip()},
-        ])
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(12)
+            .all()
+        )
+        model_messages = [{"role": "system", "content": system_prompt}]
+        model_messages.extend(
+            {"role": row.role, "content": row.content}
+            for row in reversed(prior_messages)
+            if row.role in {"user", "assistant"}
+        )
+        model_messages.append({"role": "user", "content": payload.text.strip()})
+        reply = await asyncio.to_thread(_ollama_chat, base, model, model_messages)
         verdict = "passed"
         safety_note = None
 
