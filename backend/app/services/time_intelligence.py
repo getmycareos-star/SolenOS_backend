@@ -205,25 +205,6 @@ def parse_natural_language_time(
         tomorrow = today + timedelta(days=1)
         parsed_dt = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc)
         interpretation = f"Tomorrow ({tomorrow.isoformat()})"
-    elif text_lower in ["tonight", "this evening"]:
-        parsed_dt = datetime(today.year, today.month, today.day, 20, 0, tzinfo=timezone.utc)
-        interpretation = f"Tonight at 8:00 PM ({today.isoformat()})"
-    elif text_lower == "this morning":
-        parsed_dt = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
-        interpretation = f"This morning at 9:00 AM ({today.isoformat()})"
-    elif text_lower == "this afternoon":
-        parsed_dt = datetime(today.year, today.month, today.day, 14, 0, tzinfo=timezone.utc)
-        interpretation = f"This afternoon at 2:00 PM ({today.isoformat()})"
-    elif "earlier today" in text_lower:
-        parsed_dt = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
-        interpretation = f"Earlier today (around 10:00 AM, {today.isoformat()})"
-    elif "later this week" in text_lower:
-        days_ahead = 4 - today.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
-        target = today + timedelta(days=days_ahead)
-        parsed_dt = datetime(target.year, target.month, target.day, tzinfo=timezone.utc)
-        interpretation = f"Later this week ({target.isoformat()})"
     else:
         next_monday = re.search(r"next\s+monday", text_lower)
         next_tuesday = re.search(r"next\s+tuesday", text_lower)
