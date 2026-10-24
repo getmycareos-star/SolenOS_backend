@@ -15,6 +15,7 @@ class SituationDocument(BaseModel):
     id: str
     name: str
     extracted_text: str
+    evidence_id: Optional[str] = None
     mime_type: Optional[str] = None
     ocr_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
 
