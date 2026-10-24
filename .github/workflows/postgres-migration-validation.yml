@@ -36,6 +36,7 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_test
+      PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -47,9 +48,80 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
       - name: Install backend and PostgreSQL driver
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary
+
       - name: Upgrade fresh PostgreSQL database to head
         working-directory: backend
         run: python -m alembic upgrade head
-      - name: Verify a single current migration head
+
+      - name: Verify migration graph has exactly one head
         working-directory: backend
-        run: python -m alembic current
+        run: |
+          python -m alembic heads | tee /tmp/alembic-heads.txt
+          test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
+          python -m alembic current
+
+      - name: Test empty legacy caregivers table is reconciled on PostgreSQL
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_legacy_empty
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_legacy_empty
+        working-directory: backend
+        run: |
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE caregivers (
+              id VARCHAR PRIMARY KEY,
+              email VARCHAR,
+              password_hash VARCHAR,
+              display_name VARCHAR,
+              care_recipient_ids JSONB,
+              role VARCHAR,
+              created_at TIMESTAMPTZ DEFAULT now()
+            );
+          "
+          python -m alembic upgrade head
+          for column in name relationship person_id timezone; do
+            found="$(psql "$PSQL_URL" -Atc "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='caregivers' AND column_name='$column'")"
+            test "$found" = "$column"
+          done
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conrelid = 'caregivers'::regclass
+                  AND contype = 'f'
+                  AND conname LIKE '%person_id%'
+              ) THEN
+                RAISE EXCEPTION 'caregivers.person_id foreign key missing';
+              END IF;
+            END
+            \$\$;
+          "
+
+      - name: Test populated legacy caregivers table fails closed without data loss
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_legacy_populated
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_legacy_populated
+        working-directory: backend
+        run: |
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            CREATE TABLE caregivers (
+              id VARCHAR PRIMARY KEY,
+              email VARCHAR,
+              password_hash VARCHAR,
+              display_name VARCHAR,
+              care_recipient_ids JSONB,
+              role VARCHAR,
+              created_at TIMESTAMPTZ DEFAULT now()
+            );
+            INSERT INTO caregivers (id, email, display_name, role)
+            VALUES ('legacy-caregiver-1', 'legacy@example.invalid', 'Legacy account', 'caregiver');
+          "
+          if python -m alembic upgrade head > /tmp/legacy-upgrade.log 2>&1; then
+            cat /tmp/legacy-upgrade.log
+            echo "Expected populated legacy schema migration to fail closed."
+            exit 1
+          fi
+          grep -q "requires a reviewed identity mapping" /tmp/legacy-upgrade.log
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM caregivers WHERE id='legacy-caregiver-1'")" = "1"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='public' AND table_name='caregivers' AND column_name='name'")" = "0"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261022_02"
