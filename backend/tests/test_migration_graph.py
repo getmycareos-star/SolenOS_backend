@@ -20,6 +20,9 @@ def test_task2_and_care_continuity_migrations_form_one_head():
         for revision in revisions
     }
     assert down_revisions["20261022_01"] == "20261022_0005"
+    assert down_revisions["20261022_03"] == "20261022_02"
+    assert down_revisions["t2_care_continuity_20261024"] == "20261022_03"
+    assert down_revisions["20261023_04"] == "t2_care_continuity_20261024"
     assert down_revisions["t2_completion_20261023"] == "20261023_05"
     assert down_revisions["t2_caregiver_schema_reconcile_20261024"] == "t2_delivery_attempts_20261023"
     assert down_revisions["t2_auth_reconcile_20261023"] == "t2_caregiver_schema_reconcile_20261024"
