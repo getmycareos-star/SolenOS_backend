@@ -17,6 +17,7 @@ class SituationDocument(BaseModel):
     extracted_text: str
     mime_type: Optional[str] = None
     ocr_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    extraction_source: Literal["text", "tika", "ocr", "unknown"] = "unknown"
 
 
 CaptureCategory = Literal[

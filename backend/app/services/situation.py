@@ -43,10 +43,19 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
+            # Preserve what the extractor actually knows. Missing OCR confidence is
+            # unknown, not a fabricated 0.5 score. Document date/effective time is
+            # deliberately not inferred from upload time.
             metadata = {
-                "ocr_confidence": doc.ocr_confidence,
+                "document_id": doc.id,
+                "document_name": doc.name,
                 "mime_type": doc.mime_type,
+                "extraction_source": doc.extraction_source,
+                "ocr_confidence": doc.ocr_confidence,
+                "document_time_status": "not_extracted",
+                "captured_at": payload.provenance.captured_at if payload.provenance else None,
+                "entry_method": payload.provenance.entry_method if payload.provenance else None,
             }
         evidence = Evidence(
             person_id=payload.person_id,
@@ -56,9 +65,17 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=1.0 if not doc else (doc.ocr_confidence or 0.5),
+            confidence=1.0 if not doc else doc.ocr_confidence,
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type=(
+                "caregiver_observation"
+                if not doc
+                else "document_ocr"
+                if doc.extraction_source == "ocr"
+                else "document_text_extraction"
+                if doc.extraction_source in ("text", "tika")
+                else "document_extraction_method_unknown"
+            ),
         )
         db.add(evidence)
         db.flush()
