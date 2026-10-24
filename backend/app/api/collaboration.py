@@ -97,44 +97,77 @@ async def upload_evidence(
     file: UploadFile = File(...),
     person_id: str = Form(...),
     caregiver_id: str = Form(...),
+    evidence_type: str = Form("medication_photo"),
+    extracted_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
+
     mime_type = (file.content_type or "").lower()
-    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
-        raise HTTPException(status_code=415, detail="Only JPEG, PNG, WebP, and GIF images are supported")
+    filename = (file.filename or "caregiver-upload")[:180]
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    image_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    document_types = image_types | {
+        "application/pdf", "text/plain", "text/csv", "text/markdown",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
+    }
+    if evidence_type not in {"medication_photo", "document"}:
+        raise HTTPException(status_code=422, detail="Unsupported evidence type")
+    allowed = image_types if evidence_type == "medication_photo" else document_types
+    octet_stream_document = evidence_type == "document" and mime_type == "application/octet-stream" and extension in {"doc", "docx", "rtf", "eml", "msg"}
+    if mime_type not in allowed and not octet_stream_document:
+        raise HTTPException(status_code=415, detail="This file type is not supported for the selected evidence type")
+    extracted = (extracted_text or "").strip()
+    if len(extracted) > 100_000:
+        raise HTTPException(status_code=413, detail="Extracted text exceeds the 100,000 character limit")
+
     data = await file.read(5 * 1024 * 1024 + 1)
     if not data:
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
     if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
+        raise HTTPException(status_code=413, detail="The uploaded file exceeds the 5 MB limit")
+
     caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
     evidence = EvidenceModel(
         person_id=scoped_person_id,
-        type="medication_photo",
-        source_text="Caregiver-uploaded medication photo",
+        type=evidence_type,
+        source_text=extracted or ("Caregiver-uploaded medication photo" if evidence_type == "medication_photo" else "Caregiver-uploaded document"),
         original_file_path=None,
         uploaded_by_caregiver_id=scoped_caregiver_id,
-        extra_metadata=json.dumps({"filename": (file.filename or "medication-photo")[:180], "mime_type": mime_type}),
+        extra_metadata=json.dumps({
+            "filename": filename,
+            "mime_type": mime_type,
+            "evidence_type": evidence_type,
+            "extraction_source": "tika_tesseract" if extracted else None,
+        }),
         source_type="caregiver_upload",
-        evidence_status="recorded",
+        evidence_status="reported" if evidence_type == "document" else "recorded",
     )
     db.add(evidence)
     db.flush()
     db.add(EvidenceUpload(
         evidence_id=evidence.id,
-        filename=(file.filename or "medication-photo")[:180],
+        filename=filename,
         mime_type=mime_type,
         content=data,
         size_bytes=len(data),
         sha256=hashlib.sha256(data).hexdigest(),
     ))
     db.commit()
-    return {"evidence_id": evidence.id, "size_bytes": len(data), "mime_type": mime_type, "persisted": True}
+    return {
+        "evidence_id": evidence.id,
+        "size_bytes": len(data),
+        "mime_type": mime_type,
+        "evidence_type": evidence_type,
+        "persisted": True,
+    }
 
 
 @router.get("/upload/{evidence_id}")
