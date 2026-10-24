@@ -221,6 +221,21 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # These legacy list endpoints use the care-recipient ID as the final
             # path segment. Resolve it explicitly before the session-scope check.
             target_person_id = path.rsplit("/", 1)[-1]
+        if not target_person_id and any(
+            path.startswith(prefix)
+            for prefix in (
+                "/api/v1/caregivers/",
+                "/api/v1/appointments/",
+                "/api/v1/insights/",
+                "/api/v1/observations/",
+                "/api/v1/reasoning/",
+                "/api/v1/daily-intelligence/",
+            )
+        ):
+            # Legacy care-record collections end in person_id but included-router
+            # path matching may not expose that parameter to middleware.
+            target_person_id = path.rsplit("/", 1)[-1]
+
         if path.startswith("/api/v1/care-continuity/"):
             # Resolve care-record-scoped collection routes explicitly, rather
             # than trusting a client-provided person ID or a child-record ID.
