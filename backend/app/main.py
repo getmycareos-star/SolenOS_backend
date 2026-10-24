@@ -87,9 +87,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     # Share-target payloads are temporary one-time capabilities with a random
     # 256-bit ID and a 15-minute TTL; they intentionally precede caregiver login.
-    if (path == "/api/v1/share-intake" and method == "POST") or (
-        path.startswith("/api/v1/share-intake/") and method == "GET"
-    ):
+    if path == "/api/v1/share-intake" and method == "POST":
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > 8 * 1024 * 1024:
+            return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
+        return await call_next(request)
+    if path.startswith("/api/v1/share-intake/") and method == "GET":
         return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
