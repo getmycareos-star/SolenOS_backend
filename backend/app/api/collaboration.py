@@ -138,7 +138,7 @@ async def upload_evidence(
 
 @router.get("/upload/{evidence_id}")
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, _ = _scope(request)
+    person_id, _ = _scope(request, db)
     evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
     if not evidence:
         raise HTTPException(status_code=404, detail="Evidence not found")
@@ -155,7 +155,7 @@ def download_evidence(evidence_id: str, request: Request, db: Session = Depends(
 
 @router.get("/community")
 def community_feed(request: Request, limit: int = Query(50, ge=1, le=100), db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request)
+    _, caregiver_id = _scope(request, db)
     posts = (db.query(CommunityPost)
         .filter(CommunityPost.visibility == "public", CommunityPost.moderation_status == "published")
         .order_by(CommunityPost.created_at.desc()).limit(limit).all())
@@ -164,7 +164,7 @@ def community_feed(request: Request, limit: int = Query(50, ge=1, le=100), db: S
 
 @router.post("/community", status_code=201)
 def create_community_post(payload: PostCreate, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request)
+    _, caregiver_id = _scope(request, db)
     if not db.query(Caregiver.id).filter(Caregiver.id == caregiver_id).first():
         raise HTTPException(status_code=403, detail="The session caregiver is not available")
     content = payload.content.strip()
@@ -185,7 +185,7 @@ def create_community_post(payload: PostCreate, request: Request, db: Session = D
 
 @router.post("/community/{post_id}/reactions")
 def react_to_post(post_id: str, payload: ReactionCreate, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request)
+    _, caregiver_id = _scope(request, db)
     post = db.query(CommunityPost).filter_by(id=post_id, visibility="public", moderation_status="published").first()
     if not post:
         raise HTTPException(status_code=404, detail="Published community post not found")
@@ -202,7 +202,7 @@ def react_to_post(post_id: str, payload: ReactionCreate, request: Request, db: S
 
 @router.delete("/community/{post_id}/reactions")
 def remove_reaction(post_id: str, request: Request, db: Session = Depends(get_db)):
-    _, caregiver_id = _scope(request)
+    _, caregiver_id = _scope(request, db)
     reaction = db.query(CommunityReaction).filter_by(post_id=post_id, caregiver_id=caregiver_id).first()
     if reaction:
         db.delete(reaction)
@@ -232,7 +232,7 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
 def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
-    _scope(request)
+    _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
     if not observation:
         raise HTTPException(status_code=422, detail="observation is required")
@@ -273,7 +273,7 @@ def _ollama_chat(base: str, model: str, messages: list[dict]) -> str:
 
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scope(request)
+    person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     person = db.query(Person).filter_by(id=person_id).first()
@@ -336,7 +336,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
 @router.get("/conversation/{session_id}")
 def conversation_history(session_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scope(request)
+    person_id, caregiver_id = _scope(request, db)
     session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
