@@ -113,10 +113,15 @@ jobs:
           required_tables = {
               "persons", "caregivers", "care_events", "evidence", "actions",
               "anonymous_sessions", "interaction_sessions", "care_state_revisions",
-              "care_assertions", "care_action_outcomes", "care_reminders",
+              "care_assertions", "care_action_outcomes", "care_circles",
+              "care_circle_memberships", "care_delta_runs", "care_reminders",
               "reminder_delivery_attempts", "medication_authority_verifications",
               "care_handoffs", "care_handoff_events", "document_assets",
-              "auth_accounts", "auth_sessions", "capture_analyses",
+              "auth_accounts", "auth_sessions", "auth_account_person_access",
+              "auth_caregiver_account_links", "auth_caregiver_invitations",
+              "auth_caregiver_profile_account_links", "auth_caregiver_profile_invitations",
+              "daily_captures", "evidence_files", "capture_analyses",
+              "community_posts", "community_reactions",
               "conversation_sessions", "conversation_messages",
           }
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
