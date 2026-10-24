@@ -6,13 +6,13 @@ is NOT NULL. Limit this migration to the confirmed offending column; do not
 relax constraints on unrelated legacy columns.
 
 Revision ID: 20261024_04
-Revises: 20261022_03
+Revises: 20261023_05
 """
 from alembic import op
 from sqlalchemy import inspect
 
 revision = "20261024_04"
-down_revision = "20261022_03"
+down_revision = "20261023_05"
 branch_labels = None
 depends_on = None
 
