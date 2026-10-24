@@ -455,7 +455,11 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
 @router.post("/daily/log")
 def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
+    # Keep durable capture independent from model latency. Qwen analysis is a
+    # separate read-only request after this confirmed save.
+    return _save_daily_capture_event(
+        payload, "structured_daily_capture", "Structured daily capture", request, db
+    )
 
 
 @router.post("/daily-care/entries")

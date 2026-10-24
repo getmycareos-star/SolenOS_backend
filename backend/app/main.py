@@ -447,12 +447,25 @@ def get_situation(
 
     active_situation = None
     active_turn = None
-    if observations:
-        first_timestamp = observations[0]["captured_at"]
-        last_timestamp = observations[-1]["captured_at"]
+    if observations or events:
+        first_timestamp = (
+            observations[0]["captured_at"]
+            if observations
+            else events[0].occurred_at.isoformat() if events[0].occurred_at else ""
+        )
+        last_timestamp = (
+            observations[-1]["captured_at"]
+            if observations
+            else events[-1].occurred_at.isoformat() if events[-1].occurred_at else ""
+        )
         root_event_id = events[0].id if events else None
+        projected_id = (
+            (events[0].situation_id if events and events[0].situation_id else None)
+            or root_event_id
+            or (observations[0]["id"] if observations else None)
+        )
         active_situation = {
-            "id": (events[0].situation_id if events and events[0].situation_id else None) or root_event_id or observations[0]["id"],
+            "id": projected_id,
             "care_recipient_id": person_id,
             "caregiver_id": caregiver_scope_id,
             "opened_at": first_timestamp,
@@ -485,7 +498,7 @@ def get_situation(
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
     return {
         "ok": True,
-        "has_context_root": bool(observations),
+        "has_context_root": bool(observations or events),
         "care_key": client_care_key,
         "care_recipient_id": person_id,
         "care_recipient_display_name": person.name,

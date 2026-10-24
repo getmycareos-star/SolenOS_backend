@@ -1,5 +1,6 @@
 import base64
 import importlib
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -581,5 +582,263 @@ def test_notification_preferences_round_trip_and_session_revocation(monkeypatch)
         assert revoked.status_code == 200 and revoked.json()["revoked"] is True
         after_revoke = client.get("/api/v1/notifications/unread-count", headers=auth)
         assert after_revoke.status_code == 401
+    finally:
+        teardown()
+
+
+
+def test_qwen_support_assist_is_scoped_read_only_and_never_claims_authority(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "You could write down the question you want to ask at the appointment.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get("/api/v1/events/" + person_id, headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        response = client.post("/api/v1/assistant/assist", headers=headers, json={
+            "workflow": "appointment",
+            "text": "Help me prepare for the next appointment.",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["authority"] == "solenos_care_record_and_caregiver"
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "read_only_assistance"
+        assert data["reply"] == "You could write down the question you want to ask at the appointment."
+
+        after = client.get("/api/v1/events/" + person_id, headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+
+        wrong_scope = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "handoff", "text": "Help me with this handoff.", "evidence_ids": ["not-owned"]},
+        )
+        assert wrong_scope.status_code == 403, wrong_scope.text
+    finally:
+        teardown()
+
+
+def test_community_summary_uses_qwen_only_when_a_model_response_is_generated(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "Caregiver experiences differ, so use these posts as peer perspectives rather than medical advice.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        created = client.post("/api/v1/community", headers=headers, json={
+            "post_type": "experience",
+            "content": "A written evening routine helped us remember the bedtime steps.",
+            "tags": ["routine"],
+        })
+        assert created.status_code == 201, created.text
+        response = client.post("/api/v1/community/experience/summary", headers=headers, json={
+            "observation": "I am struggling to remember the evening routine.",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["provider_status"] == "available"
+        assert "not authoritative" in data["notice"]
+    finally:
+        teardown()
+
+
+
+def test_post_save_qwen_candidate_analysis_uses_persisted_source_and_does_not_write_lcr(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        source = "The caregiver reports that the evening routine was difficult."
+        saved = client.post("/api/situation", headers=headers, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "client_care_key": "local-workspace-key",
+            "raw_input": source,
+        })
+        assert saved.status_code == 200, saved.text
+        event_id = saved.json()["care_event_id"]
+
+        import app.services.qwen_gateway as qwen_gateway
+
+        monkeypatch.setattr(
+            qwen_gateway,
+            "qwen_chat",
+            lambda messages, **kwargs: __import__("json").dumps({
+                "observations": [{
+                    "subject": "evening routine",
+                    "observation": "The caregiver reports difficulty with the evening routine.",
+                    "source_quote": source,
+                }],
+                "open_questions": ["Which part of the routine was difficult?"],
+            }),
+        )
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        analysis = client.post("/api/v1/assistant/extract-candidates", headers=headers, json={"event_id": event_id})
+        assert analysis.status_code == 200, analysis.text
+        data = analysis.json()
+        assert data["qwen_extraction_status"] == "pending_review"
+        assert data["ai_generated"] is True
+        assert data["written_to_lcr"] is False
+        assert data["qwen_candidates"]["observations"][0]["source_quote"] == source
+        assert data["qwen_candidates"]["observations"][0]["review_status"] == "pending_review"
+        candidate_id = data["qwen_candidates"]["observations"][0]["candidate_id"]
+        assert data["candidates_persisted"] is True
+
+        # Re-running analysis is idempotent; it must not create duplicate candidates.
+        repeated = client.post("/api/v1/assistant/extract-candidates", headers=headers, json={"event_id": event_id})
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["qwen_candidates"]["observations"][0]["candidate_id"] == candidate_id
+        listed = client.get("/api/v1/assistant/candidates", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["written_to_lcr"] is False
+
+        reviewed = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=headers,
+            json={"decision": "accepted", "review_note": "Caregiver confirmed this is worth keeping for review."},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["written_to_lcr"] is False
+        assert reviewed.json()["status"] == "accepted"
+        repeated_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=headers,
+            json={"decision": "rejected"},
+        )
+        assert repeated_review.status_code == 409
+
+        other_headers = {"Authorization": f"Bearer {other_token}"}
+        isolated_list = client.get("/api/v1/assistant/candidates", headers=other_headers)
+        assert isolated_list.status_code == 200
+        assert isolated_list.json() == []
+        isolated_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=other_headers,
+            json={"decision": "rejected"},
+        )
+        assert isolated_review.status_code == 404
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+
+        denied = client.post(
+            "/api/v1/assistant/extract-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"event_id": "not-in-this-record"},
+        )
+        assert denied.status_code == 404
+    finally:
+        teardown()
+
+
+def test_daily_capture_save_does_not_wait_for_qwen(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import app.services.qwen_gateway as qwen_gateway
+
+        def model_must_not_run(*args, **kwargs):
+            raise AssertionError("Qwen must run only after the daily capture save receipt")
+
+        monkeypatch.setattr(qwen_gateway, "qwen_chat", model_must_not_run)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Caregiver recorded a quiet afternoon.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True
+        assert response.json()["id"]
+    finally:
+        teardown()
+
+
+
+def test_situation_hydration_projects_real_persisted_event_without_fabricating_observations(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="caregiver_note",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Persisted note",
+            description="A caregiver recorded a note.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        event_id = event.id
+        db.close()
+
+        response = client.get(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ok"] is True
+        assert data["has_context_root"] is True
+        assert data["active_care_situation"]["root_event_id"] == event_id
+        assert data["active_care_situation"]["observations"] == []
+        assert any(row["id"] == event_id for row in data["events"])
+    finally:
+        teardown()
+
+
+
+def test_qwen_runtime_status_is_authenticated_and_reports_actual_provider_contract(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        unauthenticated = client.get("/api/v1/assistant/status")
+        assert unauthenticated.status_code == 401
+
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+            "available": True,
+            "model": "qwen2.5:1.5b",
+            "provider": "local_ollama",
+            "inference_api": "ollama_native_http",
+            "hosted_inference_api": False,
+            "runtime": "bundled_railway_sidecar",
+        })
+        response = client.get(
+            "/api/v1/assistant/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["available"] is True
+        assert data["provider"] == "local_ollama"
+        assert data["hosted_inference_api"] is False
     finally:
         teardown()

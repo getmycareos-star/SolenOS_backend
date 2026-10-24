@@ -8,7 +8,7 @@ import secrets
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
@@ -20,7 +20,9 @@ from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference
+from app.models.caregiver_intelligence import CaregiverHandoff
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference, QwenReviewCandidate
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 
 router = APIRouter(tags=["community and companion"])
 
@@ -66,6 +68,22 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+class QwenAssistRequest(BaseModel):
+    workflow: Literal["daily_capture", "document", "community", "appointment", "handoff", "living_care_record"]
+    text: str = Field(min_length=1, max_length=8000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    appointment_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class QwenCandidateRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+
+
+class QwenCandidateReview(BaseModel):
+    decision: Literal["accepted", "rejected"]
+    review_note: Optional[str] = Field(default=None, max_length=1000)
 
 
 CONSENT_TERMS_VERSION = "2026-10"
@@ -621,55 +639,74 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
+async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
     _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
     if not observation:
         raise HTTPException(status_code=422, detail="observation is required")
     matches = _literal_matches(db, observation)
+    summary = None
+    provider_status = "unavailable"
+    ai_generated = False
+    if matches:
+        try:
+            summary = await asyncio.to_thread(
+                qwen_chat,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
+                            "published peer experiences. They are personal reports, not verified facts, clinical "
+                            "evidence, or advice. Do not infer diagnosis or cause, do not recommend treatment, "
+                            "do not invent themes not present in the posts, and state briefly that experiences differ. "
+                            "Use plain, accessible English and no unexplained foreign words. Return at most three short sentences."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"caregiver_observation": observation, "published_peer_posts": [
+                                {"post_id": m["post_id"], "content": m["content"]} for m in matches
+                            ]},
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+            )
+            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\bsaba\b", summary):
+                summary = None
+                provider_status = "invalid_response"
+            else:
+                provider_status = "available"
+                ai_generated = True
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            provider_status = "unavailable"
     return {
-        "summary": None, "matches": matches, "post_ids": [m["post_id"] for m in matches],
-        "provider_status": "not_configured", "ai_generated": False,
-        "notice": "These are literal matches from published caregiver posts. No AI summary was generated.",
+        "summary": summary,
+        "matches": matches,
+        "post_ids": [m["post_id"] for m in matches],
+        "provider_status": provider_status,
+        "ai_generated": ai_generated,
+        "notice": (
+            "Qwen summarized published peer experiences; these are not authoritative care facts."
+            if ai_generated else
+            "These are literal matches from published caregiver posts. No AI summary was generated."
+        ),
         "matching_method": "literal_keyword_overlap_not_clinical_advice",
     }
 
 
 def _ollama_url() -> tuple[str, str]:
-    base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b").strip()
-    if not base or not model:
-        raise HTTPException(status_code=503, detail="Companion model is not configured on the backend")
-    parsed = urlparse(base)
-    host = (parsed.hostname or "").lower()
-    environment = (
-        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
-        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
-    ).strip().lower()
-    if environment in {"production", "prod"}:
-        accepted = parsed.scheme == "http" and host.endswith(".railway.internal")
-    else:
-        accepted = (
-            parsed.scheme == "http"
-            and (host.endswith(".railway.internal") or host in {"localhost", "127.0.0.1"})
-        )
-    if not accepted:
-        raise HTTPException(status_code=503, detail="Companion model must use the private backend model service; public model endpoints are not accepted")
+    base, model, _ = get_ollama_config()
     return base, model
 
 
 def _ollama_chat(base: str, model: str, messages: list[dict]) -> str:
-    body = json.dumps({"model": model, "messages": messages, "stream": False}).encode("utf-8")
-    request = urllib.request.Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        raise HTTPException(status_code=503, detail="Companion model is unavailable; no response was generated") from exc
-    content = result.get("message", {}).get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise HTTPException(status_code=503, detail="Companion model returned an invalid response")
-    return content.strip()
+    # Shared gateway enforces the same private/local-only policy for every caller.
+    return qwen_chat(messages)
 
 
 def _is_casual_greeting(text: str) -> bool:
@@ -694,6 +731,314 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
+
+
+@router.get("/assistant/status")
+def qwen_assistant_status(request: Request, db: Session = Depends(get_db)):
+    # Keep runtime diagnostics behind the same care-session authorization as
+    # other assistant endpoints; do not expose model infrastructure publicly.
+    _scope(request, db)
+    return qwen_runtime_status()
+
+
+@router.post("/assistant/extract-candidates")
+async def qwen_extract_saved_event_candidates(
+    payload: QwenCandidateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Analyze a saved event and persist suggestions outside the authoritative LCR."""
+    person_id, caregiver_id = _scope(request, db)
+    event = db.query(CareEvent).filter(
+        CareEvent.id == payload.event_id,
+        CareEvent.person_id == person_id,
+    ).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Saved care event not found in this care record")
+
+    sources: list[tuple[str | None, str]] = []
+    evidence_ids = list(event.evidence_ids or [])
+    if evidence_ids:
+        rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(evidence_ids),
+        ).all()
+        by_id = {str(row.id): row for row in rows}
+        for evidence_id in evidence_ids:
+            row = by_id.get(str(evidence_id))
+            if row and isinstance(row.source_text, str) and row.source_text.strip():
+                sources.append((str(row.id), row.source_text.strip()))
+    elif isinstance(event.description, str) and event.description.strip():
+        sources.append((None, event.description.strip()))
+
+    if not sources:
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": "no_source_text",
+            "qwen_candidates": {"observations": [], "open_questions": []},
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    generated = {"observations": [], "open_questions": []}
+    try:
+        for evidence_id, source_text in sources[:5]:
+            candidate_set = await asyncio.to_thread(
+                extract_review_candidates,
+                source_text,
+                source_event_id=str(event.id),
+                source_evidence_id=evidence_id,
+            )
+            generated["observations"].extend(candidate_set["observations"])
+            generated["open_questions"].extend(candidate_set["open_questions"])
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        detail = str(exc.detail).casefold()
+        status = "invalid_response" if "invalid candidate structure" in detail else "unavailable"
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": status,
+            "qwen_candidates": None,
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    persisted = []
+    for item in generated["observations"][:12]:
+        source_evidence_id = item.get("source_evidence_id")
+        query = db.query(QwenReviewCandidate).filter(
+            QwenReviewCandidate.person_id == person_id,
+            QwenReviewCandidate.source_event_id == str(event.id),
+            QwenReviewCandidate.source_quote == item["source_quote"],
+            QwenReviewCandidate.observation == item["observation"],
+        )
+        if source_evidence_id:
+            query = query.filter(QwenReviewCandidate.source_evidence_id == source_evidence_id)
+        else:
+            query = query.filter(QwenReviewCandidate.source_evidence_id.is_(None))
+        candidate = query.first()
+        if candidate is None:
+            candidate = QwenReviewCandidate(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_event_id=str(event.id),
+                source_evidence_id=source_evidence_id,
+                subject=item["subject"],
+                observation=item["observation"],
+                source_quote=item["source_quote"],
+                status="pending_review",
+            )
+            db.add(candidate)
+            db.flush()
+        item["candidate_id"] = candidate.id
+        item["review_status"] = candidate.status
+        persisted.append(item)
+    db.commit()
+    return {
+        "event_id": event.id,
+        "qwen_extraction_status": "pending_review",
+        "qwen_candidates": {
+            "observations": persisted,
+            "open_questions": list(dict.fromkeys(generated["open_questions"]))[:3],
+        },
+        "ai_generated": True,
+        "written_to_lcr": False,
+        "candidates_persisted": True,
+    }
+
+
+@router.get("/assistant/candidates")
+def list_qwen_candidates(
+    request: Request,
+    status: Optional[str] = Query(default="pending_review", pattern="^(pending_review|accepted|rejected|all)$"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    person_id, _caregiver_id = _scope(request, db)
+    query = db.query(QwenReviewCandidate).filter(QwenReviewCandidate.person_id == person_id)
+    if status != "all":
+        query = query.filter(QwenReviewCandidate.status == status)
+    rows = query.order_by(QwenReviewCandidate.created_at.desc()).limit(limit).all()
+    return [{
+        "id": row.id,
+        "person_id": row.person_id,
+        "source_event_id": row.source_event_id,
+        "source_evidence_id": row.source_evidence_id,
+        "subject": row.subject,
+        "observation": row.observation,
+        "source_quote": row.source_quote,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
+        "review_note": row.review_note,
+        "written_to_lcr": False,
+    } for row in rows]
+
+
+@router.post("/assistant/candidates/{candidate_id}/review")
+def review_qwen_candidate(
+    candidate_id: str,
+    payload: QwenCandidateReview,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    candidate = db.query(QwenReviewCandidate).filter(
+        QwenReviewCandidate.id == candidate_id,
+        QwenReviewCandidate.person_id == person_id,
+    ).first()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Review candidate not found in this care record")
+    if candidate.status != "pending_review":
+        raise HTTPException(status_code=409, detail="This candidate has already been reviewed")
+    candidate.status = payload.decision
+    candidate.reviewed_at = datetime.now(timezone.utc)
+    candidate.reviewed_by_caregiver_id = caregiver_id
+    candidate.review_note = payload.review_note.strip() if payload.review_note else None
+    db.commit()
+    db.refresh(candidate)
+    return {
+        "id": candidate.id,
+        "status": candidate.status,
+        "reviewed_by_caregiver_id": candidate.reviewed_by_caregiver_id,
+        "reviewed_at": candidate.reviewed_at.isoformat() if candidate.reviewed_at else None,
+        "written_to_lcr": False,
+        "message": "Review decision saved. This does not create or change an authoritative Living Care Record fact.",
+    }
+
+
+@router.post("/assistant/assist")
+async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
+    """Use Qwen for optional support while SolenOS and the caregiver retain authority.
+
+    This endpoint is read-only: it never creates evidence, care events, assertions,
+    reminders, appointments, handoffs, or community posts.
+    """
+    person_id, caregiver_id = _scope(request, db)
+    context_lines: list[str] = []
+    source_event_ids: list[str] = []
+    source_evidence_ids: list[str] = []
+
+    # Context is always fetched under the bearer session's server-derived scope.
+    recent_events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id)
+        .order_by(CareEvent.occurred_at.desc())
+        .limit(5)
+        .all()
+    )
+    for event in recent_events:
+        context_lines.append(
+            f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
+        )
+        source_event_ids.append(str(event.id))
+
+    appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+    if payload.appointment_id:
+        appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
+    appointments = appointments_query.order_by(Appointment.scheduled_at.asc()).limit(5).all()
+    if payload.appointment_id and not appointments:
+        raise HTTPException(status_code=404, detail="Appointment not found in this care record")
+    for appointment in appointments:
+        context_lines.append(
+            f"Recorded appointment [{appointment.id}]: {appointment.title}; status={appointment.status}; "
+            f"scheduled={appointment.scheduled_at.isoformat() if appointment.scheduled_at else 'unknown'}"
+        )
+
+    if payload.evidence_ids:
+        evidence_rows = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                EvidenceModel.id.in_(payload.evidence_ids),
+            )
+            .all()
+        )
+        evidence_by_id = {str(row.id): row for row in evidence_rows}
+        if len(evidence_by_id) != len(set(payload.evidence_ids)):
+            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
+        for evidence_id in payload.evidence_ids:
+            row = evidence_by_id[evidence_id]
+            context_lines.append(
+                f"Caregiver-provided evidence [{row.id}] ({row.type}, status={row.evidence_status}): "
+                f"{(row.source_text or '')[:1800]}"
+            )
+            source_evidence_ids.append(str(row.id))
+
+    if payload.workflow == "handoff":
+        handoffs = (
+            db.query(CaregiverHandoff)
+            .filter(CaregiverHandoff.person_id == person_id)
+            .order_by(CaregiverHandoff.timestamp.desc())
+            .limit(5)
+            .all()
+        )
+        for handoff in handoffs:
+            context_lines.append(
+                f"Recorded caregiver handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
+                f"scope={handoff.scope or 'not specified'}; acceptance={getattr(handoff.acceptance_status, 'value', handoff.acceptance_status)}; "
+                f"completed={bool(handoff.is_completed)}; context={(handoff.context or '')[:800]}"
+            )
+
+    if payload.workflow == "community":
+        matches = _literal_matches(db, payload.text)
+        for match in matches[:3]:
+            context_lines.append(
+                f"Published peer caregiver post [{match['post_id']}] (non-authoritative peer context): "
+                f"{match['content'][:700]}"
+            )
+
+    workflow_guidance = {
+        "daily_capture": "Help the caregiver organize or clarify what they reported today. Do not infer a diagnosis, cause, or unreported measurement.",
+        "document": "Explain the supplied document text cautiously. Distinguish quoted source content from interpretation and point out what needs human review.",
+        "community": "Support reflection on the caregiver's observation. Peer posts are experiences, not verified facts or clinical advice.",
+        "appointment": "Help prepare questions or organize facts for the appointment. Never invent appointment details or recommend treatment.",
+        "handoff": "Help make a clear caregiver-to-caregiver handoff from supplied facts. Separate known facts, unknowns, and questions; do not create or send a handoff.",
+        "living_care_record": "Explain only the authorized recorded context. Never edit the Living Care Record or claim a change was saved.",
+    }[payload.workflow]
+
+    prompt = (
+        "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
+        "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis, or instruction. "
+        f"Task: {workflow_guidance} "
+        "Use only the supplied user text and authorized context. Never fabricate a person, event, appointment, medication, "
+        "measurement, source quote, or record status. If information is missing, say so. For clinical decisions, direct "
+        "the caregiver to a qualified professional. For emergency symptoms, advise urgent local medical help. "
+        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        "transliterations, internal product jargon, model names, or repetitive filler. Do not greet with a canned phrase. "
+        "Do not claim you saved, changed, verified, or reviewed a record. Do not write to the Living Care Record. "
+        "Return only the helpful response text.\n\n"
+        "Authorized context (may be empty):\n"
+        + ("\n".join(context_lines) if context_lines else "No matching recorded context was found.")
+    )
+    reply = await asyncio.to_thread(
+        qwen_chat,
+        [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": payload.text.strip()},
+        ],
+    )
+    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.",
+        )
+    return {
+        "workflow": payload.workflow,
+        "reply": reply,
+        "ai_generated": True,
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+        "authority": "solenos_care_record_and_caregiver",
+        "review_required": True,
+        "written_to_lcr": False,
+        "persistence": "read_only_assistance",
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "provider_status": "available",
+    }
 
 
 @router.post("/conversation/message")
@@ -731,6 +1076,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         context_lines = [f"Recorded event: {e.title} — {e.description or 'No additional detail'} ({e.occurred_at.isoformat() if e.occurred_at else 'time unknown'})" for e in recent_events]
         appointments = (db.query(Appointment).filter(Appointment.person_id == person_id).order_by(Appointment.scheduled_at.asc()).limit(5).all())
         context_lines += [f"Recorded appointment: {a.title} — {a.status}" for a in appointments]
+        handoffs = (
+            db.query(CaregiverHandoff)
+            .filter(CaregiverHandoff.person_id == person_id)
+            .order_by(CaregiverHandoff.timestamp.desc())
+            .limit(5)
+            .all()
+        )
+        context_lines += [
+            f"Recorded caregiver handoff: {h.responsibility_type}; scope={h.scope or 'not specified'}; "
+            f"acceptance={getattr(h.acceptance_status, 'value', h.acceptance_status)}; completed={bool(h.is_completed)}; "
+            f"context={(h.context or '')[:500]}"
+            for h in handoffs
+        ]
         system_prompt = (
             "You are SolenOS Companion, a natural, respectful conversational support for family caregivers. "
             "Generate the actual reply from the user's message and context. Do not use a fixed or hardcoded greeting template "
@@ -789,7 +1147,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 },
             ]
             reply = await asyncio.to_thread(_ollama_chat, base, model, review_messages)
-            if _companion_reply_needs_revision(reply):
+            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
                 raise HTTPException(
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",

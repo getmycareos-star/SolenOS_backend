@@ -198,6 +198,9 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             "follow_up_candidate": s.follow_up_candidate,
         })
 
+    qwen_extraction_status = "not_run"
+    qwen_candidates = None
+
     return SituationResponse(
         ok=True,
         situation_id=care_event.id,
@@ -217,4 +220,6 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         what_changed=what_changed,
         analysis_status=analysis_status,
         analysis_warning=analysis_warning,
+        qwen_extraction_status=qwen_extraction_status,
+        qwen_candidates=qwen_candidates,
     )
