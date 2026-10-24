@@ -85,6 +85,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
+    # Share-target payloads are temporary one-time capabilities with a random
+    # 256-bit ID and a 15-minute TTL; they intentionally precede caregiver login.
+    if (path == "/api/v1/share-intake" and method == "POST") or (
+        path.startswith("/api/v1/share-intake/") and method == "GET"
+    ):
+        return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
 
