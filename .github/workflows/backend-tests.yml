@@ -2,7 +2,7 @@ name: Backend tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/care-continuity-integrity-engine-2026-10-22]
     paths:
       - "backend/**"
       - ".github/workflows/backend-tests.yml"
@@ -40,3 +40,92 @@ jobs:
           cd backend
           trap 'rm -f .alembic-smoke.db' EXIT
           DATABASE_URL=sqlite:///./.alembic-smoke.db python -m alembic upgrade head
+
+  postgres-migration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_test
+          POSTGRES_PASSWORD: solenos_ci_only
+          POSTGRES_DB: solenos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_test -d solenos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend
+
+      - name: Create legacy caregivers table with password_hash NOT NULL
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      email VARCHAR UNIQUE,
+                      password_hash TEXT NOT NULL,
+                      display_name VARCHAR,
+                      care_recipient_ids JSONB,
+                      role VARCHAR,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+          conn.close()
+          PY
+
+      - name: Apply complete Alembic chain to PostgreSQL legacy schema
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Verify schema and migration head
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              cur.execute("""
+                  SELECT column_name, is_nullable FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'caregivers'
+              """)
+              columns = {row[0]: row[1] for row in cur.fetchall()}
+              required = {"id", "email", "name", "relationship", "person_id", "timezone"}
+              missing = required - set(columns)
+              if missing:
+                  raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
+              if columns.get("password_hash") != "YES":
+                  raise SystemExit("password_hash must be nullable after migration 20261024_04")
+              cur.execute("SELECT version_num FROM alembic_version")
+              revision = cur.fetchone()[0]
+              if revision != "20261024_04":
+                  raise SystemExit(f"unexpected Alembic head: {revision}")
+              cur.execute("SELECT COUNT(*) FROM caregivers")
+              count = cur.fetchone()[0]
+              if count != 0:
+                  raise SystemExit(f"expected empty fixture table, got {count} rows")
+          conn.close()
+          print("PostgreSQL legacy-schema migration passed; password_hash nullable; no caregiver rows fabricated.")
+          PY
