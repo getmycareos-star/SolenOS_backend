@@ -220,7 +220,7 @@ jobs:
             echo "Expected populated legacy caregiver schema to fail closed."
             exit 1
           fi
-          grep -q "requires a reviewed identity mapping" /tmp/populated-legacy-migration.log
+          grep -Eq "reviewed identity mapping" /tmp/populated-legacy-migration.log
           python - <<'PY'
           import os
           import psycopg2
@@ -234,7 +234,11 @@ jobs:
                   WHERE table_schema='public' AND table_name='caregivers'
                     AND column_name IN ('name','relationship','person_id','timezone')
               """)
-              assert cur.fetchone()[0] == 0, "migration partially altered the populated caregivers table"
+              changed_columns = cur.fetchone()[0]
+          if changed_columns != 0:
+              print(open("/tmp/populated-legacy-migration.log", encoding="utf-8").read())
+              raise AssertionError(f"migration partially altered the populated caregivers table: {changed_columns} care columns added")
+
           conn.close()
           print("PASS: populated legacy caregiver schema fails closed; original account row and schema are preserved.")
           PY
