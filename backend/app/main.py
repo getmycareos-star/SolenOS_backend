@@ -593,23 +593,6 @@ def post_situation(
     # Guard the care-record boundary even when an older client bypasses the
     # Companion handoff. Pure social turns are not care evidence and must not
     # create an event that cannot be projected back into a meaningful LCR view.
-    if payload.action != "pause_active_care_situation" and not payload.documents:
-        normalized_text = (payload.raw_input or "").strip().lower().strip(" .,!?:;")
-        conversation_only_phrases = {
-            "hi", "hello", "hey", "hiya", "how are you", "how are you doing",
-            "how's it going", "hows it going", "good morning", "good afternoon",
-            "good evening", "thanks", "thank you", "thank you so much",
-            "good night", "bye", "goodbye",
-        }
-        if normalized_text in conversation_only_phrases:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "conversation_only",
-                    "message": "This is a conversational message, not care evidence. Continue in SolenOS Companion.",
-                },
-            )
-
     # A standalone greeting is conversation, not care evidence. Return a
     # machine-readable routing signal so the client can send it to Companion,
     # where the configured Qwen model generates the actual reply.
