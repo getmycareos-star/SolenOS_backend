@@ -86,6 +86,24 @@ jobs:
           done
           test "$available" = "1"
 
+          # Exercise actual generation through the authenticated deployed API.
+          # A healthy model inventory alone does not prove inference works.
+          inference_status=$(curl --silent --show-error --output /tmp/qwen-inference.json --write-out '%{http_code}' --max-time 120 -X POST "${base}/api/v1/assistant/assist" -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' -d '{"workflow":"living_care_record","text":"In one or two sentences, explain what the Living Care Record is. Do not invent any care facts."}' || true)
+          echo "Authenticated Qwen inference returned HTTP ${inference_status}"
+          test "${inference_status}" = "200"
+          python - <<'PY'
+          import json
+          with open("/tmp/qwen-inference.json", encoding="utf-8") as stream:
+              data = json.load(stream)
+          assert data.get("ai_generated") is True, data
+          assert data.get("provider_status") == "available", data
+          assert data.get("model") == "qwen2.5:1.5b", data
+          assert isinstance(data.get("reply"), str) and data["reply"].strip(), data
+          assert data.get("written_to_lcr") is False, data
+          assert data.get("persistence") == "read_only_assistance", data
+          print("PASS: authenticated request received a real Qwen response; LCR remained read-only.")
+          PY
+
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
