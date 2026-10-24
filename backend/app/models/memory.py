@@ -12,7 +12,7 @@ class ReasoningMemory(Base):
     memory_type = Column(String, nullable=False)
     key = Column(String, nullable=False)
     value = Column(JSONList, nullable=False)
-    confidence = Column(Float, nullable=False, default=1.0)
+    confidence = Column(Float, nullable=True, default=None)
     source_evidence_ids = Column(JSONList, nullable=True)
     is_open_question = Column(Boolean, default=False)
     superseded_by_memory_id = Column(String, nullable=True)
