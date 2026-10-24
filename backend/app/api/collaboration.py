@@ -735,7 +735,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Apply the language-quality gate to every model-generated reply, not
         # greetings alone. A failed guard must not persist a confusing answer.
         if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
-            reply, payload.text + "\\n" + "\\n".join(context_lines)
+            reply, payload.text + "\n" + "\n".join(context_lines)
         ):
             raise HTTPException(
                 status_code=503,
