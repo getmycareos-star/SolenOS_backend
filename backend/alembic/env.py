@@ -1,4 +1,8 @@
 from logging.config import fileConfig
+import os
+
+# Alembic must own schema creation; disable the local SQLite convenience bootstrap.
+os.environ["ALEMBIC_RUNNING"] = "1"
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool

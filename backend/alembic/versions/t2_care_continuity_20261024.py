@@ -1,7 +1,7 @@
 """Add durable care-continuity assertions, state revisions, and outcomes.
 
-Revision ID: 20261022_03
-Revises: 20261022_02
+Revision ID: t2_care_continuity_20261024
+Revises: 20261022_03
 
 The migration is additive. It does not rewrite existing care records.
 """
@@ -9,8 +9,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "20261022_03"
-down_revision = "20261022_02"
+revision = "t2_care_continuity_20261024"
+down_revision = "20261022_03"
 branch_labels = None
 depends_on = None
 

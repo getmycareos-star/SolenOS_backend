@@ -239,7 +239,7 @@ def test_additive_care_continuity_migration_creates_tables_and_provenance_column
         Column("person_id", String, nullable=False),
     )
     metadata.create_all(engine)
-    migration_path = Path(__file__).parents[1] / "alembic" / "versions" / "20261022_03_care_continuity.py"
+    migration_path = Path(__file__).parents[1] / "alembic" / "versions" / "t2_care_continuity_20261024.py"
     spec = importlib.util.spec_from_file_location("care_continuity_migration", migration_path)
     migration = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
