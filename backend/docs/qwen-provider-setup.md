@@ -40,3 +40,12 @@ The backend treats loopback and public model URLs as not configured in every env
 After Ollama is running and the configured model is present, verify an authorized test account through `POST /api/v1/conversation/message` and submit a test capture through the supported capture route. Confirm Companion reports `provider_status=connected` and `ai_generated=true` only after a real model response; capture extraction should report `pending_review` only when grounded candidates are actually returned. Test missing models, timeouts, emergency wording, and cross-account access.
 
 Mocked CI responses verify request contracts only; they do not prove the model is installed or reachable. Before production use, confirm the live Railway service can make a real inference request and that the model remains available after restart.
+
+
+## Companion conversational behavior
+
+The Companion system prompt requires natural, brief responses to greetings and social niceties, ordinary language, and no unexplained slang, foreign-language words, code words, or internal product/provider terminology. It does not use hardcoded greeting replies: the configured Qwen model generates the response from the current conversation. A greeting remains a conversation message and is never written as care evidence.
+
+The `POST /api/situation` route independently rejects a social-only message with `detail.code=conversation_only` before creating evidence or a care event. Frontend clients should route that response to Companion. This server-side check protects older clients and is not a substitute for the frontend handoff.
+
+Tests that stub the model verify the prompt contract and persistence boundaries only. They do not establish that the live Railway Ollama service is configured or reachable.
