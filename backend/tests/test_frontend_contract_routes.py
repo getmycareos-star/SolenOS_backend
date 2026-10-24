@@ -416,12 +416,28 @@ def test_feedback_json_contract_requires_scoped_bearer_identity(monkeypatch):
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        response = client.post("/api/v1/feedback", headers=auth, json={
+        feedback_payload = {
             "person_id": person_id,
             "caregiver_id": caregiver_id,
             "category": "human_validation",
             "detail": "{\"interaction_id\":\"interaction-1\",\"helpful_yes_no\":true,\"reduced_confusion_yes_no\":true}",
+        }
+        no_consent = client.post("/api/v1/feedback", headers=auth, json=feedback_payload)
+        assert no_consent.status_code == 403
+        assert "system-improvement consent" in no_consent.json()["detail"]
+
+        accepted = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": True,
         })
+        assert accepted.status_code == 200, accepted.text
+
+        response = client.post("/api/v1/feedback", headers=auth, json=feedback_payload)
         assert response.status_code == 200, response.text
         assert response.json()["event_type"] == "feedback"
 
