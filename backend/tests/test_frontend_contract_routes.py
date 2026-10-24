@@ -775,3 +775,33 @@ def test_situation_hydration_projects_real_persisted_event_without_fabricating_o
         assert any(row["id"] == event_id for row in data["events"])
     finally:
         teardown()
+
+
+
+def test_qwen_runtime_status_is_authenticated_and_reports_actual_provider_contract(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        unauthenticated = client.get("/api/v1/assistant/status")
+        assert unauthenticated.status_code == 401
+
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+            "available": True,
+            "model": "qwen2.5:1.5b",
+            "provider": "local_ollama",
+            "inference_api": "ollama_native_http",
+            "hosted_inference_api": False,
+            "runtime": "bundled_railway_sidecar",
+        })
+        response = client.get(
+            "/api/v1/assistant/status",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["available"] is True
+        assert data["provider"] == "local_ollama"
+        assert data["hosted_inference_api"] is False
+    finally:
+        teardown()
