@@ -346,7 +346,7 @@ async def community_experience(payload: dict, request: Request, db: Session = De
                     },
                 ],
             )
-            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\\bsaba\\b", summary):
+            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\bsaba\b", summary):
                 summary = None
                 provider_status = "invalid_response"
             else:
@@ -505,7 +505,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
     )
-    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\\bsaba\\b", reply):
+    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
     return {
         "workflow": payload.workflow,
@@ -570,8 +570,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "You are not a clinician: do not diagnose, prescribe, recommend medication changes or assert causes from patterns. "
             "Separate recorded facts from uncertainty, ask a focused follow-up only when useful, and advise contacting a qualified "
             "professional for clinical decisions. Never claim a fact is in the care record unless it appears in supplied context. "
-            "Community posts are not authoritative care-record facts.\\n\\n"
-            "Authorized care-record context (may be empty):\\n" + ("\\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
+            "Community posts are not authoritative care-record facts.\n\n"
+            "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
         prior_messages = (
             db.query(ConversationMessage)
@@ -611,7 +611,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     },
                 ],
             )
-            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\\bsaba\\b", reply):
+            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
                 raise HTTPException(
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",
