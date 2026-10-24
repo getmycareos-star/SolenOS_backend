@@ -1,7 +1,7 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
 from sqlalchemy.engine import make_url
 
 from app.core.config import get_settings
@@ -49,9 +49,10 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # Use the already-normalized URL directly. engine_from_config can re-read
+    # an unqualified URL from alembic.ini in some deployment contexts.
+    connectable = create_engine(
+        database_url,
         poolclass=pool.NullPool,
         pool_pre_ping=True,
     )
