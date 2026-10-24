@@ -137,8 +137,8 @@ async def upload_evidence(
 
     signatures = {
         "application/pdf": lambda blob: blob.startswith(b"%PDF-"),
-        "image/jpeg": lambda blob: blob.startswith(b"\\xff\\xd8\\xff"),
-        "image/png": lambda blob: blob.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
+        "image/jpeg": lambda blob: blob.startswith(b"\xff\xd8\xff"),
+        "image/png": lambda blob: blob.startswith(b"\x89PNG\r\n\x1a\n"),
         "image/gif": lambda blob: blob.startswith((b"GIF87a", b"GIF89a")),
         "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
     }
