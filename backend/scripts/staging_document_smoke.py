@@ -25,8 +25,12 @@ def main() -> None:
     api_origin = os.getenv("STAGING_API_BASE_URL", "").strip().rstrip("/")
     if not database_url or not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
         fail("DATABASE_URL must be a PostgreSQL staging connection string.")
-    if not api_origin.startswith("https://"):
-        fail("STAGING_API_BASE_URL must be the HTTPS origin of the deployed staging API.")
+    allow_local_ci = (
+        os.getenv("SOLENOS_CI_SMOKE") == "1"
+        and api_origin.startswith(("http://127.0.0.1:", "http://localhost:"))
+    )
+    if not api_origin.startswith("https://") and not allow_local_ci:
+        fail("STAGING_API_BASE_URL must be HTTPS unless the explicit loopback-only CI smoke flag is set.")
 
     api_base = api_origin[:-7] if api_origin.endswith("/api/v1") else api_origin
     api = api_base + "/api/v1"
