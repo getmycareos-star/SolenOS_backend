@@ -98,6 +98,10 @@ jobs:
               "/api/v1/sessions/refresh",
               "/api/v1/evidence/{person_id}",
               "/api/situation",
+              "/api/v1/share-intake",
+              "/api/v1/share-intake/{share_id}",
+              "/api/v1/assistant/status",
+              "/api/v1/assistant/assist",
           }
           missing = sorted(required - paths)
           if missing:
