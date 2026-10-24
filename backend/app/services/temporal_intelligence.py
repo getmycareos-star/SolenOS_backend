@@ -150,14 +150,13 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
             reference_frame_name=frame.name if frame else None,
             resolved_point=None,
             is_resolved=False,
-            confidence=0.0,
+            confidence=None,
             derivation_method="missing_reference",
         )
 
     ref_time = frame.reference_time
     text_lower = expression.lower().strip()
     resolved_point = None
-    confidence = 0.9
     derivation_method = "relative_calculation"
     lower_bound = None
     upper_bound = None
@@ -196,10 +195,8 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
     elif "before" in text_lower and "after" not in text_lower:
         if ref_time:
             resolved_point = ref_time
-            confidence = 0.5
             derivation_method = "relative_ordering"
     else:
-        confidence = 0.0
         derivation_method = "unparseable"
 
     if resolved_point:
@@ -209,7 +206,7 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
             reference_frame_name=frame.name,
             resolved_point=resolved_point,
             is_resolved=True,
-            confidence=confidence,
+            confidence=None,
             derivation_method=derivation_method,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
@@ -221,7 +218,7 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
         reference_frame_name=frame.name if frame else None,
         resolved_point=None,
         is_resolved=False,
-        confidence=0.0,
+        confidence=None,
         derivation_method="unresolved",
     )
 
@@ -247,7 +244,7 @@ def infer_temporal_relation(db: Session, fact_a_id: str, fact_b_id: str) -> Opti
         "fact_a_id": fact_a_id,
         "fact_b_id": fact_b_id,
         "relation": relation.value,
-        "confidence": min(fact_a.confidence, fact_b.confidence),
+        "confidence": (min(fact_a.confidence, fact_b.confidence) if fact_a.confidence is not None and fact_b.confidence is not None else None),
         "is_derived": True,
         "derivation_method": "temporal_calculation",
     }

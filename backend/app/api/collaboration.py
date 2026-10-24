@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from app.core.database import get_db
 from app.models.care import Person, Caregiver, CareEvent, Insight
 from app.models.time_location import Appointment
@@ -65,9 +65,11 @@ def _caregiver_for_person(db: Session, caregiver_id: str, person_id: str) -> Car
 
 def _post_payload(db: Session, post: CommunityPost, actor_id: Optional[str] = None):
     reactions = db.query(CommunityReaction).filter(CommunityReaction.post_id == post.id).all()
-    counts = {}
+    counts = {reaction_type: 0 for reaction_type in ("support", "helpful", "relate", "heart")}
     for reaction in reactions:
-        counts[reaction.reaction_type] = counts.get(reaction.reaction_type, 0) + 1
+        if reaction.reaction_type not in counts:
+            raise HTTPException(status_code=500, detail="Stored Community reaction has an unsupported type")
+        counts[reaction.reaction_type] += 1
     return {
         "id": post.id, "caregiver_id": post.caregiver_id,
         "author_type": post.author_type, "author_label": post.author_label,
@@ -319,7 +321,18 @@ def create_professional_access_grant(payload: ProfessionalGrantCreate, db: Sessi
 
 @router.get("/professional/dashboard")
 def professional_dashboard(professional_caregiver_id: str, db: Session = Depends(get_db)):
-    grants = db.query(ProfessionalAccessGrant).filter_by(professional_caregiver_id=professional_caregiver_id, status="active").all()
+    grants = (
+        db.query(ProfessionalAccessGrant)
+        .filter(
+            ProfessionalAccessGrant.professional_caregiver_id == professional_caregiver_id,
+            ProfessionalAccessGrant.status == "active",
+            or_(
+                ProfessionalAccessGrant.expires_at.is_(None),
+                ProfessionalAccessGrant.expires_at > datetime.now(timezone.utc),
+            ),
+        )
+        .all()
+    )
     result = []
     for grant in grants:
         person = db.query(Person).filter_by(id=grant.person_id).first()
@@ -333,4 +346,4 @@ def professional_dashboard(professional_caregiver_id: str, db: Session = Depends
             "active_insights_count": db.query(func.count(Insight.id)).filter_by(person_id=person.id, is_active=True).scalar() or 0,
             "last_events": [{"id": e.id, "title": e.title, "description": e.description, "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None} for e in db.query(CareEvent).filter_by(person_id=person.id).order_by(CareEvent.occurred_at.desc()).limit(5).all()],
         })
-    return {"professional_caregiver_id": professional_caregiver_id, "care_recipients": result, "count": len(result), "access_control": "active grant records; caller authentication must still be enforced by auth middleware"}
+    return {"professional_caregiver_id": professional_caregiver_id, "care_recipients": result, "count": len(result), "access_control": "active, unexpired grant records; caller authentication must still be enforced by auth middleware"}

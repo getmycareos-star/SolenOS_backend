@@ -110,6 +110,9 @@ def test_change_detection_onset():
         assert changes[0].change_type.value == "onset"
         assert changes[0].previous_count == 0
         assert changes[0].current_count == 3
+        assert changes[0].confidence is None, (
+            "Change confidence must remain unknown until a calibrated score exists."
+        )
         db.close()
     finally:
         teardown_db()
@@ -156,6 +159,9 @@ def test_pattern_detection_recurrence():
         assert len(patterns) >= 1
         pattern_types = [p.pattern_type.value for p in patterns]
         assert "frequency_increase" in pattern_types or "recurrence" in pattern_types
+        assert all(p.confidence is None for p in patterns), (
+            "Pattern confidence must remain unknown until a calibrated score exists."
+        )
         db.close()
     finally:
         teardown_db()
@@ -232,6 +238,9 @@ def test_situation_update_on_new_event():
         detect_event_changes(db, person.id, "fall", None, now)
         situations = detect_situations(db, person.id, now)
         assert len(situations) >= 1
+        assert all(situation.confidence is None for situation in situations), (
+            "Situation confidence must remain unknown when its inputs are uncalibrated."
+        )
         new_event = CareEvent(
             person_id=person.id,
             event_type="fall",

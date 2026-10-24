@@ -84,7 +84,7 @@ def test_parse_natural_language_today():
     result = parse_natural_language_time("today", ref)
     assert result["parsed_datetime"] is not None
     assert "Today" in result["interpretation"]
-    assert result["confidence"] >= 0.9
+    assert result["confidence"] is None  # Parse confidence is not calibrated.
 
 
 def test_parse_natural_language_yesterday():
@@ -101,11 +101,28 @@ def test_parse_natural_language_tomorrow():
     assert "Tomorrow" in result["interpretation"]
 
 
-def test_parse_natural_language_tonight():
+def test_parse_natural_language_tonight_does_not_invent_a_clock_time():
     ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
     result = parse_natural_language_time("tonight", ref)
+    assert result["parsed_datetime"] is None
+    assert result["confidence"] is None
+    assert result["is_ambiguous"] is True
+    assert "clarify" in result["interpretation"].lower()
+
+
+def test_vague_day_parts_do_not_become_synthetic_timestamps():
+    ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    for phrase in ("this morning", "this afternoon", "earlier today", "later this week", "this evening"):
+        result = parse_natural_language_time(phrase, ref)
+        assert result["parsed_datetime"] is None, phrase
+        assert result["confidence"] is None, phrase
+        assert result["is_ambiguous"] is True, phrase
+
+
+def test_explicit_clock_time_can_be_parsed_without_vague_period_fallback():
+    ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    result = parse_natural_language_time("tonight at 7 pm", ref)
     assert result["parsed_datetime"] is not None
-    assert "Tonight" in result["interpretation"]
 
 
 def test_parse_natural_language_next_monday():
@@ -147,7 +164,7 @@ def test_parse_natural_language_three_months_ago():
 def test_parse_natural_language_unrecognized():
     ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
     result = parse_natural_language_time("xyzzy", ref)
-    assert result["confidence"] == 0.0
+    assert result["confidence"] is None
     assert result["parsed_datetime"] is None
 
 
@@ -286,6 +303,8 @@ def test_detect_time_patterns():
     assert len(patterns) >= 1
     time_patterns = [p for p in patterns if p["pattern_type"] == "time_of_day"]
     assert len(time_patterns) >= 1
+    # Frequency counts are observed evidence; they are not calibrated confidence.
+    assert all("confidence" not in pattern for pattern in patterns)
 
 
 def test_natural_language_time_ago():

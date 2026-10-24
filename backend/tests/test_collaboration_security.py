@@ -84,6 +84,11 @@ def test_community_post_cannot_claim_a_verified_role_or_publish_immediately():
         assert created.json()["author_type"] == "peer_caregiver"
         assert created.json()["author_label"] == "Anonymous caregiver"
         assert created.json()["moderation_status"] == "pending"
+        # Counts come from the database; all supported reaction types are explicit,
+        # including zeroes calculated from an empty reaction set.
+        assert created.json()["reaction_counts"] == {
+            "support": 0, "helpful": 0, "relate": 0, "heart": 0,
+        }
 
         db = TestingSessionLocal()
         row = db.query(CommunityPost).filter_by(id=created.json()["id"]).one()

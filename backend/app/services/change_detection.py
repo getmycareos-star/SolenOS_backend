@@ -9,7 +9,7 @@ from app.services.baseline import (
     get_longitudinal_event_counts,
     _ensure_utc,
 )
-from app.core.change_enums import ChangeType, ChangeDirection, BaselineConfidence
+from app.core.change_enums import ChangeType, ChangeDirection
 
 
 def detect_event_changes(
@@ -164,7 +164,7 @@ def _create_change(
         baseline_id=baseline_id,
         comparison_window_start=comparison.get("current_window_start"),
         comparison_window_end=comparison.get("current_window_end"),
-        confidence=_calculate_change_confidence(comparison, len(events)),
+        confidence=None,
         evidence_ids=evidence_ids,
         explanation=explanation,
         time_provenance=f"detected_at:{now.isoformat()}",
@@ -178,16 +178,3 @@ def _create_change(
     return change
 
 
-def _calculate_change_confidence(comparison: Dict[str, Any], event_count: int) -> float:
-    confidence = 1.0
-    baseline_confidence = comparison.get("baseline_confidence", "moderate")
-    if baseline_confidence == BaselineConfidence.LOW.value:
-        confidence -= 0.3
-    elif baseline_confidence == BaselineConfidence.MODERATE.value:
-        confidence -= 0.15
-    observation_density = comparison.get("observation_density")
-    if observation_density is not None and observation_density < 0.05:
-        confidence -= 0.2
-    if event_count < 2:
-        confidence -= 0.2
-    return max(0.1, min(1.0, confidence))

@@ -96,9 +96,10 @@ class ActionCandidate(BaseModel):
 
 
 class ActionCompletionEvidence(BaseModel):
-    evidence_ids: List[str]
-    completion_confidence: float = Field(ge=0.0, le=1.0)
-    notes: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+    # None means no independently assessed confidence was supplied.
+    completion_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    notes: Optional[str] = Field(default=None, max_length=2000)
 
 
 class ActionUpdate(BaseModel):

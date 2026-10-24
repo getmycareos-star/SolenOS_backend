@@ -19,11 +19,8 @@ def explain_change(change: Change, baseline: Optional[Baseline] = None) -> str:
         parts.append(f"Magnitude of change: {change.magnitude:.1f}%.")
     if change.is_persistent is not None:
         parts.append(f"Change persistence: {change.persistence_days} days.")
-    if change.confidence < 0.7:
-        parts.append(
-            f"Confidence in this detection is {change.confidence:.2f} "
-            f"due to limited evidence or weak baseline."
-        )
+    if change.confidence is not None:
+        parts.append(f"Change confidence: {change.confidence:.2f} (calibration metadata available).")
     return " ".join(parts)
 
 
@@ -39,10 +36,8 @@ def explain_pattern(pattern: Pattern) -> str:
     if pattern.direction:
         parts.append(f"Direction: {pattern.direction.value}.")
     parts.append(f"Evidence count: {pattern.evidence_count}.")
-    if pattern.confidence < 0.7:
-        parts.append(
-            f"Pattern confidence is {pattern.confidence:.2f} due to limited evidence."
-        )
+    if pattern.confidence is not None:
+        parts.append(f"Pattern confidence: {pattern.confidence:.2f} (calibration metadata available).")
     return " ".join(parts)
 
 

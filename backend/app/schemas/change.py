@@ -62,7 +62,7 @@ class ChangeBase(BaseModel):
     comparison_window_end: Optional[datetime] = None
     persistence_days: Optional[int] = None
     is_persistent: Optional[bool] = None
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_ids: List[str]
     explanation: Optional[str] = None
     time_provenance: Optional[str] = None
@@ -100,7 +100,7 @@ class PatternBase(BaseModel):
     frequency: Optional[float] = None
     rate_per_period: Optional[float] = None
     direction: Optional[ChangeDirection] = None
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_count: int = 0
     alternative_interpretations: Optional[List[dict[str, Any]]] = None
 
@@ -133,7 +133,7 @@ class SituationBase(BaseModel):
     pattern_ids: Optional[List[str]] = None
     change_ids: Optional[List[str]] = None
     significance_assessment_id: Optional[str] = None
-    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     alternative_interpretations: Optional[List[dict[str, Any]]] = None
     context: Optional[dict[str, Any]] = None
     attention_candidate: bool = False
@@ -164,7 +164,7 @@ class SituationResponse(BaseModel):
     description: Optional[str] = None
     situation_type: SituationType
     state: SituationState
-    confidence: float
+    confidence: Optional[float] = None
     explanation: Optional[str] = None
     signals: List[dict[str, Any]]
     patterns: Optional[List[dict[str, Any]]] = None

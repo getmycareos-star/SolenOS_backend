@@ -77,7 +77,7 @@ class LearningEngine:
                             "corrected_at": datetime.utcnow().isoformat(),
                         }
                     ],
-                    confidence=1.0,
+                    confidence=None,
                     source_evidence_ids=[],
                 )
                 self.db.add(memory)
@@ -95,7 +95,7 @@ class LearningEngine:
                     "recorded_at": datetime.utcnow().isoformat(),
                 }
             ],
-            confidence=1.0,
+            confidence=None,
             source_evidence_ids=[],
         )
         self.db.add(memory)

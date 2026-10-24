@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
+from uuid import uuid4
 from app.core.database import get_db
+from app.services.storage import upload_private_object, delete_private_object, create_signed_object_url
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -234,6 +236,97 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
+
+
+_MAX_EVIDENCE_IMAGE_BYTES = 5 * 1024 * 1024
+_EVIDENCE_IMAGE_TYPES = {
+    "image/jpeg": ("jpg", lambda data: data.startswith(b"\xff\xd8\xff")),
+    "image/png": ("png", lambda data: data.startswith(b"\x89PNG\r\n\x1a\n")),
+    "image/webp": ("webp", lambda data: len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"),
+}
+
+
+@router.post("/upload", status_code=201)
+async def upload_evidence_photo(
+    request: Request,
+    file: UploadFile = File(...),
+    person_id: str = Form(...),
+    caregiver_id: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    authenticated_caregiver_id = getattr(request.state, "auth_caregiver_id", None)
+    if not authenticated_caregiver_id or getattr(request.state, "auth_role", None) != "caregiver":
+        raise HTTPException(status_code=403, detail="A signed-in caregiver is required to upload evidence")
+    if caregiver_id != authenticated_caregiver_id:
+        raise HTTPException(status_code=403, detail="Caregiver identity must match the authenticated account")
+
+    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Care recipient not found")
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter_by(id=authenticated_caregiver_id, person_id=person_id)
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+    content_type = (file.content_type or "").lower()
+    image_spec = _EVIDENCE_IMAGE_TYPES.get(content_type)
+    if not image_spec:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG, and WebP images are accepted")
+    data = await file.read(_MAX_EVIDENCE_IMAGE_BYTES + 1)
+    if not data:
+        raise HTTPException(status_code=422, detail="The uploaded image is empty")
+    if len(data) > _MAX_EVIDENCE_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
+    extension, signature_check = image_spec
+    if not signature_check(data):
+        raise HTTPException(status_code=415, detail="Image content does not match its declared file type")
+
+    object_path = f"{uuid4().hex}.{extension}"
+    upload_private_object(object_path, content_type, data)
+    evidence = EvidenceModel(
+        person_id=person_id,
+        type="medication_photo",
+        source_text="Caregiver-uploaded medication photo; image contents have not been clinically interpreted.",
+        original_file_path=object_path,
+        uploaded_by_caregiver_id=authenticated_caregiver_id,
+        extra_metadata=json.dumps({"content_type": content_type, "file_size_bytes": len(data)}),
+        evidence_status="reported",
+        source_type="caregiver_uploaded_image",
+        confidence=None,
+    )
+    try:
+        db.add(evidence)
+        db.commit()
+        db.refresh(evidence)
+    except Exception as exc:
+        db.rollback()
+        delete_private_object(object_path)
+        raise HTTPException(
+            status_code=500,
+            detail="Evidence metadata could not be saved; the upload was rolled back where possible",
+        ) from exc
+    return {"evidence_id": evidence.id}
+
+
+@router.get("/evidence/{person_id}/{evidence_id}/signed-url")
+def get_evidence_signed_url(
+    person_id: str,
+    evidence_id: str,
+    db: Session = Depends(get_db),
+):
+    evidence = (
+        db.query(EvidenceModel)
+        .filter_by(id=evidence_id, person_id=person_id)
+        .first()
+    )
+    if not evidence:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    if not evidence.original_file_path or evidence.source_type != "caregiver_uploaded_image":
+        raise HTTPException(status_code=404, detail="Evidence does not have an accessible image file")
+    return {"url": create_signed_object_url(evidence.original_file_path), "expires_in": 300}
 
 
 def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Session):
@@ -840,7 +933,6 @@ def create_temporal_relationship(
         event_b_id=event_b_id,
         relationship_type=relationship["relationship"],
         time_difference_seconds=str(relationship["time_difference_seconds"]),
-        confidence="0.9",
     )
     db.add(db_rel)
     db.commit()
@@ -999,4 +1091,4 @@ def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = N
     return {"fact_id": fact_id, "temporal_status": status}
 
 
-router.include_router(actions_router, prefix="/actions", tags=["actions"])
+router.include_router(actions_router, tags=["actions"])

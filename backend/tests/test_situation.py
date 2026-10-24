@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -76,6 +77,53 @@ def test_post_situation_creates_evidence_and_event():
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
         assert data["evidence_id"] is not None
         assert data["care_event_id"] is not None
+
+        # Raw caregiver text is a reported observation, not a calibrated confidence score.
+        db = TestingSessionLocal()
+        evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
+        assert evidence.confidence is None
+        db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_post_situation_rejects_invalid_occurrence_timestamp_without_substituting_now():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-invalid-time", name="Test Person")
+        caregiver = Caregiver(
+            id="caregiver-invalid-time",
+            name="Test Caregiver",
+            email="invalid-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-invalid-time",
+                "person_id": "person-invalid-time",
+                "raw_input": "Caregiver-reported note with invalid occurrence time.",
+                "timestamp": "not-a-datetime",
+            },
+        )
+        assert response.status_code == 400
+        assert "valid ISO 8601 datetime" in response.json()["detail"]
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 0
+        assert db.query(CareEvent).count() == 0
+        db.close()
     finally:
         teardown_db()
 
@@ -129,6 +177,66 @@ def test_post_situation_with_documents():
         assert data["ok"] is True
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Document observation"
+
+        db = TestingSessionLocal()
+        evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
+        # OCR confidence describes text extraction, not confidence in the care fact.
+        assert evidence.confidence is None
+        metadata = json.loads(evidence.extra_metadata)
+        assert metadata["ocr_confidence"] == 0.95
+        assert metadata["original_filename"] == "discharge_summary.pdf"
+        assert evidence.original_file_path is None
+        assert evidence.source_type == "caregiver_uploaded_document"
+        db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_post_situation_reports_analysis_unavailable_when_derived_pipeline_fails(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        import app.services.situation as situation_service
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-analysis-unavailable", name="Test Person")
+        caregiver = Caregiver(
+            id="caregiver-analysis-unavailable",
+            name="Test Caregiver",
+            email="analysis-unavailable@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        def fail_analysis(*args, **kwargs):
+            raise RuntimeError("test-only derived analysis failure")
+
+        monkeypatch.setattr(situation_service, "detect_event_changes", fail_analysis)
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/situation",
+            json={
+                "caregiver_id": "caregiver-analysis-unavailable",
+                "person_id": "person-analysis-unavailable",
+                "raw_input": "Caregiver-reported note for analysis failure test.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ok"] is True
+        assert data["intelligence_status"] == "unavailable"
+        assert "derived analysis is unavailable" in data["intelligence_message"]
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).count() == 1
+        assert db.query(CareEvent).count() == 1
+        db.close()
     finally:
         teardown_db()
 

@@ -160,11 +160,35 @@ def parse_natural_language_time(
         reference_time = utc_now()
 
     text_lower = text.lower().strip()
-    confidence = 0.9
+    tz = get_timezone(source_tz)
+
+    # Do not turn vague day-parts or relative periods into invented clock times
+    # (for example, "tonight" -> 20:00 or "this morning" -> 09:00).
+    vague_periods = (
+        "tonight",
+        "this evening",
+        "this morning",
+        "this afternoon",
+        "earlier today",
+        "later this week",
+    )
+    explicit_clock_time = re.search(r"\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b", text_lower)
+    if any(period in text_lower for period in vague_periods) and not explicit_clock_time:
+        return {
+            "original_text": text,
+            "parsed_datetime": None,
+            "timezone": tz.tzname(datetime.now(tz)) if tz else None,
+            "timezone_id": source_tz,
+            "confidence": None,
+            "interpretation": "The time period is too broad to assign an exact date and time; clarify the date and/or time.",
+            "is_ambiguous": True,
+            "provenance": "caregiver_entered",
+        }
+
+    confidence = None
     interpretation = ""
     parsed_dt = None
     is_ambiguous = False
-    tz = get_timezone(source_tz)
 
     today = reference_time.date()
     current_year = reference_time.year
@@ -181,25 +205,6 @@ def parse_natural_language_time(
         tomorrow = today + timedelta(days=1)
         parsed_dt = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=timezone.utc)
         interpretation = f"Tomorrow ({tomorrow.isoformat()})"
-    elif text_lower in ["tonight", "this evening"]:
-        parsed_dt = datetime(today.year, today.month, today.day, 20, 0, tzinfo=timezone.utc)
-        interpretation = f"Tonight at 8:00 PM ({today.isoformat()})"
-    elif text_lower == "this morning":
-        parsed_dt = datetime(today.year, today.month, today.day, 9, 0, tzinfo=timezone.utc)
-        interpretation = f"This morning at 9:00 AM ({today.isoformat()})"
-    elif text_lower == "this afternoon":
-        parsed_dt = datetime(today.year, today.month, today.day, 14, 0, tzinfo=timezone.utc)
-        interpretation = f"This afternoon at 2:00 PM ({today.isoformat()})"
-    elif "earlier today" in text_lower:
-        parsed_dt = datetime(today.year, today.month, today.day, 10, 0, tzinfo=timezone.utc)
-        interpretation = f"Earlier today (around 10:00 AM, {today.isoformat()})"
-    elif "later this week" in text_lower:
-        days_ahead = 4 - today.weekday()
-        if days_ahead <= 0:
-            days_ahead += 7
-        target = today + timedelta(days=days_ahead)
-        parsed_dt = datetime(target.year, target.month, target.day, tzinfo=timezone.utc)
-        interpretation = f"Later this week ({target.isoformat()})"
     else:
         next_monday = re.search(r"next\s+monday", text_lower)
         next_tuesday = re.search(r"next\s+tuesday", text_lower)
@@ -404,10 +409,10 @@ def parse_natural_language_time(
                     interpretation = f"Date may be ambiguous: {parsed_dt.isoformat()}"
                 else:
                     interpretation = f"Parsed date: {parsed_dt.isoformat()}"
-                confidence = 0.7
+                confidence = None  # Parser confidence is not calibrated.
             except Exception:
                 interpretation = "Could not parse date"
-                confidence = 0.0
+                confidence = None
                 parsed_dt = None
 
     return {
@@ -418,7 +423,7 @@ def parse_natural_language_time(
         "confidence": confidence,
         "interpretation": interpretation,
         "is_ambiguous": is_ambiguous,
-        "provenance": "ai_estimated" if confidence < 1.0 else "caregiver_entered",
+        "provenance": "ai_estimated" if parsed_dt is not None else "caregiver_entered",
     }
 
 
@@ -721,7 +726,6 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Events frequently occur in the {period}",
                 "period": period,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
                 "window_days": window_days,
             })
 
@@ -732,7 +736,6 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Events frequently occur on {day}s",
                 "day": day,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
                 "window_days": window_days,
             })
 
@@ -743,7 +746,6 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Recurring {evt_type} events",
                 "event_type": evt_type,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
                 "window_days": window_days,
             })
 

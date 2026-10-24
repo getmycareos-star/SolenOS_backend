@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import List, Optional
@@ -32,7 +32,7 @@ def _get_action_or_404(db: Session, action_id: str) -> ActionModel:
     return action
 
 
-@router.post("/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
+@router.post("/actions/documents/{document_id}/extract-actions", response_model=List[ActionSchema])
 def extract_actions_from_document(
     document_id: str,
     document_text: str,
@@ -204,9 +204,23 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 
 
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
-def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
+def complete_action(
+    action_id: str,
+    evidence: ActionCompletionEvidence,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    caregiver_id = getattr(request.state, "auth_caregiver_id", None)
+    try:
+        return lifecycle_service.record_completion(
+            db_action,
+            evidence,
+            db,
+            caregiver_id=caregiver_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)

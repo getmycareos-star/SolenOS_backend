@@ -27,8 +27,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError:
-            occurred_at = _utc_now()
+        except ValueError as exc:
+            raise ValueError("timestamp must be a valid ISO 8601 datetime; occurrence time was not inferred.") from exc
     else:
         occurred_at = _utc_now()
 
@@ -37,8 +37,12 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
+            # The API receives extracted text and a client-reported filename, not
+            # the original file bytes. Keep the filename as metadata; never imply
+            # that a retrievable file was stored in original_file_path.
             metadata = {
+                "original_filename": doc.name,
                 "ocr_confidence": doc.ocr_confidence,
                 "mime_type": doc.mime_type,
             }
@@ -46,13 +50,15 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             person_id=payload.person_id,
             type="note" if not doc else "document",
             source_text=source_text,
-            original_file_path=doc.name if doc else None,
+            original_file_path=None,
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=1.0 if not doc else (doc.ocr_confidence or 0.5),
+            # OCR recognition confidence is extraction metadata, not a calibrated
+            # confidence score about the care observation itself.
+            confidence=None,
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type="caregiver_uploaded_document" if doc else "caregiver_observation",
         )
         db.add(evidence)
         db.flush()
@@ -91,6 +97,8 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     attention_candidate = False
     follow_up_candidate = False
     what_changed = None
+    intelligence_status = "available"
+    intelligence_message = None
 
     try:
         changes = detect_event_changes(db, payload.person_id, care_event.event_type, None, occurred_at)
@@ -117,16 +125,20 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         care_event.significance_verdict = sig_changes[0].significance_verdict.value if sig_changes else None
         care_event.attention_candidate = attention_candidate
         care_event.follow_up_candidate = follow_up_candidate
-        care_event.confidence = sig_changes[0].confidence if sig_changes else 0.5
+        care_event.confidence = sig_changes[0].confidence if sig_changes else None
         if situations:
             care_event.situation_id = situations[0].id
         db.commit()
         db.refresh(care_event)
     except Exception:
+        # The raw care event was committed before derived analysis. Preserve that
+        # record, but report analysis as unavailable rather than implying success.
         db.rollback()
         db.add(care_event)
         db.flush()
         db.commit()
+        intelligence_status = "unavailable"
+        intelligence_message = "Care input was saved, but derived analysis is unavailable. No conclusion was inferred from the failed analysis."
 
     events = [
         SituationEvent(
@@ -166,4 +178,6 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         attention_candidate=attention_candidate,
         follow_up_candidate=follow_up_candidate,
         what_changed=what_changed,
+        intelligence_status=intelligence_status,
+        intelligence_message=intelligence_message,
     )

@@ -429,6 +429,18 @@ class TestSafetyEvaluationSuite:
         assert results["total_adversarial_tests"] == 5
         assert len(results["results"]) == 5
 
+    def test_missing_regression_scores_are_unavailable_not_perfect(self):
+        checks = self.suite.run_regression_check(
+            current_results=[],
+            previous_results=[{"check_name": "safety-coverage", "score": 0.8}],
+        )
+        assert len(checks) == 1
+        assert checks[0].previous_score == 0.8
+        assert checks[0].current_score is None
+        assert checks[0].passed is False
+        assert checks[0].regression_detected is None
+        assert "unavailable" in (checks[0].details or "").lower()
+
     def test_benchmark_passing(self):
         cases = [
             SafetyBenchmarkCase(
@@ -557,3 +569,20 @@ class TestSafetyAPI:
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data
+
+
+def test_grounding_benchmark_does_not_inject_canned_medication_evidence():
+    suite = SafetyEvaluationSuite()
+    case = SafetyBenchmarkCase(
+        id="grounding-no-evidence",
+        benchmark_category="grounding",
+        name="No evidence supplied",
+        description="A grounding benchmark with no evidence attached",
+        input_text="The medication was changed yesterday.",
+        expected_decision=SafetyDecision.REQUIRE_MORE_EVIDENCE,
+        expected_risk_class=RiskClass.INFORMATIONAL,
+        created_at=datetime.now(timezone.utc),
+    )
+    payload = suite._build_input(case)
+    assert payload.evidence_references == []
+    assert payload.epistemic_status == {}

@@ -1,7 +1,8 @@
 import json
+from datetime import datetime, timezone
 from fastapi import FastAPI, APIRouter, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import text, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.api.v1 import router as api_v1_router
@@ -162,6 +163,12 @@ async def require_authenticated_care_access(request, call_next):
             from fastapi.responses import JSONResponse
             return JSONResponse(status_code=401, content={"detail": "Account caregiver is unavailable"})
 
+        # Routes that create provenance records use the authenticated identity,
+        # never a caller-supplied caregiver ID or the original action creator.
+        request.state.auth_account_id = account.id
+        request.state.auth_caregiver_id = account.caregiver_id
+        request.state.auth_role = account.role
+
         if path.startswith("/api/v1/team/") or path == "/api/v1/metrics":
             if account.role != "team":
                 from fastapi.responses import JSONResponse
@@ -214,32 +221,80 @@ async def require_authenticated_care_access(request, call_next):
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "Caregiver identity must match the authenticated account"})
 
-        person_id = None
-        if isinstance(body, dict) and isinstance(body.get("person_id"), str):
-            person_id = body.get("person_id")
-        elif request.query_params.get("person_id"):
-            person_id = request.query_params.get("person_id")
-        if not person_id:
-            segments = [segment for segment in path.split("/") if segment]
-            for segment in reversed(segments):
-                person_id = _person_id_for_resource(db, segment)
-                if person_id:
-                    break
+        body_person_id = (
+            body.get("person_id")
+            if isinstance(body, dict) and isinstance(body.get("person_id"), str)
+            else None
+        )
+        query_person_id = request.query_params.get("person_id")
+        if body_person_id and query_person_id and body_person_id != query_person_id:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Conflicting care-recipient scopes are not allowed"},
+            )
+
+        requested_person_id = body_person_id or query_person_id
+        path_person_id = None
+        segments = [segment for segment in path.split("/") if segment]
+        for segment in reversed(segments):
+            path_person_id = _person_id_for_resource(db, segment)
+            if path_person_id:
+                break
+
+        # A caller cannot authorize one recipient in the query/body while targeting
+        # a different recipient or child record in the URL.
+        if path_person_id and requested_person_id and path_person_id != requested_person_id:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Care-recipient scope does not match the requested resource"},
+            )
+
+        person_id = requested_person_id or path_person_id
         # Protect private care records using the identity attached to the signed token.
         # A professional may access only care recipients with an active grant.
         if person_id:
             if account.role == "caregiver":
                 allowed = caregiver.person_id == person_id
             elif account.role == "professional":
-                allowed = db.query(ProfessionalAccessGrant.id).filter_by(
-                    professional_caregiver_id=account.caregiver_id,
-                    person_id=person_id, status="active"
+                allowed = db.query(ProfessionalAccessGrant.id).filter(
+                    ProfessionalAccessGrant.professional_caregiver_id == account.caregiver_id,
+                    ProfessionalAccessGrant.person_id == person_id,
+                    ProfessionalAccessGrant.status == "active",
+                    or_(
+                        ProfessionalAccessGrant.expires_at.is_(None),
+                        ProfessionalAccessGrant.expires_at > datetime.now(timezone.utc),
+                    ),
                 ).first() is not None
             else:
                 allowed = False
             if not allowed:
                 from fastapi.responses import JSONResponse
                 return JSONResponse(status_code=403, content={"detail": "This account is not authorized for the selected care recipient"})
+
+        else:
+            # Fail closed for authenticated routes that do not identify a care recipient.
+            # Only explicitly global or role-scoped endpoints may omit person scope.
+            scope_exempt = (
+                path == "/api/v1/auth/me"
+                or path == "/api/v1/auth/care-contexts"
+                or path == "/api/v1/auth/my-caregiver-links"
+                or path == "/api/v1/community"
+                or path.startswith("/api/v1/community/")
+                # Multipart upload fields are validated by the upload handler itself:
+                # it binds caregiver_id to the signed-in identity and verifies that
+                # the caregiver is linked to the submitted person_id before storage.
+                or path == "/api/v1/upload"
+                or (path == "/api/v1/professional/dashboard" and account.role == "professional")
+                or ((path.startswith("/api/v1/team/") or path == "/api/v1/metrics") and account.role == "team")
+            )
+            if not scope_exempt:
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Care recipient scope is required for this endpoint"},
+                )
 
         # DELETE reaction requests carry the actor ID in the query string, not JSON.
         # Bind that identifier to the signed-in account to prevent removing another

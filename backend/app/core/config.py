@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_storage_bucket: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -24,21 +27,22 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        environment = (
-            os.getenv("RAILWAY_ENVIRONMENT_NAME")
-            or os.getenv("RAILWAY_ENVIRONMENT")
-            or os.getenv("APP_ENV")
-            or os.getenv("ENVIRONMENT")
-            or ""
+        environment_values = (
+            os.getenv("RAILWAY_ENVIRONMENT_NAME", ""),
+            os.getenv("RAILWAY_ENVIRONMENT", ""),
+            os.getenv("APP_ENV", ""),
+            os.getenv("ENVIRONMENT", ""),
         )
-        return environment.strip().lower() in {"production", "prod"}
+        return any(value.strip().lower() in {"production", "prod"} for value in environment_values)
 
     def validate_production_configuration(self) -> None:
         if not self.is_production:
             return
 
         database_url = self.database_url.strip().lower()
-        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg2://")):
+        if not database_url.startswith(
+            ("postgres://", "postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")
+        ):
             raise RuntimeError(
                 "Production requires DATABASE_URL to point to the managed PostgreSQL database; "
                 "SQLite and missing DATABASE_URL values are not allowed."
@@ -48,6 +52,9 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "Production requires SECRET_KEY to be a unique random value of at least 32 characters."
             )
+
+        if self.debug:
+            raise RuntimeError("Production DEBUG must be false.")
 
 
 @lru_cache

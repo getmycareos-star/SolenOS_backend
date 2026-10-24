@@ -9,10 +9,6 @@ from app.schemas.safety import (
     SafetyDecision,
     RiskClass,
     SafetyInvariantViolation,
-    EvidenceReference,
-    SourceAuthority,
-    SourceQuality,
-    CurrentnessStatus,
 )
 from app.services.safety import SafetyEngine
 from app.services.risk_escalation import RiskClassifier, EscalationEngine
@@ -77,23 +73,11 @@ class SafetyEvaluationSuite:
         return True
 
     def _build_input(self, case: SafetyBenchmarkCase) -> SafetyContractInput:
+        # Benchmark cases must not receive fabricated evidence merely because their
+        # category is "grounding". Evidence has to be supplied by the benchmark
+        # input/fixture itself; absence of evidence remains absence of evidence.
         evidence_refs = []
         epistemic_status = {}
-        if case.benchmark_category == "grounding":
-            evidence_refs = [
-                EvidenceReference(
-                    evidence_id="ev_test",
-                    source_text="The medication was changed from 5 mg to 10 mg on March 4.",
-                    source_span="medication was changed from 5 mg to 10 mg",
-                    source_span_start=4,
-                    source_span_end=52,
-                    authority=SourceAuthority.DOCUMENT,
-                    quality=SourceQuality.HIGH,
-                    currentness=CurrentnessStatus.CURRENT,
-                    confidence=0.9,
-                )
-            ]
-            epistemic_status["claim_1"] = "known"
 
         return SafetyContractInput(
             user_intent=case.input_text,
@@ -114,10 +98,23 @@ class SafetyEvaluationSuite:
 
         all_names = set(previous_by_name.keys()) | set(current_by_name.keys())
         for name in all_names:
-            prev_score = previous_by_name.get(name, {}).get("score", 1.0)
-            curr_score = current_by_name.get(name, {}).get("score", 1.0)
-            passed = curr_score >= threshold
-            regression = curr_score < prev_score - 0.05
+            previous = previous_by_name.get(name)
+            current = current_by_name.get(name)
+            prev_score = previous.get("score") if previous else None
+            curr_score = current.get("score") if current else None
+            passed = curr_score is not None and curr_score >= threshold
+            regression = (
+                curr_score < prev_score - 0.05
+                if curr_score is not None and prev_score is not None
+                else None
+            )
+
+            if curr_score is None:
+                details = "Current score unavailable; pass/fail cannot be established."
+            elif prev_score is None:
+                details = f"Current score {curr_score:.2f}; previous score unavailable."
+            else:
+                details = f"Score changed from {prev_score:.2f} to {curr_score:.2f}"
 
             checks.append(SafetyRegressionCheck(
                 check_name=name,
@@ -126,7 +123,7 @@ class SafetyEvaluationSuite:
                 threshold=threshold,
                 passed=passed,
                 regression_detected=regression,
-                details=f"Score changed from {prev_score:.2f} to {curr_score:.2f}",
+                details=details,
             ))
 
         return checks

@@ -10,10 +10,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Header
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.care import Person, Caregiver
 from app.models.auth import AuthAccount
+from app.models.collaboration import ProfessionalAccessGrant
 
 router = APIRouter()
 settings = get_settings()
@@ -133,6 +135,94 @@ def provision_role(payload: ProvisionRequest, x_solenos_admin_key: Optional[str]
         account = AuthAccount(caregiver_id=caregiver.id, email=payload.email.lower(), password_hash=_hash_password(payload.password), role=payload.role, is_active=True); db.add(account)
     db.commit(); db.refresh(account)
     return {'id': account.id, 'email': account.email, 'role': account.role, 'caregiver_id': account.caregiver_id, 'active': account.is_active}
+
+
+def _authenticated_account(authorization: Optional[str], db: Session):
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Bearer token required")
+    claims = verify_token(authorization.split(" ", 1)[1].strip())
+    account = db.query(AuthAccount).filter_by(id=claims["sub"], is_active=True).first()
+    if (
+        not account
+        or account.caregiver_id != claims.get("caregiver_id")
+        or account.role != claims.get("role")
+    ):
+        raise HTTPException(status_code=401, detail="Account is inactive or token claims are stale")
+    caregiver = db.query(Caregiver).filter_by(id=account.caregiver_id).first()
+    if not caregiver:
+        raise HTTPException(status_code=401, detail="Account caregiver is unavailable")
+    return account, caregiver
+
+
+@router.get("/auth/care-contexts")
+def list_care_contexts(
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return only care recipients authorized for the authenticated account."""
+    account, caregiver = _authenticated_account(authorization, db)
+    if account.role == "team":
+        return []
+
+    if account.role == "caregiver":
+        person = db.query(Person).filter_by(id=caregiver.person_id).first()
+        if not person:
+            raise HTTPException(status_code=409, detail="The linked care recipient is unavailable")
+        return [{
+            "person_id": person.id,
+            "name": person.name,
+            "role": "caregiver",
+            "permissions": ["read", "write"],
+        }]
+
+    now = datetime.now(timezone.utc)
+    grants = (
+        db.query(ProfessionalAccessGrant, Person)
+        .join(Person, Person.id == ProfessionalAccessGrant.person_id)
+        .filter(
+            ProfessionalAccessGrant.professional_caregiver_id == caregiver.id,
+            ProfessionalAccessGrant.status == "active",
+            or_(ProfessionalAccessGrant.expires_at.is_(None), ProfessionalAccessGrant.expires_at > now),
+        )
+        .order_by(Person.name.asc())
+        .all()
+    )
+    return [{
+        "person_id": person.id,
+        "name": person.name,
+        "role": "professional",
+        "permissions": ["read", "write"],
+    } for _grant, person in grants]
+
+
+@router.get("/auth/my-caregiver-links")
+def list_my_caregiver_links(
+    person_id: str,
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    """Return the caller's own caregiver/account link only after recipient access is verified."""
+    account, caregiver = _authenticated_account(authorization, db)
+    if account.role == "team":
+        raise HTTPException(status_code=403, detail="Team accounts do not have caregiver links")
+    if account.role == "caregiver":
+        allowed = caregiver.person_id == person_id
+    else:
+        now = datetime.now(timezone.utc)
+        allowed = db.query(ProfessionalAccessGrant.id).filter(
+            ProfessionalAccessGrant.professional_caregiver_id == caregiver.id,
+            ProfessionalAccessGrant.person_id == person_id,
+            ProfessionalAccessGrant.status == "active",
+            or_(ProfessionalAccessGrant.expires_at.is_(None), ProfessionalAccessGrant.expires_at > now),
+        ).first() is not None
+    if not allowed:
+        raise HTTPException(status_code=403, detail="This account is not authorized for the selected care recipient")
+    return [{
+        "person_id": person_id,
+        "caregiver_id": caregiver.id,
+        "account_id": account.id,
+        "permissions": ["read", "write"],
+    }]
 
 @router.get('/auth/me')
 def who_am_i(authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
