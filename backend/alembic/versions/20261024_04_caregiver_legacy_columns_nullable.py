@@ -21,7 +21,7 @@ def upgrade():
     for name in ("password_hash", "display_name"):
         column = columns.get(name)
         if column and not column.get("nullable", True) and not column.get("primary_key"):
-            op.alter_column(name="caregivers", column_name=name,
+            op.alter_column("caregivers", name,
                             existing_type=column["type"], nullable=True)
             columns = {item["name"]: item for item in inspect(bind).get_columns("caregivers")}
 
