@@ -42,3 +42,22 @@ def test_time_patterns_do_not_emit_uncalibrated_count_based_confidence():
     api_v1 = (APPLICATION_ROOT / "api" / "v1.py").read_text(encoding="utf-8")
     assert "min(count / 10.0, 1.0)" not in time_intelligence
     assert 'confidence="0.9"' not in api_v1
+
+
+def test_production_services_do_not_invent_confidence_or_seed_benchmark_evidence():
+    services = APPLICATION_ROOT / "services"
+    time_intelligence = (services / "time_intelligence.py").read_text(encoding="utf-8")
+    action_lifecycle = (services / "action_lifecycle.py").read_text(encoding="utf-8")
+    safety_evaluation = (services / "safety_evaluation.py").read_text(encoding="utf-8")
+    pattern_detection = (services / "pattern_detection.py").read_text(encoding="utf-8")
+
+    assert "confidence = 0.9" not in time_intelligence
+    assert "confidence = 0.7" not in time_intelligence
+    assert "20, 0, tzinfo=timezone.utc" not in time_intelligence
+    assert "9, 0, tzinfo=timezone.utc" not in time_intelligence
+    assert "14, 0, tzinfo=timezone.utc" not in time_intelligence
+    assert "evidence_strengths.append(0.9)" not in action_lifecycle
+    assert '"confidence": max_strength' not in action_lifecycle
+    assert "The medication was changed from 5 mg to 10 mg on March 4." not in safety_evaluation
+    assert 'evidence_id="ev_test"' not in safety_evaluation
+    assert "confidence=0.5" not in pattern_detection
