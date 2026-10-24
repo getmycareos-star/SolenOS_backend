@@ -18,6 +18,7 @@ from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.collaboration import router as collaboration_router
+from app.api.document_extract import router as document_extract_router
 from app.models.collaboration import ConsentRecord
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
@@ -51,8 +52,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
@@ -66,6 +67,7 @@ app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(document_extract_router, prefix="/api")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
