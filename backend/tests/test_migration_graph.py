@@ -37,11 +37,11 @@ def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
     assert "qualname = root" in root_section
 
 
-def _load_caregiver_schema_migration():
+def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_20261024.py"):
     import importlib.util
 
     backend_dir = Path(__file__).resolve().parents[1]
-    path = backend_dir / "alembic" / "versions" / "t2_caregiver_schema_reconcile_20261024.py"
+    path = backend_dir / "alembic" / "versions" / filename
     spec = importlib.util.spec_from_file_location("caregiver_schema_reconcile_migration", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -49,13 +49,17 @@ def _load_caregiver_schema_migration():
     return module
 
 
-def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_table():
+@__import__("pytest").mark.parametrize("filename", [
+    "20261022_03_caregiver_schema_reconciliation.py",
+    "t2_caregiver_schema_reconcile_20261024.py",
+])
+def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_table(filename):
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
     from sqlalchemy import create_engine, inspect, text
 
     engine = create_engine("sqlite://")
-    migration = _load_caregiver_schema_migration()
+    migration = _load_caregiver_schema_migration(filename)
     try:
         with engine.begin() as connection:
             connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
@@ -68,14 +72,18 @@ def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_ta
         engine.dispose()
 
 
-def test_caregiver_schema_reconciliation_refuses_to_guess_existing_identity_mapping():
+@__import__("pytest").mark.parametrize("filename", [
+    "20261022_03_caregiver_schema_reconciliation.py",
+    "t2_caregiver_schema_reconcile_20261024.py",
+])
+def test_caregiver_schema_reconciliation_refuses_to_guess_existing_identity_mapping(filename):
     import pytest
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
     from sqlalchemy import create_engine, inspect, text
 
     engine = create_engine("sqlite://")
-    migration = _load_caregiver_schema_migration()
+    migration = _load_caregiver_schema_migration(filename)
     try:
         with engine.begin() as connection:
             connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
