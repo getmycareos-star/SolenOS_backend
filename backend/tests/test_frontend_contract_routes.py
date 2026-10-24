@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.care import CareEvent, Caregiver
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -165,6 +166,42 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert downloaded.status_code == 200
         assert downloaded.content == original
         assert downloaded.headers["content-type"] == "image/png"
+
+        linked = client.post("/api/situation", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "raw_input": "Caregiver notes a detail that needs later review.",
+            "documents": [{
+                "id": "client-document-image",
+                "name": "medication.png",
+                "extracted_text": "",
+                "evidence_id": evidence_id,
+                "mime_type": "image/png",
+            }],
+        })
+        assert linked.status_code == 200, linked.text
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=linked.json()["care_event_id"]).first()
+        assert event is not None
+        assert evidence_id in (event.evidence_ids or [])
+        other_caregiver = db.query(Caregiver).filter_by(person_id=other_person_id).first()
+        assert other_caregiver is not None
+        other_caregiver_id = other_caregiver.id
+        db.close()
+
+        cross_record = client.post("/api/situation", headers={"Authorization": f"Bearer {other_token}"}, json={
+            "person_id": other_person_id,
+            "caregiver_id": other_caregiver_id,
+            "raw_input": "This record must not link another person's evidence.",
+            "documents": [{
+                "id": "foreign-document-image",
+                "name": "medication.png",
+                "extracted_text": "",
+                "evidence_id": evidence_id,
+                "mime_type": "image/png",
+            }],
+        })
+        assert cross_record.status_code == 400, cross_record.text
 
         denied = client.get(
             f"/api/v1/upload/{evidence_id}",
