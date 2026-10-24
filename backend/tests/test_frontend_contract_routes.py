@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, ConversationSession, CareNotification, CareNotificationPreference
-from app.models.care import Evidence
+from app.models.care import CareEvent, Evidence
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -95,6 +95,44 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
         assert other_reaction.status_code == 200, other_reaction.text
         db = TestingSessionLocal()
         assert db.query(CommunityPost).filter_by(id=post["id"]).count() == 1
+        db.close()
+    finally:
+        teardown()
+
+
+def test_companion_greeting_uses_qwen_prompt_and_never_writes_lcr(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_ollama_chat(base, model, messages):
+        captured["base"] = base
+        captured["model"] = model
+        captured["messages"] = messages
+        return "Hi! I'm here. What would you like to talk about?"
+
+    import app.api.collaboration as collaboration_api
+    monkeypatch.setattr(collaboration_api, "_ollama_url", lambda: ("http://ollama:11434", "qwen2.5:1.5b"))
+    monkeypatch.setattr(collaboration_api, "_ollama_chat", fake_ollama_chat)
+    try:
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["reply"] == "Hi! I'm here. What would you like to talk about?"
+        system_prompt = captured["messages"][0]["content"].lower()
+        assert "do not use a fixed or hardcoded greeting template" in system_prompt
+        assert "do not automatically ask 'how are you doing?'" in system_prompt
+        assert "plain, clear language" in system_prompt
+        assert "saba" in system_prompt
+        assert "saba" not in data["reply"].lower()
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+        assert db.query(ConversationMessage).filter_by(session_id=data["session_id"]).count() == 2
         db.close()
     finally:
         teardown()
