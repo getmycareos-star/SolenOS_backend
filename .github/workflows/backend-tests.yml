@@ -116,7 +116,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261024_09":
+              if revision != "20261024_10":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -125,6 +125,12 @@ jobs:
           conn.close()
           print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
           PY
+
+      - name: Run real HTTP + PostgreSQL identity and persistence E2E
+        env:
+          SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
+          APP_ENV: test
+        run: python backend/scripts/postgres_anonymous_e2e.py
 
 
   qwen-image-build:
