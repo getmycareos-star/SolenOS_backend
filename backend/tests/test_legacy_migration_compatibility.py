@@ -44,6 +44,19 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
         ):
             if name not in columns:
                 db.execute(f"ALTER TABLE caregivers ADD COLUMN {name} {definition}")
+        # The legacy production schema lacks the tables added by the other
+        # meaning of revision 20261022_03. Remove any that the current ORM
+        # baseline may have created so the forward compatibility migration must
+        # restore them after the revision is stamped.
+        existing_tables = {
+            row[0]
+            for row in db.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+        for table in ("care_action_outcomes", "care_assertions", "care_state_revisions"):
+            if table in existing_tables:
+                db.execute(f'DROP TABLE "{table}"')
         db.execute("UPDATE alembic_version SET version_num = '20261022_03'")
 
     # The production DB considers caregiver reconciliation applied, so Alembic
