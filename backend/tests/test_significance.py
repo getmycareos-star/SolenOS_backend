@@ -259,6 +259,7 @@ def test_gradual_decline_detected_via_trend():
         assert "trend" in types
         trend = [p for p in patterns if p.pattern_type.value == "trend"][0]
         assert trend.direction.value == "increasing"
+        assert all(p.confidence is None for p in patterns), "uncalibrated pattern confidence must remain unknown"
         db.close()
     finally:
         teardown_db()

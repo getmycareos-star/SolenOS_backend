@@ -8,7 +8,7 @@ class ReasoningMemoryBase(BaseModel):
     memory_type: str
     key: str
     value: List[Any]
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     source_evidence_ids: Optional[List[str]] = None
     is_open_question: bool = False
 

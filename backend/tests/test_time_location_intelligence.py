@@ -84,7 +84,7 @@ def test_parse_natural_language_today():
     result = parse_natural_language_time("today", ref)
     assert result["parsed_datetime"] is not None
     assert "Today" in result["interpretation"]
-    assert result["confidence"] >= 0.9
+    assert result["confidence"] is None
 
 
 def test_parse_natural_language_yesterday():
@@ -147,7 +147,7 @@ def test_parse_natural_language_three_months_ago():
 def test_parse_natural_language_unrecognized():
     ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
     result = parse_natural_language_time("xyzzy", ref)
-    assert result["confidence"] == 0.0
+    assert result["confidence"] is None
     assert result["parsed_datetime"] is None
 
 

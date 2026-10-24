@@ -385,7 +385,7 @@ def test_resolve_relative_time_unresolved():
         result = resolve_relative_time(db, "person-8", "3 days after discharge", None)
         assert result.is_resolved is False
         assert result.resolved_point is None
-        assert result.confidence == 0.0
+        assert result.confidence is None
     finally:
         teardown_db()
 
@@ -1002,7 +1002,7 @@ def test_case_d_relative_date_missing_reference():
         result = resolve_relative_time(db, "person-d", "3 days after discharge", None)
         assert result.is_resolved is False
         assert result.resolved_point is None
-        assert result.confidence == 0.0
+        assert result.confidence is None
         assert result.derivation_method == "missing_reference"
     finally:
         teardown_db()

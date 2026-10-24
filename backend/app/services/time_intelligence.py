@@ -160,7 +160,7 @@ def parse_natural_language_time(
         reference_time = utc_now()
 
     text_lower = text.lower().strip()
-    confidence = 0.9
+    confidence = None  # Parser confidence is not calibrated.
     interpretation = ""
     parsed_dt = None
     is_ambiguous = False
@@ -404,10 +404,10 @@ def parse_natural_language_time(
                     interpretation = f"Date may be ambiguous: {parsed_dt.isoformat()}"
                 else:
                     interpretation = f"Parsed date: {parsed_dt.isoformat()}"
-                confidence = 0.7
+                confidence = None
             except Exception:
                 interpretation = "Could not parse date"
-                confidence = 0.0
+                confidence = None
                 parsed_dt = None
 
     return {
@@ -418,7 +418,7 @@ def parse_natural_language_time(
         "confidence": confidence,
         "interpretation": interpretation,
         "is_ambiguous": is_ambiguous,
-        "provenance": "ai_estimated" if confidence < 1.0 else "caregiver_entered",
+        "provenance": "ai_estimated" if parsed_dt is not None else "unknown",
     }
 
 
