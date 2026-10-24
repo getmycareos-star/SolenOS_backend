@@ -153,7 +153,13 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
-        if path.startswith("/api/v1/community") or path == "/api/v1/upload":
+        if (
+            path.startswith("/api/v1/community")
+            or path == "/api/v1/upload"
+            or path.startswith("/api/v1/assistant/")
+        ):
+            # Qwen support is read-only and must inherit the authenticated
+            # caregiver session scope; it must not require a caller-supplied ID.
             target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
