@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -320,6 +321,23 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
+    # Defence in depth: enforce revocation on the persistence path itself, not
+    # only in middleware, so a revoked consent can never create a care event.
+    from app.models.collaboration import ConsentRecord
+    consent_record = (
+        db.query(ConsentRecord)
+        .populate_existing()
+        .filter_by(person_id=person_id, caregiver_id=caregiver_id)
+        .first()
+    )
+    if consent_record and consent_record.revoked_at is not None:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Consent has been revoked. Reaccept the required terms before writing care data.",
+                "code": "consent_revoked",
+            },
+        )
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
