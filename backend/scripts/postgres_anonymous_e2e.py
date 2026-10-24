@@ -138,6 +138,21 @@ def main():
 
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
+        status, _ = request("GET", f"/api/v1/evidence/{person_a}")
+        require(status == 401, f"unauthenticated evidence access must return 401, got {status}")
+
+        status, cross_write = request(
+            "POST",
+            "/api/situation",
+            token=token_b,
+            body={
+                "person_id": person_a,
+                "caregiver_id": caregiver_a,
+                "raw_input": "This cross-recipient write must be rejected",
+                "care_session_id": "postgres-e2e-cross-write",
+            },
+        )
+        require(status == 403, f"cross-care-record write must return 403, got {status}: {cross_write}")
 
         status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
         require(status == 200, f"token refresh expected 200, got {status}: {refreshed}")
