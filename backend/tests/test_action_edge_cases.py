@@ -39,6 +39,12 @@ def teardown_db():
     Base.metadata.drop_all(bind=engine)
 
 
+def test_actions_router_exposes_frontend_collection_path():
+    paths = set(app.openapi()["paths"])
+    assert "/api/v1/actions/{person_id}" in paths
+    assert "/api/v1/actions/actions/{person_id}" not in paths
+
+
 def test_action_supersession():
     setup_db()
     try:
