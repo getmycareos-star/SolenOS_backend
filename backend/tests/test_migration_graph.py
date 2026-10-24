@@ -33,8 +33,8 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     assert down_revisions["t2_auth_reconcile_20261023"] == "t2_caregiver_guard_20261024"
     assert down_revisions["t3_care_handoffs_20261023"] == "t2_auth_reconcile_20261023"
     assert down_revisions["t4_document_assets_20261023"] == "t3_care_handoffs_20261023"
-    assert down_revisions["t5_handoff_accountability_20261023"] == "t4_document_assets_20261023"
-    assert down_revisions["t5_proactive_items_20261024"] == "t5_handoff_accountability_20261023"
+    assert down_revisions["t5_handoff_20261023"] == "t4_document_assets_20261023"
+    assert down_revisions["t5_proactive_items_20261024"] == "t5_handoff_20261023"
 
 
 def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
