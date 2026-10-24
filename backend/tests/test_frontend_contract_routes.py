@@ -842,3 +842,55 @@ def test_qwen_runtime_status_is_authenticated_and_reports_actual_provider_contra
         assert data["hosted_inference_api"] is False
     finally:
         teardown()
+
+
+
+def test_qwen_support_workflows_cover_extended_care_modules_without_writes(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "I can help organize the recorded information and point out what still needs review.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        workflows = [
+            "daily_capture",
+            "document",
+            "community",
+            "appointment",
+            "after_appointment",
+            "handoff",
+            "professional_summary",
+            "open_loops",
+            "two_week_review",
+            "decision_outcome",
+            "medication_day",
+            "living_care_record",
+        ]
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        for workflow in workflows:
+            response = client.post(
+                "/api/v1/assistant/assist",
+                headers=headers,
+                json={"workflow": workflow, "text": f"Help me organize the {workflow.replace('_', ' ')} details."},
+            )
+            assert response.status_code == 200, f"{workflow}: {response.text}"
+            data = response.json()
+            assert data["workflow"] == workflow
+            assert data["ai_generated"] is True
+            assert data["review_required"] is True
+            assert data["written_to_lcr"] is False
+            assert data["persistence"] == "read_only_assistance"
+            assert data["authority"] == "solenos_care_record_and_caregiver"
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+    finally:
+        teardown()
