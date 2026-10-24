@@ -152,23 +152,15 @@ class ActionLifecycleService:
         if not evidence_items:
             return {"verified": False, "reason": "No valid evidence found"}
 
-        evidence_strengths = []
-        for ev in evidence_items:
-            if ev.type in ("appointment_record", "provider_note", "lab_result", "medication_list"):
-                evidence_strengths.append(0.9)
-            elif ev.type in ("caregiver_report", "patient_report"):
-                evidence_strengths.append(0.6)
-            elif ev.type in ("document", "form"):
-                evidence_strengths.append(0.7)
-            else:
-                evidence_strengths.append(0.4)
-
-        max_strength = max(evidence_strengths) if evidence_strengths else 0.0
+        # Evidence type is provenance metadata, not proof that the action occurred.
+        # Until a reviewed/verified status exists in the evidence model, do not assign
+        # synthetic strengths or label completion verified from a type label alone.
         return {
-            "verified": max_strength >= 0.5,
-            "confidence": max_strength,
+            "verified": False,
+            "confidence": None,
             "evidence_count": len(evidence_items),
-            "reason": "Evidence supports completion" if max_strength >= 0.5 else "Evidence too weak to confirm completion",
+            "review_required": True,
+            "reason": "Evidence is linked, but completion remains unverified until the source is reviewed.",
         }
 
 
