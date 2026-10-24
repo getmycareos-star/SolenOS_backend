@@ -280,12 +280,18 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
 
 @router.post("/sessions/revoke")
 def revoke_current_session(request: Request, db: Session = Depends(get_db)):
-    session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
-        raise HTTPException(status_code=401, detail="No active session was authenticated")
+    # Resolve the capability from the bearer supplied on this same request.
+    # Middleware validates it before the handler runs; hashing again avoids
+    # depending on request.state propagation across ASGI middleware wrappers.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid bearer session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
     row = db.query(AnonymousSession).filter(
-        AnonymousSession.id == session_id,
+        AnonymousSession.token_hash == token_hash,
         AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
     ).first()
     if row is None:
         raise HTTPException(status_code=401, detail="Session is already revoked or unavailable")
