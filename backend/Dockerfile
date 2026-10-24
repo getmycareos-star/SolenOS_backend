@@ -10,11 +10,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # mutations, which made this Railway image build fail before the model stage.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends bash ca-certificates curl libgomp1 tini; \
+    apt-get install -y --no-install-recommends bash ca-certificates curl libgomp1 tini zstd; \
     curl --retry 4 --retry-all-errors --connect-timeout 20 -fsSL \
-      https://ollama.com/download/ollama-linux-amd64.tgz -o /tmp/ollama.tgz; \
-    tar -xzf /tmp/ollama.tgz -C /usr; \
-    rm -f /tmp/ollama.tgz; \
+      https://ollama.com/download/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst; \
+    tar --zstd -xf /tmp/ollama.tar.zst -C /usr; \
+    rm -f /tmp/ollama.tar.zst; \
     rm -rf /var/lib/apt/lists/*; \
     ollama --version
 
