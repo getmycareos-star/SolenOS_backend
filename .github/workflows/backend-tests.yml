@@ -79,7 +79,7 @@ jobs:
                   CREATE TABLE caregivers (
                       id VARCHAR PRIMARY KEY,
                       email VARCHAR UNIQUE,
-                      password_hash TEXT,
+                      password_hash TEXT NOT NULL,
                       display_name VARCHAR,
                       care_recipient_ids JSONB,
                       role VARCHAR,
@@ -102,22 +102,24 @@ jobs:
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
           with conn.cursor() as cur:
               cur.execute("""
-                  SELECT column_name FROM information_schema.columns
+                  SELECT column_name, is_nullable FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'caregivers'
               """)
-              columns = {row[0] for row in cur.fetchall()}
+              columns = {row[0]: row[1] for row in cur.fetchall()}
               required = {"id", "email", "name", "relationship", "person_id", "timezone"}
-              missing = required - columns
+              missing = required - set(columns)
               if missing:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
+              if columns.get("password_hash") != "YES":
+                  raise SystemExit("password_hash must be nullable after migration 20261024_04")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261022_03":
+              if revision != "20261024_04":
                   raise SystemExit(f"unexpected Alembic head: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
               if count != 0:
                   raise SystemExit(f"expected empty fixture table, got {count} rows")
           conn.close()
-          print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
+          print("PostgreSQL legacy-schema migration passed; password_hash nullable; no caregiver rows fabricated.")
           PY
