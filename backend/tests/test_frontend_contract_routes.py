@@ -654,3 +654,87 @@ def test_community_summary_uses_qwen_only_when_a_model_response_is_generated(mon
         assert "not authoritative" in data["notice"]
     finally:
         teardown()
+
+
+
+def test_post_save_qwen_candidate_analysis_uses_persisted_source_and_does_not_write_lcr(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        headers = {"Authorization": f"Bearer {token}"}
+        source = "The caregiver reports that the evening routine was difficult."
+        saved = client.post("/api/situation", headers=headers, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "client_care_key": "local-workspace-key",
+            "raw_input": source,
+        })
+        assert saved.status_code == 200, saved.text
+        event_id = saved.json()["care_event_id"]
+
+        import app.services.qwen_gateway as qwen_gateway
+
+        monkeypatch.setattr(
+            qwen_gateway,
+            "qwen_chat",
+            lambda messages, **kwargs: __import__("json").dumps({
+                "observations": [{
+                    "subject": "evening routine",
+                    "observation": "The caregiver reports difficulty with the evening routine.",
+                    "source_quote": source,
+                }],
+                "open_questions": ["Which part of the routine was difficult?"],
+            }),
+        )
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        analysis = client.post("/api/v1/assistant/extract-candidates", headers=headers, json={"event_id": event_id})
+        assert analysis.status_code == 200, analysis.text
+        data = analysis.json()
+        assert data["qwen_extraction_status"] == "pending_review"
+        assert data["ai_generated"] is True
+        assert data["written_to_lcr"] is False
+        assert data["qwen_candidates"]["observations"][0]["source_quote"] == source
+        assert data["qwen_candidates"]["observations"][0]["review_status"] == "pending_review"
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+
+        denied = client.post(
+            "/api/v1/assistant/extract-candidates",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"event_id": "not-in-this-record"},
+        )
+        assert denied.status_code == 404
+    finally:
+        teardown()
+
+
+def test_daily_capture_save_does_not_wait_for_qwen(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import app.services.qwen_gateway as qwen_gateway
+
+        def model_must_not_run(*args, **kwargs):
+            raise AssertionError("Qwen must run only after the daily capture save receipt")
+
+        monkeypatch.setattr(qwen_gateway, "qwen_chat", model_must_not_run)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Caregiver recorded a quiet afternoon.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True
+        assert response.json()["id"]
+    finally:
+        teardown()
