@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from app.core.database import Base
 
 revision = "20261021_0001"
-down_revision = "t0_caregiver_schema_guard_20261024"
+down_revision = "t0_caregiver_guard_20261024"
 branch_labels = None
 depends_on = None
 
