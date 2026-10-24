@@ -33,17 +33,15 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
 
     with sqlite3.connect(db_path) as db:
         columns = {row[1] for row in db.execute("PRAGMA table_info(caregivers)")}
-        # Reproduce the caregiver-reconciliation schema already present in
-        # production. Include legacy account columns so the migration proves
-        # it relaxes their NOT NULL constraints rather than merely skipping
-        # absent columns. No caregiver or person rows are inserted.
+        # Reproduce the legacy caregiver-reconciliation columns already
+        # present in production. PostgreSQL-specific nullability changes for
+        # password_hash/display_name are tested by the PostgreSQL migration job
+        # because SQLite cannot faithfully exercise ALTER COLUMN nullability.
         for name, definition in (
             ("name", "VARCHAR NOT NULL DEFAULT ''"),
             ("relationship", "VARCHAR NOT NULL DEFAULT ''"),
             ("person_id", "VARCHAR"),
             ("timezone", "VARCHAR NOT NULL DEFAULT 'UTC'"),
-            ("password_hash", "VARCHAR NOT NULL DEFAULT ''"),
-            ("display_name", "VARCHAR NOT NULL DEFAULT ''"),
         ):
             if name not in columns:
                 db.execute(f"ALTER TABLE caregivers ADD COLUMN {name} {definition}")
@@ -72,10 +70,5 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         assert {"care_state_revisions", "care_assertions", "care_action_outcomes"} <= tables
-        caregiver_columns = {
-            row[1]: row for row in db.execute("PRAGMA table_info(caregivers)")
-        }
-        assert caregiver_columns["password_hash"][3] == 0
-        assert caregiver_columns["display_name"][3] == 0
         assert db.execute("SELECT COUNT(*) FROM persons").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM caregivers").fetchone()[0] == 0
