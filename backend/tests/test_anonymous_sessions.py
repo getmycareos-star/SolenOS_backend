@@ -534,3 +534,143 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     }
     assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
     assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()
+
+
+
+def test_action_routes_are_scoped_to_the_authenticated_care_recipient():
+    client = TestClient(app)
+    first = create_session(client, "First care recipient")
+    second = create_session(client, "Second care recipient")
+
+    from app.models.action import Action as ActionModel
+
+    db = TestSessionLocal()
+    try:
+        action = ActionModel(
+            id="action-scope-regression",
+            person_id=first["person"]["id"],
+            source_evidence_id="evidence-scope-regression",
+            source_passage="Arrange a follow-up appointment",
+            original_text="Arrange a follow-up appointment",
+            normalized_action="Arrange a follow-up appointment",
+            created_by_caregiver_id=first["caregiver"]["id"],
+            status="active",
+        )
+        db.add(action)
+        db.commit()
+    finally:
+        db.close()
+
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    own_actions = client.get(
+        f"/api/v1/actions/{first['person']['id']}",
+        headers=first_headers,
+    )
+    assert own_actions.status_code == 200, own_actions.text
+    assert any(item["id"] == "action-scope-regression" for item in own_actions.json())
+
+    cross_person_list = client.get(
+        f"/api/v1/actions/{first['person']['id']}",
+        headers=second_headers,
+    )
+    assert cross_person_list.status_code == 403, cross_person_list.text
+
+    cross_person_update = client.patch(
+        f"/api/v1/actions/action-scope-regression",
+        headers=second_headers,
+        json={"normalized_action": "Unauthorised change"},
+    )
+    assert cross_person_update.status_code == 403, cross_person_update.text
+
+    unauthenticated = client.get(f"/api/v1/actions/{first['person']['id']}")
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
+
+def test_action_router_has_no_duplicate_actions_prefix():
+    registered_paths = set(app.openapi()["paths"])
+    assert "/api/v1/actions/{person_id}" in registered_paths
+    assert "/api/v1/actions/{action_id}/complete" in registered_paths
+    assert "/api/v1/actions/actions/{person_id}" not in registered_paths
+
+
+
+def test_action_creation_cannot_bypass_medication_authority_with_fabricated_quote():
+    client = TestClient(app)
+    created = create_session(client, "Medication safety recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    from app.models.care import Evidence
+
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            id="medication-source-safety-regression",
+            person_id=created["person"]["id"],
+            type="document",
+            source_text="Prescriber instruction: take medication 5 mg daily.",
+            uploaded_by_caregiver_id=created["caregiver"]["id"],
+            evidence_status="uploaded",
+        )
+        db.add(evidence)
+        db.commit()
+    finally:
+        db.close()
+
+    fabricated = client.post(
+        "/api/v1/actions",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "source_evidence_id": "medication-source-safety-regression",
+            "source_passage": "Schedule an appointment",
+            "original_text": "Schedule an appointment",
+            "normalized_action": "Schedule an appointment",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert fabricated.status_code == 422, fabricated.text
+
+    unverified_medication = client.post(
+        "/api/v1/actions",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "source_evidence_id": "medication-source-safety-regression",
+            "source_passage": "Prescriber instruction: take medication 5 mg daily.",
+            "original_text": "Prescriber instruction: take medication 5 mg daily.",
+            "normalized_action": "Take medication 5 mg daily",
+            "is_medication_action": False,
+            "source_authority": "physician",
+            "created_by_caregiver_id": created["caregiver"]["id"],
+        },
+    )
+    assert unverified_medication.status_code == 409, unverified_medication.text
+    assert unverified_medication.json()["detail"]["requires_clinical_source_verification"] is True
+
+
+def test_reminder_routes_are_scoped_to_the_authenticated_care_recipient():
+    client = TestClient(app)
+    first = create_session(client, "First reminder recipient")
+    second = create_session(client, "Second reminder recipient")
+    own_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    own = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}",
+        headers=own_headers,
+    )
+    assert own.status_code == 200, own.text
+
+    cross_person = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}",
+        headers=other_headers,
+    )
+    assert cross_person.status_code == 403, cross_person.text
+
+    cross_person_inbox = client.get(
+        f"/api/v1/reminders/people/{first['person']['id']}/deliveries",
+        headers=other_headers,
+    )
+    assert cross_person_inbox.status_code == 403, cross_person_inbox.text

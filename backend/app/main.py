@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
+import asyncio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -22,13 +23,39 @@ from app.core.database import Base, database_schema_differences, get_db, Session
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.action import Action as ActionModel
+from app.models.reminder import CareReminder
 from app.api.anonymous_sessions import router as anonymous_sessions_router
+from app.api.reminders import router as reminders_router
+from app.api.medication_authority import router as medication_authority_router
+from app.services.reminder_worker import reminder_scheduler_loop
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
+_reminder_task = None
+
+
+@app.on_event("startup")
+async def start_reminder_scheduler():
+    global _reminder_task
+    enabled = os.getenv("ENABLE_REMINDER_SCHEDULER", "true").strip().lower() in {"1", "true", "yes", "on"}
+    if enabled and (_reminder_task is None or _reminder_task.done()):
+        _reminder_task = asyncio.create_task(reminder_scheduler_loop(), name="solenos-reminder-scheduler")
+
+
+@app.on_event("shutdown")
+async def stop_reminder_scheduler():
+    global _reminder_task
+    if _reminder_task is not None:
+        _reminder_task.cancel()
+        try:
+            await _reminder_task
+        except asyncio.CancelledError:
+            pass
+        _reminder_task = None
 
 # Production CORS is explicitly controlled by CORS_ORIGINS. Keep local
 # development origins only when no production allowlist is configured.
@@ -53,6 +80,8 @@ app.add_middleware(
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
+app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(medication_authority_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
@@ -153,6 +182,41 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 "revisions", "assertions", "freshness", "next-questions", "outcomes", "contradictions"
             }:
                 target_person_id = parts[-1]
+
+        if path.startswith("/api/v1/reminders"):
+            # Resolve reminder and action ownership explicitly because nested
+            # router wrappers may not expose their path parameters here.
+            parts = path.split("/")
+            if len(parts) >= 6 and parts[4] == "people":
+                target_person_id = parts[5]
+            elif len(parts) >= 6 and parts[4] == "actions":
+                action_owner = db.query(ActionModel.person_id).filter(ActionModel.id == parts[5]).scalar()
+                if action_owner:
+                    target_person_id = str(action_owner)
+            elif len(parts) >= 5 and parts[4] not in {"people", "actions"}:
+                reminder_owner = db.query(CareReminder.person_id).filter(CareReminder.id == parts[4]).scalar()
+                if reminder_owner:
+                    target_person_id = str(reminder_owner)
+
+        if path.startswith("/api/v1/actions"):
+            # FastAPI's nested included-router wrappers do not consistently
+            # expose child path parameters to this middleware. Resolve action
+            # ownership explicitly so list/detail/mutation routes stay scoped.
+            parts = path.split("/")
+            suffix = parts[4:] if len(parts) > 4 else []
+            if path == "/api/v1/actions/safety-check":
+                target_person_id = scoped_person_id
+            elif method == "GET" and len(suffix) == 1 and suffix[0] not in {"detail", "safety-check"}:
+                # GET /actions/{person_id} is the care-record action collection.
+                target_person_id = suffix[0]
+            elif method == "GET" and len(suffix) == 2 and suffix[1] == "uncompleted":
+                target_person_id = suffix[0]
+            else:
+                action_id = suffix[1] if suffix and suffix[0] == "detail" and len(suffix) > 1 else (suffix[0] if suffix else None)
+                if action_id and action_id != "safety-check":
+                    action_owner = db.query(ActionModel.person_id).filter(ActionModel.id == action_id).scalar()
+                    if action_owner:
+                        target_person_id = str(action_owner)
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
