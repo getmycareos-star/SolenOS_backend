@@ -243,6 +243,13 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 if handoff_owner:
                     target_person_id = str(handoff_owner)
 
+        if path.startswith("/api/v1/care-delta/runs/"):
+            # Delta history is addressed by person ID; bind that path value to
+            # the authenticated session before returning persisted snapshots.
+            parts = path.split("/")
+            if len(parts) >= 6:
+                target_person_id = parts[5]
+
         if path.startswith("/api/v1/reminders"):
             # Resolve reminder and action ownership explicitly because nested
             # router wrappers may not expose their path parameters here.
