@@ -11,7 +11,7 @@ def test_task2_and_care_continuity_migrations_form_one_head():
 
     # The caregiver legacy-constraint repair extends the current production
     # head; it must not create a second Alembic head.
-    assert script.get_heads() == ["20261024_04"]
+    assert script.get_heads() == ["20261024_05"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))

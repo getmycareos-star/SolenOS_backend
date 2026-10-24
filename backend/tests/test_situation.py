@@ -86,6 +86,13 @@ def test_post_situation_creates_evidence_and_event():
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
         assert data["evidence_id"] is not None
         assert data["care_event_id"] is not None
+        db = TestingSessionLocal()
+        evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
+        event = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+        assert evidence.confidence is None
+        assert event.confidence is None or event.confidence != 0.5
+        assert event.confidence is None or 0.0 <= event.confidence <= 1.0
+        db.close()
     finally:
         teardown_db()
 
@@ -112,6 +119,13 @@ def test_post_situation_with_documents():
                         "extracted_text": "Patient cleared for discharge with follow-up in 1 week.",
                         "mime_type": "application/pdf",
                         "ocr_confidence": 0.95,
+                    },
+                    {
+                        "id": "doc-2",
+                        "name": "low_confidence_scan.pdf",
+                        "extracted_text": "Text extraction confidence was zero.",
+                        "mime_type": "application/pdf",
+                        "ocr_confidence": 0.0,
                     }
                 ],
                 "provenance": {
@@ -128,6 +142,10 @@ def test_post_situation_with_documents():
         assert data["ok"] is True
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Document observation"
+        db = TestingSessionLocal()
+        evidence = db.query(Evidence).filter_by(person_id=created["person"]["id"]).all()
+        assert sorted(item.confidence for item in evidence) == [0.0, 0.95]
+        db.close()
     finally:
         teardown_db()
 
