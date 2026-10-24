@@ -86,11 +86,11 @@ jobs:
           with conn.cursor() as cur:
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261024_10":
+              if revision != "20261024_11":
                   raise SystemExit(f"unexpected fresh-schema Alembic head: {revision}")
               for table in (
                   "care_state_revisions", "care_assertions", "care_action_outcomes",
-                  "care_delta_runs", "care_circles", "care_circle_memberships",
+                  "care_delta_runs", "care_circles", "care_circle_memberships",\n              "care_notifications", "care_notification_preferences", "caregiver_consents", "share_intakes",
               ):
                   cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
                   if cur.fetchone()[0] is None:
@@ -159,7 +159,7 @@ jobs:
               with conn.cursor() as cur:
                   cur.execute("SELECT version_num FROM alembic_version")
                   revision = cur.fetchone()[0]
-                  if revision != "20261024_10":
+                  if revision != "20261024_11":
                       raise SystemExit(f"unexpected legacy-upgrade Alembic head: {revision}")
 
                   cur.execute("""
