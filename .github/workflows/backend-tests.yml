@@ -77,6 +77,9 @@ jobs:
       - name: Install backend and PostgreSQL driver
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary httpx
 
+      - name: Install Tesseract OCR runtime for integration smoke
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+
       - name: Recreate legacy account-oriented caregivers table
         run: |
           python - <<'PY'
@@ -160,6 +163,10 @@ jobs:
       - name: Exercise integrated PostgreSQL API continuity over HTTP
         working-directory: backend
         run: python scripts/postgres_anonymous_e2e.py
+
+      - name: Exercise integrated PostgreSQL document intake, OCR, and review over HTTP
+        working-directory: backend
+        run: python scripts/postgres_document_e2e.py
 
       - name: Create populated legacy-schema safety database
         run: |
