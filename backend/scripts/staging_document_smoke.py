@@ -188,11 +188,13 @@ def main() -> None:
                 for row in created:
                     person_id = row["person_id"]
                     caregiver_id = row["caregiver_id"]
-                    for table in ("document_assets", "capture_analyses", "care_events", "evidence", "anonymous_sessions"):
+                    for table in ("document_assets", "capture_analyses", "care_state_revisions", "care_events", "evidence", "anonymous_sessions"):
                         if table == "document_assets":
                             connection.execute(text("DELETE FROM document_assets WHERE person_id = :pid"), {"pid": person_id})
                         elif table == "capture_analyses":
                             connection.execute(text("DELETE FROM capture_analyses WHERE person_id = :pid"), {"pid": person_id})
+                        elif table == "care_state_revisions":
+                            connection.execute(text("DELETE FROM care_state_revisions WHERE person_id = :pid"), {"pid": person_id})
                         elif table == "care_events":
                             connection.execute(text("DELETE FROM care_events WHERE person_id = :pid"), {"pid": person_id})
                         elif table == "evidence":
