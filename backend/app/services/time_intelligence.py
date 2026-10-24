@@ -481,79 +481,199 @@ def generate_daily_intelligence(
     appointments: list,
     windows: list[dict],
     reference_time: Optional[datetime] = None,
+    actions: Optional[list[dict]] = None,
 ) -> dict:
+    """Build deterministic, source-linked prompts from the selected care record.
+
+    These are coordination cues, not clinical conclusions. A repeated event type
+    is reported as a repeated record only; it does not imply cause or deterioration.
+    """
     if reference_time is None:
         reference_time = utc_now()
+    if reference_time.tzinfo is None:
+        reference_time = reference_time.replace(tzinfo=timezone.utc)
     today = reference_time.date()
     overdue = []
     upcoming = []
+    proactive = []
     active_windows = get_active_care_windows(windows, reference_time)
     expired_windows = get_expired_care_windows(windows, reference_time)
 
+    def parse_datetime(value):
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
+
     for apt in appointments:
-        apt_time = apt.get("scheduled_at")
-        if isinstance(apt_time, str):
-            apt_time = datetime.fromisoformat(apt_time)
-        if apt_time and apt_time.tzinfo is None:
-            apt_time = apt_time.replace(tzinfo=timezone.utc)
-        if apt_time and apt_time < reference_time and apt.get("status") in ("scheduled", "upcoming"):
-            overdue.append(
-                {
-                    "type": "appointment",
-                    "title": apt.get("title"),
-                    "scheduled_at": apt_time.isoformat(),
-                    "location": apt.get("location"),
-                    "status": apt.get("status"),
-                }
-            )
-        elif apt_time and apt_time.date() == today and apt.get("status") == "scheduled":
-            upcoming.append(
-                {
-                    "type": "appointment",
-                    "title": apt.get("title"),
-                    "scheduled_at": apt_time.isoformat(),
-                    "location": apt.get("location"),
-                    "status": apt.get("status"),
-                }
-            )
+        apt_time = parse_datetime(apt.get("scheduled_at"))
+        if apt_time and apt_time < reference_time and apt.get("status") in ("scheduled", "upcoming", "today", "overdue"):
+            overdue.append({
+                "type": "appointment",
+                "id": apt.get("id"),
+                "title": apt.get("title"),
+                "scheduled_at": apt_time.isoformat(),
+                "location": apt.get("location"),
+                "status": apt.get("status"),
+                "source_evidence_ids": apt.get("evidence_ids") or [],
+                "time_provenance": apt.get("time_provenance"),
+            })
+            proactive.append({
+                "id": f"appointment:{apt.get('id') or apt.get('title')}",
+                "kind": "appointment_status_check",
+                "priority": "time_sensitive",
+                "title": f"Confirm outcome: {apt.get('title') or 'past appointment'}",
+                "message": "The recorded appointment time has passed and the record does not show a completed/resolved status. Confirm whether it occurred, was rescheduled, or still needs arranging.",
+                "status": apt.get("status"),
+                "occurred_at": apt_time.isoformat(),
+                "source_type": "appointment",
+                "source_id": apt.get("id"),
+                "source_evidence_ids": apt.get("evidence_ids") or [],
+                "time_provenance": apt.get("time_provenance"),
+            })
+        elif apt_time and apt_time.date() == today and apt.get("status") in ("scheduled", "upcoming", "today"):
+            upcoming.append({
+                "type": "appointment",
+                "id": apt.get("id"),
+                "title": apt.get("title"),
+                "scheduled_at": apt_time.isoformat(),
+                "location": apt.get("location"),
+                "status": apt.get("status"),
+                "source_evidence_ids": apt.get("evidence_ids") or [],
+                "time_provenance": apt.get("time_provenance"),
+            })
 
     for evt in events:
-        evt_time = evt.get("occurred_at")
-        if isinstance(evt_time, str):
-            evt_time = datetime.fromisoformat(evt_time)
-        if evt_time and evt_time.tzinfo is None:
-            evt_time = evt_time.replace(tzinfo=timezone.utc)
+        evt_time = parse_datetime(evt.get("occurred_at"))
         if evt_time and evt_time.date() == today:
-            upcoming.append(
-                {
-                    "type": "event",
-                    "title": evt.get("title"),
-                    "occurred_at": evt_time.isoformat(),
-                    "status": evt.get("status"),
-                    "event_type": evt.get("event_type"),
-                }
-            )
+            upcoming.append({
+                "type": "event",
+                "id": evt.get("id"),
+                "title": evt.get("title"),
+                "occurred_at": evt_time.isoformat(),
+                "status": evt.get("status"),
+                "event_type": evt.get("event_type"),
+                "source_evidence_ids": evt.get("evidence_ids") or [],
+                "time_provenance": evt.get("time_provenance"),
+            })
+
+    actionable_statuses = {"active", "conditional", "pending_confirmation", "blocked"}
+    for action in actions or []:
+        status = str(action.get("status") or "detected")
+        if status not in actionable_statuses:
+            continue
+        modality = str(action.get("modality") or "").lower()
+        if modality in {"informational", "optional", "prohibited"}:
+            continue
+        deadline = parse_datetime(action.get("deadline"))
+        is_overdue = bool(deadline and deadline < reference_time)
+        is_due_soon = bool(deadline and reference_time <= deadline <= reference_time + timedelta(days=7))
+        if is_overdue:
+            priority = "time_sensitive"
+            message = "The recorded deadline has passed and this action is not marked complete. Confirm its current status with the assigned caregiver or source."
+        elif status in {"pending_confirmation", "blocked"} or action.get("requires_confirmation"):
+            priority = "review_required"
+            message = "This action is awaiting confirmation or is blocked. Resolve the recorded dependency before treating it as ready to act."
+        elif is_due_soon:
+            priority = "upcoming"
+            message = "This recorded action has a deadline within seven days. Check the assignment and source before proceeding."
+        else:
+            priority = "coordination"
+            message = "This recorded action remains open. Confirm its owner and next step; no deadline is recorded." if deadline is None else "This recorded action remains open. Confirm its owner and next step."
+        title = str(action.get("normalized_action") or action.get("action_object") or action.get("original_text") or "Open care action")
+        if action.get("is_medication_action") and action.get("requires_confirmation"):
+            message = "Medication-related action requires confirmation. Do not treat this item as medication authority or a dosing instruction."
+            priority = "review_required"
+        proactive.append({
+            "id": f"action:{action.get('id')}",
+            "kind": "open_action",
+            "priority": priority,
+            "title": title,
+            "message": message,
+            "status": status,
+            "deadline": deadline.isoformat() if deadline else None,
+            "actor_id": action.get("actor_id"),
+            "actor_label": action.get("actor_label"),
+            "action_type": action.get("action_type"),
+            "is_medication_action": bool(action.get("is_medication_action")),
+            "requires_confirmation": bool(action.get("requires_confirmation")),
+            "extraction_confidence": action.get("extraction_confidence"),
+            "source_type": "action",
+            "source_id": action.get("id"),
+            "source_evidence_ids": [action.get("source_evidence_id")] if action.get("source_evidence_id") else [],
+            "source_passage": action.get("source_passage"),
+            "time_provenance": "recorded_action_deadline" if deadline else "no_deadline_recorded",
+        })
+
+    # Surface only repeated, exact event-type/title pairs in the last 30 days.
+    # Each item includes the records used so a caregiver can inspect the source.
+    recent_groups = {}
+    for evt in events:
+        evt_time = parse_datetime(evt.get("occurred_at"))
+        if not evt_time or evt_time > reference_time or evt_time < reference_time - timedelta(days=30):
+            continue
+        if str(evt.get("status") or "").lower() in {"cancelled", "superseded"}:
+            continue
+        event_type = " ".join(str(evt.get("event_type") or "").lower().split())
+        title_key = " ".join(str(evt.get("title") or "").lower().split())
+        if not event_type or not title_key:
+            continue
+        key = (event_type, title_key)
+        recent_groups.setdefault(key, []).append((evt, evt_time))
+    for (event_type, title_key), records in recent_groups.items():
+        if len(records) < 2:
+            continue
+        records.sort(key=lambda pair: pair[1], reverse=True)
+        latest_event, latest_time = records[0]
+        proactive.append({
+            "id": f"repeated-records:{event_type}:{title_key}",
+            "kind": "similar_recorded_concern",
+            "priority": "review_context",
+            "title": f"Repeated records: {latest_event.get('title')}",
+            "message": f"{len(records)} records with the same event type and title appear in the last 30 days. This is a record pattern only; it does not establish a cause, clinical trend, or deterioration.",
+            "count": len(records),
+            "first_recorded_at": min(pair[1] for pair in records).isoformat(),
+            "last_recorded_at": latest_time.isoformat(),
+            "source_type": "care_event",
+            "source_ids": [pair[0].get("id") for pair in records if pair[0].get("id")],
+            "source_evidence_ids": sorted({eid for pair in records for eid in (pair[0].get("evidence_ids") or [])}),
+            "time_provenance": "care_event_occurred_at",
+        })
+
+    proactive.sort(key=lambda item: (
+        {"time_sensitive": 0, "review_required": 1, "upcoming": 2, "coordination": 3, "review_context": 4}.get(item.get("priority"), 5),
+        str(item.get("deadline") or item.get("last_recorded_at") or ""),
+    ))
 
     summary_parts = []
     if overdue:
-        summary_parts.append(f"{len(overdue)} overdue appointment(s)")
+        summary_parts.append(f"{len(overdue)} overdue appointment(s) need outcome confirmation")
     if upcoming:
         summary_parts.append(f"{len(upcoming)} item(s) today")
     if active_windows:
         summary_parts.append(f"{len(active_windows)} active care window(s)")
     if expired_windows:
         summary_parts.append(f"{len(expired_windows)} care window(s) completed")
-    summary = ". ".join(summary_parts) if summary_parts else "No special items today."
+    open_action_count = sum(item.get("kind") == "open_action" for item in proactive)
+    if open_action_count:
+        summary_parts.append(f"{open_action_count} open action(s) need coordination")
+    repeated_count = sum(item.get("kind") == "similar_recorded_concern" for item in proactive)
+    if repeated_count:
+        summary_parts.append(f"{repeated_count} repeated record pattern(s) to review")
+    summary = ". ".join(summary_parts) if summary_parts else "No special items surfaced from the currently available records."
 
     return {
         "person_id": person_id,
-        "intelligence_date": datetime(
-            today.year, today.month, today.day, tzinfo=timezone.utc
-        ).isoformat(),
+        "intelligence_date": datetime(today.year, today.month, today.day, tzinfo=timezone.utc).isoformat(),
         "overdue_items": overdue,
         "upcoming_items": upcoming,
         "active_windows": active_windows,
         "expired_windows": expired_windows,
+        "proactive_items": proactive,
         "daily_summary": summary,
     }
 
