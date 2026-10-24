@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OLLAMA_MODELS=/root/.ollama/models
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl tini \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl tini \
     && curl -fsSL https://ollama.com/install.sh | sh \
     && rm -rf /var/lib/apt/lists/*
 
