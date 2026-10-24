@@ -29,6 +29,8 @@ import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
 import app.models.causal  # noqa: E402, F401
 import app.models.safety  # noqa: E402, F401
+import app.models.care_continuity  # noqa: E402, F401
+import app.models.care_circle  # noqa: E402, F401
 
 
 def get_db():

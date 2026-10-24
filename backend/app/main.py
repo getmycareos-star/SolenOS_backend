@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import hashlib
 import json
+import os
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from app.api.uncertainty import router as uncertainty_router
 from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
+from app.api.care_continuity import router as care_continuity_router
+from app.api.care_delta import router as care_delta_router
+from app.api.care_circle import router as care_circle_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -26,13 +30,23 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Production CORS is explicitly controlled by CORS_ORIGINS. Keep local
+# development origins only when no production allowlist is configured.
+_cors_env = os.getenv("CORS_ORIGINS", "").strip()
+if _cors_env:
+    _allowed_origins = [origin.strip().rstrip("/") for origin in _cors_env.split(",") if origin.strip()]
+elif settings.is_production:
+    _allowed_origins = ["https://solenosai.netlify.app"]
+else:
+    _allowed_origins = [
         "http://localhost:5173",
         "http://localhost:3000",
         "https://solenosai.netlify.app",
-    ],
+    ]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +59,9 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+app.include_router(care_continuity_router, prefix="/api/v1")
+app.include_router(care_delta_router, prefix="/api/v1")
+app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -128,6 +145,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # These legacy list endpoints use the care-recipient ID as the final
             # path segment. Resolve it explicitly before the session-scope check.
             target_person_id = path.rsplit("/", 1)[-1]
+        if path.startswith("/api/v1/care-continuity/"):
+            # Resolve care-record-scoped collection routes explicitly, rather
+            # than trusting a client-provided person ID or a child-record ID.
+            parts = path.split("/")
+            if len(parts) >= 5 and parts[-2] in {
+                "revisions", "assertions", "freshness", "next-questions", "outcomes", "contradictions"
+            }:
+                target_person_id = parts[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
         query_person_id = request.query_params.get("person_id")
@@ -213,6 +238,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         claimed_caregiver_id = None if path.endswith("/situation") and method == "GET" else (
             body_payload.get("caregiver_id")
             or body_payload.get("created_by_caregiver_id")
+            or body_payload.get("updated_by_caregiver_id")
+            or body_payload.get("resolved_by_caregiver_id")
             or body_payload.get("uploaded_by_caregiver_id")
             or request.query_params.get("caregiver_id")
             or request.query_params.get("created_by_caregiver_id")
@@ -222,6 +249,24 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "Caregiver attribution does not match this session"},
             )
+
+        # Care-continuity audit actors are always derived from the verified
+        # bearer session. Reject spoofed IDs above; also fill omitted/null actor
+        # fields so the persisted review history never silently loses authorship.
+        if path.startswith("/api/v1/care-continuity/") and isinstance(body_payload, dict):
+            actor_field = None
+            if method == "POST" and path.endswith("/assertions"):
+                actor_field = "created_by_caregiver_id"
+            elif method == "POST" and path.endswith("/outcomes"):
+                actor_field = "created_by_caregiver_id"
+            elif method == "PATCH" and path.endswith("/status") and "/assertions/" in path:
+                actor_field = "updated_by_caregiver_id"
+            elif method == "PATCH" and path.endswith("/resolution") and "/contradictions/" in path:
+                actor_field = "resolved_by_caregiver_id"
+            if actor_field:
+                body_payload[actor_field] = scoped_caregiver_id
+                body = json.dumps(body_payload).encode("utf-8")
+                request._body = body
 
         if not target_person_id:
             return JSONResponse(

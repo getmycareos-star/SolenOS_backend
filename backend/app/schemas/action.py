@@ -103,6 +103,7 @@ class ActionCompletionEvidence(BaseModel):
 
 class ActionUpdate(BaseModel):
     status: Optional[str] = None
+    actor_id: Optional[str] = None
     normalized_action: Optional[str] = None
     modality: Optional[str] = None
     deadline: Optional[datetime] = None

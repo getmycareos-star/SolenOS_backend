@@ -328,3 +328,219 @@ def test_done_for_now_cannot_pause_another_session_scope():
         },
     )
     assert denied.status_code == 403, denied.text
+
+
+def test_care_continuity_routes_enforce_person_scope_and_reviewer_attribution():
+    client = TestClient(app)
+    first = create_session(client, "First person")
+    second = create_session(client, "Second person")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+
+    created = client.post(
+        "/api/v1/care-continuity/assertions",
+        headers=first_headers,
+        json={
+            "person_id": first["person"]["id"],
+            "subject_type": "medication",
+            "subject_id": "medication-1",
+            "field": "dose",
+            "assertion_kind": "current_state",
+            "asserted_value": "5 mg",
+            "source_label": "caregiver report",
+            "evidence_ids": [],
+            "review_after_days": 30,
+            "created_by_caregiver_id": first["caregiver"]["id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assertion_id = created.json()["id"]
+
+    cross_record_read = client.get(
+        f"/api/v1/care-continuity/assertions/{second['person']['id']}",
+        headers=first_headers,
+    )
+    assert cross_record_read.status_code == 403, cross_record_read.text
+
+    spoofed_reviewer = client.patch(
+        f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+        headers=first_headers,
+        json={
+            "person_id": first["person"]["id"],
+            "assertion_status": "accepted",
+            "review_after_days": 30,
+            "updated_by_caregiver_id": second["caregiver"]["id"],
+        },
+    )
+    assert spoofed_reviewer.status_code == 403, spoofed_reviewer.text
+
+    accepted = client.patch(
+        f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+        headers=first_headers,
+        json={
+            "person_id": first["person"]["id"],
+            "assertion_status": "accepted",
+            "review_after_days": 30,
+            "updated_by_caregiver_id": first["caregiver"]["id"],
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["assertion_status"] == "accepted"
+
+
+def test_care_continuity_contradiction_keeps_both_reports_and_links_sources():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    person_id = created["person"]["id"]
+    for value in ("5 mg", "10 mg"):
+        response = client.post(
+            "/api/v1/care-continuity/assertions",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "subject_type": "medication",
+                "subject_id": "medication-1",
+                "field": "dose",
+                "assertion_kind": "current_state",
+                "asserted_value": value,
+                "source_label": "caregiver report",
+                "evidence_ids": [],
+                "review_after_days": 30,
+                "created_by_caregiver_id": created["caregiver"]["id"],
+            },
+        )
+        assert response.status_code == 201, response.text
+
+    reports = client.get(f"/api/v1/care-continuity/assertions/{person_id}", headers=headers)
+    conflicts = client.get(f"/api/v1/care-continuity/contradictions/{person_id}", headers=headers)
+    assert reports.status_code == 200, reports.text
+    assert {item["asserted_value"] for item in reports.json()} == {"5 mg", "10 mg"}
+    assert conflicts.status_code == 200, conflicts.text
+    conflict = next(item for item in conflicts.json() if item["field"] == "dose")
+    assert conflict["resolution_status"] == "unresolved"
+    assert set(conflict["source_assertion_ids"]) == {item["id"] for item in reports.json()}
+
+    for route in ("revisions", "freshness", "outcomes", "assertions", "contradictions"):
+        response = client.get(f"/api/v1/care-continuity/{route}/{person_id}", headers=headers)
+        assert response.status_code == 200, f"{route}: {response.text}"
+    questions = client.post(
+        f"/api/v1/care-continuity/next-questions/{person_id}", headers=headers, json={}
+    )
+    assert questions.status_code == 200, questions.text
+    assert any(item["source_kind"] == "contradiction" for item in questions.json())
+
+
+
+def test_care_continuity_audit_actors_default_to_authenticated_session():
+    client = TestClient(app)
+    created = create_session(client, "Actor attribution recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+
+    def report(value):
+        return client.post(
+            "/api/v1/care-continuity/assertions",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "subject_type": "medication",
+                "subject_id": "medication-actor-test",
+                "field": "dose",
+                "assertion_kind": "current_state",
+                "asserted_value": value,
+                "source_label": "caregiver report",
+                "evidence_ids": [],
+                "review_after_days": 30,
+                # Intentionally omit created_by_caregiver_id.
+            },
+        )
+
+    first = report("5 mg")
+    second = report("10 mg")
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["created_by_caregiver_id"] == caregiver_id
+    assert second.json()["created_by_caregiver_id"] == caregiver_id
+
+    assertion_id = first.json()["id"]
+    reviewed = client.patch(
+        f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "assertion_status": "accepted",
+            "review_after_days": 30,
+            # Intentionally omit updated_by_caregiver_id.
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assert reviewed.json()["updated_by_caregiver_id"] == caregiver_id
+
+    freshness = client.get(
+        f"/api/v1/care-continuity/freshness/{person_id}",
+        headers=headers,
+    )
+    assert freshness.status_code == 200, freshness.text
+    freshness_by_id = {item["assertion_id"]: item for item in freshness.json()}
+    assert freshness_by_id[first.json()["id"]]["status"] == "needs_confirmation"
+    assert "competing report" in freshness_by_id[first.json()["id"]]["explanation"].lower()
+
+    contradictions = client.get(
+        f"/api/v1/care-continuity/contradictions/{person_id}",
+        headers=headers,
+    )
+    assert contradictions.status_code == 200, contradictions.text
+    conflict = next(
+        item for item in contradictions.json()
+        if item["subject_id"] == "medication-actor-test" and item["field"] == "dose"
+    )
+
+    questions = client.post(
+        f"/api/v1/care-continuity/next-questions/{person_id}",
+        headers=headers,
+        json={},
+    )
+    assert questions.status_code == 200, questions.text
+    conflict_question = next(
+        item for item in questions.json() if item["source_kind"] == "contradiction"
+    )
+    outcome = client.post(
+        "/api/v1/care-continuity/outcomes",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "action_id": conflict_question["persisted_question_id"],
+            "action_type": "next_best_question",
+            "outcome_status": "useful",
+            # Intentionally omit created_by_caregiver_id.
+        },
+    )
+    assert outcome.status_code == 201, outcome.text
+    assert outcome.json()["created_by_caregiver_id"] == caregiver_id
+
+    resolved = client.patch(
+        f"/api/v1/care-continuity/contradictions/{conflict['id']}/resolution",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "resolution_status": "qualified",
+            "resolution_notes": "Reports remain competing; no source independently confirms either value.",
+            # Intentionally omit resolved_by_caregiver_id.
+        },
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["resolved_by_caregiver_id"] == caregiver_id
+
+    # "Qualified" retains uncertainty: it must not turn either competing report
+    # into a confirmed current state.
+    freshness_after_qualification = client.get(
+        f"/api/v1/care-continuity/freshness/{person_id}",
+        headers=headers,
+    )
+    assert freshness_after_qualification.status_code == 200, freshness_after_qualification.text
+    after_qualification = {
+        item["assertion_id"]: item for item in freshness_after_qualification.json()
+    }
+    assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
+    assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()

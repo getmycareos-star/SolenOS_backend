@@ -1,11 +1,12 @@
+
 {
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "python -m pip install --upgrade pip && python -m pip install -e ./backend"
+    "buildCommand": "python3 -m pip install --upgrade pip && python3 -m pip install -e ."
   },
   "deploy": {
-    "startCommand": "cd backend && alembic upgrade head && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT",
+    "startCommand": "python3 -m alembic upgrade head && python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT",
     "healthcheckPath": "/ready",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

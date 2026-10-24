@@ -1,7 +1,8 @@
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import create_engine, pool
+from sqlalchemy.engine import make_url
 
 from app.core.config import get_settings
 from app.core.database import Base
@@ -12,7 +13,24 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-database_url = configure_database_url(settings.database_url, railway_runtime=is_railway_runtime())
+database_url = configure_database_url(settings.database_url, railway_runtime=True)
+# Enforce Supabase Session Pooler username here as well: Railway pre-deploy
+# must never attempt authentication as the unqualified "postgres" user.
+_parsed_database_url = make_url(database_url)
+if (
+    _parsed_database_url.host
+    and _parsed_database_url.host.endswith(".pooler.supabase.com")
+    and _parsed_database_url.username == "postgres"
+):
+    _parsed_database_url = _parsed_database_url.set(
+        username="postgres.qyialgkfbwralolryhjx"
+    )
+database_url = _parsed_database_url.render_as_string(hide_password=False)
+print(
+    "Alembic database target:",
+    f"{_parsed_database_url.host}:{_parsed_database_url.port or 5432}",
+    f"user={_parsed_database_url.username}",
+)
 config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
@@ -31,9 +49,10 @@ def run_migrations_offline():
 
 
 def run_migrations_online():
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    # Use the already-normalized URL directly. engine_from_config can re-read
+    # an unqualified URL from alembic.ini in some deployment contexts.
+    connectable = create_engine(
+        database_url,
         poolclass=pool.NullPool,
         pool_pre_ping=True,
     )

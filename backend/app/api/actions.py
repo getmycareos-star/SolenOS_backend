@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
+from app.models.care import Caregiver as CaregiverModel
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -193,8 +194,31 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
     db_action = _get_action_or_404(db, action_id)
     update_data = update.model_dump(exclude_unset=True)
 
+    # Assignment labels and actor types are derived from a validated caregiver ID;
+    # callers cannot spoof them independently.
+    if ("actor_type" in update_data or "actor_label" in update_data) and "actor_id" not in update_data:
+        raise HTTPException(status_code=422, detail="Assignment identity must be updated through a linked caregiver ID")
+
+    # An assignee must be an existing caregiver linked to this same care record.
+    # Never trust a client-supplied caregiver ID without verifying membership.
+    if "actor_id" in update_data:
+        assignee_id = update_data["actor_id"]
+        if assignee_id:
+            assignee = (
+                db.query(CaregiverModel)
+                .filter(CaregiverModel.id == assignee_id, CaregiverModel.person_id == db_action.person_id)
+                .first()
+            )
+            if not assignee:
+                raise HTTPException(status_code=422, detail="Assignee must be linked to this care record")
+            update_data["actor_type"] = "caregiver"
+            update_data["actor_label"] = assignee.name
+        else:
+            update_data["actor_type"] = "unknown"
+            update_data["actor_label"] = None
+
     for field, value in update_data.items():
-        if value is not None:
+        if value is not None or field in {"actor_id", "actor_label"}:
             setattr(db_action, field, value)
 
     db.add(db_action)

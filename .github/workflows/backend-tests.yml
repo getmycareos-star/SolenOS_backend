@@ -34,3 +34,9 @@ jobs:
 
       - name: Run backend tests
         run: python -m pytest backend/tests -q
+
+      - name: Smoke-test the complete Alembic upgrade on SQLite
+        run: |
+          cd backend
+          trap 'rm -f .alembic-smoke.db' EXIT
+          DATABASE_URL=sqlite:///./.alembic-smoke.db python -m alembic upgrade head

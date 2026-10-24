@@ -104,6 +104,7 @@ class ContradictionBase(BaseModel):
     resolution_notes: Optional[str] = None
     resolved_by_caregiver_id: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
+    source_assertion_ids: Optional[List[str]] = None
 
 
 class ContradictionCreate(ContradictionBase):
