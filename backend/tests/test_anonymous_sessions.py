@@ -573,6 +573,7 @@ def test_owner_can_read_care_record_and_delta_runs_but_other_session_cannot():
     for path in (
         f"/api/v1/care-record/{person_id}",
         f"/api/v1/care-delta/runs/{person_id}",
+        f"/api/v1/actions/{person_id}?status=active",
     ):
         allowed = client.get(path, headers=first_headers)
         assert allowed.status_code == 200, f"{path}: expected owner access, got {allowed.status_code}: {allowed.text}"
