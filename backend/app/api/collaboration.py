@@ -332,6 +332,7 @@ async def upload_evidence(
         "application/msword",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
+        "application/json",
     }
     if evidence_type not in {"medication_photo", "document"}:
         raise HTTPException(status_code=422, detail="Unsupported evidence type")
