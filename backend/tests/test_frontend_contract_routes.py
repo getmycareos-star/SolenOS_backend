@@ -698,6 +698,32 @@ def test_post_save_qwen_candidate_analysis_uses_persisted_source_and_does_not_wr
         assert data["written_to_lcr"] is False
         assert data["qwen_candidates"]["observations"][0]["source_quote"] == source
         assert data["qwen_candidates"]["observations"][0]["review_status"] == "pending_review"
+        candidate_id = data["qwen_candidates"]["observations"][0]["candidate_id"]
+        assert data["candidates_persisted"] is True
+
+        # Re-running analysis is idempotent; it must not create duplicate candidates.
+        repeated = client.post("/api/v1/assistant/extract-candidates", headers=headers, json={"event_id": event_id})
+        assert repeated.status_code == 200, repeated.text
+        assert repeated.json()["qwen_candidates"]["observations"][0]["candidate_id"] == candidate_id
+        listed = client.get("/api/v1/assistant/candidates", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["written_to_lcr"] is False
+
+        reviewed = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=headers,
+            json={"decision": "accepted", "review_note": "Caregiver confirmed this is worth keeping for review."},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["written_to_lcr"] is False
+        assert reviewed.json()["status"] == "accepted"
+        repeated_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=headers,
+            json={"decision": "rejected"},
+        )
+        assert repeated_review.status_code == 409
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
