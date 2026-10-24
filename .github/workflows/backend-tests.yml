@@ -112,7 +112,7 @@ jobs:
           conn.close()
           PY
 
-      - name: Apply integrated Task 4 Alembic chain to PostgreSQL
+      - name: Apply integrated Task 5 Alembic chain to PostgreSQL
         working-directory: backend
         run: python -m alembic upgrade head
 
@@ -133,7 +133,7 @@ jobs:
               "auth_caregiver_account_links", "auth_caregiver_invitations",
               "auth_caregiver_profile_account_links", "auth_caregiver_profile_invitations",
               "daily_captures", "evidence_files", "capture_analyses",
-              "community_posts", "community_reactions",
+              "community_posts", "community_reactions", "daily_intelligence",
               "conversation_sessions", "conversation_messages",
           }
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
@@ -151,13 +151,17 @@ jobs:
                   raise SystemExit(f"caregivers schema missing columns: {sorted(missing_columns)}")
               cur.execute("SELECT version_num FROM alembic_version")
               heads = [row[0] for row in cur.fetchall()]
-              if heads != ["t4_document_assets_20261023"]:
+              if heads != ["t5_proactive_items_20261024"]:
                   raise SystemExit(f"unexpected integrated Alembic head(s): {heads}")
+              cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'daily_intelligence'")
+              intelligence_columns = {row[0] for row in cur.fetchall()}
+              if "proactive_items" not in intelligence_columns:
+                  raise SystemExit("daily_intelligence.proactive_items column is missing")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               if cur.fetchone()[0] != 0:
                   raise SystemExit("unexpected caregiver rows in the empty migration fixture")
           conn.close()
-          print("Integrated Task 4 PostgreSQL migration passed; one head, required schema present, no caregiver rows fabricated.")
+          print("Integrated Task 5 PostgreSQL migration passed; one head, required schema and proactive column present, no caregiver rows fabricated.")
           PY
 
       - name: Exercise integrated PostgreSQL API continuity over HTTP
@@ -167,6 +171,14 @@ jobs:
       - name: Exercise integrated PostgreSQL document intake, OCR, and review over HTTP
         working-directory: backend
         run: python scripts/postgres_document_e2e.py
+
+      - name: Exercise integrated PostgreSQL handoffs, reminders, and completion attribution over HTTP
+        working-directory: backend
+        run: python scripts/postgres_care_coordination_e2e.py
+
+      - name: Exercise integrated PostgreSQL Delta reconciliation and isolation over HTTP
+        working-directory: backend
+        run: python scripts/postgres_delta_e2e.py
 
       - name: Create populated legacy-schema safety database
         run: |
