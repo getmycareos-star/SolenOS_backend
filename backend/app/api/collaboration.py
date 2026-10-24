@@ -20,7 +20,7 @@ from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference
 
 router = APIRouter(tags=["community and companion"])
 
@@ -276,6 +276,108 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+@router.post("/sessions/revoke")
+def revoke_current_session(request: Request, db: Session = Depends(get_db)):
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="No active session was authenticated")
+    row = db.query(AnonymousSession).filter(
+        AnonymousSession.id == session_id,
+        AnonymousSession.revoked_at.is_(None),
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=401, detail="Session is already revoked or unavailable")
+    row.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"revoked": True, "session_id": row.id}
+
+
+class NotificationPreferencesPatch(BaseModel):
+    quiet_hours_enabled: Optional[bool] = None
+    reminders_enabled: Optional[bool] = None
+
+
+def _notification_json(row: CareNotification) -> dict:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "body": row.body,
+        "category": row.category,
+        "priority": row.priority,
+        "source_event_id": row.source_event_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "is_read": row.read_at is not None,
+        "read_at": row.read_at.isoformat() if row.read_at else None,
+    }
+
+
+@router.get("/notifications")
+def list_notifications(request: Request, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0), db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    rows = db.query(CareNotification).filter(
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+    ).order_by(CareNotification.created_at.desc(), CareNotification.id.desc()).offset(offset).limit(limit).all()
+    return {"items": [_notification_json(row) for row in rows], "limit": limit, "offset": offset}
+
+
+@router.get("/notifications/unread-count")
+def unread_notification_count(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    count = db.query(CareNotification).filter(
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+        CareNotification.read_at.is_(None),
+    ).count()
+    return {"unread_count": count}
+
+
+@router.patch("/notifications/{notification_id}/read")
+def mark_notification_read(notification_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    row = db.query(CareNotification).filter(
+        CareNotification.id == notification_id,
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if row.read_at is None:
+        row.read_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(row)
+    return _notification_json(row)
+
+
+@router.get("/notifications/preferences")
+def get_notification_preferences(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    row = db.query(CareNotificationPreference).filter_by(person_id=person_id, caregiver_id=caregiver_id).first()
+    return {
+        "quiet_hours_enabled": row.quiet_hours_enabled if row else False,
+        "reminders_enabled": row.reminders_enabled if row else True,
+    }
+
+
+@router.put("/notifications/preferences")
+def update_notification_preferences(payload: NotificationPreferencesPatch, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    row = db.query(CareNotificationPreference).filter_by(person_id=person_id, caregiver_id=caregiver_id).first()
+    if row is None:
+        row = CareNotificationPreference(person_id=person_id, caregiver_id=caregiver_id)
+        db.add(row)
+    if payload.quiet_hours_enabled is not None:
+        row.quiet_hours_enabled = payload.quiet_hours_enabled
+    if payload.reminders_enabled is not None:
+        row.reminders_enabled = payload.reminders_enabled
+    db.commit()
+    db.refresh(row)
+    return {
+        "quiet_hours_enabled": row.quiet_hours_enabled,
+        "reminders_enabled": row.reminders_enabled,
+    }
 
 
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
