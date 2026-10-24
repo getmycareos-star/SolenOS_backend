@@ -5,10 +5,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     OLLAMA_MODELS=/root/.ollama/models
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl tini \
-    && curl -fsSL https://ollama.com/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
+# Keep OS package installation and Ollama installation in separate build steps:
+# a failure now reports the exact failing command instead of masking it in one RUN.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends bash ca-certificates curl tini; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    curl --fail --show-error --location --retry 3 --retry-all-errors \
+      https://ollama.com/install.sh --output /tmp/ollama-install.sh; \
+    bash /tmp/ollama-install.sh; \
+    rm -f /tmp/ollama-install.sh
 
 WORKDIR /app
 COPY pyproject.toml ./
