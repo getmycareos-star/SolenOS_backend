@@ -50,8 +50,15 @@ def upgrade():
         ),
         "timezone": sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
     }
-    for column_name in missing:
-        op.add_column("caregivers", additions[column_name])
+    if bind.dialect.name == "sqlite":
+        # SQLite cannot ALTER TABLE to add a foreign-key constraint directly.
+        # Rebuild is safe here because the table was proven empty above.
+        with op.batch_alter_table("caregivers", recreate="always") as batch_op:
+            for column_name in missing:
+                batch_op.add_column(additions[column_name])
+    else:
+        for column_name in missing:
+            op.add_column("caregivers", additions[column_name])
 
 
 def downgrade():
