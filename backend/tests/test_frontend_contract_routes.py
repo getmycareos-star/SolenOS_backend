@@ -720,3 +720,37 @@ def test_qwen_status_is_public_health_and_assist_is_session_scoped(monkeypatch):
         db.close()
     finally:
         teardown()
+
+
+
+def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fallback(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        replies = iter([
+            "Saba, saba. I can help organize the recorded handoff information and identify what remains unknown.",
+            "I can organize the recorded handoff details and flag missing information without inventing a handoff.",
+        ])
+        calls = []
+        def qwen_chat(messages, **kwargs):
+            calls.append(messages)
+            return next(replies)
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_chat)
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "handoff", "text": "Help me organize the handoff."},
+        )
+        assert response.status_code == 200, response.text
+        assert len(calls) == 2
+        assert response.json()["reply"] == "I can organize the recorded handoff details and flag missing information without inventing a handoff."
+        assert response.json()["ai_generated"] is True
+        assert response.json()["written_to_lcr"] is False
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
+    finally:
+        teardown()
