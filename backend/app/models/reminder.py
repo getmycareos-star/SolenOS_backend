@@ -15,7 +15,7 @@ class CareReminder(Base):
     title = Column(String(180), nullable=False)
     note = Column(Text, nullable=True)
     due_at = Column(DateTime(timezone=True), nullable=False, index=True)
-    status = Column(String(16), nullable=False, default="open", index=True)
+    status = Column(String(16), nullable=False, default="open", server_default="open", index=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     completed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     completion_note = Column(Text, nullable=True)
