@@ -16,6 +16,7 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
+    assert all(len(revision_id) <= 32 for revision_id in revision_ids)
 
     down_revisions = {
         revision.revision: revision.down_revision
