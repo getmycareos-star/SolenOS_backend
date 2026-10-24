@@ -1033,6 +1033,23 @@ def record_feedback(
     if not person_id or not caregiver_id or not category or not detail:
         raise HTTPException(status_code=422, detail="person_id, caregiver_id, category and detail are required")
     _require_session_scope(request, db, person_id, caregiver_id)
+    if category in {"help_improve", "human_validation"}:
+        consent = db.query(ConsentRecord).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id
+        ).first()
+        if not (
+            consent
+            and consent.revoked_at is None
+            and consent.data_improvement_consent
+            and consent.medical_disclaimer_acknowledged
+            and consent.privacy_model_acknowledged
+            and consent.multi_caregiver_acknowledged
+            and consent.no_advertising_acknowledged
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Enable optional system-improvement consent in Privacy Settings before sending this feedback.",
+            )
     engine = LearningEngine(db)
     engine.record_feedback(person_id, category, detail, caregiver_id)
     engine.after_save(person_id)
