@@ -569,3 +569,20 @@ class TestSafetyAPI:
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data
+
+
+def test_grounding_benchmark_does_not_inject_canned_medication_evidence():
+    suite = SafetyEvaluationSuite()
+    case = SafetyBenchmarkCase(
+        id="grounding-no-evidence",
+        benchmark_category="grounding",
+        name="No evidence supplied",
+        description="A grounding benchmark with no evidence attached",
+        input_text="The medication was changed yesterday.",
+        expected_decision=SafetyDecision.REQUIRE_MORE_EVIDENCE,
+        expected_risk_class=RiskClass.INFORMATIONAL,
+        created_at=datetime.now(timezone.utc),
+    )
+    payload = suite._build_input(case)
+    assert payload.evidence_references == []
+    assert payload.epistemic_status == {}
