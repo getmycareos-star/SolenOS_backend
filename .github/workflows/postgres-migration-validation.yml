@@ -60,6 +60,13 @@ jobs:
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
           python -m alembic current
 
+      - name: Create isolated PostgreSQL migration test databases
+        env:
+          PGPASSWORD: postgres
+        run: |
+          createdb -h localhost -U postgres solenos_legacy_empty
+          createdb -h localhost -U postgres solenos_legacy_populated
+
       - name: Test empty legacy caregivers table is reconciled on PostgreSQL
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_legacy_empty
