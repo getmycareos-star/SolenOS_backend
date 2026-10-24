@@ -37,6 +37,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.action import Action as ActionModel
+from app.models.care_handoff import CareHandoff as CareHandoffModel
 from app.models.reminder import CareReminder
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.reminders import router as reminders_router
@@ -230,6 +231,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             }:
                 target_person_id = parts[-1]
 
+        if path.startswith("/api/v1/care-handoffs/"):
+            # Resolve a handoff's owner from PostgreSQL before allowing nested
+            # acknowledge, close, and event-history routes.
+            parts = path.split("/")
+            if len(parts) >= 5:
+                handoff_id = parts[4]
+                handoff_owner = db.query(CareHandoffModel.person_id).filter(
+                    CareHandoffModel.id == handoff_id
+                ).scalar()
+                if handoff_owner:
+                    target_person_id = str(handoff_owner)
+
         if path.startswith("/api/v1/reminders"):
             # Resolve reminder and action ownership explicitly because nested
             # router wrappers may not expose their path parameters here.
@@ -299,6 +312,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 payload = {}
 
             if isinstance(payload, dict):
+                if path == "/api/v1/care-handoffs" and method == "POST":
+                    target_person_id = payload.get("person_id") or target_person_id
                 supplied_person_id = payload.get("person_id")
                 if target_person_id and supplied_person_id and str(supplied_person_id) != str(target_person_id):
                     return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
