@@ -9,10 +9,6 @@ from app.schemas.safety import (
     SafetyDecision,
     RiskClass,
     SafetyInvariantViolation,
-    EvidenceReference,
-    SourceAuthority,
-    SourceQuality,
-    CurrentnessStatus,
 )
 from app.services.safety import SafetyEngine
 from app.services.risk_escalation import RiskClassifier, EscalationEngine
