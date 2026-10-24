@@ -62,3 +62,11 @@ class EvidenceUpload(Base):
     size_bytes = Column(Integer, nullable=False)
     sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ShareIntake(Base):
+    __tablename__ = "share_intakes"
+    id = Column(String, primary_key=True)
+    payload_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
