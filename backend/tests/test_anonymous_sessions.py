@@ -558,3 +558,25 @@ def test_owner_can_read_caregivers_events_and_evidence_but_other_session_cannot(
     for route in ("caregivers", "events", "evidence"):
         denied = client.get(f"/api/v1/{route}/{person_id}", headers=second_headers)
         assert denied.status_code == 403, f"{route}: expected cross-record denial, got {denied.status_code}: {denied.text}"
+
+
+
+def test_owner_can_read_care_record_and_delta_runs_but_other_session_cannot():
+    """Person-scoped integration routes must resolve identity before authorization."""
+    client = TestClient(app)
+    first = create_session(client, "Owner care record route")
+    second = create_session(client, "Other care record route")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    person_id = first["person"]["id"]
+
+    for path in (
+        f"/api/v1/care-record/{person_id}",
+        f"/api/v1/care-delta/runs/{person_id}",
+        f"/api/v1/actions/{person_id}?status=active",
+    ):
+        allowed = client.get(path, headers=first_headers)
+        assert allowed.status_code == 200, f"{path}: expected owner access, got {allowed.status_code}: {allowed.text}"
+
+        denied = client.get(path, headers=second_headers)
+        assert denied.status_code == 403, f"{path}: expected cross-record denial, got {denied.status_code}: {denied.text}"
