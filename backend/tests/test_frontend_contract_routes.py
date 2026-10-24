@@ -165,7 +165,7 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
 
 
 def test_original_upload_download_and_cross_record_denial(monkeypatch):
-    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         original = b"\x89PNG\r\n\x1a\n" + b"test-image-bytes"
