@@ -63,12 +63,20 @@ def get_ollama_config() -> tuple[str, str, float]:
     return base, model, timeout
 
 
-def qwen_chat(messages: list[dict], *, timeout: float | None = None) -> str:
+def qwen_chat(
+    messages: list[dict],
+    *,
+    timeout: float | None = None,
+    response_format: dict | str | None = None,
+    options: dict | None = None,
+) -> str:
     base, model, configured_timeout = get_ollama_config()
-    body = json.dumps(
-        {"model": model, "messages": messages, "stream": False},
-        ensure_ascii=False,
-    ).encode("utf-8")
+    payload = {"model": model, "messages": messages, "stream": False}
+    if response_format is not None:
+        payload["format"] = response_format
+    if options:
+        payload["options"] = options
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         base + "/api/chat",
         data=body,
