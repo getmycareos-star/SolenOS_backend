@@ -183,7 +183,7 @@ def main():
             f"/api/v1/events/{person_id}",
             f"/api/v1/insights/{person_id}",
             f"/api/v1/observations/{person_id}",
-            f"/api/v1/reasoning/{person_id}",
+            f"/api/v1/reasoning/{person_id}/summary",
             f"/api/v1/actions/{person_id}",
             f"/api/v1/appointments/{person_id}",
         ):
