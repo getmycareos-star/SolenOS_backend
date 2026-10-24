@@ -1,5 +1,6 @@
 import base64
 import importlib
+from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -736,5 +737,41 @@ def test_daily_capture_save_does_not_wait_for_qwen(monkeypatch):
         assert response.status_code == 200, response.text
         assert response.json()["success"] is True
         assert response.json()["id"]
+    finally:
+        teardown()
+
+
+
+def test_situation_hydration_projects_real_persisted_event_without_fabricating_observations(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="caregiver_note",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Persisted note",
+            description="A caregiver recorded a note.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        event_id = event.id
+        db.close()
+
+        response = client.get(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ok"] is True
+        assert data["has_context_root"] is True
+        assert data["active_care_situation"]["root_event_id"] == event_id
+        assert data["active_care_situation"]["observations"] == []
+        assert any(row["id"] == event_id for row in data["events"])
     finally:
         teardown()
