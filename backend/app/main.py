@@ -16,6 +16,7 @@ from app.api.safety import router as safety_router
 from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
+from app.api.collaboration import router as collaboration_router
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -62,6 +63,7 @@ app.include_router(causal_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
+app.include_router(collaboration_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -139,6 +141,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        # Shared Community feed and private uploads still require a valid bearer
+        # session. Their record scope is derived from that session, never a body ID.
+        if path.startswith("/api/v1/community") or path.startswith("/api/v1/upload"):
+            target_person_id = scoped_person_id
 
         # Middleware runs before FastAPI populates request.path_params. Resolve
         # the known person-scoped GET routes from their documented URL shape as
@@ -208,7 +214,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     if supplied_person_id and str(supplied_person_id) != str(scoped_person_id):
                         return JSONResponse(status_code=403, content={"detail": "This session is not authorised for that care record"})
                     if method == "POST" and payload.get("caregiver_id"):
-                        payload["client_care_key"] = payload["caregiver_id"]
+                        payload["client_care_key"] = payload.get("client_care_key") or payload["caregiver_id"]
                     payload["person_id"] = scoped_person_id
                     payload["caregiver_id"] = scoped_caregiver_id
                     target_person_id = scoped_person_id
@@ -328,10 +334,22 @@ def get_situation(
     query values are UI continuity keys only and never authorize data access.
     This endpoint does not synthesize clinical interpretation or sample data.
     """
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_scope_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_scope_id:
+    # Revalidate the bearer capability at the route boundary so hydration
+    # does not depend solely on ASGI request.state propagation.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    person_id = str(authorized_session.person_id)
+    caregiver_scope_id = str(authorized_session.caregiver_id)
 
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
