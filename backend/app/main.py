@@ -151,11 +151,19 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         }
         person_route_collections = {
             "appointments", "insights", "caregivers", "daily-intelligence", "actions",
+            "care-record",
         }
         if len(route_parts) == 4 and route_parts[:2] == ["api", "v1"]:
             collection = route_parts[2]
             if collection in person_route_collections:
                 target_person_id = route_parts[3]
+        elif (
+            len(route_parts) == 5
+            and route_parts[:2] == ["api", "v1"]
+            and route_parts[2:4] == ["care-delta", "runs"]
+        ):
+            # Delta run history is scoped by person ID in the final segment.
+            target_person_id = route_parts[4]
         elif len(route_parts) == 5 and route_parts[:2] == ["api", "v1"]:
             collection, candidate_person_id, suffix = route_parts[2:]
             if person_route_suffixes.get(collection) == suffix:
