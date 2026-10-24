@@ -86,10 +86,14 @@ jobs:
                       id VARCHAR PRIMARY KEY,
                       email VARCHAR UNIQUE,
                       password_hash TEXT NOT NULL,
+                      name VARCHAR NOT NULL,
+                      relationship VARCHAR NOT NULL,
+                      person_id VARCHAR NOT NULL,
+                      timezone VARCHAR NOT NULL DEFAULT 'UTC',
+                      created_at TIMESTAMPTZ DEFAULT now(),
                       display_name VARCHAR,
                       care_recipient_ids JSONB,
-                      role VARCHAR,
-                      created_at TIMESTAMPTZ DEFAULT now()
+                      role VARCHAR
                   )
               """)
           conn.close()
