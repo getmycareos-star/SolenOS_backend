@@ -328,3 +328,30 @@ def test_done_for_now_cannot_pause_another_session_scope():
         },
     )
     assert denied.status_code == 403, denied.text
+
+
+def test_qwen_status_inherits_authenticated_session_scope(monkeypatch):
+    client = TestClient(app)
+    created = create_session(client, "Qwen status recipient")
+
+    import app.api.collaboration as collaboration_module
+    monkeypatch.setattr(
+        collaboration_module,
+        "qwen_runtime_status",
+        lambda: {
+            "available": True,
+            "model": "qwen2.5:1.5b",
+            "provider": "local_ollama",
+            "hosted_inference_api": False,
+        },
+    )
+
+    response = client.get(
+        "/api/v1/assistant/status",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["provider"] == "local_ollama"
+
+    unauthenticated = client.get("/api/v1/assistant/status")
+    assert unauthenticated.status_code == 401, unauthenticated.text
