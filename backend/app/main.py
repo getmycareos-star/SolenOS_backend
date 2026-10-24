@@ -338,7 +338,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Revocation is enforced server-side for every write, not only by the UI.
         # Consent can be reaccepted through the consent endpoint itself.
         if method in {"POST", "PUT", "PATCH", "DELETE"} and path != "/api/v1/consent":
-            consent_record = db.query(ConsentRecord).filter_by(
+            # Refresh identity-map state before enforcing revocation. Consent may
+            # have been changed by the immediately preceding request.
+            db.expire_all()
+            consent_record = db.query(ConsentRecord).populate_existing().filter_by(
                 person_id=scoped_person_id, caregiver_id=scoped_caregiver_id
             ).first()
             if consent_record and consent_record.revoked_at is not None:
