@@ -1,3 +1,5 @@
+import os
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -17,6 +19,10 @@ Base = declarative_base()
 
 # Register all ORM models before local schema creation or Alembic autogeneration.
 import app.models.care  # noqa: E402, F401
+import app.models.auth_identity  # noqa: E402, F401
+import app.models.capture  # noqa: E402, F401
+import app.models.capture_analysis  # noqa: E402, F401
+import app.models.collaboration  # noqa: E402, F401
 import app.models.anonymous_session  # noqa: E402, F401
 import app.models.interaction_session  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
@@ -34,6 +40,7 @@ import app.models.safety  # noqa: E402, F401
 import app.models.care_continuity  # noqa: E402, F401
 import app.models.care_circle  # noqa: E402, F401
 import app.models.care_handoff  # noqa: E402, F401
+import app.models.document_asset  # noqa: E402, F401
 
 
 def get_db():
@@ -124,6 +131,6 @@ def database_schema_differences(bind=None):
 # Local development keeps its low-friction SQLite bootstrap. Railway production
 # must run reviewed Alembic migrations before ASGI startup; create_all() cannot
 # alter existing PostgreSQL tables and must not silently mutate production schema.
-if not RAILWAY_RUNTIME:
+if not RAILWAY_RUNTIME and os.getenv("ALEMBIC_RUNNING") != "1":
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()

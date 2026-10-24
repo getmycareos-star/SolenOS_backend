@@ -18,6 +18,18 @@ from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.care_handoffs import router as care_handoffs_router
+from app.api.document_extraction import router as document_extraction_router
+from app.api.authentication import router as authentication_router, current_account
+from app.api.capture import router as capture_router
+from app.api.collaboration import (
+    community_router,
+    conversation_router,
+    team_router,
+    professional_router,
+    router as collaboration_router,
+)
+from app.core.authz import assert_person_access, assert_account_is_caregiver
+from app.models.auth_identity import AuthAccount
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -93,6 +105,14 @@ app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_circle_router, prefix="/api/v1/care-circle")
 app.include_router(care_handoffs_router, prefix="/api/v1")
+app.include_router(document_extraction_router, prefix="/api/v1")
+app.include_router(authentication_router, prefix="/api/v1")
+app.include_router(capture_router, prefix="/api/v1")
+app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(community_router, prefix="/api/v1")
+app.include_router(conversation_router, prefix="/api/v1")
+app.include_router(team_router, prefix="/api/v1")
+app.include_router(professional_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -114,6 +134,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
+    # Account-authenticated routes enforce their own bearer/account/person grants
+    # through FastAPI dependencies. Do not force these requests through the
+    # legacy anonymous-session resolver.
+    if (
+        path.startswith("/api/v1/auth/")
+        or path.startswith("/api/v1/daily/")
+        or path.startswith("/api/v1/community")
+        or path.startswith("/api/v1/conversation")
+        or path.startswith("/api/v1/team")
+        or path.startswith("/api/v1/professional-dashboard")
+    ):
+        return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
 
@@ -125,6 +157,17 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             content={"detail": "A valid SolenOS anonymous session is required"},
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
+        raw_length = request.headers.get("content-length")
+        try:
+            request_length = int(raw_length) if raw_length is not None else None
+        except ValueError:
+            request_length = None
+        if request_length is None or request_length < 1:
+            return JSONResponse(status_code=411, content={"detail": "Content-Length is required for document uploads"})
+        if request_length > 11 * 1024 * 1024:
+            return JSONResponse(status_code=413, content={"detail": "Document upload exceeds the request size limit"})
 
     token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
@@ -170,6 +213,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        if path == "/api/v1/documents/ocr-status" and method == "GET":
+            target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
@@ -221,12 +266,32 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                         target_person_id = str(action_owner)
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
+        # Document extraction has no caller-selected person ID; the validated bearer
+        # session is its only permitted care-record scope.
+        if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
+            target_person_id = scoped_person_id
+        elif path.startswith("/api/v1/documents/"):
+            # Binary download and candidate review are scoped through the owning
+            # evidence row; never trust an evidence ID as proof of access.
+            parts = path.split("/")
+            if len(parts) >= 6 and parts[4] not in {"extract", "intake"}:
+                document_owner = db.query(Evidence.person_id).filter(
+                    Evidence.id == parts[4],
+                    Evidence.type == "document",
+                ).scalar()
+                if document_owner:
+                    target_person_id = str(document_owner)
+
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
         body = b""
         payload = {}
-        if method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if path in {"/api/v1/documents/extract", "/api/v1/documents/intake"} and method == "POST":
+            # Preserve the multipart stream for FastAPI's bounded upload parser.
+            # Do not buffer the full binary document in this middleware.
+            pass
+        elif method in {"POST", "PUT", "PATCH", "DELETE"}:
             body = await request.body()
             try:
                 payload = json.loads(body.decode("utf-8")) if body else {}

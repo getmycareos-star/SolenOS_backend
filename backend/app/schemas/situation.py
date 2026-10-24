@@ -17,6 +17,10 @@ class SituationDocument(BaseModel):
     extracted_text: str
     mime_type: Optional[str] = None
     ocr_confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    extraction_source: Optional[str] = None
+    extraction_warnings: Optional[List[str]] = None
+    sha256: Optional[str] = Field(None, pattern=r"^[a-f0-9]{64}$")
+    extracted_char_count: Optional[int] = Field(None, ge=0)
 
 
 class SituationInput(BaseModel):
