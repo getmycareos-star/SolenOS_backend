@@ -659,7 +659,7 @@ def test_community_summary_uses_qwen_only_when_a_model_response_is_generated(mon
 
 
 def test_post_save_qwen_candidate_analysis_uses_persisted_source_and_does_not_write_lcr(monkeypatch):
-    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
     try:
         headers = {"Authorization": f"Bearer {token}"}
         source = "The caregiver reports that the evening routine was difficult."
@@ -724,6 +724,17 @@ def test_post_save_qwen_candidate_analysis_uses_persisted_source_and_does_not_wr
             json={"decision": "rejected"},
         )
         assert repeated_review.status_code == 409
+
+        other_headers = {"Authorization": f"Bearer {other_token}"}
+        isolated_list = client.get("/api/v1/assistant/candidates", headers=other_headers)
+        assert isolated_list.status_code == 200
+        assert isolated_list.json() == []
+        isolated_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=other_headers,
+            json={"decision": "rejected"},
+        )
+        assert isolated_review.status_code == 404
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
