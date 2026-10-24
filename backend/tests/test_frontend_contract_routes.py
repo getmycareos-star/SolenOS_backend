@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -691,11 +691,21 @@ def test_qwen_status_and_read_only_assist_are_bound_to_the_authenticated_session
             lambda messages, **kwargs: "I can help organize the available appointment details and identify unanswered questions.",
         )
         headers = {"Authorization": f"Bearer {token}"}
+        db = TestingSessionLocal()
+        persons_before = db.query(Person).count()
+        caregivers_before = db.query(Caregiver).count()
+        db.close()
 
-        status = client.get("/api/v1/assistant/status", headers=headers)
+        # Runtime health is infrastructure-only and must not mint a synthetic care record.
+        status = client.get("/api/v1/assistant/status")
         assert status.status_code == 200, status.text
         assert status.json()["provider"] == "local_ollama"
         assert status.json()["hosted_inference_api"] is False
+
+        db = TestingSessionLocal()
+        assert db.query(Person).count() == persons_before
+        assert db.query(Caregiver).count() == caregivers_before
+        db.close()
 
         assist = client.post("/api/v1/assistant/assist", headers=headers, json={
             "workflow": "appointment",
