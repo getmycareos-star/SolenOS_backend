@@ -77,7 +77,7 @@ def teardown():
 
 
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
-    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         forged = client.post("/api/v1/community", headers=auth, json={
