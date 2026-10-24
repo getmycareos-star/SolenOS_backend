@@ -45,7 +45,7 @@ def upgrade():
         "person_id": sa.Column(
             "person_id",
             sa.String(),
-            sa.ForeignKey("persons.id"),
+            sa.ForeignKey("persons.id", name="fk_caregivers_person_id_persons"),
             nullable=False,
         ),
         "timezone": sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
