@@ -112,8 +112,8 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261022_03":
-                  raise SystemExit(f"unexpected Alembic head: {revision}")
+              if revision != "20261024_05":
+                  raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
               if count != 0:
