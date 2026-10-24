@@ -149,7 +149,7 @@ def _form_change_situation(
         pattern_ids=[p.id for p in relevant_patterns],
         change_ids=[c.id for c in changes],
         significance_assessment_id=primary.id if primary else None,
-        confidence=_situation_confidence(changes, relevant_patterns),
+        confidence=None,
         alternative_interpretations=alternative_interpretations,
         context=context,
         attention_candidate=attention,
@@ -175,13 +175,9 @@ def _primary_significance(db: Session, change: Change) -> Optional[SignificanceA
     )
 
 
-def _situation_confidence(changes: List[Change], patterns: List[Pattern]) -> float:
-    sigs = [c.confidence for c in changes]
-    pats = [p.confidence for p in patterns]
-    vals = sigs + pats
-    if not vals:
-        return 0.0
-    return round(min(vals), 3)
+def _situation_confidence(changes: List[Change], patterns: List[Pattern]) -> Optional[float]:
+    # These upstream scores are not calibrated; unknown must remain unknown.
+    return None
 
 
 def _build_situation_context(db: Session, person_id: str, changes: List[Change],
@@ -269,7 +265,7 @@ def _derive_alternatives(db: Session, person_id: str, changes: List[Change],
                 f"Documentation or reporting change rather than actual change for {c.subject_type} "
                 f"({c.change_type.value}, n={c.current_count})"
             ),
-            "confidence": 0.3,
+            "confidence": None,
             "supporting_evidence": "No documentation-density delta computed for this window; treat as unconfirmed hypothesis.",
         }
         if ep["contradictions"]:
@@ -331,11 +327,11 @@ def _form_pattern_situation(
         significance_assessment_id=(
             next((v.id for v in change_sigs.values()), None)
         ),
-        confidence=min(p.confidence for p in active_patterns) * 0.9,
+        confidence=None,
         alternative_interpretations=[
             {
                 "interpretation": "Convergence may indicate a systemic change, or may reflect inconsistent reporting across signals.",
-                "confidence": 0.4,
+                "confidence": None,
                 "supporting_evidence": f"{len(active_patterns)} active patterns.",
             }
         ],
@@ -391,14 +387,14 @@ def _form_frequency_situation(
 ) -> Optional[Situation]:
     change_sigs = {c.id: _primary_significance(db, c) for c in changes}
     change_sigs = {k: v for k, v in change_sigs.items() if v is not None}
-    att = any(s.attention_candidate for s in change_sigs.values()) if change_sigs else pattern.confidence >= 0.6
+    att = any(s.attention_candidate for s in change_sigs.values()) if change_sigs else False
     foll = any(s.follow_up_candidate for s in change_sigs.values()) if change_sigs else pattern.pattern_strength.value == "established"
 
     context = {
         "type": "frequency_situation_understanding",
         "significance_verdict": SignificanceVerdict.MEANINGFUL_CANDIDATE.value if att else SignificanceVerdict.NOT_MEANINGFUL.value,
-        "significance_confidence": min(s.significance_confidence for s in change_sigs.values()) if change_sigs else round(pattern.confidence * 0.9, 3),
-        "evidence_confidence": min(s.evidence_confidence for s in change_sigs.values()) if change_sigs else round(pattern.confidence * 0.8, 3),
+        "significance_confidence": min(s.significance_confidence for s in change_sigs.values()) if change_sigs else None,
+        "evidence_confidence": min(s.evidence_confidence for s in change_sigs.values()) if change_sigs else None,
         "evidence_status": EvidenceStatus.REPORTED.value,
         "per_change_significance": {
             cid: {"verdict": s.verdict.value, "significance_confidence": s.significance_confidence}
@@ -431,7 +427,7 @@ def _form_frequency_situation(
         pattern_ids=[pattern.id],
         change_ids=[c.id for c in changes],
         significance_assessment_id=(next(iter(change_sigs.values()), None).id if change_sigs else None),
-        confidence=pattern.confidence * 0.9,
+        confidence=None,
         alternative_interpretations=[
             {
                 "interpretation": f"Increase may be documentation-driven for {pattern.subject_type}",
