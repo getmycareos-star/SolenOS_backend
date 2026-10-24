@@ -572,7 +572,7 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     headers = {"Authorization": f"Bearer {token}"}
     try:
-        png_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"medication image bytes"
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"medication image bytes"
         medication = client.post(
             "/api/v1/upload",
             headers=headers,
@@ -582,7 +582,7 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         assert medication.status_code == 201, medication.text
         medication_id = medication.json()["evidence_id"]
 
-        docx_bytes = b"PK\\x03\\x04" + b"minimal docx fixture"
+        docx_bytes = b"PK\x03\x04" + b"minimal docx fixture"
         document = client.post(
             "/api/v1/upload",
             headers=headers,
