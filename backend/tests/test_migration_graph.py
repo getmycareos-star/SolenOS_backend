@@ -21,6 +21,8 @@ def test_task2_and_care_continuity_migrations_form_one_head():
         revision.revision: revision.down_revision
         for revision in revisions
     }
+    assert down_revisions["t0_caregiver_schema_guard_20261024"] is None
+    assert down_revisions["20261021_0001"] == "t0_caregiver_schema_guard_20261024"
     assert down_revisions["20261022_01"] == "20261022_0005"
     assert down_revisions["20261022_03"] == "20261022_02"
     assert down_revisions["t2_care_continuity_20261024"] == "20261022_03"
@@ -52,6 +54,7 @@ def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_202
 
 
 @pytest.mark.parametrize("filename", [
+    "t0_caregiver_schema_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
     "t2_caregiver_schema_reconcile_20261024.py",
 ])
@@ -75,6 +78,7 @@ def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_ta
 
 
 @pytest.mark.parametrize("filename", [
+    "t0_caregiver_schema_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
     "t2_caregiver_schema_reconcile_20261024.py",
 ])
