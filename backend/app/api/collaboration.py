@@ -428,7 +428,7 @@ def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
 
 
 def _companion_reply_needs_revision(text: str) -> bool:
-    words = re.findall(r"[a-zA-Z']+", (text or "").casefold())
+    words = re.findall(r"[^\\W_]+(?:['’][^\\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
         return True
     if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
