@@ -100,6 +100,30 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
         teardown()
 
 
+def test_social_greeting_cannot_be_saved_as_care_evidence(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        response = client.post(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "client_care_key": "browser-care-key",
+                "raw_input": "hi",
+                "care_session_id": "greeting-only-session",
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "conversation_only"
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_qwen_prompt_and_never_writes_lcr(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     captured = {}
