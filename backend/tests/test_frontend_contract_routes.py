@@ -1,3 +1,4 @@
+import base64
 import importlib
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, ConversationSession
+from app.models.care import Evidence
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
