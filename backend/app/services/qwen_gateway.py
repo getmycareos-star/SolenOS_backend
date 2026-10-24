@@ -167,3 +167,39 @@ def extract_review_candidates(
         if isinstance(question, str) and question.strip()
     ]
     return {"observations": observations, "open_questions": clean_questions}
+
+
+
+def qwen_runtime_status() -> dict:
+    """Confirm the configured model is actually served by the local Ollama runtime."""
+    base, model, timeout = get_ollama_config()
+    request = urllib.request.Request(
+        base + "/api/tags",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=min(timeout, 10.0)) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="SolenOS local Qwen runtime is not responding.",
+        ) from exc
+    models = payload.get("models")
+    if not isinstance(models, list):
+        raise HTTPException(status_code=503, detail="Ollama returned an invalid model inventory.")
+    names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
+    if model not in names:
+        raise HTTPException(
+            status_code=503,
+            detail="The configured Qwen model is not installed in the local runtime.",
+        )
+    return {
+        "available": True,
+        "model": model,
+        "provider": "local_ollama",
+        "inference_api": "ollama_native_http",
+        "hosted_inference_api": False,
+        "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service",
+    }
