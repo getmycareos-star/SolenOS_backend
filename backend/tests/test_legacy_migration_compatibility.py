@@ -1,9 +1,9 @@
-"""Regression test for the deployed 20261022_03 revision-ID collision.
+"""Regression test for upgrading a database stamped at the legacy 20261022_03 revision.
 
 The production database was stamped 20261022_03 after caregiver-schema
-reconciliation, while this codebase originally used that ID for care-continuity
-tables. This reproduces the legacy stamp and verifies the forward compatibility
-migration restores missing tables without inserting fake people or caregivers.
+reconciliation, while care-continuity tables were absent. This reproduces that
+legacy stamp and verifies forward migrations restore the missing tables without
+inserting fake people or caregivers.
 """
 import os
 import sqlite3
@@ -28,7 +28,7 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
             text=True,
         )
 
-    # Build the schema immediately before the conflicting revision.
+    # Build the schema immediately before the legacy caregiver revision.
     alembic("upgrade", "20261022_02")
 
     with sqlite3.connect(db_path) as db:
@@ -48,7 +48,7 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
 
         # Some current baseline versions may create these ORM tables before
         # the revision that normally creates them; remove them to simulate the
-        # deployed database where the legacy revision skipped that migration.
+        # deployed database where continuity tables were still absent.
         existing_tables = {
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -64,7 +64,7 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
 
     with sqlite3.connect(db_path) as db:
         head = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        assert head == "20261024_05"
+        assert head == "20261024_07"
         tables = {
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
