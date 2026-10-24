@@ -1,14 +1,14 @@
 """Add care-record-scoped notifications and preferences.
 
-Revision ID: 20261024_10
-Revises: 20261024_09
+Revision ID: 20261024_11
+Revises: 20261024_10
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261024_10"
-down_revision = "20261024_09"
+revision = "20261024_11"
+down_revision = "20261024_10"
 branch_labels = None
 depends_on = None
 
