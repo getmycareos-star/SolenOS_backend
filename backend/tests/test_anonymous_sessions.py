@@ -534,3 +534,27 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     }
     assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
     assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()
+
+
+def test_owner_can_read_caregivers_events_and_evidence_but_other_session_cannot():
+    """Guard the route-level identity handoff seen in Railway smoke logs."""
+    client = TestClient(app)
+    first = create_session(client, "Owner scope person")
+    second = create_session(client, "Different scope person")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    person_id = first["person"]["id"]
+
+    # All three routes take the care-recipient ID, not caregiver ID, in the path.
+    caregivers = client.get(f"/api/v1/caregivers/{person_id}", headers=first_headers)
+    assert caregivers.status_code == 200, caregivers.text
+    assert any(item["id"] == first["caregiver"]["id"] for item in caregivers.json())
+
+    events = client.get(f"/api/v1/events/{person_id}", headers=first_headers)
+    assert events.status_code == 200, events.text
+    evidence = client.get(f"/api/v1/evidence/{person_id}", headers=first_headers)
+    assert evidence.status_code == 200, evidence.text
+
+    for route in ("caregivers", "events", "evidence"):
+        denied = client.get(f"/api/v1/{route}/{person_id}", headers=second_headers)
+        assert denied.status_code == 403, f"{route}: expected cross-record denial, got {denied.status_code}: {denied.text}"
