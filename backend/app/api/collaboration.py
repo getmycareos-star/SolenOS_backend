@@ -369,7 +369,10 @@ async def community_experience(payload: dict, request: Request, db: Session = De
                     },
                 ],
             )
-            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\bsaba\b", summary):
+            if _companion_reply_needs_revision(summary) or _contains_unrequested_saba(
+                summary,
+                observation + "\n" + "\n".join(item["content"] for item in matches),
+            ):
                 summary = None
                 provider_status = "invalid_response"
             else:
@@ -614,7 +617,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
     )
-    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
+    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+        reply, payload.text + "\n" + "\n".join(context_lines)
+    ):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
     return {
         "workflow": payload.workflow,
@@ -720,7 +725,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     },
                 ],
             )
-            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
+            if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+                reply, payload.text + "\n" + "\n".join(context_lines)
+            ):
                 raise HTTPException(
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",
