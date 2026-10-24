@@ -86,6 +86,7 @@ from app.schemas.temporal import (
     SubjectTemporalView,
 )
 from app.services.learning import LearningEngine, SavePipelineEvent
+from app.services.qwen_support import analyze_capture_candidates
 from app.services.time_intelligence import (
     parse_natural_language_time,
     calculate_care_windows,
@@ -346,7 +347,20 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         source_id=event.id,
         caregiver_id=caregiver_id,
     )
-    return {"success": True, "id": event.id, "event_type": event.event_type, "recorded_at": event.recorded_at}
+
+    # Qwen is a supporting extractor only. The capture is already persisted;
+    # model failure must not undo it or imply that extraction succeeded.
+    source_for_review = json.dumps(detail, ensure_ascii=False, default=str)
+    qwen_result = analyze_capture_candidates(source_for_review)
+    return {
+        "success": True,
+        "id": event.id,
+        "event_type": event.event_type,
+        "recorded_at": event.recorded_at,
+        "qwen_extraction_status": qwen_result["status"],
+        "qwen_candidates": qwen_result["candidates"],
+        "qwen_is_authoritative": False,
+    }
 
 
 @router.post("/daily/log")
