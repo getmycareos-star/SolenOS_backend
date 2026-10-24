@@ -43,3 +43,102 @@ jobs:
           cd backend
           trap 'rm -f .alembic-smoke.db' EXIT
           DATABASE_URL=sqlite:///./.alembic-smoke.db python -m alembic upgrade head
+
+  postgres-integrated-migrations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_test
+          POSTGRES_PASSWORD: solenos_ci_only
+          POSTGRES_DB: solenos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_test -d solenos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and PostgreSQL driver
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary
+
+      - name: Recreate legacy account-oriented caregivers table
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      email VARCHAR UNIQUE,
+                      password_hash TEXT,
+                      display_name VARCHAR,
+                      care_recipient_ids JSONB,
+                      role VARCHAR,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+          conn.close()
+          PY
+
+      - name: Apply integrated Task 4 Alembic chain to PostgreSQL
+        working-directory: backend
+        run: python -m alembic upgrade head
+
+      - name: Verify integrated schema, one head, and no fabricated caregiver rows
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          required_tables = {
+              "persons", "caregivers", "care_events", "evidence", "actions",
+              "anonymous_sessions", "interaction_sessions", "care_state_revisions",
+              "care_assertions", "care_action_outcomes", "care_reminders",
+              "reminder_delivery_attempts", "medication_authority_verifications",
+              "care_handoffs", "care_handoff_events", "document_assets",
+              "auth_accounts", "auth_sessions", "capture_analyses",
+              "conversation_sessions", "conversation_messages",
+          }
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+              tables = {row[0] for row in cur.fetchall()}
+              missing_tables = required_tables - tables
+              if missing_tables:
+                  raise SystemExit(f"integrated Task 4 schema missing tables: {sorted(missing_tables)}")
+              cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'caregivers'")
+              columns = {row[0] for row in cur.fetchall()}
+              required_columns = {"id", "email", "name", "relationship", "person_id", "timezone"}
+              missing_columns = required_columns - columns
+              if missing_columns:
+                  raise SystemExit(f"caregivers schema missing columns: {sorted(missing_columns)}")
+              cur.execute("SELECT version_num FROM alembic_version")
+              heads = [row[0] for row in cur.fetchall()]
+              if heads != ["t4_document_assets_20261023"]:
+                  raise SystemExit(f"unexpected integrated Alembic head(s): {heads}")
+              cur.execute("SELECT COUNT(*) FROM caregivers")
+              if cur.fetchone()[0] != 0:
+                  raise SystemExit("unexpected caregiver rows in the empty migration fixture")
+          conn.close()
+          print("Integrated Task 4 PostgreSQL migration passed; one head, required schema present, no caregiver rows fabricated.")
+          PY
