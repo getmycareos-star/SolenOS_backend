@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timezone, timedelta
 import json
 from app.core.database import get_db
 from app.models.care import (
@@ -1250,7 +1250,7 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
         .order_by(CareEventModel.occurred_at.desc())
-        .limit(50)
+        .limit(100)
         .all()
     )
     appointments = (
@@ -1264,13 +1264,26 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
         .filter(CareWindowModel.person_id == person_id, CareWindowModel.status == "active")
         .all()
     )
+    actions = (
+        db.query(ActionModel)
+        .filter(
+            ActionModel.person_id == person_id,
+            ActionModel.status.in_(["active", "conditional", "pending_confirmation", "blocked"]),
+        )
+        .order_by(ActionModel.deadline.asc().nullslast(), ActionModel.created_at.asc())
+        .limit(200)
+        .all()
+    )
     event_dicts = [
         {
             "id": e.id,
             "title": e.title,
-            "occurred_at": e.occurred_at.isoformat(),
+            "description": e.description,
+            "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
             "status": e.status,
             "event_type": e.event_type,
+            "evidence_ids": e.evidence_ids or [],
+            "time_provenance": e.time_provenance,
         }
         for e in events
     ]
@@ -1278,9 +1291,11 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
         {
             "id": a.id,
             "title": a.title,
-            "scheduled_at": a.scheduled_at.isoformat(),
+            "scheduled_at": a.scheduled_at.isoformat() if a.scheduled_at else None,
             "location": a.location,
             "status": a.status,
+            "evidence_ids": a.evidence_ids or [],
+            "time_provenance": a.time_provenance,
         }
         for a in appointments
     ]
@@ -1291,20 +1306,60 @@ def get_daily_intelligence(person_id: str, db: Session = Depends(get_db)):
             "started_at": w.started_at.isoformat(),
             "ends_at": w.ends_at.isoformat(),
             "status": w.status,
+            "source_event_id": w.source_event_id,
+            "time_provenance": w.time_provenance,
         }
         for w in windows
     ]
-    result = generate_daily_intelligence(person_id, event_dicts, appointment_dicts, window_dicts)
-    db_intel = DailyIntelligenceModel(
-        person_id=person_id,
-        intelligence_date=datetime.fromisoformat(result["intelligence_date"]),
-        overdue_items=result["overdue_items"],
-        upcoming_items=result["upcoming_items"],
-        active_windows=result["active_windows"],
-        expired_windows=result["expired_windows"],
-        daily_summary=result["daily_summary"],
+    action_dicts = [
+        {
+            "id": a.id,
+            "normalized_action": a.normalized_action,
+            "action_object": a.action_object,
+            "original_text": a.original_text,
+            "source_passage": a.source_passage,
+            "source_evidence_id": a.source_evidence_id,
+            "action_type": a.action_type,
+            "modality": a.modality,
+            "status": a.status,
+            "deadline": a.deadline.isoformat() if a.deadline else None,
+            "actor_id": a.actor_id,
+            "actor_label": a.actor_label,
+            "is_medication_action": a.is_medication_action,
+            "requires_confirmation": a.requires_confirmation,
+            "extraction_confidence": a.extraction_confidence,
+        }
+        for a in actions
+    ]
+    result = generate_daily_intelligence(
+        person_id, event_dicts, appointment_dicts, window_dicts, actions=action_dicts
     )
-    db.add(db_intel)
+    intelligence_date = datetime.fromisoformat(result["intelligence_date"])
+    db_intel = (
+        db.query(DailyIntelligenceModel)
+        .filter(
+            DailyIntelligenceModel.person_id == person_id,
+            DailyIntelligenceModel.intelligence_date >= intelligence_date,
+            DailyIntelligenceModel.intelligence_date < intelligence_date + timedelta(days=1),
+        )
+        .order_by(DailyIntelligenceModel.generated_at.desc())
+        .first()
+    )
+    if db_intel is None:
+        db_intel = DailyIntelligenceModel(
+            person_id=person_id,
+            intelligence_date=intelligence_date,
+        )
+        db.add(db_intel)
+    db_intel.overdue_items = result["overdue_items"]
+    db_intel.upcoming_items = result["upcoming_items"]
+    db_intel.active_windows = result["active_windows"]
+    db_intel.expired_windows = result["expired_windows"]
+    db_intel.proactive_items = result["proactive_items"]
+    db_intel.daily_summary = result["daily_summary"]
+    db_intel.source_event_ids = [e.id for e in events]
+    db_intel.source_appointment_ids = [a.id for a in appointments]
+    db_intel.source_care_window_ids = [w.id for w in windows]
     db.commit()
     db.refresh(db_intel)
     return db_intel
