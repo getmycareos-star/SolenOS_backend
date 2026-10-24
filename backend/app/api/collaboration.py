@@ -310,16 +310,63 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
+async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
     _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
     if not observation:
         raise HTTPException(status_code=422, detail="observation is required")
     matches = _literal_matches(db, observation)
+    summary = None
+    provider_status = "unavailable"
+    ai_generated = False
+    if matches:
+        try:
+            summary = await asyncio.to_thread(
+                qwen_chat,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
+                            "published peer experiences. They are personal reports, not verified facts, clinical "
+                            "evidence, or advice. Do not infer diagnosis or cause, recommend treatment, or invent "
+                            "themes not present in the posts. State briefly that experiences differ. Use plain, "
+                            "accessible English, no unexplained foreign words, and at most three short sentences."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "caregiver_observation": observation,
+                            "published_peer_posts": [
+                                {"post_id": item["post_id"], "content": item["content"]}
+                                for item in matches
+                            ],
+                        }, ensure_ascii=False),
+                    },
+                ],
+            )
+            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\\bsaba\\b", summary):
+                summary = None
+                provider_status = "invalid_response"
+            else:
+                provider_status = "available"
+                ai_generated = True
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            provider_status = "unavailable"
     return {
-        "summary": None, "matches": matches, "post_ids": [m["post_id"] for m in matches],
-        "provider_status": "not_configured", "ai_generated": False,
-        "notice": "These are literal matches from published caregiver posts. No AI summary was generated.",
+        "summary": summary,
+        "matches": matches,
+        "post_ids": [m["post_id"] for m in matches],
+        "provider_status": provider_status,
+        "ai_generated": ai_generated,
+        "notice": (
+            "Qwen summarized published peer experiences; these are not authoritative care facts."
+            if ai_generated else
+            "These are literal matches from published caregiver posts. No AI summary was generated."
+        ),
         "matching_method": "literal_keyword_overlap_not_clinical_advice",
     }
 
@@ -355,6 +402,124 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
+
+
+@router.get("/assistant/status")
+def qwen_assistant_status(request: Request, db: Session = Depends(get_db)):
+    _scope(request, db)
+    return qwen_runtime_status()
+
+
+@router.post("/assistant/assist")
+async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
+    """Read-only Qwen support across SolenOS; never mutates the Living Care Record."""
+    person_id, caregiver_id = _scope(request, db)
+    context_lines: list[str] = []
+    source_event_ids: list[str] = []
+    source_evidence_ids: list[str] = []
+
+    events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+    if payload.workflow == "two_week_review":
+        from datetime import timedelta
+        events_query = events_query.filter(CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14))
+    events = events_query.order_by(CareEvent.occurred_at.desc()).limit(20 if payload.workflow == "two_week_review" else 8).all()
+    for event in events:
+        context_lines.append(
+            f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
+        )
+        source_event_ids.append(str(event.id))
+
+    appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+    if payload.appointment_id:
+        appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
+    appointments = appointments_query.order_by(Appointment.scheduled_at.asc()).limit(8).all()
+    if payload.appointment_id and not appointments:
+        raise HTTPException(status_code=404, detail="Appointment not found in this care record")
+    for appointment in appointments:
+        context_lines.append(
+            f"Recorded appointment [{appointment.id}]: {appointment.title}; status={appointment.status}; "
+            f"scheduled={appointment.scheduled_at.isoformat() if appointment.scheduled_at else 'unknown'}"
+        )
+
+    if payload.evidence_ids:
+        evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+            EvidenceModel.id.in_(payload.evidence_ids),
+        ).all()
+        by_id = {str(row.id): row for row in evidence_rows}
+        if len(by_id) != len(set(payload.evidence_ids)):
+            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
+        for evidence_id in payload.evidence_ids:
+            row = by_id[evidence_id]
+            context_lines.append(
+                f"Caregiver-provided evidence [{row.id}] ({row.type}, status={row.evidence_status}): "
+                f"{(row.source_text or '')[:1800]}"
+            )
+            source_evidence_ids.append(str(row.id))
+
+    if payload.workflow == "handoff":
+        handoffs = db.query(CaregiverHandoff).filter(
+            CaregiverHandoff.person_id == person_id
+        ).order_by(CaregiverHandoff.timestamp.desc()).limit(5).all()
+        for handoff in handoffs:
+            context_lines.append(
+                f"Recorded handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
+                f"scope={handoff.scope or 'not specified'}; completed={bool(handoff.is_completed)}; "
+                f"context={(handoff.context or '')[:800]}"
+            )
+
+    if payload.workflow == "community":
+        for match in _literal_matches(db, payload.text)[:3]:
+            context_lines.append(
+                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
+                f"{match['content'][:700]}"
+            )
+
+    guidance = {
+        "daily_capture": "Organize only what the caregiver reports today. Do not infer diagnosis, cause, or unreported measurements.",
+        "document": "Explain only supplied/authorized document text; distinguish quoted source facts from interpretation and flag uncertainty.",
+        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
+        "appointment": "Prepare questions and organize recorded facts for the appointment. Never invent appointment details or recommend treatment.",
+        "after_appointment": "Organize the caregiver's report after an appointment; distinguish clinician-reported words, caregiver understanding, unanswered questions and reported next steps.",
+        "handoff": "Help prepare a clear caregiver handoff from recorded and supplied facts. Do not create, assign, send or acknowledge the handoff.",
+        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details.",
+        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in the supplied context. Never invent tasks, owners, deadlines or completion states.",
+        "two_week_review": "Review only the supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
+        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer that a decision caused an outcome.",
+        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
+        "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative; never edit it or claim a change was saved.",
+    }[payload.workflow]
+    prompt = (
+        "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
+        "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
+        f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
+        "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
+        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
+        "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
+        "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
+        + ("\n".join(context_lines) if context_lines else "No matching recorded context was found.")
+    )
+    reply = await asyncio.to_thread(
+        qwen_chat,
+        [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
+    )
+    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\\bsaba\\b", reply):
+        raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
+    return {
+        "workflow": payload.workflow,
+        "reply": reply,
+        "ai_generated": True,
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+        "authority": "solenos_care_record_and_caregiver",
+        "review_required": True,
+        "written_to_lcr": False,
+        "persistence": "read_only_assistance",
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "provider_status": "available",
+    }
 
 
 @router.post("/conversation/message")
