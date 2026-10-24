@@ -52,7 +52,8 @@ def start_server():
     for _ in range(40):
         if process.poll() is not None:
             log.close()
-            raise RuntimeError(f"Uvicorn exited early; see {log_path}")
+            details = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+            raise RuntimeError(f"Uvicorn exited early; log tail:\\n{details}")
         try:
             status, _ = request("GET", "/ready")
             if status == 200:
@@ -68,7 +69,8 @@ def start_server():
         process.kill()
         process.wait(timeout=5)
     log.close()
-    raise RuntimeError(f"Uvicorn did not become ready; see {log_path}")
+    details = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+    raise RuntimeError(f"Uvicorn did not become ready; log tail:\\n{details}")
 
 
 def stop_server(process):
