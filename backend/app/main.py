@@ -139,6 +139,27 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+
+        # Middleware runs before FastAPI populates request.path_params. Resolve
+        # the known person-scoped GET routes from their documented URL shape as
+        # a fallback. This is only target extraction: the bearer-session scope
+        # check below still rejects every ID other than session.person_id.
+        route_parts = [part for part in path.split("/") if part]
+        person_route_suffixes = {
+            "observations": "trends",
+            "reasoning": "summary",
+        }
+        person_route_collections = {
+            "appointments", "insights", "caregivers", "daily-intelligence", "actions",
+        }
+        if len(route_parts) == 4 and route_parts[:2] == ["api", "v1"]:
+            collection = route_parts[2]
+            if collection in person_route_collections:
+                target_person_id = route_parts[3]
+        elif len(route_parts) == 5 and route_parts[:2] == ["api", "v1"]:
+            collection, candidate_person_id, suffix = route_parts[2:]
+            if person_route_suffixes.get(collection) == suffix:
+                target_person_id = candidate_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
