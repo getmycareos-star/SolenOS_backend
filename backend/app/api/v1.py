@@ -125,6 +125,7 @@ from app.services.temporal_intelligence import (
 )
 import hashlib
 from app.models.anonymous_session import AnonymousSession as AnonymousSessionModel
+from app.models.collaboration import ConsentRecord
 from app.models.action import Action as ActionModel
 from app.models.care_continuity import CareActionOutcome as CareActionOutcomeModel, CareAssertion as CareAssertionModel
 from app.api.actions import router as actions_router
