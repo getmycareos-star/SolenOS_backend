@@ -1,3 +1,6 @@
+import hashlib
+from datetime import datetime, timedelta, timezone
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -5,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 engine = create_engine(
@@ -48,6 +52,22 @@ def seed_person_and_caregiver():
     db.close()
 
 
+
+
+def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
+    token = f"daily-test-token-{person_id}-{caregiver_id}"
+    db = TestingSessionLocal()
+    db.add(AnonymousSession(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    ))
+    db.commit()
+    db.close()
+    return {"Authorization": f"Bearer {token}"}
+
+
 def test_daily_capture_persists_for_linked_caregiver():
     setup_db()
     try:
@@ -55,6 +75,7 @@ def test_daily_capture_persists_for_linked_caregiver():
         client = TestClient(app)
         response = client.post(
             "/api/v1/daily-care/entries",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
             json={
                 "person_id": "person-daily-test",
                 "caregiver_id": "caregiver-daily-test",
@@ -78,17 +99,19 @@ def test_daily_capture_persists_for_linked_caregiver():
 def test_daily_capture_rejects_unknown_person():
     setup_db()
     try:
+        seed_person_and_caregiver()
         client = TestClient(app)
         response = client.post(
             "/api/v1/daily-care/entries",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
             json={
                 "person_id": "missing-person",
                 "caregiver_id": "caregiver-daily-test",
                 "mood": "Calm",
             },
         )
-        assert response.status_code == 404
-        assert response.json()["detail"] == "Person not found"
+        assert response.status_code == 403
+        assert response.json()["detail"] == "This session is not authorised for that care record"
     finally:
         teardown_db()
 
@@ -100,6 +123,7 @@ def test_daily_capture_rejects_unlinked_caregiver():
         client = TestClient(app)
         response = client.post(
             "/api/v1/daily-care/entries",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
             json={
                 "person_id": "person-daily-test",
                 "caregiver_id": "not-linked-caregiver",
@@ -107,7 +131,7 @@ def test_daily_capture_rejects_unlinked_caregiver():
             },
         )
         assert response.status_code == 403
-        assert response.json()["detail"] == "Caregiver is not linked to this care record"
+        assert response.json()["detail"] == "Caregiver attribution does not match this session"
     finally:
         teardown_db()
 
