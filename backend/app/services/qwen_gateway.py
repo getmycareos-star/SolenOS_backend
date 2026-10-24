@@ -126,7 +126,7 @@ def extract_review_candidates(
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="Qwen returned an invalid candidate structure; no candidate was saved.",
+            detail="Qwen returned an invalid candidate structure; no candidate was returned.",
         ) from exc
     if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
         raise HTTPException(
