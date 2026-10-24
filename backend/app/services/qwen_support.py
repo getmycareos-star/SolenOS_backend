@@ -113,5 +113,5 @@ def analyze_capture_candidates(source: str) -> dict:
             "status": "pending_review" if observations or questions else "no_candidates",
             "candidates": {"observations": observations, "open_questions": questions},
         }
-    except (HTTPException, json.JSONDecodeError, TypeError, AttributeError):
+    except (HTTPException, json.JSONDecodeError, TypeError, AttributeError, ValueError):
         return {"status": "unavailable", "candidates": None}
