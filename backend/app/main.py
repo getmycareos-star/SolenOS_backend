@@ -312,8 +312,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 payload = {}
 
             if isinstance(payload, dict):
-                if path == "/api/v1/care-handoffs" and method == "POST":
-                    target_person_id = payload.get("person_id") or target_person_id
+                if method == "POST" and path in {
+                    "/api/v1/actions",
+                    "/api/v1/care-handoffs",
+                    "/api/v1/care-delta/reconcile",
+                    "/api/v1/evidence",
+                }:
+                    # Bind body-scoped writes to the bearer session, then reject
+                    # any client-supplied person_id that differs from that scope.
+                    target_person_id = payload.get("person_id") or scoped_person_id
                 supplied_person_id = payload.get("person_id")
                 if target_person_id and supplied_person_id and str(supplied_person_id) != str(target_person_id):
                     return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
