@@ -6,7 +6,7 @@ import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
@@ -18,6 +18,8 @@ from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
+from app.models.caregiver_intelligence import CaregiverHandoff
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
 
 router = APIRouter(tags=["community and companion"])
@@ -39,6 +41,17 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+class QwenAssistRequest(BaseModel):
+    workflow: Literal[
+        "daily_capture", "document", "community", "appointment", "after_appointment",
+        "handoff", "professional_summary", "open_loops", "two_week_review",
+        "decision_outcome", "medication_day", "living_care_record",
+    ]
+    text: str = Field(min_length=1, max_length=8000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
@@ -312,40 +325,36 @@ def community_experience(payload: dict, request: Request, db: Session = Depends(
 
 
 def _ollama_url() -> tuple[str, str]:
-    base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b").strip()
-    if not base or not model:
-        raise HTTPException(status_code=503, detail="Companion model is not configured on the backend")
-    parsed = urlparse(base)
-    host = (parsed.hostname or "").lower()
-    environment = (
-        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
-        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
-    ).strip().lower()
-    if environment in {"production", "prod"}:
-        accepted = parsed.scheme == "http" and host.endswith(".railway.internal")
-    else:
-        accepted = (
-            parsed.scheme == "http"
-            and (host.endswith(".railway.internal") or host in {"localhost", "127.0.0.1"})
-        )
-    if not accepted:
-        raise HTTPException(status_code=503, detail="Companion model must use the private backend model service; public model endpoints are not accepted")
+    base, model, _ = get_ollama_config()
     return base, model
 
 
 def _ollama_chat(base: str, model: str, messages: list[dict]) -> str:
-    body = json.dumps({"model": model, "messages": messages, "stream": False}).encode("utf-8")
-    request = urllib.request.Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        raise HTTPException(status_code=503, detail="Companion model is unavailable; no response was generated") from exc
-    content = result.get("message", {}).get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise HTTPException(status_code=503, detail="Companion model returned an invalid response")
-    return content.strip()
+    # All SolenOS workflows use the same local/private Qwen gateway.
+    return qwen_chat(messages)
+
+
+def _is_casual_greeting(text: str) -> bool:
+    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
+    normalized = " ".join(normalized.split())
+    return normalized in {
+        "hi", "hello", "hey", "hiya", "howdy",
+        "how are you", "how are you doing", "how are you today",
+        "how's it going", "hows it going", "what's up", "whats up",
+        "good morning", "good afternoon", "good evening", "good night",
+        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
+    }
+
+
+def _companion_reply_needs_revision(text: str) -> bool:
+    words = re.findall(r"[a-zA-Z']+", (text or "").casefold())
+    if not words or len(words) > 55:
+        return True
+    if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
+        return True
+    normalized = " ".join(words)
+    internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
+    return any(term in normalized for term in internal_terms)
 
 
 @router.post("/conversation/message")
