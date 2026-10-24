@@ -9,9 +9,9 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    # The care-continuity and forward-only trigger-function security changes
-    # must remain on one linear migration head.
-    assert script.get_heads() == ["20261024_06"]
+    # The legacy caregiver and care-continuity histories must converge on
+    # one forward-only merge head after the PostgreSQL privilege migration.
+    assert script.get_heads() == ["20261024_07"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
