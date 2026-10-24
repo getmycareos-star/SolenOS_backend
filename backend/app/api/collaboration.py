@@ -278,6 +278,22 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+@router.post("/sessions/revoke")
+def revoke_current_session(request: Request, db: Session = Depends(get_db)):
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="No active session was authenticated")
+    row = db.query(AnonymousSession).filter(
+        AnonymousSession.id == session_id,
+        AnonymousSession.revoked_at.is_(None),
+    ).first()
+    if row is None:
+        raise HTTPException(status_code=401, detail="Session is already revoked or unavailable")
+    row.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"revoked": True, "session_id": row.id}
+
+
 class NotificationPreferencesPatch(BaseModel):
     quiet_hours_enabled: Optional[bool] = None
     reminders_enabled: Optional[bool] = None
