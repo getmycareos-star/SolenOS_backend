@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, "feat/care-continuity-integrity-engine-2026-10-22", "fix/**"]
   push:
-    branches: [main]
+    branches: [main, "feat/care-continuity-integrity-engine-2026-10-22", "fix/**"]
 
 permissions:
   contents: read
