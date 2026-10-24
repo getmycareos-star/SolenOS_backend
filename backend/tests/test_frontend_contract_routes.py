@@ -402,6 +402,14 @@ def test_consent_acceptance_preferences_revocation_and_scope(monkeypatch):
         assert revoked.json()["verified"] is False
         assert revoked.json()["profile"]["limited_mode"] is True
 
+        blocked_write = client.post("/api/v1/daily/log", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "raw_input": "This must not be persisted after consent revocation.",
+        })
+        assert blocked_write.status_code == 403
+        assert blocked_write.json()["code"] == "consent_revoked"
+
         cross_record = client.get(
             f"/api/v1/consent?person_id={person_id}",
             headers={"Authorization": f"Bearer {other_token}"},
