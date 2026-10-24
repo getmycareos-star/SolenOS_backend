@@ -370,6 +370,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
     from app.schemas.care_continuity import CareAssertionCreate
     from app.services.care_continuity import create_assertion
+from app.services.qwen_gateway import extract_review_candidates
 
     def add_source_assertion(field, value, subject_type, subject_id, assertion_kind, observed_at=None):
         if value is None or (isinstance(value, str) and not value.strip()):
@@ -455,7 +456,34 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
 @router.post("/daily/log")
 def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
+    # Persist first. Optional Qwen assistance can never roll back a valid caregiver
+    # capture, and generated observations remain review candidates only.
+    result = _save_daily_capture_event(
+        payload, "structured_daily_capture", "Structured daily capture", request, db
+    )
+    if not isinstance(result, dict) or not result.get("success"):
+        return result
+    source = {
+        key: value for key, value in payload.items()
+        if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}
+    }
+    try:
+        result["qwen_candidates"] = extract_review_candidates(
+            json.dumps(source, ensure_ascii=False, default=str),
+            source_event_id=str(result["id"]),
+        )
+        result["qwen_extraction_status"] = "pending_review"
+    except HTTPException as exc:
+        result["qwen_candidates"] = None
+        result["qwen_extraction_status"] = (
+            "invalid_response"
+            if exc.status_code == 503 and "invalid candidate structure" in str(exc.detail)
+            else "unavailable"
+        )
+    except Exception:
+        result["qwen_candidates"] = None
+        result["qwen_extraction_status"] = "unavailable"
+    return result
 
 
 @router.post("/daily-care/entries")
