@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class CareReminderCreate(BaseModel):
@@ -34,3 +34,12 @@ class CareReminderRead(BaseModel):
     updated_at: Optional[datetime] = None
     delivery_mode: Literal["in_app_list_only"] = "in_app_list_only"
     notification_delivery_status: Literal["not_sent"] = "not_sent"
+
+    @field_validator("due_at", "completed_at", "cancelled_at", "created_at", "updated_at", mode="before")
+    @classmethod
+    def normalize_sqlite_timestamps(cls, value):
+        # SQLite does not preserve timezone offsets for DateTime(timezone=True).
+        # Treat its stored UTC timestamps as UTC when serializing API responses.
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
