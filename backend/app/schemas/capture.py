@@ -61,6 +61,15 @@ class DailyCaptureOutput(BaseModel):
     daily_capture_id: str
     care_event_id: str
     recorded_at: datetime
+    analysis_status: str = "complete"
+    analysis_error: Optional[str] = None
+    what_changed: Optional[str] = None
+    attention_candidate: bool = False
+    follow_up_candidate: bool = False
+    situations: list[dict] = Field(default_factory=list)
+    qwen_extraction_status: str = "not_configured"
+    qwen_candidates: Optional[dict] = None
+    qwen_analysis_id: Optional[str] = None
 
 
 class DailyCaptureRecordOutput(BaseModel):
@@ -88,3 +97,13 @@ class UploadOutput(BaseModel):
     message: str
 
 
+
+
+class CaptureCandidateReviewInput(BaseModel):
+    """Explicit caregiver review of an extracted candidate; never an LCR write."""
+
+    candidate_index: int = Field(ge=0, le=29)
+    decision: Literal["accept", "correct", "reject"]
+    corrected_subject: Optional[str] = Field(default=None, max_length=160)
+    corrected_observation: Optional[str] = Field(default=None, max_length=1200)
+    note: Optional[str] = Field(default=None, max_length=1000)

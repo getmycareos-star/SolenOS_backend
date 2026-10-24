@@ -12,9 +12,10 @@ from app.core.database import get_db
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink, CaregiverInvitation, CaregiverProfileAccountLink, CaregiverProfileInvitation
 from app.models.care import Person, Caregiver
 from app.models.caregiver_intelligence import CaregiverProfile
-from app.services.auth_service import authenticate_account, create_account, create_session, resolve_session, revoke_session
+from app.services.auth_service import authenticate_account, create_account, create_session, hash_password, resolve_session, revoke_session
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
+session_router = APIRouter(prefix="/sessions", tags=["anonymous-session"])
 bearer = HTTPBearer(auto_error=False)
 
 class SignupInput(BaseModel):
@@ -35,6 +36,9 @@ class LoginInput(BaseModel):
 
 class CareContextInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+
+class AnonymousSessionInput(BaseModel):
+    caregiver_name: str = Field(default="Caregiver", min_length=1, max_length=120)
 
 class CareContextOutput(BaseModel):
     person_id: str
@@ -581,3 +585,126 @@ def list_my_caregiver_links(
             permissions=grant.permissions or [] if grant else [],
         ))
     return output
+
+
+
+def _anonymous_session_payload(account: AuthAccount, person: Person, caregiver: Caregiver, raw_token: str, session) -> dict:
+    now = datetime.now(timezone.utc)
+    expires = session.expires_at
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return {
+        "session_id": session.id,
+        "person": {
+            "id": person.id,
+            "name": person.name,
+            "date_of_birth": None,
+        },
+        "caregiver": {
+            "id": caregiver.id,
+            "name": caregiver.name,
+            "relationship": "Family",
+        },
+        "access_token": raw_token,
+        "token_type": "Bearer",
+        "expires_at": expires.isoformat(),
+        "expires_in_seconds": max(0, int((expires - now).total_seconds())),
+    }
+
+
+@session_router.post("/anonymous", status_code=status.HTTP_201_CREATED)
+def create_anonymous_session(payload: AnonymousSessionInput, db: Session = Depends(get_db)):
+    """Create a server-owned anonymous identity and one explicitly scoped empty care record."""
+    caregiver_name = payload.caregiver_name.strip() or "Caregiver"
+    internal_email = f"anonymous-{secrets.token_hex(16)}@anonymous.solenos.invalid"
+    account = AuthAccount(
+        email=internal_email,
+        password_hash=hash_password(secrets.token_urlsafe(48)),
+        display_name=caregiver_name,
+        is_anonymous=True,
+    )
+    db.add(account)
+    db.flush()
+
+    person = Person(name="Unnamed care recipient")
+    db.add(person)
+    db.flush()
+    caregiver = Caregiver(
+        name=caregiver_name,
+        email=internal_email,
+        relationship="family",
+        person_id=person.id,
+        timezone="UTC",
+    )
+    db.add(caregiver)
+    db.flush()
+
+    grant = AccountPersonAccess(
+        account_id=account.id,
+        person_id=person.id,
+        role="owner",
+        permissions=["read", "write", "admin"],
+        is_active=True,
+        granted_by_account_id=account.id,
+    )
+    caregiver_link = CaregiverAccountLink(
+        account_id=account.id,
+        caregiver_id=caregiver.id,
+        person_id=person.id,
+        linked_by_account_id=account.id,
+        is_active=True,
+    )
+    db.add_all([grant, caregiver_link])
+    # create_session commits the pending account, person, caregiver, grants,
+    # and session together, avoiding an orphaned empty record if session creation fails.
+    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
+    db.refresh(account)
+    db.refresh(person)
+    db.refresh(caregiver)
+    return _anonymous_session_payload(account, person, caregiver, raw_token, session)
+
+
+@session_router.post("/refresh")
+def refresh_anonymous_session(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
+    db: Session = Depends(get_db),
+):
+    """Rotate an anonymous bearer session without changing its care-record identity."""
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Authentication required", headers={"WWW-Authenticate": "Bearer"})
+    account = resolve_session(db, credentials.credentials)
+    if account is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired session", headers={"WWW-Authenticate": "Bearer"})
+    if not account.is_anonymous:
+        raise HTTPException(status_code=403, detail="This refresh endpoint is only for anonymous care sessions")
+
+    grants = db.query(AccountPersonAccess).filter(
+        AccountPersonAccess.account_id == account.id,
+        AccountPersonAccess.is_active.is_(True),
+        AccountPersonAccess.revoked_at.is_(None),
+    ).all()
+    caregiver_links = db.query(CaregiverAccountLink).filter(
+        CaregiverAccountLink.account_id == account.id,
+        CaregiverAccountLink.is_active.is_(True),
+        CaregiverAccountLink.revoked_at.is_(None),
+    ).all()
+    if len(grants) != 1 or len(caregiver_links) != 1:
+        raise HTTPException(status_code=409, detail="Anonymous care-session ownership could not be restored safely")
+    grant = grants[0]
+    caregiver_link = caregiver_links[0]
+    if grant.person_id != caregiver_link.person_id:
+        raise HTTPException(status_code=409, detail="Anonymous care-session ownership could not be restored safely")
+
+    person = db.query(Person).filter(Person.id == grant.person_id).first()
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_link.caregiver_id,
+        Caregiver.person_id == grant.person_id,
+    ).first()
+    if person is None or caregiver is None:
+        raise HTTPException(status_code=409, detail="Anonymous care record is incomplete; no replacement record was created")
+
+    # Create the replacement first; if session issuance fails, the existing token
+    # remains valid instead of stranding the caregiver.
+    raw_token, session = create_session(db, account, expires_in_hours=24 * 30)
+    revoke_session(db, credentials.credentials)
+    return _anonymous_session_payload(account, person, caregiver, raw_token, session)

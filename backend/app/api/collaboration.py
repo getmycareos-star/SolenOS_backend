@@ -5,6 +5,7 @@ Professional access requires an explicit active access grant with role='professi
 Team-wide endpoints require an out-of-band staff account flag.
 """
 from datetime import datetime, timedelta, timezone
+import json
 import re
 from typing import Literal, Optional
 
@@ -14,7 +15,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.api.authentication import current_account
-from app.core.authz import assert_person_access, require_staff
+from app.core.authz import assert_account_is_caregiver, assert_person_access, require_staff
 from app.core.database import get_db
 from app.models.auth_identity import AccountPersonAccess, AuthAccount, CaregiverAccountLink
 from app.models.care import CareEvent, Caregiver, Person
@@ -26,9 +27,20 @@ from app.models.collaboration import (
 )
 from app.models.time_location import Appointment
 from app.services.conversation_service import build_companion_reply
+from app.services.qwen_gateway import call_qwen_json
 
 router = APIRouter(dependencies=[Depends(current_account)])
 community_router = APIRouter(prefix="/community", tags=["community"], dependencies=[Depends(current_account)])
+
+def _require_authorized_caregiver_context(db: Session, account_id: str, caregiver_id: str, permission: str) -> Caregiver:
+    """Resolve caregiver identity to its person, then enforce identity link and record grant."""
+    caregiver = db.query(Caregiver).filter(Caregiver.id == caregiver_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="Caregiver identity not found")
+    assert_account_is_caregiver(db, account_id, caregiver.id, caregiver.person_id)
+    assert_person_access(db, account_id, caregiver.person_id, permission)
+    return caregiver
+
 conversation_router = APIRouter(prefix="/conversation", tags=["conversation"], dependencies=[Depends(current_account)])
 team_router = APIRouter(prefix="/team", tags=["team"], dependencies=[Depends(require_staff)])
 professional_router = APIRouter(prefix="/professional-dashboard", tags=["professional-dashboard"], dependencies=[Depends(current_account)])
@@ -54,6 +66,13 @@ class ReactionInput(BaseModel):
 
 class ExperienceSearchInput(BaseModel):
     observation: str = Field(min_length=2, max_length=500)
+
+
+
+
+class LCRExplanationInput(BaseModel):
+    person_id: str = Field(min_length=1, max_length=100)
+    question: str = Field(default="Explain the current recorded care situation, what is known, what remains uncertain, and what useful question to ask next.", min_length=5, max_length=2000)
 
 
 class ModerationInput(BaseModel):
@@ -126,7 +145,7 @@ def list_community_posts(
     # caregiver_id query name. Treat it only as a context authorization check;
     # never infer caregiver identity from it.
     if caregiver_id:
-        assert_person_access(db, account.id, caregiver_id, "read")
+        _require_authorized_caregiver_context(db, account.id, caregiver_id, "read")
     posts = (
         db.query(CommunityPost)
         .filter(CommunityPost.status == "published", CommunityPost.visibility.in_([ "public", "anonymous" ]))
@@ -148,7 +167,7 @@ def create_community_post(
 ):
     # This confirms that the author is an authorized caregiver in a care context.
     # The context ID is not stored on the public post and is not an attribution ID.
-    assert_person_access(db, account.id, payload.caregiver_id, "write")
+    _require_authorized_caregiver_context(db, account.id, payload.caregiver_id, "write")
     body = payload.content.strip()
     if not body:
         raise HTTPException(status_code=422, detail="Post content cannot be blank")
@@ -200,6 +219,71 @@ def search_shared_experiences(
     return {"matches": matches, "method": "literal_search", "ai_generated": False}
 
 
+@community_router.post("/experience/summary")
+def summarize_shared_experiences(
+    payload: ExperienceSearchInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Use Qwen to summarize only published peer posts; never writes to the LCR."""
+    terms = [term.lower() for term in re.findall(r"[a-zA-Z0-9]{3,}", payload.observation)][:8]
+    posts = db.query(CommunityPost).filter(
+        CommunityPost.status == "published",
+        CommunityPost.visibility.in_(["public", "anonymous"]),
+    ).order_by(CommunityPost.created_at.desc()).limit(200).all()
+    matches = []
+    for post in posts:
+        haystack = f"{post.title or ''} {post.body} {' '.join(post.tags or [])}".lower()
+        matched = [term for term in terms if term in haystack]
+        if matched:
+            matches.append({
+                "post_id": post.id,
+                "author_label": "Anonymous caregiver",
+                "author_type": "peer_caregiver",
+                "content": post.body[:3000],
+                "tags": post.tags or ["general"],
+            })
+        if len(matches) >= 10:
+            break
+    if not matches:
+        return {"summary": None, "post_ids": [], "matches": [], "provider_status": "not_needed",
+                "ai_generated": False, "notice": "No matching published peer experiences were found."}
+    parsed, status = call_qwen_json(
+        system_prompt=(
+            "You summarize published peer-caregiver experiences for a support community. "
+            "Peer reports are not clinical evidence and are not medical recommendations. "
+            "Do not diagnose, prescribe, infer causality, or claim a peer report is generally true. "
+            "Summarize commonalities and differences only when supported by the supplied posts; "
+            "if they differ, state that. Never write to or update a person's Living Care Record. "
+            "Return JSON with summary (string), post_ids (array copied only from supplied IDs), "
+            "and limitations (array of strings)."
+        ),
+        user_prompt=json.dumps({
+            "question": payload.observation,
+            "published_peer_posts": matches,
+            "allowed_post_ids": [item["post_id"] for item in matches],
+        }, ensure_ascii=False),
+        temperature=0.0,
+    )
+    summary = parsed.get("summary") if parsed else None
+    ids = parsed.get("post_ids", []) if parsed else []
+    if not isinstance(summary, str) or not summary.strip():
+        summary = None
+    allowed_ids = {item["post_id"] for item in matches}
+    ids = sorted({item for item in ids if isinstance(item, str) and item in allowed_ids}) if isinstance(ids, list) else []
+    limitations = parsed.get("limitations", []) if parsed else []
+    limitations = [item.strip()[:300] for item in limitations if isinstance(item, str) and item.strip()][:5] if isinstance(limitations, list) else []
+    return {
+        "summary": summary,
+        "post_ids": ids,
+        "provider_status": status,
+        "ai_generated": bool(summary and status == "connected"),
+        "limitations": limitations,
+        "notice": "Peer experience only; not clinical advice and never a Living Care Record fact.",
+        "matches": matches,
+    }
+
+
 @community_router.post("/{post_id}/reactions")
 def react_to_community_post(
     post_id: str,
@@ -207,7 +291,7 @@ def react_to_community_post(
     db: Session = Depends(get_db),
     account: AuthAccount = Depends(current_account),
 ):
-    assert_person_access(db, account.id, payload.caregiver_id, "read")
+    _require_authorized_caregiver_context(db, account.id, payload.caregiver_id, "read")
     post = db.query(CommunityPost).filter(
         CommunityPost.id == post_id,
         CommunityPost.status == "published",
@@ -272,6 +356,34 @@ def moderate_community_post(
     return {"success": True, "post_id": post.id, "status": post.status}
 
 
+@router.post("/lcr/explain")
+def explain_living_care_record(
+    payload: LCRExplanationInput,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Read-only Qwen explanation of the authorized LCR; it cannot mutate care facts."""
+    assert_person_access(db, account.id, payload.person_id, "read")
+    result = build_companion_reply(
+        db,
+        payload.person_id,
+        "LCR READ-ONLY EXPLANATION REQUEST: " + payload.question.strip()
+        + " Explain only what the supplied authorized record context supports. Clearly separate "
+        "recorded facts, uncertainty, missing information, and suggested questions. Do not modify the record.",
+        [],
+    )
+    return {
+        "person_id": payload.person_id,
+        "explanation": result.reply,
+        "evidence_ids": result.evidence_ids,
+        "provider_status": result.provider_status,
+        "ai_generated": result.ai_generated,
+        "read_only": True,
+        "guard_verdict": result.guard_verdict,
+        "safety_note": result.safety_note,
+    }
+
+
 @conversation_router.post("/message")
 def send_companion_message(
     payload: ConversationInput,
@@ -297,7 +409,23 @@ def send_companion_message(
     user_text = payload.text.strip()
     if not user_text:
         raise HTTPException(status_code=422, detail="Message cannot be blank")
-    policy_reply = build_companion_reply(user_text)
+    # Load only this authenticated account's prior messages for this authorized person/session.
+    history_rows = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.session_id == session.id,
+            ConversationMessage.account_id == account.id,
+        )
+        .order_by(ConversationMessage.created_at.desc())
+        .limit(12)
+        .all()
+    )
+    history = [
+        {"role": row.role, "content": row.content}
+        for row in reversed(history_rows)
+        if row.role in {"user", "assistant"}
+    ]
+    policy_reply = build_companion_reply(db, payload.person_id, user_text, history)
     db.add(ConversationMessage(
         session_id=session.id, account_id=account.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids=[],
@@ -316,8 +444,8 @@ def send_companion_message(
         "safety_note": policy_reply.safety_note,
         "confidence": policy_reply.confidence,
         "evidence_ids": policy_reply.evidence_ids,
-        "ai_generated": False,
-        "provider_status": "not_configured",
+        "ai_generated": policy_reply.ai_generated,
+        "provider_status": policy_reply.provider_status,
     }
 
 

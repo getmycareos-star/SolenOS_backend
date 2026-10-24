@@ -10,6 +10,8 @@ PUBLIC_ENDPOINTS = {
     ("/api/v1/auth/signup", "post"),
     ("/api/v1/auth/login", "post"),
     ("/api/v1/auth/logout", "post"),
+    # The only unauthenticated care-session endpoint is bootstrap; it creates an isolated record.
+    ("/api/v1/sessions/anonymous", "post"),
     ("/health", "get"),
     ("/ready", "get"),
     ("/openapi.json", "get"),

@@ -50,3 +50,8 @@ class SituationResponse(BaseModel):
     attention_candidate: bool = False
     follow_up_candidate: bool = False
     what_changed: Optional[str] = None
+    analysis_status: str = "complete"
+    analysis_error: Optional[str] = None
+    qwen_extraction_status: str = "not_configured"
+    qwen_candidates: Optional[Dict[str, Any]] = None
+    qwen_analysis_id: Optional[str] = None

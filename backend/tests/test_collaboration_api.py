@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.auth_identity import AuthAccount, AccountPersonAccess
-from app.models.care import Person
+from app.models.care import Person, Caregiver
 
 
 def _client_for_test():
@@ -51,6 +51,13 @@ def _account_context(client, session_factory, email, role="owner"):
     return headers, person_id
 
 
+
+
+def _caregiver_id_for_person(session_factory, person_id):
+    with session_factory() as db:
+        return db.query(Caregiver).filter_by(person_id=person_id).one().id
+
+
 def _cleanup(engine, client):
     client.close()
     app.dependency_overrides.clear()
@@ -62,17 +69,18 @@ def test_community_post_reaction_and_literal_experience_search_persist():
     engine, Session, client = _client_for_test()
     try:
         headers, person_id = _account_context(client, Session, "community@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
         created = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": person_id, "content": "Our bedtime routine #sleep helped us settle.",
+            "caregiver_id": caregiver_id, "content": "Our bedtime routine #sleep helped us settle.",
             "post_type": "experience", "visibility": "public",
         })
         assert created.status_code == 201, created.text
         post_id = created.json()["post"]["id"]
-        listed = client.get(f"/api/v1/community?caregiver_id={person_id}", headers=headers)
+        listed = client.get(f"/api/v1/community?caregiver_id={caregiver_id}", headers=headers)
         assert listed.status_code == 200, listed.text
         assert any(item["id"] == post_id for item in listed.json()["posts"])
         reaction = client.post(f"/api/v1/community/{post_id}/reactions", headers=headers, json={
-            "caregiver_id": person_id, "reaction_type": "support"
+            "caregiver_id": caregiver_id, "reaction_type": "support"
         })
         assert reaction.status_code == 200, reaction.text
         search = client.post("/api/v1/community/experience", headers=headers, json={"observation": "bedtime routine"})
@@ -109,7 +117,7 @@ def test_community_post_reaction_and_literal_experience_search_persist():
 
         # Same reaction toggles off instead of creating duplicate rows.
         client.post(f"/api/v1/community/{post_id}/reactions", headers=headers, json={
-            "caregiver_id": person_id, "reaction_type": "support"
+            "caregiver_id": caregiver_id, "reaction_type": "support"
         })
         with Session() as db:
             from app.models.collaboration import CommunityReaction, CommunityPost
@@ -123,8 +131,10 @@ def test_community_cannot_be_written_using_an_unrelated_person_id():
     engine, Session, client = _client_for_test()
     try:
         headers, _person_id = _account_context(client, Session, "community-scope@example.test")
+        _other_headers, other_person_id = _account_context(client, Session, "community-scope-other@example.test")
+        other_caregiver_id = _caregiver_id_for_person(Session, other_person_id)
         response = client.post("/api/v1/community", headers=headers, json={
-            "caregiver_id": "another-account-person", "content": "A post"
+            "caregiver_id": other_caregiver_id, "content": "A post"
         })
         assert response.status_code == 403, response.text
     finally:
@@ -135,9 +145,10 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
     engine, Session, client = _client_for_test()
     try:
         author_headers, person_id = _account_context(client, Session, "flag-author@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
         reporter_headers, _reporter_person = _account_context(client, Session, "flag-reporter@example.test")
         created = client.post("/api/v1/community", headers=author_headers, json={
-            "caregiver_id": person_id,
+            "caregiver_id": caregiver_id,
             "content": "A user-submitted community post for moderation.",
             "post_type": "experience",
             "visibility": "public",
@@ -190,7 +201,17 @@ def test_community_flag_enters_staff_review_queue_with_audit_reason():
         _cleanup(engine, client)
 
 
-def test_companion_persists_both_messages_and_does_not_claim_ai_was_used():
+def test_companion_persists_both_messages_and_does_not_claim_ai_was_used(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import conversation_service
+
+    # Keep this integration test deterministic; it must not depend on a developer's
+    # local Ollama process being available in the CI runner.
+    monkeypatch.setattr(
+        conversation_service,
+        "get_settings",
+        lambda: SimpleNamespace(ollama_configured=False),
+    )
     engine, Session, client = _client_for_test()
     try:
         headers, person_id = _account_context(client, Session, "companion@example.test")
@@ -337,6 +358,9 @@ def test_collaboration_routes_are_registered_and_session_protected():
         ("GET", "/api/v1/community"),
         ("POST", "/api/v1/community"),
         ("POST", "/api/v1/community/experience"),
+        ("POST", "/api/v1/community/experience/summary"),
+        ("POST", "/api/v1/lcr/explain"),
+        ("POST", "/api/v1/documents/{care_event_id}/analyze"),
         ("POST", "/api/v1/community/{post_id}/reactions"),
         ("POST", "/api/v1/community/{post_id}/flag"),
         ("POST", "/api/v1/conversation/message"),
@@ -359,3 +383,85 @@ def test_collaboration_routes_are_registered_and_session_protected():
         f"Missing collaboration routes: {sorted(required - actual)}; "
         f"registered paths: {sorted(schema.get('paths', {}))}"
     )
+
+
+def test_community_qwen_summary_uses_only_published_peer_posts_and_never_writes_lcr(monkeypatch):
+    from app.api import collaboration
+    from app.models.collaboration import CommunityPost
+    engine, Session, client = _client_for_test()
+    try:
+        headers, person_id = _account_context(client, Session, "community-qwen@example.test")
+        caregiver_id = _caregiver_id_for_person(Session, person_id)
+        created = client.post("/api/v1/community", headers=headers, json={
+            "caregiver_id": caregiver_id,
+            "content": "Our quiet bedtime routine helped us settle.",
+            "post_type": "experience",
+            "visibility": "public",
+        })
+        assert created.status_code == 201, created.text
+        post_id = created.json()["post"]["id"]
+        monkeypatch.setattr(
+            collaboration,
+            "call_qwen_json",
+            lambda **kwargs: ({
+                "summary": "One caregiver describes a quiet bedtime routine.",
+                "post_ids": [post_id, "invented-post"],
+                "limitations": ["This is one person's experience."],
+            }, "connected"),
+        )
+        response = client.post(
+            "/api/v1/community/experience/summary",
+            headers=headers,
+            json={"observation": "quiet bedtime routine"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["ai_generated"] is True
+        assert body["provider_status"] == "connected"
+        assert body["post_ids"] == [post_id]
+        assert body["matches"][0]["post_id"] == post_id
+        assert body["notice"].startswith("Peer experience only")
+        # Qwen community assistance must never add care events or facts.
+        from app.models.care import CareEvent
+        with Session() as db:
+            assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+    finally:
+        _cleanup(engine, client)
+
+
+def test_lcr_explanation_is_read_only_and_authorization_scoped(monkeypatch):
+    from types import SimpleNamespace
+    from app.api import collaboration
+    engine, Session, client = _client_for_test()
+    try:
+        headers, person_id = _account_context(client, Session, "lcr-qwen@example.test")
+        monkeypatch.setattr(
+            collaboration,
+            "build_companion_reply",
+            lambda db, person, message, history: SimpleNamespace(
+                reply="The record contains one reported observation; more context is needed.",
+                evidence_ids=["evidence-1"],
+                provider_status="connected",
+                ai_generated=True,
+                guard_verdict="grounded",
+                safety_note=None,
+            ),
+        )
+        response = client.post("/api/v1/lcr/explain", headers=headers, json={
+            "person_id": person_id,
+            "question": "What is known and what remains uncertain?",
+        })
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["read_only"] is True
+        assert body["ai_generated"] is True
+        assert body["provider_status"] == "connected"
+        assert body["evidence_ids"] == ["evidence-1"]
+
+        denied = client.post("/api/v1/lcr/explain", headers=headers, json={
+            "person_id": "another-account-record",
+            "question": "Explain this record.",
+        })
+        assert denied.status_code == 403, denied.text
+    finally:
+        _cleanup(engine, client)

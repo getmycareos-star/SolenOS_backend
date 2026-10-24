@@ -12,6 +12,7 @@ class AuthAccount(Base):
     display_name = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     is_staff = Column(Boolean, nullable=False, default=False)
+    is_anonymous = Column(Boolean, nullable=False, default=False, server_default=text("false"))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

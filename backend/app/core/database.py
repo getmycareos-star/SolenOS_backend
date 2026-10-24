@@ -148,6 +148,7 @@ def _register_all_models():
     import app.models.safety  # noqa: F401
     import app.models.auth_identity  # noqa: F401
     import app.models.capture  # noqa: F401
+    import app.models.capture_analysis  # noqa: F401
     import app.models.collaboration  # noqa: F401
 
 

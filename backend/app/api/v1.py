@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+import json
 from app.core.database import get_db
 from app.api.authentication import current_account
 from app.core.authz import assert_person_access, assert_account_is_caregiver, require_person_access
@@ -125,6 +126,7 @@ from app.services.temporal_intelligence import (
     check_temporal_conflict,
 )
 from app.api.actions import router as actions_router
+from app.services.situation import analyze_saved_care_event
 
 router = APIRouter(dependencies=[Depends(current_account)])
 
@@ -300,6 +302,86 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db), acc
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema], dependencies=[Depends(require_person_access("read"))])
 def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
+
+
+@router.post("/daily-care/entries")
+def create_daily_care_entry(
+    payload: dict,
+    db: Session = Depends(get_db),
+    account: AuthAccount = Depends(current_account),
+):
+    """Persist structured Daily Care and run the same change/situation analysis as free text."""
+    person_id = payload.get("person_id")
+    caregiver_id = payload.get("caregiver_id") or payload.get("created_by_caregiver_id")
+    if not isinstance(person_id, str) or not person_id.strip():
+        raise HTTPException(status_code=422, detail="person_id is required")
+    assert_person_access(db, account.id, person_id, "write")
+    caregiver = _require_caregiver_in_person(
+        db, caregiver_id if isinstance(caregiver_id, str) else None,
+        person_id, account.id,
+    )
+
+    detail = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}
+        and value not in (None, "", [], {})
+        and not (key == "agitation_scale" and value == 0)
+    }
+    if not detail:
+        raise HTTPException(status_code=422, detail="At least one non-empty care observation is required")
+
+    occurred_at = datetime.now(timezone.utc)
+    source_text = json.dumps(detail, ensure_ascii=False, default=str)
+    evidence = EvidenceModel(
+        person_id=person_id,
+        type="structured_daily_care",
+        source_text=source_text,
+        uploaded_by_caregiver_id=caregiver.id,
+        time_provenance="server_recorded_at",
+        confidence=None,
+        evidence_status="reported",
+        source_type="caregiver_structured_capture",
+    )
+    db.add(evidence)
+    db.flush()
+    event = CareEventModel(
+        person_id=person_id,
+        event_type="daily_care_entry",
+        status="recorded",
+        occurred_at=occurred_at,
+        occurred_at_timezone=caregiver.timezone,
+        title="What matters today",
+        description=source_text,
+        evidence_ids=[evidence.id],
+        created_by_caregiver_id=caregiver.id,
+        time_provenance="server_recorded_at",
+        tags=["daily_capture", "structured"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    _log_and_learn(
+        db, person_id, "daily_care_entry", "Structured Daily Care entry recorded",
+        "care_event", source_id=event.id, caregiver_id=caregiver.id,
+    )
+    analysis = analyze_saved_care_event(db, event.id)
+    return {
+        "success": True,
+        "id": event.id,
+        "event_type": event.event_type,
+        "recorded_at": event.recorded_at.isoformat() if event.recorded_at else occurred_at.isoformat(),
+        "evidence_ids": [evidence.id],
+        "analysis_status": analysis["analysis_status"],
+        "analysis_error": analysis["analysis_error"],
+        "what_changed": analysis["what_changed"],
+        "attention_candidate": analysis["attention_candidate"],
+        "follow_up_candidate": analysis["follow_up_candidate"],
+        "situations": analysis["situations"],
+        "qwen_extraction_status": analysis["qwen_extraction_status"],
+        "qwen_candidates": analysis["qwen_candidates"],
+    }
 
 
 @router.post("/events", response_model=CareEventSchema)

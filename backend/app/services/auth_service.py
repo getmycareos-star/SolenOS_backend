@@ -51,11 +51,11 @@ def authenticate_account(db: Session, email: str, password: str) -> Optional[Aut
         return None
     return account
 
-def create_session(db: Session, account: AuthAccount) -> tuple[str, AuthSession]:
+def create_session(db: Session, account: AuthAccount, *, expires_in_hours: Optional[int] = None) -> tuple[str, AuthSession]:
     raw_token = secrets.token_urlsafe(32)
     digest = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
-    session = AuthSession(account_id=account.id, token_digest=digest, expires_at=now + timedelta(hours=SESSION_HOURS))
+    session = AuthSession(account_id=account.id, token_digest=digest, expires_at=now + timedelta(hours=expires_in_hours or SESSION_HOURS))
     db.add(session)
     db.commit()
     db.refresh(session)
