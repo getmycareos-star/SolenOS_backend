@@ -142,4 +142,72 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: solenos-backend:qwen-ci
+
+      - name: Run real Qwen inference and authenticated API smoke tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --detach --name solenos-qwen-e2e \
+            --publish 8080:8080 \
+            --env APP_ENV=ci \
+            --env DATABASE_URL=sqlite:////tmp/solenos-qwen-e2e.db \
+            --env SECRET_KEY=ci-only-secret \
+            solenos-backend:qwen-ci
+          cleanup() {
+            docker rm --force solenos-qwen-e2e >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:8080/ready >/tmp/solenos-ready.json; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs solenos-qwen-e2e
+            echo "Bundled Qwen/FastAPI image did not become ready." >&2
+            exit 1
+          fi
+
+          session=$(curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d '{"caregiver_name":"CI-only caregiver"}' \
+            http://127.0.0.1:8080/api/v1/sessions/anonymous)
+          token=$(python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<< "$session")
+          person_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["person"]["id"])' <<< "$session")
+          caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
+          auth_header="Authorization: Bearer $token"
+
+          status=$(curl --fail --silent --show-error -H "$auth_header" \
+            http://127.0.0.1:8080/api/v1/assistant/status)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:1.5b"' "$status"
+
+          greeting=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\\bsaba\\b", reply); assert len(reply.split()) <= 55' "$greeting"
+
+          assist=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"workflow":"appointment","text":"Help organize the available appointment details and unanswered questions."}' \
+            http://127.0.0.1:8080/api/v1/assistant/assist)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
+
+          events=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
+
+          daily=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
+            http://127.0.0.1:8080/api/v1/daily/log)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"])' "$daily"
+
+          echo "PASS: bundled Qwen model answered a real greeting, read-only appointment assist, and Daily Capture candidate extraction through authenticated FastAPI routes."
+
