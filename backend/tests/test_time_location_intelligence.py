@@ -101,11 +101,28 @@ def test_parse_natural_language_tomorrow():
     assert "Tomorrow" in result["interpretation"]
 
 
-def test_parse_natural_language_tonight():
+def test_parse_natural_language_tonight_does_not_invent_a_clock_time():
     ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
     result = parse_natural_language_time("tonight", ref)
+    assert result["parsed_datetime"] is None
+    assert result["confidence"] == 0.0
+    assert result["is_ambiguous"] is True
+    assert "clarify" in result["interpretation"].lower()
+
+
+def test_vague_day_parts_do_not_become_synthetic_timestamps():
+    ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    for phrase in ("this morning", "this afternoon", "earlier today", "later this week", "this evening"):
+        result = parse_natural_language_time(phrase, ref)
+        assert result["parsed_datetime"] is None, phrase
+        assert result["confidence"] == 0.0, phrase
+        assert result["is_ambiguous"] is True, phrase
+
+
+def test_explicit_clock_time_can_be_parsed_without_vague_period_fallback():
+    ref = datetime(2026, 8, 7, 12, 0, 0, tzinfo=timezone.utc)
+    result = parse_natural_language_time("tonight at 7 pm", ref)
     assert result["parsed_datetime"] is not None
-    assert "Tonight" in result["interpretation"]
 
 
 def test_parse_natural_language_next_monday():
