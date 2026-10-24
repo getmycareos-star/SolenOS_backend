@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "t2_auth_reconcile_20261023"
-down_revision = "t2_caregiver_schema_reconcile_20261024"
+down_revision = "t2_caregiver_guard_20261024"
 branch_labels = None
 depends_on = None
 
