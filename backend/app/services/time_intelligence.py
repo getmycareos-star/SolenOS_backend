@@ -172,7 +172,7 @@ def parse_natural_language_time(
         "earlier today",
         "later this week",
     )
-    explicit_clock_time = re.search(r"\\b\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)\\b", text_lower)
+    explicit_clock_time = re.search(r"\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b", text_lower)
     if any(period in text_lower for period in vague_periods) and not explicit_clock_time:
         return {
             "original_text": text,
