@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261023_04"
-down_revision = "20261022_03"
+down_revision = "t2_care_continuity_20261024"
 branch_labels = None
 depends_on = None
 
