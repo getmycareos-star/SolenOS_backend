@@ -148,4 +148,114 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: solenos-backend:qwen-ci
+
+      - name: Run real Qwen inference and authenticated API smoke tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --detach --name solenos-qwen-e2e \
+            --publish 8080:8080 \
+            --env APP_ENV=ci \
+            --env DATABASE_URL=sqlite:////tmp/solenos-qwen-e2e.db \
+            --env SECRET_KEY=ci-only-secret \
+            solenos-backend:qwen-ci
+          cleanup() {
+            docker rm --force solenos-qwen-e2e >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:8080/ready >/tmp/solenos-ready.json; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs solenos-qwen-e2e
+            echo "Bundled Qwen/FastAPI image did not become ready." >&2
+            exit 1
+          fi
+
+          session=$(curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d '{"caregiver_name":"CI-only caregiver"}' \
+            http://127.0.0.1:8080/api/v1/sessions/anonymous)
+          token=$(python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<< "$session")
+          person_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["person"]["id"])' <<< "$session")
+          caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
+          auth_header="Authorization: Bearer $token"
+
+          status=$(curl --fail --silent --show-error -H "$auth_header" \
+            http://127.0.0.1:8080/api/v1/assistant/status)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:1.5b"' "$status"
+
+          greeting=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert len(reply.split()) <= 55' "$greeting"
+
+          assist=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"workflow":"appointment","text":"Help organize the available appointment details and unanswered questions."}' \
+            http://127.0.0.1:8080/api/v1/assistant/assist)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
+
+          # Exercise every supported read-only workflow against the actual model.
+          for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+            workflow_response=$(curl --fail --silent --show-error \
+              -H "$auth_header" -H "Content-Type: application/json" \
+              -d "{\"workflow\":\"$workflow\",\"text\":\"Help organize the available information and identify what remains unknown.\"}" \
+              http://127.0.0.1:8080/api/v1/assistant/assist)
+            python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(); assert len(d["reply"].split()) <= 55' "$workflow_response" "$workflow"
+          done
+
+          # Verify a real Qwen summary is grounded in a real, published CI-only community post.
+          post=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"post_type":"experience","content":"A quiet routine helped us prepare for bedtime.","care_stage":"unspecified","tags":["routine"]}' \
+            http://127.0.0.1:8080/api/v1/community)
+          post_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$post")
+          community_summary=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"observation":"bedtime routine"}' \
+            http://127.0.0.1:8080/api/v1/community/experience/summary)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert sys.argv[2] in d["post_ids"]; assert isinstance(d["summary"],str) and d["summary"].strip()' "$community_summary" "$post_id"
+
+          # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
+          printf 'CI-only document: follow-up date is not stated.\\n' > /tmp/solenos-qwen-document.txt
+          upload=$(curl --fail --silent --show-error \
+            -H "$auth_header" \
+            -F "person_id=$person_id" \
+            -F "caregiver_id=$caregiver_id" \
+            -F "evidence_type=document" \
+            -F "extracted_text=CI-only document: follow-up date is not stated." \
+            -F "file=@/tmp/solenos-qwen-document.txt;type=text/plain" \
+            http://127.0.0.1:8080/api/v1/upload)
+          evidence_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["evidence_id"])' <<< "$upload")
+          document_payload=$(python -c 'import json,sys; print(json.dumps({"workflow":"document","text":"Explain only what this uploaded document states and what is missing.","evidence_ids":[sys.argv[1]]}))' "$evidence_id")
+          document_assist=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "$document_payload" \
+            http://127.0.0.1:8080/api/v1/assistant/assist)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["written_to_lcr"] is False; assert sys.argv[2] in d["source_evidence_ids"]' "$document_assist" "$evidence_id"
+
+          events=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
+
+          daily=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
+            http://127.0.0.1:8080/api/v1/daily/log)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
+          events_after_daily=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
+
+          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
+

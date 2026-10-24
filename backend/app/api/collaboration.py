@@ -369,7 +369,10 @@ async def community_experience(payload: dict, request: Request, db: Session = De
                     },
                 ],
             )
-            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\bsaba\b", summary):
+            if _companion_reply_needs_revision(summary) or _contains_unrequested_saba(
+                summary,
+                observation + "\n" + "\n".join(item["content"] for item in matches),
+            ):
                 summary = None
                 provider_status = "invalid_response"
             else:
@@ -416,8 +419,16 @@ def _is_casual_greeting(text: str) -> bool:
     }
 
 
+def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
+    """Reject the observed unexplained token only when it is not in supplied source."""
+    return bool(
+        re.search(r"(?i)\bsaba\b", reply or "")
+        and not re.search(r"(?i)\bsaba\b", source_text or "")
+    )
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
-    words = re.findall(r"[a-zA-Z']+", (text or "").casefold())
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
         return True
     if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
@@ -596,7 +607,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
-        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        "Keep the response to 55 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
@@ -606,7 +617,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
     )
-    if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
+    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+        reply, payload.text + "\n" + "\n".join(context_lines)
+    ):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
     return {
         "workflow": payload.workflow,
@@ -712,11 +725,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     },
                 ],
             )
-            if _companion_reply_needs_revision(reply) or re.search(r"(?i)\bsaba\b", reply):
+            if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+                reply, payload.text + "\n" + "\n".join(context_lines)
+            ):
                 raise HTTPException(
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",
                 )
+        # Apply the language-quality gate to every model-generated reply, not
+        # greetings alone. A failed guard must not persist a confusing answer.
+        if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+            reply, payload.text + "\\n" + "\\n".join(context_lines)
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Companion could not produce a clear, accessible response. No reply was saved; please try again.",
+            )
         verdict = "passed"
         safety_note = None
 

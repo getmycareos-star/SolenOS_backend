@@ -613,3 +613,100 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         assert downloaded.content == docx_bytes
     finally:
         teardown()
+
+
+
+def test_companion_rejects_unrequested_saba_in_any_reply_without_saving(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+        monkeypatch.setattr(
+            collaboration,
+            "_ollama_chat",
+            lambda base, model, messages: "Saba, saba. I can help organize the appointment details.",
+        )
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Help me prepare questions for the appointment."},
+        )
+        assert response.status_code == 503, response.text
+        assert "clear" in response.json()["detail"].lower()
+
+        db = TestingSessionLocal()
+        assert db.query(ConversationMessage).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+def test_read_only_qwen_assist_rejects_unrequested_saba_without_lcr_write(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "Saba is the key thing to remember. Saba, saba.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "appointment", "text": "Help organize my appointment questions."},
+        )
+        assert response.status_code == 503, response.text
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+    finally:
+        teardown()
+
+
+
+def test_qwen_status_and_read_only_assist_are_bound_to_the_authenticated_session(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+            "available": True,
+            "model": "qwen2.5:1.5b",
+            "provider": "local_ollama",
+            "inference_api": "ollama_native_http",
+            "hosted_inference_api": False,
+            "runtime": "bundled_railway_sidecar",
+        })
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "I can help organize the available appointment details and identify unanswered questions.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        status = client.get("/api/v1/assistant/status", headers=headers)
+        assert status.status_code == 200, status.text
+        assert status.json()["provider"] == "local_ollama"
+        assert status.json()["hosted_inference_api"] is False
+
+        assist = client.post("/api/v1/assistant/assist", headers=headers, json={
+            "workflow": "appointment",
+            "text": "Help organize the appointment details and questions.",
+        })
+        assert assist.status_code == 200, assist.text
+        assert assist.json()["written_to_lcr"] is False
+        assert assist.json()["authority"] == "solenos_care_record_and_caregiver"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
+    finally:
+        teardown()
