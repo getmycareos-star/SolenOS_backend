@@ -1,7 +1,8 @@
+
 """Persist complete Delta Engine comparison results.
 
 Revision ID: 20261023_04
-Revises: 20261022_03
+Revises: 20261024_03
 
 This migration is additive; existing care records remain unchanged.
 """
@@ -10,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261023_04"
-down_revision = "20261022_03"
+down_revision = "20261024_03"
 branch_labels = None
 depends_on = None
 
