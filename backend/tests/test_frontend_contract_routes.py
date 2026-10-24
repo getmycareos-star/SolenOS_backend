@@ -1,19 +1,15 @@
-import hashlib
 import importlib
-from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-main_module = importlib.import_module("app.main")
 from app.core.database import Base, get_db
-from app.main import app
 from app.models.collaboration import CommunityPost, ConversationMessage
-from app.models.care import Caregiver, Person
-from app.models.anonymous_session import AnonymousSession
 
+main_module = importlib.import_module("app.main")
+app = main_module.app
 engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
@@ -34,43 +30,19 @@ def setup_client(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
-    db = TestingSessionLocal()
-    person = Person(id="contract-person-1", name="Care recipient")
-    caregiver = Caregiver(
-        id="contract-caregiver-1",
-        name="Family caregiver",
-        email=None,
-        relationship="Family",
-        person_id=person.id,
+    client = TestClient(app)
+    first = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Family caregiver"})
+    second = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Other caregiver"})
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    return (
+        client,
+        first.json()["access_token"],
+        first.json()["person"]["id"],
+        first.json()["caregiver"]["id"],
+        second.json()["access_token"],
+        second.json()["person"]["id"],
     )
-    other_person = Person(id="contract-person-2", name="Other care recipient")
-    other_caregiver = Caregiver(
-        id="contract-caregiver-2",
-        name="Other caregiver",
-        email=None,
-        relationship="Family",
-        person_id=other_person.id,
-    )
-    db.add_all([person, caregiver, other_person, other_caregiver])
-    token = "contract-test-token"
-    db.add(AnonymousSession(
-        id="contract-session-1",
-        person_id=person.id,
-        caregiver_id=caregiver.id,
-        token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    ))
-    other_token = "contract-test-token-2"
-    db.add(AnonymousSession(
-        id="contract-session-2",
-        person_id=other_person.id,
-        caregiver_id=other_caregiver.id,
-        token_hash=hashlib.sha256(other_token.encode()).hexdigest(),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    ))
-    db.commit()
-    db.close()
-    return TestClient(app), token, other_token
 
 
 def teardown():
@@ -79,21 +51,17 @@ def teardown():
 
 
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
-    client, token, other_token = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        created = client.post("/api/v1/community", headers=auth, json={
+        forged = client.post("/api/v1/community", headers=auth, json={
             "caregiver_id": "caller-controlled-value",
             "author_type": "solenos_verified",
             "author_label": "Forged verified identity",
             "post_type": "experience",
-            "content": "A quiet routine helped us prepare for bedtime.",
-            "tags": ["routine", "sleep"],
-            "visibility": "public",
+            "content": "A forged identity must not be accepted.",
         })
-        # Middleware rejects caller-supplied caregiver attribution that differs
-        # from the caregiver bound to the bearer session.
-        assert created.status_code == 403
+        assert forged.status_code == 403, forged.text
 
         created = client.post("/api/v1/community", headers=auth, json={
             "post_type": "experience",
@@ -117,13 +85,12 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
         assert reaction.status_code == 200, reaction.text
         assert reaction.json()["reaction_counts"]["support"] == 1
 
-        # Reactions are attributed to the server-derived caregiver, not a body ID.
-        other = client.post(
+        other_reaction = client.post(
             f"/api/v1/community/{post['id']}/reactions",
             headers={"Authorization": f"Bearer {other_token}"},
             json={"reaction_type": "like"},
         )
-        assert other.status_code == 200, other.text
+        assert other_reaction.status_code == 200, other_reaction.text
         db = TestingSessionLocal()
         assert db.query(CommunityPost).filter_by(id=post["id"]).count() == 1
         db.close()
@@ -132,17 +99,17 @@ def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatc
 
 
 def test_companion_emergency_response_is_scoped_and_persisted_without_model(monkeypatch):
-    client, token, other_token = setup_client(monkeypatch)
+    client, token, person_id, _, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         denied = client.post("/api/v1/conversation/message", headers=auth, json={
-            "person_id": "contract-person-2",
+            "person_id": other_person_id,
             "text": "What happened today?",
         })
-        assert denied.status_code == 403
+        assert denied.status_code == 403, denied.text
 
         response = client.post("/api/v1/conversation/message", headers=auth, json={
-            "person_id": "contract-person-1",
+            "person_id": person_id,
             "text": "They are unconscious and not breathing",
         })
         assert response.status_code == 200, response.text
@@ -160,7 +127,7 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
             f"/api/v1/conversation/{data['session_id']}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
-        assert cross_record.status_code == 404
+        assert cross_record.status_code == 404, cross_record.text
 
         db = TestingSessionLocal()
         rows = db.query(ConversationMessage).filter_by(session_id=data["session_id"]).all()
