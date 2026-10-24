@@ -16,6 +16,10 @@ depends_on = None
 
 
 def upgrade():
+    # The function privileges and regprocedure syntax are PostgreSQL-specific.
+    # SQLite is used only for migration smoke tests; PostgreSQL CI exercises this DDL.
+    if op.get_bind().dialect.name != "postgresql":
+        return
     op.execute(
         """
         DO $migration$
