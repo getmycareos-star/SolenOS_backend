@@ -1,14 +1,25 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     OLLAMA_MODELS=/root/.ollama/models
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl tini \
-    && curl -fsSL https://ollama.com/install.sh | sh \
-    && rm -rf /var/lib/apt/lists/*
+# Keep OS package installation separate from Ollama installation so a failed
+# build reports which operation actually failed. Pin Bookworm rather than
+# following the moving python:3.12-slim Debian release.
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends bash ca-certificates curl tini; \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Ollama in its own build step. Do not hide installer failures behind
+# an apt-get command chain.
+RUN set -eux; \
+    curl --fail --show-error --location https://ollama.com/install.sh -o /tmp/ollama-install.sh; \
+    sh /tmp/ollama-install.sh; \
+    rm -f /tmp/ollama-install.sh; \
+    ollama --version
 
 WORKDIR /app
 COPY pyproject.toml ./
