@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
@@ -129,6 +130,13 @@ from app.models.care_continuity import CareActionOutcome as CareActionOutcomeMod
 from app.api.actions import router as actions_router
 
 router = APIRouter()
+
+
+class FeedbackPayload(BaseModel):
+    person_id: str
+    caregiver_id: str
+    category: str = Field(min_length=1, max_length=80)
+    detail: str = Field(min_length=1, max_length=4000)
 
 
 def _require_session_scope(request: Request, db: Session, person_id: str, caregiver_id: Optional[str] = None) -> AnonymousSessionModel:
@@ -1009,8 +1017,22 @@ def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
-    person_id: str, category: str, detail: str, caregiver_id: str, db: Session = Depends(get_db)
+    request: Request,
+    payload: Optional[FeedbackPayload] = Body(default=None),
+    person_id: Optional[str] = Query(default=None),
+    category: Optional[str] = Query(default=None),
+    detail: Optional[str] = Query(default=None),
+    caregiver_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
 ):
+    if payload is not None:
+        person_id = payload.person_id
+        caregiver_id = payload.caregiver_id
+        category = payload.category
+        detail = payload.detail
+    if not person_id or not caregiver_id or not category or not detail:
+        raise HTTPException(status_code=422, detail="person_id, caregiver_id, category and detail are required")
+    _require_session_scope(request, db, person_id, caregiver_id)
     engine = LearningEngine(db)
     engine.record_feedback(person_id, category, detail, caregiver_id)
     engine.after_save(person_id)
