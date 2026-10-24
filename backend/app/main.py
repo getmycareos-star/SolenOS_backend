@@ -263,10 +263,23 @@ def get_situation(
     query values are UI continuity keys only and never authorize data access.
     This endpoint does not synthesize clinical interpretation or sample data.
     """
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_scope_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_scope_id:
+    # Resolve the bearer capability at the route boundary as well as in
+    # middleware. This avoids relying on request.state propagation between ASGI
+    # middleware layers and ensures the database scope always comes from the token.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    person_id = str(authorized_session.person_id)
+    caregiver_scope_id = str(authorized_session.caregiver_id)
 
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:
