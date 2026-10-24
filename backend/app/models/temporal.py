@@ -39,7 +39,7 @@ class TemporalFact(Base):
     source_assertion = Column(Text, nullable=True)
 
     evidence_ids = Column(JSONList, nullable=True)
-    confidence = Column(Float, nullable=False, default=1.0)
+    confidence = Column(Float, nullable=True, default=None)
 
     superseded_by_fact_id = Column(String, ForeignKey("temporal_facts.id"), nullable=True)
 
@@ -67,7 +67,7 @@ class TemporalRelation(Base):
     fact_a_id = Column(String, ForeignKey("temporal_facts.id"), nullable=False)
     fact_b_id = Column(String, ForeignKey("temporal_facts.id"), nullable=False)
     relation_type = Column(SQLEnum(TemporalRelationType), nullable=False)
-    confidence = Column(Float, nullable=False, default=1.0)
+    confidence = Column(Float, nullable=True, default=None)
     is_derived = Column(Boolean, nullable=False, default=False)
     derivation_method = Column(String, nullable=True)
     evidence_ids = Column(JSONList, nullable=True)
