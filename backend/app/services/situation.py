@@ -66,8 +66,37 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     if payload.documents:
         for doc in payload.documents:
-            if doc.extracted_text and doc.extracted_text.strip():
-                create_evidence(doc.extracted_text.strip(), doc)
+            if not doc.extracted_text or not doc.extracted_text.strip():
+                continue
+            extracted_text = doc.extracted_text.strip()
+            if doc.evidence_id:
+                # Reuse the authenticated upload record so the original bytes,
+                # OCR text and care event share one evidence identity.
+                existing = db.query(Evidence).filter(
+                    Evidence.id == doc.evidence_id,
+                    Evidence.person_id == payload.person_id,
+                    Evidence.uploaded_by_caregiver_id == payload.caregiver_id,
+                ).first()
+                if not existing:
+                    raise ValueError("Uploaded evidence is not linked to this care record")
+                existing.source_text = extracted_text
+                existing.type = "document"
+                existing.confidence = doc.ocr_confidence
+                metadata = {}
+                try:
+                    metadata = json.loads(existing.extra_metadata or "{}")
+                except (TypeError, ValueError):
+                    metadata = {}
+                metadata.update({
+                    "filename": doc.name[:180],
+                    "mime_type": doc.mime_type,
+                    "ocr_confidence": doc.ocr_confidence,
+                })
+                existing.extra_metadata = json.dumps(metadata)
+                existing.evidence_status = "reported"
+                evidence_ids.append(existing.id)
+            else:
+                create_evidence(extracted_text, doc)
 
     if not evidence_ids:
         raise ValueError("No valid evidence provided")
