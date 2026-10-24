@@ -44,7 +44,10 @@ class ReminderCreate(BaseModel):
 class ReminderOut(BaseModel):
     id: str
     person_id: str
-    action_id: str
+    action_id: Optional[str] = None
+    handoff_id: Optional[str] = None
+    recipient_caregiver_id: Optional[str] = None
+    created_by_caregiver_id: Optional[str] = None
     title: str
     message: str
     timezone: str

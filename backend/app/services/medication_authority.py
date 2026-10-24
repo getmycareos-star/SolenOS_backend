@@ -26,7 +26,7 @@ def get_verified_medication_authority(
     person_id: str,
     evidence_id: str,
     source_authority: str,
-    now: datetime | None = None,
+    reference_time: datetime | None = None,
 ):
     if (source_authority or "").strip().lower() not in TRUSTED_PRESCRIBER_ROLES:
         return None
@@ -47,7 +47,7 @@ def get_verified_medication_authority(
     ).first()
     if verification is None:
         return None
-    now = now or datetime.now(timezone.utc)
+    now = reference_time or datetime.now(timezone.utc)
     if now.tzinfo is None:
         now = now.replace(tzinfo=timezone.utc)
     else:
@@ -62,7 +62,9 @@ def get_verified_medication_authority(
 
 
 
-def action_has_verified_medication_authority(db: Session, action, now: datetime | None = None) -> bool:
+def action_has_verified_medication_authority(
+    db: Session, action, reference_time: datetime | None = None
+) -> bool:
     """Revalidate the exact source evidence whenever a medication action is used."""
     action_text = " ".join(
         str(value or "")
@@ -82,5 +84,5 @@ def action_has_verified_medication_authority(db: Session, action, now: datetime 
         person_id=str(action.person_id),
         evidence_id=str(action.source_evidence_id),
         source_authority=str(action.source_authority or "unknown"),
-        now=now,
+        reference_time=reference_time,
     ) is not None

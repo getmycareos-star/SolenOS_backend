@@ -5,11 +5,14 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.models.reminder import CareReminder, ReminderDelivery, ReminderDeliveryAttempt
 from app.models.action import Action as ActionModel
+from app.models.care_handoff import CareHandoff
 from app.services.medication_authority import action_has_verified_medication_authority
 from app.services.medication_authority import medication_instruction_requires_authority, get_verified_medication_authority
 
 
-def _action_has_current_medication_authority(db: Session, action: ActionModel, now: datetime | None = None) -> bool:
+def _action_has_current_medication_authority(
+    db: Session, action: ActionModel, reference_time: datetime | None = None
+) -> bool:
     text = " ".join((action.original_text or "", action.source_passage or "", action.normalized_action or "", action.action_object or ""))
     if not medication_instruction_requires_authority(text, action.is_medication_action):
         return True
@@ -18,7 +21,7 @@ def _action_has_current_medication_authority(db: Session, action: ActionModel, n
         person_id=str(action.person_id),
         evidence_id=str(action.source_evidence_id or ""),
         source_authority=action.source_authority or "unknown",
-        now=now,
+        reference_time=reference_time,
     ) is not None
 
 logger = logging.getLogger(__name__)
@@ -60,6 +63,16 @@ def next_local_occurrence(current_utc: datetime, timezone_name: str, local_time:
     raise ValueError("Could not resolve the recurring time across the timezone transition")
 
 
+def _handoff_reminder_is_active(db: Session, reminder: CareReminder) -> bool:
+    if not reminder.handoff_id:
+        return False
+    handoff = db.query(CareHandoff).filter(
+        CareHandoff.id == reminder.handoff_id,
+        CareHandoff.person_id == reminder.person_id,
+    ).first()
+    return handoff is not None and handoff.status != "closed"
+
+
 def materialize_due_reminders(db: Session, now: datetime | None = None, batch_size: int = 100) -> int:
     """Persist one idempotent inbox receipt per due occurrence; safe to rerun after restarts."""
     now = _aware_utc(now or utc_now())
@@ -73,11 +86,17 @@ def materialize_due_reminders(db: Session, now: datetime | None = None, batch_si
         .all()
     )
     for reminder in due:
-        action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=reminder.person_id).first()
-        if action is None or action.status not in ("active", "conditional") or not _action_has_current_medication_authority(db, action, now):
-            reminder.enabled = False
-            db.commit()
-            continue
+        if reminder.handoff_id:
+            if not _handoff_reminder_is_active(db, reminder):
+                reminder.enabled = False
+                db.commit()
+                continue
+        else:
+            action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=reminder.person_id).first()
+            if action is None or action.status not in ("active", "conditional") or not _action_has_current_medication_authority(db, action, now):
+                reminder.enabled = False
+                db.commit()
+                continue
         scheduled_for = _aware_utc(reminder.next_run_at)
         key = f"{reminder.id}:{scheduled_for.isoformat(timespec='seconds')}"
         receipt = ReminderDelivery(
@@ -141,19 +160,27 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             db.commit()
             continue
 
-        action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
-        if action is None or action.status not in ("active", "conditional") or not action_has_verified_medication_authority(db, action, now):
-            reminder.enabled = False
-            receipt.status = "cancelled"
-            receipt.last_error = "Associated care action is no longer active or its medication source is no longer verified"
-            db.commit()
-            continue
-        if not _action_has_current_medication_authority(db, action):
-            reminder.enabled = False
-            receipt.status = "cancelled"
-            receipt.last_error = "Medication source verification is missing, expired, or no longer matches the stored evidence"
-            db.commit()
-            continue
+        if reminder.handoff_id:
+            if not _handoff_reminder_is_active(db, reminder):
+                reminder.enabled = False
+                receipt.status = "cancelled"
+                receipt.last_error = "Associated handoff is closed or no longer exists"
+                db.commit()
+                continue
+        else:
+            action = db.query(ActionModel).filter_by(id=reminder.action_id, person_id=receipt.person_id).first()
+            if action is None or action.status not in ("active", "conditional") or not action_has_verified_medication_authority(db, action, now):
+                reminder.enabled = False
+                receipt.status = "cancelled"
+                receipt.last_error = "Associated care action is no longer active or its medication source is no longer verified"
+                db.commit()
+                continue
+            if not _action_has_current_medication_authority(db, action, now):
+                reminder.enabled = False
+                receipt.status = "cancelled"
+                receipt.last_error = "Medication source verification is missing, expired, or no longer matches the stored evidence"
+                db.commit()
+                continue
 
         attempt_number = receipt.attempt_count + 1
         attempt = ReminderDeliveryAttempt(
