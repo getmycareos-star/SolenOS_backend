@@ -135,3 +135,33 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
         db.close()
     finally:
         teardown()
+
+
+
+def test_original_upload_download_and_cross_record_denial(monkeypatch):
+    client, token, other_token = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        original = b"test-image-bytes"
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={"person_id": "contract-person-1", "caregiver_id": "contract-caregiver-1"},
+            files={"file": ("medication.png", original, "image/png")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        assert uploaded.json()["persisted"] is True
+
+        downloaded = client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+        assert downloaded.status_code == 200
+        assert downloaded.content == original
+        assert downloaded.headers["content-type"] == "image/png"
+
+        denied = client.get(
+            f"/api/v1/upload/{evidence_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert denied.status_code == 404
+    finally:
+        teardown()
