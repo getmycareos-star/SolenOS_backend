@@ -64,11 +64,11 @@ def test_legacy_revision_three_is_reconciled_without_synthetic_records(tmp_path)
 
     with sqlite3.connect(db_path) as db:
         head = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
-        assert head == "20261024_07"
+        assert head == "20261024_08"
         tables = {
             row[0]
             for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
-        assert {"care_state_revisions", "care_assertions", "care_action_outcomes"} <= tables
+        assert {"care_state_revisions", "care_assertions", "care_action_outcomes", "community_posts", "community_reactions", "conversation_sessions", "conversation_messages", "evidence_uploads"} <= tables
         assert db.execute("SELECT COUNT(*) FROM persons").fetchone()[0] == 0
         assert db.execute("SELECT COUNT(*) FROM caregivers").fetchone()[0] == 0
