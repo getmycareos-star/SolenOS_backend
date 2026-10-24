@@ -213,6 +213,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        if path == "/api/v1/documents/ocr-status" and method == "GET":
+            target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
