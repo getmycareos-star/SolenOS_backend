@@ -672,7 +672,7 @@ def test_read_only_qwen_assist_rejects_unrequested_saba_without_lcr_write(monkey
 
 
 
-def test_qwen_status_and_read_only_assist_are_bound_to_the_authenticated_session(monkeypatch):
+def test_qwen_status_is_public_health_and_assist_is_session_scoped(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
         import app.api.collaboration as collaboration
