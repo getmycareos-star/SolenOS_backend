@@ -150,7 +150,7 @@ def deliver_pending_receipts(db: Session, now: datetime | None = None, batch_siz
             receipt.last_error = "Associated care action is no longer active or its medication source is no longer verified"
             db.commit()
             continue
-        if not _action_has_current_medication_authority(db, action):
+        if not _action_has_current_medication_authority(db, action, now):
             reminder.enabled = False
             receipt.status = "cancelled"
             receipt.last_error = "Medication source verification is missing, expired, or no longer matches the stored evidence"
