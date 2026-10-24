@@ -17,6 +17,7 @@ from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.collaboration import router as collaboration_router
+from app.models.collaboration import ConsentRecord
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -325,6 +326,21 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "This session is not authorised for that care record"},
             )
+
+        # Revocation is enforced server-side for every write, not only by the UI.
+        # Consent can be reaccepted through the consent endpoint itself.
+        if method in {"POST", "PUT", "PATCH", "DELETE"} and path != "/api/v1/consent":
+            consent_record = db.query(ConsentRecord).filter_by(
+                person_id=scoped_person_id, caregiver_id=scoped_caregiver_id
+            ).first()
+            if consent_record and consent_record.revoked_at is not None:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": "Consent has been revoked. Reaccept the required terms before writing care data.",
+                        "code": "consent_revoked",
+                    },
+                )
 
     return await call_next(request)
 
