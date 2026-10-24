@@ -1,6 +1,6 @@
 """Reconcile legacy caregiver columns without guessing existing identity mappings.
 
-Revision ID: t2_caregiver_schema_reconcile_20261024
+Revision ID: t2_caregiver_guard_20261024
 Revises: t2_delivery_attempts_20261023
 
 The migration is deliberately fail-closed: if the legacy caregivers table needs
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "t2_caregiver_schema_reconcile_20261024"
+revision = "t2_caregiver_guard_20261024"
 down_revision = "t2_delivery_attempts_20261023"
 branch_labels = None
 depends_on = None
