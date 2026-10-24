@@ -1,73 +1,31 @@
-import pytest
-
-from seed import _assert_demo_seed_allowed
+from pathlib import Path
 
 
-def clear_environment(monkeypatch):
-    for key in (
-        "RAILWAY_ENVIRONMENT_NAME",
-        "RAILWAY_ENVIRONMENT",
-        "APP_ENV",
-        "ENVIRONMENT",
-        "SOLENOS_ENABLE_DEMO_SEED",
-    ):
-        monkeypatch.delenv(key, raising=False)
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+APPLICATION_ROOT = BACKEND_ROOT / "app"
 
 
-def test_demo_seed_is_disabled_by_default(monkeypatch):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv("APP_ENV", "development")
-
-    with pytest.raises(RuntimeError, match="disabled by default"):
-        _assert_demo_seed_allowed()
+def test_demo_seed_script_is_not_shipped():
+    """Synthetic care-record generator must not be present in the runtime repository."""
+    assert not (BACKEND_ROOT / "seed.py").exists()
 
 
-def test_demo_seed_is_denied_when_environment_is_not_explicit(monkeypatch):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
-
-    with pytest.raises(RuntimeError, match="explicitly named local development environment"):
-        _assert_demo_seed_allowed()
-
-
-def test_demo_seed_requires_explicit_local_opt_in(monkeypatch):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
-
-    _assert_demo_seed_allowed()
+def test_production_modules_have_no_shared_or_demo_identity_fallbacks():
+    forbidden = (
+        "default_caregiver",
+        "default_care_recipient",
+        "-".join(("demo", "person", "id")),
+        " ".join(("Alex", "Johnson")),
+        " ".join(("Sam", "Johnson")),
+    )
+    for path in APPLICATION_ROOT.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        for marker in forbidden:
+            assert marker not in source, f"{marker!r} found in production module {path}"
 
 
-@pytest.mark.parametrize("environment_key", [
-    "RAILWAY_ENVIRONMENT_NAME",
-    "RAILWAY_ENVIRONMENT",
-    "APP_ENV",
-    "ENVIRONMENT",
-])
-def test_demo_seed_is_forbidden_in_production_even_with_opt_in(monkeypatch, environment_key):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv(environment_key, "production")
-    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
-
-    with pytest.raises(RuntimeError, match="never be seeded in production"):
-        _assert_demo_seed_allowed()
-
-
-def test_production_environment_cannot_be_overridden_by_development_label(monkeypatch):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
-
-    with pytest.raises(RuntimeError, match="never be seeded in production"):
-        _assert_demo_seed_allowed()
-
-
-def test_unknown_environment_label_blocks_demo_seed(monkeypatch):
-    clear_environment(monkeypatch)
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("ENVIRONMENT", "staging")
-    monkeypatch.setenv("SOLENOS_ENABLE_DEMO_SEED", "true")
-
-    with pytest.raises(RuntimeError, match="explicitly named local development environment"):
-        _assert_demo_seed_allowed()
+def test_production_modules_do_not_import_demo_seed_code():
+    for path in APPLICATION_ROOT.rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        assert "from seed import" not in source
+        assert "import seed" not in source
