@@ -252,3 +252,22 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         assert denied.status_code == 403
     finally:
         teardown()
+
+
+
+def test_companion_provider_unavailable_returns_503_without_orphan_session(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    try:
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "How can I prepare for bedtime?"},
+        )
+        assert response.status_code == 503, response.text
+        db = TestingSessionLocal()
+        assert db.query(ConversationSession).count() == 0
+        assert db.query(ConversationMessage).count() == 0
+        db.close()
+    finally:
+        teardown()
