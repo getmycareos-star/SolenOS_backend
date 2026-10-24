@@ -118,6 +118,10 @@ jobs:
       - name: Test handoffs, action reminders, delivery receipts, and completion attribution
         working-directory: backend
         run: python scripts/postgres_care_coordination_e2e.py
+
+      - name: Test Delta reconciliation persistence, provenance, and access isolation
+        working-directory: backend
+        run: python scripts/postgres_delta_e2e.py
       - name: Create isolated populated-legacy safety database
         run: |
           python - <<'PY'
