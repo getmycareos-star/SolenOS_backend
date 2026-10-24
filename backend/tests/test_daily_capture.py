@@ -304,10 +304,11 @@ def test_daily_capture_conflicting_medication_reports_are_preserved():
     try:
         seed_person_and_caregiver()
         client = TestClient(app)
+        auth = session_headers("person-daily-test", "caregiver-daily-test")
         for dose in ("5 mg", "10 mg"):
             response = client.post(
                 "/api/v1/daily-care/entries",
-                headers=session_headers("person-daily-test", "caregiver-daily-test"),
+                headers=auth,
                 json={
                     "person_id": "person-daily-test",
                     "caregiver_id": "caregiver-daily-test",
