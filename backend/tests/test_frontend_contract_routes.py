@@ -165,3 +165,48 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert denied.status_code == 404
     finally:
         teardown()
+
+
+
+def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
+    client, token, other_token = setup_client(monkeypatch)
+    try:
+        import app.api.care_delta as care_delta_api
+        monkeypatch.setattr(care_delta_api, "reconcile_event", lambda db, **kwargs: {
+            "event_summary": "Caregiver report reconciled.",
+            "caregiver_summary": "Review the source before acting.",
+            "clinician_summary": "",
+            "medications": [], "conditions": [], "symptoms": [], "tests": [],
+            "follow_ups": [], "contradictions": [], "clinical_gaps": [],
+            "persisted": bool(kwargs["persist"]),
+            "created_by_caregiver_id": kwargs["created_by_caregiver_id"],
+        })
+        auth = {"Authorization": f"Bearer {token}"}
+        ok = client.post("/api/v1/care-delta/reconcile", headers=auth, json={
+            "person_id": "contract-person-1",
+            "event_date": "2026-10-24T09:00:00Z",
+            "source": "Caregiver report",
+            "content": "Care recipient slept poorly last night.",
+            "evidence_ids": [],
+            "persist": True,
+        })
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["persisted"] is True
+        assert ok.json()["created_by_caregiver_id"] == "contract-caregiver-1"
+
+        denied = client.post("/api/v1/care-delta/reconcile", headers=auth, json={
+            "person_id": "contract-person-2",
+            "source": "Caregiver report",
+            "content": "Cross-record access must fail.",
+        })
+        assert denied.status_code == 403
+
+        history = client.get("/api/v1/care-delta/runs/contract-person-2", headers=auth)
+        assert history.status_code == 403
+        other_history = client.get(
+            "/api/v1/care-delta/runs/contract-person-1",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert other_history.status_code == 403
+    finally:
+        teardown()
