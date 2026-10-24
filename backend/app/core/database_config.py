@@ -6,6 +6,7 @@ from sqlalchemy.engine import make_url
 _SUPABASE_PROJECT_REF = "qyialgkfbwralolryhjx"
 _SUPABASE_DIRECT_HOST = f"db.{_SUPABASE_PROJECT_REF}.supabase.co"
 _SUPABASE_POOLER_HOST = "aws-0-us-west-1.pooler.supabase.com"
+_LOCAL_DATABASE_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def is_railway_runtime(environ=None) -> bool:
@@ -55,6 +56,9 @@ def configure_database_url(url: str, *, railway_runtime: bool) -> str:
     if railway_runtime and not parsed.host:
         raise RuntimeError("Railway DATABASE_URL must include a PostgreSQL host.")
 
-    if parsed.query.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
+    # Keep TLS mandatory for remote databases. Disposable localhost PostgreSQL
+    # used by tests does not provide TLS, and must not inherit production SSL.
+    is_local_test_database = not railway_runtime and parsed.host in _LOCAL_DATABASE_HOSTS
+    if not is_local_test_database and parsed.query.get("sslmode") not in {"require", "verify-ca", "verify-full"}:
         parsed = parsed.update_query_dict({"sslmode": "require"})
     return parsed.render_as_string(hide_password=False)
