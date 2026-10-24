@@ -28,6 +28,7 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
       STAGING_API_BASE_URL: ${{ vars.STAGING_API_BASE_URL }}
+      STAGING_DATABASE_HOST: ${{ vars.STAGING_DATABASE_HOST }}
     steps:
       - name: Check out selected branch
         uses: actions/checkout@v4
@@ -51,13 +52,19 @@ jobs:
           from urllib.parse import urlparse
           url = os.environ.get("DATABASE_URL", "").strip()
           api = os.environ.get("STAGING_API_BASE_URL", "").strip()
+          expected_host = os.environ.get("STAGING_DATABASE_HOST", "").strip().lower()
           if not url.startswith(("postgresql://", "postgresql+psycopg2://")):
               raise SystemExit("STAGING_DATABASE_URL must be a PostgreSQL SQLAlchemy URL.")
-          if not urlparse(url).hostname:
+          actual_host = (urlparse(url).hostname or "").lower()
+          if not actual_host:
               raise SystemExit("STAGING_DATABASE_URL has no database host.")
+          if not expected_host:
+              raise SystemExit("STAGING_DATABASE_HOST must explicitly identify the approved staging PostgreSQL hostname.")
+          if actual_host != expected_host:
+              raise SystemExit("STAGING_DATABASE_URL host does not match the approved STAGING_DATABASE_HOST; refusing to migrate.")
           if not api.startswith("https://"):
               raise SystemExit("STAGING_API_BASE_URL must be an HTTPS staging API origin.")
-          print("Staging database and HTTPS API target are configured; secret values withheld.")
+          print("Approved staging database host and HTTPS API target validated; secret values withheld.")
           PY
 
       - name: Apply the integrated Alembic chain to staging PostgreSQL
