@@ -65,3 +65,5 @@ class SituationResponse(BaseModel):
     what_changed: Optional[str] = None
     analysis_status: Literal["complete", "partial"] = "complete"
     analysis_warning: Optional[str] = None
+    qwen_extraction_status: Literal["pending_review", "unavailable", "invalid_response", "not_run"] = "not_run"
+    qwen_candidates: Optional[Dict[str, Any]] = None
