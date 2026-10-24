@@ -19,6 +19,7 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
+from app.services.qwen_support import qwen_chat
 
 router = APIRouter(tags=["community and companion"])
 
@@ -296,7 +297,6 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 
 
 @router.post("/community/experience")
-@router.post("/community/experience/summary")
 def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
     _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
@@ -308,6 +308,69 @@ def community_experience(payload: dict, request: Request, db: Session = Depends(
         "provider_status": "not_configured", "ai_generated": False,
         "notice": "These are literal matches from published caregiver posts. No AI summary was generated.",
         "matching_method": "literal_keyword_overlap_not_clinical_advice",
+    }
+
+
+
+@router.post("/community/experience/summary")
+def community_experience_summary(payload: dict, request: Request, db: Session = Depends(get_db)):
+    _scope(request, db)
+    observation = str(payload.get("observation", "")).strip()
+    if not observation:
+        raise HTTPException(status_code=422, detail="observation is required")
+    matches = _literal_matches(db, observation)
+    if not matches:
+        return {
+            "summary": None,
+            "matches": [],
+            "post_ids": [],
+            "provider_status": "no_matching_posts",
+            "ai_generated": False,
+            "notice": "No published peer posts matched this question; no summary was generated.",
+        }
+
+    # Only published peer submissions are model context. No private care-record
+    # events, caregiver identities, or unpublished posts are sent to Qwen.
+    source_posts = []
+    for match in matches[:8]:
+        post = db.query(CommunityPost).filter_by(
+            id=match["post_id"], visibility="public", moderation_status="published"
+        ).first()
+        if post:
+            source_posts.append({"post_id": post.id, "post_type": post.post_type, "content": post.content})
+    if not source_posts:
+        return {
+            "summary": None, "matches": [], "post_ids": [],
+            "provider_status": "no_matching_posts", "ai_generated": False,
+            "notice": "No published peer posts matched this question; no summary was generated.",
+        }
+
+    prompt = (
+        "Summarize only the caregiver experiences supplied below that relate to the question. "
+        "Do not invent a peer story, quote, clinical fact, diagnosis, or outcome. Do not advise "
+        "medication changes. Make clear these are shared experiences, not verified medical advice. "
+        "If the posts do not answer the question, say so. Keep it concise and respectful.\n"
+        + json.dumps({"question": observation, "published_peer_posts": source_posts}, ensure_ascii=False)
+    )
+    try:
+        summary_text = qwen_chat([
+            {"role": "system", "content": "You are Qwen supporting SolenOS. SolenOS and the source records remain authoritative. Return plain text only."},
+            {"role": "user", "content": prompt},
+        ])
+    except HTTPException:
+        return {
+            "summary": None, "matches": matches, "post_ids": [m["post_id"] for m in matches],
+            "provider_status": "unavailable", "ai_generated": False,
+            "notice": "Qwen is unavailable. Published peer matches are shown without an AI summary.",
+        }
+    return {
+        "summary": summary_text,
+        "matches": matches,
+        "post_ids": [m["post_id"] for m in matches],
+        "provider_status": "connected",
+        "ai_generated": True,
+        "source_post_ids": [p["post_id"] for p in source_posts],
+        "notice": "Qwen summarized only the published peer posts listed as sources.",
     }
 
 
@@ -335,17 +398,8 @@ def _ollama_url() -> tuple[str, str]:
 
 
 def _ollama_chat(base: str, model: str, messages: list[dict]) -> str:
-    body = json.dumps({"model": model, "messages": messages, "stream": False}).encode("utf-8")
-    request = urllib.request.Request(base + "/api/chat", data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60"))) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        raise HTTPException(status_code=503, detail="Companion model is unavailable; no response was generated") from exc
-    content = result.get("message", {}).get("content")
-    if not isinstance(content, str) or not content.strip():
-        raise HTTPException(status_code=503, detail="Companion model returned an invalid response")
-    return content.strip()
+    # Shared Qwen client enforces the private Railway service boundary.
+    return qwen_chat(messages)
 
 
 @router.post("/conversation/message")
@@ -389,7 +443,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Separate recorded facts from uncertainty, ask a focused follow-up when context is missing, "
             "and advise contacting a qualified professional for clinical decisions. "
             "Never claim a fact is in the care record unless it appears in the supplied context. "
-            "Community posts are not authoritative care-record facts.\n\n"
+            "Community posts are not authoritative care-record facts. "
+            "For casual greetings and ordinary social conversation, respond naturally, briefly, "
+            "and in plain everyday language, matching the user's language where possible. Do not "
+            "reply with unexplained slang, internal labels, model names, developer terms, or system "
+            "status. Do not turn greetings or thanks into care-record facts. Never use a canned "
+            "greeting template; generate a context-appropriate reply to this message. "
+            "When the user shares a care concern, support SolenOS's recorded evidence and clearly "
+            "distinguish source facts from suggestions. Qwen is an assistant, not the authority.\n\n"
             "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
         prior_messages = (
