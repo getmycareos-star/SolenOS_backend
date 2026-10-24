@@ -72,7 +72,33 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend
 
-      - name: Create legacy caregivers table with account-era NOT NULL columns
+      - name: Verify complete Alembic chain on a fresh PostgreSQL database
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Verify fresh-schema head and continuity tables
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              cur.execute("SELECT version_num FROM alembic_version")
+              revision = cur.fetchone()[0]
+              if revision != "20261024_04":
+                  raise SystemExit(f"unexpected fresh-schema Alembic head: {revision}")
+              for table in (
+                  "care_state_revisions", "care_assertions", "care_action_outcomes",
+                  "care_delta_runs", "care_circles", "care_circle_memberships",
+              ):
+                  cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+                  if cur.fetchone()[0] is None:
+                      raise SystemExit(f"required fresh-schema table missing: {table}")
+          conn.close()
+          PY
+
+      - name: Recreate a disposable production-like database at legacy revision 20261022_03
         run: |
           python - <<'PY'
           import os
@@ -81,6 +107,15 @@ jobs:
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
           conn.autocommit = True
           with conn.cursor() as cur:
+              # This is a disposable CI database only. Model the production
+              # Alembic stamp from the legacy migration branch, where revision
+              # 20261022_03 meant caregiver reconciliation and care-continuity
+              # tables were absent despite sharing the same revision ID.
+              cur.execute("DROP SCHEMA public CASCADE")
+              cur.execute("CREATE SCHEMA public")
+              cur.execute("GRANT ALL ON SCHEMA public TO solenos_test")
+              cur.execute("GRANT ALL ON SCHEMA public TO public")
+              cur.execute("CREATE TABLE persons (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL)")
               cur.execute("""
                   CREATE TABLE caregivers (
                       id VARCHAR PRIMARY KEY,
@@ -91,21 +126,25 @@ jobs:
                       role VARCHAR NOT NULL DEFAULT 'caregiver',
                       name VARCHAR NOT NULL,
                       relationship VARCHAR NOT NULL,
-                      person_id VARCHAR NOT NULL,
+                      person_id VARCHAR NOT NULL REFERENCES persons(id),
                       timezone VARCHAR NOT NULL DEFAULT 'UTC',
                       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                       last_login_at TIMESTAMPTZ
                   )
               """)
+              cur.execute("CREATE TABLE care_events (id VARCHAR PRIMARY KEY, person_id VARCHAR NOT NULL REFERENCES persons(id))")
+              cur.execute("CREATE TABLE contradictions (id VARCHAR PRIMARY KEY)")
+              cur.execute("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)")
+              cur.execute("INSERT INTO alembic_version (version_num) VALUES ('20261022_03')")
           conn.close()
           PY
 
-      - name: Apply complete Alembic chain to PostgreSQL legacy schema
+      - name: Upgrade the legacy production-like revision to head
         working-directory: backend
         run: alembic upgrade head
 
-      - name: Verify migration head, reconciled tables, and anonymous caregiver insert
+      - name: Verify production-like reconciliation and anonymous caregiver insert
         run: |
           python - <<'PY'
           import os
@@ -118,23 +157,19 @@ jobs:
           caregiver_id = str(uuid.uuid4())
           try:
               with conn.cursor() as cur:
+                  cur.execute("SELECT version_num FROM alembic_version")
+                  revision = cur.fetchone()[0]
+                  if revision != "20261024_04":
+                      raise SystemExit(f"unexpected legacy-upgrade Alembic head: {revision}")
+
                   cur.execute("""
                       SELECT column_name, is_nullable FROM information_schema.columns
                       WHERE table_schema = 'public' AND table_name = 'caregivers'
                   """)
                   columns = {row[0]: row[1] for row in cur.fetchall()}
-                  required = {"id", "email", "name", "relationship", "person_id", "timezone"}
-                  missing = required - set(columns)
-                  if missing:
-                      raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
                   for legacy_column in ("password_hash", "display_name"):
                       if columns.get(legacy_column) != "YES":
                           raise SystemExit(f"{legacy_column} must be nullable after migration 20261024_04")
-
-                  cur.execute("SELECT version_num FROM alembic_version")
-                  revision = cur.fetchone()[0]
-                  if revision != "20261024_04":
-                      raise SystemExit(f"unexpected Alembic head: {revision}")
 
                   for table in (
                       "care_state_revisions", "care_assertions", "care_action_outcomes",
@@ -142,11 +177,9 @@ jobs:
                   ):
                       cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
                       if cur.fetchone()[0] is None:
-                          raise SystemExit(f"required care-continuity table missing: {table}")
+                          raise SystemExit(f"required reconciled table missing: {table}")
 
                   cur.execute("INSERT INTO persons (id, name) VALUES (%s, %s)", (person_id, "CI-only person"))
-                  # Deliberately omit legacy account columns: this mirrors the ORM
-                  # insert used by anonymous sessions after the migration.
                   cur.execute(
                       """INSERT INTO caregivers (id, name, relationship, person_id, timezone)
                          VALUES (%s, %s, %s, %s, %s)""",
@@ -161,5 +194,5 @@ jobs:
               conn.rollback()
           finally:
               conn.close()
-          print("PostgreSQL legacy-schema migration passed; all required tables exist; caregiver insert succeeded and test rows were rolled back.")
+          print("Legacy production-like PostgreSQL upgrade passed; caregiver insert succeeded; fixture rows rolled back.")
           PY
