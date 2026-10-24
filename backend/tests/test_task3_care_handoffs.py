@@ -8,7 +8,7 @@ import pytest
 from app.core.database import Base
 from app.models.care import Person, Caregiver
 from app.models.care_handoff import CareHandoff, CareHandoffEvent
-from app.schemas.care_handoff import CareHandoffCreate
+from app.schemas.care_handoff import CareHandoffCreate, CareHandoffCompletion
 from app.api.care_handoffs import (
     create_handoff,
     acknowledge_handoff,
@@ -103,7 +103,7 @@ def test_handoff_rejects_cross_person_and_unlinked_assignee():
         )
         with pytest.raises(HTTPException) as exc:
             create_handoff(invalid_assignee, request, db)
-        assert exc.value.status_code == 422
+        assert exc.value.status_code == 403
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
@@ -131,7 +131,7 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
             db,
         )
         with pytest.raises(HTTPException) as exc:
-            close_handoff(item.id, request_for(person.id, backup.id), db)
+            close_handoff(item.id, CareHandoffCompletion(completion_report="Unauthorized close attempt"), request_for(person.id, backup.id), db)
         assert exc.value.status_code == 403
         with pytest.raises(HTTPException) as exc:
             acknowledge_handoff(item.id, request_for(person.id, caregiver.id), db)
@@ -146,7 +146,7 @@ def test_only_assigned_caregiver_can_acknowledge_and_status_changes_are_audited(
         again = acknowledge_handoff(item.id, request_for(person.id, assigned.id), db)
         assert again.status == "acknowledged"
 
-        closed = close_handoff(item.id, request_for(person.id, assigned.id), db)
+        closed = close_handoff(item.id, CareHandoffCompletion(completion_report="Follow-up completed by assigned caregiver"), request_for(person.id, assigned.id), db)
         assert closed.status == "closed"
         assert closed.closed_by_caregiver_id == assigned.id
         assert closed.closed_at is not None
