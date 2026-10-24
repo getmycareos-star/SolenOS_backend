@@ -518,6 +518,7 @@ async def upload_evidence(
         "evidence_id": evidence.id,
         "size_bytes": len(data),
         "mime_type": mime_type,
+        "evidence_type": evidence_type,
         "sha256": digest,
         "persisted": True,
     }
