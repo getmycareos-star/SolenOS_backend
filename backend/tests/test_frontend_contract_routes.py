@@ -206,7 +206,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
     client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        original = b"test-image-bytes"
+        original = bytes([137, 80, 78, 71, 13, 10, 26, 10]) + b"test-image-bytes"
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
