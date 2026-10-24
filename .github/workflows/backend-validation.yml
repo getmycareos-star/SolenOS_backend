@@ -42,7 +42,9 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: always()
+    # Live deployment smoke belongs to mainline release validation, not PR unit CI.
+    # It remains enabled for pushes to main so outages still fail the release check.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
