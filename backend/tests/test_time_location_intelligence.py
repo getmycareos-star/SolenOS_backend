@@ -366,3 +366,119 @@ def test_location_intelligence_format_location_for_display():
     display = format_location_for_display(loc)
     assert "Test Clinic" in display
     assert "Los Angeles" in display
+
+
+
+def test_daily_intelligence_surfaces_open_actions_with_source_and_deadline():
+    ref = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    result = generate_daily_intelligence(
+        "person-task5",
+        events=[],
+        appointments=[],
+        windows=[],
+        reference_time=ref,
+        actions=[
+            {
+                "id": "action-overdue",
+                "normalized_action": "Call the clinic to confirm follow-up",
+                "action_type": "call",
+                "status": "active",
+                "modality": "required",
+                "deadline": (ref - timedelta(days=1)).isoformat(),
+                "actor_id": "caregiver-1",
+                "actor_label": "Assigned caregiver",
+                "source_evidence_id": "evidence-1",
+                "source_passage": "Please call the clinic tomorrow.",
+                "extraction_confidence": 0.91,
+            },
+            {
+                "id": "action-med-review",
+                "normalized_action": "Review medication instruction",
+                "action_type": "take",
+                "status": "pending_confirmation",
+                "modality": "required",
+                "is_medication_action": True,
+                "requires_confirmation": True,
+                "source_evidence_id": "evidence-2",
+            },
+            {
+                "id": "action-prohibited",
+                "normalized_action": "Do not take medication",
+                "action_type": "take",
+                "status": "active",
+                "modality": "prohibited",
+                "source_evidence_id": "evidence-3",
+            },
+        ],
+    )
+
+    items = result["proactive_items"]
+    overdue = next(item for item in items if item["source_id"] == "action-overdue")
+    assert overdue["priority"] == "time_sensitive"
+    assert overdue["actor_label"] == "Assigned caregiver"
+    assert overdue["source_evidence_ids"] == ["evidence-1"]
+    assert overdue["source_passage"] == "Please call the clinic tomorrow."
+    medication = next(item for item in items if item["source_id"] == "action-med-review")
+    assert medication["priority"] == "review_required"
+    assert "not medication authority" in medication["message"]
+    assert all(item.get("source_id") != "action-prohibited" for item in items)
+
+
+def test_daily_intelligence_surfaces_repeated_records_without_claiming_causation():
+    ref = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": "event-1",
+            "title": "Night waking",
+            "event_type": "sleep",
+            "occurred_at": (ref - timedelta(days=2)).isoformat(),
+            "status": "recorded",
+            "evidence_ids": ["evidence-1"],
+        },
+        {
+            "id": "event-2",
+            "title": "Night waking",
+            "event_type": "sleep",
+            "occurred_at": (ref - timedelta(days=1)).isoformat(),
+            "status": "recorded",
+            "evidence_ids": ["evidence-2"],
+        },
+        {
+            "id": "event-old",
+            "title": "Night waking",
+            "event_type": "sleep",
+            "occurred_at": (ref - timedelta(days=60)).isoformat(),
+            "status": "recorded",
+            "evidence_ids": ["evidence-old"],
+        },
+    ]
+    result = generate_daily_intelligence(
+        "person-task5", events, [], [], reference_time=ref
+    )
+    pattern = next(item for item in result["proactive_items"] if item["kind"] == "similar_recorded_concern")
+    assert pattern["count"] == 2
+    assert set(pattern["source_ids"]) == {"event-1", "event-2"}
+    assert set(pattern["source_evidence_ids"]) == {"evidence-1", "evidence-2"}
+    assert "does not establish a cause" in pattern["message"]
+
+
+def test_daily_intelligence_marks_past_appointment_for_outcome_confirmation_not_automatically_overdue_care():
+    ref = datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    result = generate_daily_intelligence(
+        "person-task5",
+        events=[],
+        appointments=[{
+            "id": "appointment-past",
+            "title": "Neurology follow-up",
+            "scheduled_at": (ref - timedelta(days=1)).isoformat(),
+            "status": "scheduled",
+            "evidence_ids": ["appointment-evidence"],
+            "time_provenance": "caregiver_entered",
+        }],
+        windows=[],
+        reference_time=ref,
+    )
+    item = next(item for item in result["proactive_items"] if item["source_id"] == "appointment-past")
+    assert item["kind"] == "appointment_status_check"
+    assert item["source_evidence_ids"] == ["appointment-evidence"]
+    assert "Confirm whether it occurred" in item["message"]
