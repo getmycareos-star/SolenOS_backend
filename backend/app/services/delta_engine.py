@@ -17,6 +17,7 @@ from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
+from app.services.qwen_gateway import get_ollama_config
 
 
 DELTA_JSON_CONTRACT = {
@@ -133,26 +134,8 @@ DELTA_JSON_CONTRACT = {
 
 
 def _local_ollama_url() -> tuple[str, str, float]:
-    base_url = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "").strip()
-    try:
-        timeout = max(5.0, min(float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60")), 180.0))
-    except ValueError:
-        timeout = 60.0
-    if not base_url or not model:
-        raise HTTPException(status_code=503, detail="The configured local SolenOS model is unavailable: OLLAMA_BASE_URL and OLLAMA_MODEL must be configured.")
-    parsed = urlparse(base_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
-        raise HTTPException(status_code=503, detail="Local model configuration must use an HTTP(S) service URL.")
-    environment = (
-        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
-        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
-    ).strip().lower()
-    if environment in {"production", "prod"}:
-        hostname = parsed.hostname.casefold()
-        if hostname in {"localhost", "127.0.0.1", "::1"} or not hostname.endswith(".railway.internal"):
-            raise HTTPException(status_code=503, detail="Production Delta inference must use the private SolenOS model service; loopback and public model hosts are rejected.")
-    return base_url, model, timeout
+    # Delta and Companion share one fail-closed, private/local-only provider policy.
+    return get_ollama_config()
 
 
 
