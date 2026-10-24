@@ -55,7 +55,7 @@ def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_202
 
 
 @pytest.mark.parametrize("filename", [
-    "t0_caregiver_guard_20261024.py",
+    "t0_caregiver_schema_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
     "t2_caregiver_schema_reconcile_20261024.py",
 ])
@@ -79,7 +79,7 @@ def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_ta
 
 
 @pytest.mark.parametrize("filename", [
-    "t0_caregiver_guard_20261024.py",
+    "t0_caregiver_schema_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
     "t2_caregiver_schema_reconcile_20261024.py",
 ])
