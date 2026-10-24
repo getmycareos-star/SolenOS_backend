@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import hashlib
 import os
+import re
 import json
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -256,6 +257,23 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
 
 situation_router = APIRouter()
+
+
+def _is_social_only_input(value: str) -> bool:
+    """Reject greetings/social niceties from care capture; Companion owns conversation."""
+    normalized = re.sub(r"[.!?,;:]+", " ", (value or "").casefold())
+    normalized = re.sub(r"\\s+", " ", normalized).strip()
+    normalized = normalized.replace("’", "'")
+    phrases = {
+        "hi", "hello", "hey", "hiya", "hi there", "hello there", "hey there",
+        "hey solenos", "hi solenos", "hello solenos",
+        "how are you", "how are you doing", "how's it going", "hows it going",
+        "how are things", "how have you been",
+        "good morning", "good afternoon", "good evening", "good night",
+        "thanks", "thank you", "thank you so much", "thanks so much",
+        "bye", "goodbye", "see you",
+    }
+    return normalized in phrases
 
 
 @situation_router.get("/situation")
@@ -529,6 +547,17 @@ def post_situation(
             "paused_at": row.paused_at,
             "care_reality_preserved": True,
         }
+
+    # Defense in depth for clients that have not yet adopted the Companion
+    # handoff. Never turn a greeting into care evidence or an Active Care Situation.
+    if not payload.documents and _is_social_only_input(payload.raw_input or ""):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "conversation_only",
+                "message": "This is a conversation message, not a care-record capture. Send it to SolenOS Companion.",
+            },
+        )
 
     try:
         result = process_situation_input(db, payload)
