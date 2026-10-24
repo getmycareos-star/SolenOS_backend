@@ -86,7 +86,22 @@ def qwen_chat(
     try:
         with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+    except TimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="SolenOS local Qwen timed out; no model response was generated.",
+        ) from exc
+    except urllib.error.URLError as exc:
+        if isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise HTTPException(
+                status_code=504,
+                detail="SolenOS local Qwen timed out; no model response was generated.",
+            ) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="SolenOS local Qwen is unavailable; no model response was generated.",
+        ) from exc
+    except (ValueError, OSError) as exc:
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
