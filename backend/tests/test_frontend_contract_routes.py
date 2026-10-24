@@ -583,3 +583,75 @@ def test_notification_preferences_round_trip_and_session_revocation(monkeypatch)
         assert after_revoke.status_code == 401
     finally:
         teardown()
+
+
+
+def test_qwen_support_assist_is_scoped_read_only_and_never_claims_authority(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "You could write down the question you want to ask at the appointment.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get("/api/v1/events/" + person_id, headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        response = client.post("/api/v1/assistant/assist", headers=headers, json={
+            "workflow": "appointment",
+            "text": "Help me prepare for the next appointment.",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["authority"] == "solenos_care_record_and_caregiver"
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "read_only_assistance"
+        assert data["reply"] == "You could write down the question you want to ask at the appointment."
+
+        after = client.get("/api/v1/events/" + person_id, headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+
+        wrong_scope = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "handoff", "text": "Help me with this handoff.", "evidence_ids": ["not-owned"]},
+        )
+        assert wrong_scope.status_code == 200, wrong_scope.text
+        assert wrong_scope.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_community_summary_uses_qwen_only_when_a_model_response_is_generated(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "Caregiver experiences differ, so use these posts as peer perspectives rather than medical advice.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        created = client.post("/api/v1/community", headers=headers, json={
+            "post_type": "experience",
+            "content": "A written evening routine helped us remember the bedtime steps.",
+            "tags": ["routine"],
+        })
+        assert created.status_code == 201, created.text
+        response = client.post("/api/v1/community/experience/summary", headers=headers, json={
+            "observation": "I am struggling to remember the evening routine.",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["provider_status"] == "available"
+        assert "not authoritative" in data["notice"]
+    finally:
+        teardown()
