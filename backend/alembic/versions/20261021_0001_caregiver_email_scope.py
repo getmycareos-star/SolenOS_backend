@@ -64,14 +64,45 @@ def upgrade():
         )
 
     caregiver_columns = {column["name"] for column in inspector.get_columns("caregivers")}
-    required_columns = {"id", "email", "person_id"}
+    required_columns = {"id", "email", "name", "relationship", "person_id", "timezone"}
     missing_columns = sorted(required_columns - caregiver_columns)
     if missing_columns:
-        raise RuntimeError(
-            "Cannot migrate caregiver email uniqueness because the existing caregivers "
-            f"table is missing required columns: {', '.join(missing_columns)}. "
-            "Apply a reviewed schema migration before retrying."
-        )
+        row_count = bind.execute(sa.text("SELECT COUNT(*) FROM caregivers")).scalar_one()
+        if row_count:
+            raise RuntimeError(
+                "Caregiver schema reconciliation requires a reviewed identity mapping: "
+                f"caregivers has {row_count} existing rows and is missing {', '.join(missing_columns)}. "
+                "No columns were changed. Do not infer person relationships from account fields."
+            )
+
+        # A legacy table with no rows can be reconciled without inventing account
+        # identities or person links. The later 20261022_03 revision is idempotent
+        # and handles databases whose applied revision is already 20261022_02.
+        additions = {
+            "name": sa.Column("name", sa.String(), nullable=False),
+            "relationship": sa.Column("relationship", sa.String(), nullable=False),
+            "person_id": sa.Column(
+                "person_id",
+                sa.String(),
+                sa.ForeignKey("persons.id", name="fk_caregivers_person_id_persons"),
+                nullable=False,
+            ),
+            "timezone": sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
+            "email": sa.Column("email", sa.String(), nullable=True),
+        }
+        for column_name in missing_columns:
+            if column_name == "id":
+                raise RuntimeError("Cannot reconcile caregivers: required primary key id is missing.")
+            op.add_column("caregivers", additions[column_name])
+
+        inspector = sa.inspect(bind)
+        caregiver_columns = {column["name"] for column in inspector.get_columns("caregivers")}
+        missing_columns = sorted(required_columns - caregiver_columns)
+        if missing_columns:
+            raise RuntimeError(
+                "Caregiver schema reconciliation did not establish required columns: "
+                + ", ".join(missing_columns)
+            )
 
     # Refuse the migration before any uniqueness DDL if existing records already
     # violate the target rule. Never silently delete or merge caregiver rows.
