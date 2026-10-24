@@ -50,6 +50,31 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/health')
           echo "GET /health returned HTTP $status"
           test "$status" = "200"
+
+      - name: Verify deployed database readiness endpoint
+        run: |
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/ready')
+          echo "GET /ready returned HTTP $status"
+          test "$status" = "200"
+
+      - name: Verify deployed OpenAPI exposes core continuity routes
+        run: |
+          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
+          python - <<'PY'
+          import json
+          with open("/tmp/solenos-openapi.json", encoding="utf-8") as stream:
+              paths = set(json.load(stream).get("paths", {}))
+          required = {
+              "/api/v1/sessions/anonymous",
+              "/api/v1/sessions/refresh",
+              "/api/v1/evidence/{person_id}",
+              "/api/situation",
+          }
+          missing = sorted(required - paths)
+          if missing:
+              raise SystemExit(f"Deployed OpenAPI is missing core continuity routes: {missing}")
+          print("PASS: deployed OpenAPI exposes anonymous sessions, refresh, evidence reads, and care capture.")
+          PY
       - name: Diagnose deployed route paths
         if: always()
         shell: bash
