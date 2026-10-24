@@ -78,7 +78,14 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary httpx
 
       - name: Install Tesseract OCR runtime for integration smoke
-        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+        run: |
+          if command -v tesseract >/dev/null 2>&1; then
+            tesseract --version
+          else
+            sudo apt-get update
+            sudo apt-get install -y tesseract-ocr tesseract-ocr-eng
+            tesseract --version
+          fi
 
       - name: Recreate legacy account-oriented caregivers table
         run: |
