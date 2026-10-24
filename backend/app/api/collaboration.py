@@ -21,7 +21,7 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference
-from app.services.qwen_gateway import get_ollama_config, qwen_chat
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat
 
 router = APIRouter(tags=["community and companion"])
 
@@ -74,6 +74,10 @@ class QwenAssistRequest(BaseModel):
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
+
+
+class QwenCandidateRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
 
 
 CONSENT_TERMS_VERSION = "2026-10"
@@ -721,6 +725,81 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
+
+
+@router.post("/assistant/extract-candidates")
+async def qwen_extract_saved_event_candidates(
+    payload: QwenCandidateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Analyze already-saved evidence; never delay or alter the original write."""
+    person_id, _caregiver_id = _scope(request, db)
+    event = db.query(CareEvent).filter(
+        CareEvent.id == payload.event_id,
+        CareEvent.person_id == person_id,
+    ).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Saved care event not found in this care record")
+
+    sources: list[tuple[str | None, str]] = []
+    evidence_ids = list(event.evidence_ids or [])
+    if evidence_ids:
+        rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(evidence_ids),
+        ).all()
+        by_id = {str(row.id): row for row in rows}
+        for evidence_id in evidence_ids:
+            row = by_id.get(str(evidence_id))
+            if row and isinstance(row.source_text, str) and row.source_text.strip():
+                sources.append((str(row.id), row.source_text.strip()))
+    elif isinstance(event.description, str) and event.description.strip():
+        # Structured daily capture is preserved as the event description.
+        sources.append((None, event.description.strip()))
+
+    if not sources:
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": "no_source_text",
+            "qwen_candidates": {"observations": [], "open_questions": []},
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    candidates = {"observations": [], "open_questions": []}
+    try:
+        for evidence_id, source_text in sources[:5]:
+            candidate_set = await asyncio.to_thread(
+                extract_review_candidates,
+                source_text,
+                source_event_id=str(event.id),
+                source_evidence_id=evidence_id,
+            )
+            candidates["observations"].extend(candidate_set["observations"])
+            candidates["open_questions"].extend(candidate_set["open_questions"])
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        detail = str(exc.detail).casefold()
+        status = "invalid_response" if "invalid candidate structure" in detail else "unavailable"
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": status,
+            "qwen_candidates": None,
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+    return {
+        "event_id": event.id,
+        "qwen_extraction_status": "pending_review",
+        "qwen_candidates": {
+            "observations": candidates["observations"][:12],
+            "open_questions": list(dict.fromkeys(candidates["open_questions"]))[:3],
+        },
+        "ai_generated": True,
+        "written_to_lcr": False,
+    }
 
 
 @router.post("/assistant/assist")
