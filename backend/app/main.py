@@ -262,7 +262,7 @@ situation_router = APIRouter()
 def _is_social_only_input(value: str) -> bool:
     """Reject greetings/social niceties from care capture; Companion owns conversation."""
     normalized = re.sub(r"[.!?,;:]+", " ", (value or "").casefold())
-    normalized = re.sub(r"\\s+", " ", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     normalized = normalized.replace("’", "'")
     phrases = {
         "hi", "hello", "hey", "hiya", "hi there", "hello there", "hey there",
