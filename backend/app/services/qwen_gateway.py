@@ -90,3 +90,80 @@ def qwen_chat(messages: list[dict], *, timeout: float | None = None) -> str:
             detail="SolenOS local Qwen returned no usable response.",
         )
     return content.strip()
+
+
+
+def extract_review_candidates(
+    source_text: str,
+    *,
+    source_event_id: str,
+    source_evidence_id: str | None = None,
+) -> dict:
+    """Return only verbatim-grounded, explicitly review-required candidate observations."""
+    bounded_source = (source_text or "").strip()[:12_000]
+    if not bounded_source:
+        return {"observations": [], "open_questions": []}
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You extract possible caregiver-observed facts from a source, but you are not the authority. "
+                "Return valid JSON only with exactly this shape: "
+                '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
+                '"open_questions":["string"]}. '
+                "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
+                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source. "
+                "If there are no supported observations, return an empty observations array. Ask at most three short "
+                "clarifying questions. Never treat greetings or small talk as care observations."
+            ),
+        },
+        {"role": "user", "content": "Source text to review:\n" + bounded_source},
+    ]
+    raw = qwen_chat(messages)
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen returned an invalid candidate structure; no candidate was saved.",
+        ) from exc
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("observations"), list):
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen returned an invalid candidate structure; no candidate was saved.",
+        )
+
+    observations = []
+    for item in parsed["observations"][:12]:
+        if not isinstance(item, dict):
+            continue
+        subject = item.get("subject")
+        observation = item.get("observation")
+        quote = item.get("source_quote")
+        if not all(isinstance(value, str) and value.strip() for value in (subject, observation, quote)):
+            continue
+        if quote not in bounded_source:
+            continue
+        if any(term in observation.casefold() for term in ("diagnosed with", "caused by", "should increase dose", "should stop medication")):
+            continue
+        candidate = {
+            "subject": subject.strip()[:120],
+            "observation": observation.strip()[:500],
+            "source_quote": quote,
+            "review_status": "pending_review",
+            "source_event_id": source_event_id,
+        }
+        if source_evidence_id:
+            candidate["source_evidence_id"] = source_evidence_id
+        observations.append(candidate)
+
+    questions = parsed.get("open_questions", [])
+    if not isinstance(questions, list):
+        questions = []
+    clean_questions = [
+        question.strip()[:300]
+        for question in questions[:3]
+        if isinstance(question, str) and question.strip()
+    ]
+    return {"observations": observations, "open_questions": clean_questions}
