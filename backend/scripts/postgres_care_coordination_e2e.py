@@ -174,6 +174,20 @@ def main():
         action_id = action["id"]
         require(action["status"] == "active", f"action was not activated for reminder test: {action['status']}")
 
+        # Exercise every read route consumed by the frontend dashboard against
+        # the real PostgreSQL API before validating proactive item persistence.
+        for dashboard_path in (
+            f"/api/v1/caregivers/{person_id}",
+            f"/api/v1/events/{person_id}",
+            f"/api/v1/insights/{person_id}",
+            f"/api/v1/observations/{person_id}",
+            f"/api/v1/reasoning/{person_id}",
+            f"/api/v1/actions/{person_id}",
+            f"/api/v1/appointments/{person_id}",
+        ):
+            dashboard_status, dashboard_payload = request("GET", dashboard_path, token=token_a)
+            require(dashboard_status == 200, f"frontend dashboard API route failed ({dashboard_path}): {dashboard_status} {dashboard_payload}")
+
         # The same endpoint used by the frontend dashboard must persist a
         # source-linked proactive item and update today's snapshot idempotently.
         status, intelligence = request("GET", f"/api/v1/daily-intelligence/{person_id}", token=token_a)
@@ -268,6 +282,8 @@ def main():
         status, cancelled_receipts = request("GET", f"/api/v1/reminders/{cancelled_reminder['id']}/deliveries", token=token_a)
         require(status == 200 and len(cancelled_receipts) == 0, "closed handoff reminder was delivered after closure")
 
+        status, foreign_dashboard = request("GET", f"/api/v1/daily-intelligence/{person_id}", token=token_b)
+        require(status == 403, f"cross-record proactive dashboard access was not denied: {status}")
         status, foreign_handoff = request("GET", f"/api/v1/care-handoffs/{handoff_id}", token=token_b)
         require(status in {403, 404}, f"cross-person handoff access was not denied: {status}")
         status, foreign_reminders = request("GET", f"/api/v1/reminders/{action_reminder_id}/deliveries", token=token_b)
