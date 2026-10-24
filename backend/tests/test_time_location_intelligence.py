@@ -459,6 +459,8 @@ def test_daily_intelligence_surfaces_repeated_records_without_claiming_causation
     assert pattern["count"] == 2
     assert set(pattern["source_ids"]) == {"event-1", "event-2"}
     assert set(pattern["source_evidence_ids"]) == {"evidence-1", "evidence-2"}
+    assert {record["event_id"] for record in pattern["source_records"]} == {"event-1", "event-2"}
+    assert all(record["occurred_at"] and "time_provenance" in record for record in pattern["source_records"])
     assert "does not establish a cause" in pattern["message"]
 
 
