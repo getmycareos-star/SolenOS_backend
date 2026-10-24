@@ -66,6 +66,9 @@ app.include_router(care_delta_router, prefix="/api/v1")
 # person. The anonymous bootstrap is the only way to obtain a new capability;
 # caller-supplied person/caregiver IDs are never accepted as credentials.
 PUBLIC_V1_ENDPOINTS = {
+    # Infrastructure-only status exposes no care data and permits health checks
+    # without creating a synthetic caregiver/person record.
+    ("/api/v1/assistant/status", "GET"),
     ("/api/v1/time/now", "GET"),
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
