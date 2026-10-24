@@ -199,6 +199,45 @@ jobs:
             http://127.0.0.1:8080/api/v1/assistant/assist)
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
 
+          # Exercise every supported read-only workflow against the actual model.
+          for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+            workflow_response=$(curl --fail --silent --show-error \
+              -H "$auth_header" -H "Content-Type: application/json" \
+              -d "{\"workflow\":\"$workflow\",\"text\":\"Help organize the available information and identify what remains unknown.\"}" \
+              http://127.0.0.1:8080/api/v1/assistant/assist)
+            python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(); assert len(d["reply"].split()) <= 55' "$workflow_response" "$workflow"
+          done
+
+          # Verify a real Qwen summary is grounded in a real, published CI-only community post.
+          post=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"post_type":"experience","content":"A quiet routine helped us prepare for bedtime.","care_stage":"unspecified","tags":["routine"]}' \
+            http://127.0.0.1:8080/api/v1/community)
+          post_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$post")
+          community_summary=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"observation":"bedtime routine"}' \
+            http://127.0.0.1:8080/api/v1/community/experience/summary)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert sys.argv[2] in d["post_ids"]; assert isinstance(d["summary"],str) and d["summary"].strip()' "$community_summary" "$post_id"
+
+          # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
+          printf 'CI-only document: follow-up date is not stated.\\n' > /tmp/solenos-qwen-document.txt
+          upload=$(curl --fail --silent --show-error \
+            -H "$auth_header" \
+            -F "person_id=$person_id" \
+            -F "caregiver_id=$caregiver_id" \
+            -F "evidence_type=document" \
+            -F "extracted_text=CI-only document: follow-up date is not stated." \
+            -F "file=@/tmp/solenos-qwen-document.txt;type=text/plain" \
+            http://127.0.0.1:8080/api/v1/upload)
+          evidence_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["evidence_id"])' <<< "$upload")
+          document_payload=$(python -c 'import json,sys; print(json.dumps({"workflow":"document","text":"Explain only what this uploaded document states and what is missing.","evidence_ids":[sys.argv[1]]}))' "$evidence_id")
+          document_assist=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "$document_payload" \
+            http://127.0.0.1:8080/api/v1/assistant/assist)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["written_to_lcr"] is False; assert sys.argv[2] in d["source_evidence_ids"]' "$document_assist" "$evidence_id"
+
           events=$(curl --fail --silent --show-error -H "$auth_header" \
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
