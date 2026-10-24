@@ -210,3 +210,45 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
         assert other_history.status_code == 403
     finally:
         teardown()
+
+
+
+def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatch):
+    client, token, other_token = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": "contract-person-1",
+            "caregiver_id": "contract-caregiver-1",
+            "medications": [{
+                "medication_name": "Caregiver-reported medication",
+                "status": "administered",
+                "dose": "reported dose",
+                "scheduled_for": None,
+                "administered_at": "2026-10-24T08:00:00Z",
+                "photo_evidence_id": None,
+                "note": "Recorded by caregiver",
+            }],
+            "vitals": [{"vital_type": "heart_rate", "value": 72, "unit": "bpm"}],
+            "scales": [{"axis": "mood", "score": 3}],
+            "notes": "Daily capture contract test",
+        }
+        saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["success"] is True
+
+        events = client.get("/api/v1/events/contract-person-1", headers=auth)
+        assert events.status_code == 200, events.text
+        row = next(event for event in events.json() if event["id"] == saved.json()["id"])
+        import json as json_module
+        stored = json_module.loads(row["description"])
+        assert stored["notes"] == "Daily capture contract test"
+        assert stored["medications"][0]["medication_name"] == "Caregiver-reported medication"
+
+        denied = client.get(
+            f"/api/v1/events/contract-person-1",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert denied.status_code == 403
+    finally:
+        teardown()
