@@ -151,7 +151,7 @@ def test_companion_greeting_uses_qwen_prompt_and_never_writes_lcr(monkeypatch):
         assert "do not use a fixed or hardcoded greeting template" in system_prompt
         assert "do not automatically ask 'how are you doing?'" in system_prompt
         assert "plain, clear language" in system_prompt
-        assert "saba" in system_prompt
+        assert "unfamiliar foreign terms" in system_prompt
         assert "saba" not in data["reply"].lower()
         db = TestingSessionLocal()
         assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
