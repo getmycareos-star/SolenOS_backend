@@ -179,7 +179,7 @@ def parse_natural_language_time(
             "parsed_datetime": None,
             "timezone": tz.tzname(datetime.now(tz)) if tz else None,
             "timezone_id": source_tz,
-            "confidence": 0.0,
+            "confidence": None,
             "interpretation": "The time period is too broad to assign an exact date and time; clarify the date and/or time.",
             "is_ambiguous": True,
             "provenance": "caregiver_entered",
