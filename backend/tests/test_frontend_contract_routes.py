@@ -163,9 +163,67 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 404
+
+        text_bytes = b"Caregiver note text; not yet promoted to a care assertion."
+        text_upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": text_bytes.decode("utf-8"),
+            },
+            files={"file": ("care-note.txt", text_bytes, "text/plain")},
+        )
+        assert text_upload.status_code == 201, text_upload.text
+        assert text_upload.json()["persisted"] is True
+        assert len(text_upload.json()["sha256"]) == 64
+        text_id = text_upload.json()["evidence_id"]
+        text_download = client.get(f"/api/v1/upload/{text_id}", headers=auth)
+        assert text_download.status_code == 200
+        assert text_download.content == text_bytes
+        assert text_download.headers["content-type"] == "text/plain"
+        text_denied = client.get(
+            f"/api/v1/upload/{text_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert text_denied.status_code == 404
     finally:
         teardown()
 
+
+
+def test_document_extraction_requires_session_and_supports_utf8_text(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        original_text = b"Caregiver note: a follow-up question remains open."
+        unauthenticated = client.post(
+            "/api/extract",
+            files={"file": ("care-note.txt", original_text, "text/plain")},
+        )
+        assert unauthenticated.status_code == 401, unauthenticated.text
+
+        response = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("care-note.txt", original_text, "text/plain")},
+        )
+        assert response.status_code == 200, response.text
+        document = response.json()["document"]
+        assert response.json()["ok"] is True
+        assert document["extracted_text"] == original_text.decode("utf-8")
+        assert document["extraction_source"] == "text"
+
+        unsupported = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("scan.png", b"not-a-real-image", "image/png")},
+        )
+        assert unsupported.status_code == 415, unsupported.text
+        assert "scanned images require OCR" in unsupported.json()["detail"]
+    finally:
+        teardown()
 
 
 def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
