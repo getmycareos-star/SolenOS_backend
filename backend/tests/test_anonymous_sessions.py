@@ -534,3 +534,26 @@ def test_care_continuity_audit_actors_default_to_authenticated_session():
     }
     assert after_qualification[first.json()["id"]]["status"] == "needs_confirmation"
     assert "competing report" in after_qualification[first.json()["id"]]["explanation"].lower()
+
+
+def test_session_can_read_its_own_caregivers_collection():
+    client = TestClient(app)
+    created = create_session(client, "Scoped read")
+    response = client.get(
+        f"/api/v1/caregivers/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    caregivers = response.json()
+    assert any(item["id"] == created["caregiver"]["id"] for item in caregivers)
+
+
+def test_session_cannot_read_another_person_caregivers_collection():
+    client = TestClient(app)
+    first = create_session(client, "First scoped read")
+    second = create_session(client, "Second scoped read")
+    response = client.get(
+        f"/api/v1/caregivers/{first['person']['id']}",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert response.status_code == 403, response.text
