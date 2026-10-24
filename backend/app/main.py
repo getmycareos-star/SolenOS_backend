@@ -13,6 +13,7 @@ from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
+from app.api.collaboration import router as collaboration_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -45,6 +46,7 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+app.include_router(collaboration_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -122,6 +124,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        # Community is shared between caregivers, but each request still requires a
+        # valid session. Bind its authorization check to that session rather than
+        # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
+        if path.startswith("/api/v1/community"):
+            target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
