@@ -9,9 +9,9 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    # The caregiver legacy-constraint repair extends the current production
-    # head; it must not create a second Alembic head.
-    assert script.get_heads() == ["20261024_05"]
+    # The care-continuity and forward-only trigger-function security changes
+    # must remain on one linear migration head.
+    assert script.get_heads() == ["20261024_06"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
