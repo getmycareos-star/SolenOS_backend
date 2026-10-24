@@ -9,9 +9,9 @@ def test_task2_and_care_continuity_migrations_form_one_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
 
-    # PR #21 ends at the care-circle/Delta merge; Task 2 must extend it
-    # through delivery-attempt persistence as one deployable head.
-    assert script.get_heads() == ["t2_delivery_attempts_20261023"]
+    # Task 2 extends the care-continuity graph through delivery-attempt persistence.
+    # Task 5 must continue that same graph as one deployable head.
+    assert script.get_heads() == ["t5_proactive_items_20261024"]
     revisions = list(script.walk_revisions())
     revision_ids = [revision.revision for revision in revisions]
     assert len(revision_ids) == len(set(revision_ids))
