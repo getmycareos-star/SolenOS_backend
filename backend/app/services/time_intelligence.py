@@ -160,6 +160,7 @@ def parse_natural_language_time(
         reference_time = utc_now()
 
     text_lower = text.lower().strip()
+    tz = get_timezone(source_tz)
 
     # Do not turn vague day-parts or relative periods into invented clock times
     # (for example, "tonight" -> 20:00 or "this morning" -> 09:00).
@@ -188,7 +189,6 @@ def parse_natural_language_time(
     interpretation = ""
     parsed_dt = None
     is_ambiguous = False
-    tz = get_timezone(source_tz)
 
     today = reference_time.date()
     current_year = reference_time.year
