@@ -409,3 +409,28 @@ def test_consent_acceptance_preferences_revocation_and_scope(monkeypatch):
         assert cross_record.status_code == 403
     finally:
         teardown()
+
+
+
+def test_feedback_json_contract_requires_scoped_bearer_identity(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        response = client.post("/api/v1/feedback", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "category": "human_validation",
+            "detail": "{\"interaction_id\":\"interaction-1\",\"helpful_yes_no\":true,\"reduced_confusion_yes_no\":true}",
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["event_type"] == "feedback"
+
+        denied = client.post("/api/v1/feedback", headers=auth, json={
+            "person_id": other_person_id,
+            "caregiver_id": caregiver_id,
+            "category": "human_validation",
+            "detail": "cross-record feedback must be denied",
+        })
+        assert denied.status_code == 403
+    finally:
+        teardown()
