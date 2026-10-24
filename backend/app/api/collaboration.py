@@ -416,6 +416,14 @@ def _is_casual_greeting(text: str) -> bool:
     }
 
 
+def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
+    """Reject the observed unexplained token only when it is not in supplied source."""
+    return bool(
+        re.search(r"(?i)\\bsaba\\b", reply or "")
+        and not re.search(r"(?i)\\bsaba\\b", source_text or "")
+    )
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[a-zA-Z']+", (text or "").casefold())
     if not words or len(words) > 55:
@@ -717,6 +725,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     status_code=503,
                     detail="Companion could not produce a clear response. No reply was saved; please try again.",
                 )
+        # Apply the language-quality gate to every model-generated reply, not
+        # greetings alone. A failed guard must not persist a confusing answer.
+        if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+            reply, payload.text + "\\n" + "\\n".join(context_lines)
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Companion could not produce a clear, accessible response. No reply was saved; please try again.",
+            )
         verdict = "passed"
         safety_note = None
 
