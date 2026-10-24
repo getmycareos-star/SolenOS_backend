@@ -55,7 +55,7 @@ def get_ollama_config() -> tuple[str, str, float]:
                 status_code=503,
                 detail="SolenOS accepts only its bundled Qwen runtime or a private Railway model service.",
             )
-    elif not (loopback or host.endswith(".railway.internal") or host == "ollama"):
+    elif not (loopback or host.endswith(".railway.internal") or host.endswith(".internal") or host == "ollama"):
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen must use a loopback or private Railway service.",
