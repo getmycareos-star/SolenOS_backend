@@ -157,6 +157,10 @@ jobs:
           print("Integrated Task 4 PostgreSQL migration passed; one head, required schema present, no caregiver rows fabricated.")
           PY
 
+      - name: Exercise integrated PostgreSQL API continuity over HTTP
+        working-directory: backend
+        run: python scripts/postgres_anonymous_e2e.py
+
       - name: Create populated legacy-schema safety database
         run: |
           python - <<'PY'
