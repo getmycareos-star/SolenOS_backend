@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -58,7 +58,7 @@ class EvidenceUpload(Base):
     evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True)
     filename = Column(String, nullable=False)
     mime_type = Column(String, nullable=False)
-    content = Column(__import__("sqlalchemy").LargeBinary, nullable=False)
-    size_bytes = Column(__import__("sqlalchemy").Integer, nullable=False)
+    content = Column(LargeBinary, nullable=False)
+    size_bytes = Column(Integer, nullable=False)
     sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
