@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
+from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat
 
@@ -861,6 +862,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
             source_evidence_ids.append(str(row.id))
 
+    if payload.workflow == "handoff":
+        handoffs = (
+            db.query(CaregiverHandoff)
+            .filter(CaregiverHandoff.person_id == person_id)
+            .order_by(CaregiverHandoff.timestamp.desc())
+            .limit(5)
+            .all()
+        )
+        for handoff in handoffs:
+            context_lines.append(
+                f"Recorded caregiver handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
+                f"scope={handoff.scope or 'not specified'}; acceptance={getattr(handoff.acceptance_status, 'value', handoff.acceptance_status)}; "
+                f"completed={bool(handoff.is_completed)}; context={(handoff.context or '')[:800]}"
+            )
+
     if payload.workflow == "community":
         matches = _literal_matches(db, payload.text)
         for match in matches[:3]:
@@ -954,6 +970,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         context_lines = [f"Recorded event: {e.title} — {e.description or 'No additional detail'} ({e.occurred_at.isoformat() if e.occurred_at else 'time unknown'})" for e in recent_events]
         appointments = (db.query(Appointment).filter(Appointment.person_id == person_id).order_by(Appointment.scheduled_at.asc()).limit(5).all())
         context_lines += [f"Recorded appointment: {a.title} — {a.status}" for a in appointments]
+        handoffs = (
+            db.query(CaregiverHandoff)
+            .filter(CaregiverHandoff.person_id == person_id)
+            .order_by(CaregiverHandoff.timestamp.desc())
+            .limit(5)
+            .all()
+        )
+        context_lines += [
+            f"Recorded caregiver handoff: {h.responsibility_type}; scope={h.scope or 'not specified'}; "
+            f"acceptance={getattr(h.acceptance_status, 'value', h.acceptance_status)}; completed={bool(h.is_completed)}; "
+            f"context={(h.context or '')[:500]}"
+            for h in handoffs
+        ]
         system_prompt = (
             "You are SolenOS Companion, a natural, respectful conversational support for family caregivers. "
             "Generate the actual reply from the user's message and context. Do not use a fixed or hardcoded greeting template "
