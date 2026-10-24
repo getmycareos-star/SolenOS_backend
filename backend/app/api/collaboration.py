@@ -1,5 +1,6 @@
 import asyncio
 import json
+import hashlib
 import os
 import re
 import urllib.error
@@ -8,14 +9,15 @@ from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.time_location import Appointment
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
 
 router = APIRouter(tags=["community and companion"])
 
@@ -71,6 +73,69 @@ def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None)
         "user_reaction": next((r.reaction_type for r in reactions if actor_id and r.caregiver_id == actor_id), None),
         "moderation_status": post.moderation_status,
     }
+
+
+@router.post("/upload", status_code=201)
+async def upload_evidence(
+    request: Request,
+    file: UploadFile = File(...),
+    person_id: str = Form(...),
+    caregiver_id: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    scoped_person_id, scoped_caregiver_id = _scope(request)
+    if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
+        raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
+    mime_type = (file.content_type or "").lower()
+    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
+        raise HTTPException(status_code=415, detail="Only JPEG, PNG, WebP, and GIF images are supported")
+    data = await file.read(5 * 1024 * 1024 + 1)
+    if not data:
+        raise HTTPException(status_code=422, detail="The uploaded file is empty")
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
+    caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+    evidence = EvidenceModel(
+        person_id=scoped_person_id,
+        type="medication_photo",
+        source_text="Caregiver-uploaded medication photo",
+        original_file_path=None,
+        uploaded_by_caregiver_id=scoped_caregiver_id,
+        extra_metadata=json.dumps({"filename": (file.filename or "medication-photo")[:180], "mime_type": mime_type}),
+        source_type="caregiver_upload",
+        evidence_status="recorded",
+    )
+    db.add(evidence)
+    db.flush()
+    db.add(EvidenceUpload(
+        evidence_id=evidence.id,
+        filename=(file.filename or "medication-photo")[:180],
+        mime_type=mime_type,
+        content=data,
+        size_bytes=len(data),
+        sha256=hashlib.sha256(data).hexdigest(),
+    ))
+    db.commit()
+    return {"evidence_id": evidence.id, "size_bytes": len(data), "mime_type": mime_type, "persisted": True}
+
+
+@router.get("/upload/{evidence_id}")
+def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scope(request)
+    evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
+    if not evidence:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
+    if not blob:
+        raise HTTPException(status_code=404, detail="Original upload is unavailable")
+    safe_filename = blob.filename.replace("\r", "").replace("\n", "").replace('"', "")
+    return Response(
+        content=blob.content,
+        media_type=blob.mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{safe_filename}"', "X-Content-Type-Options": "nosniff"},
+    )
 
 
 @router.get("/community")
