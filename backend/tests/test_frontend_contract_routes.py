@@ -139,14 +139,14 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
 
 
 def test_original_upload_download_and_cross_record_denial(monkeypatch):
-    client, token, other_token = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         original = b"test-image-bytes"
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
-            data={"person_id": "contract-person-1", "caregiver_id": "contract-caregiver-1"},
+            data={"person_id": person_id, "caregiver_id": caregiver_id},
             files={"file": ("medication.png", original, "image/png")},
         )
         assert uploaded.status_code == 201, uploaded.text
@@ -169,7 +169,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
 
 
 def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
-    client, token, other_token = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         import app.api.care_delta as care_delta_api
         monkeypatch.setattr(care_delta_api, "reconcile_event", lambda db, **kwargs: {
@@ -183,7 +183,7 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
         })
         auth = {"Authorization": f"Bearer {token}"}
         ok = client.post("/api/v1/care-delta/reconcile", headers=auth, json={
-            "person_id": "contract-person-1",
+            "person_id": person_id,
             "event_date": "2026-10-24T09:00:00Z",
             "source": "Caregiver report",
             "content": "Care recipient slept poorly last night.",
@@ -192,19 +192,19 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
         })
         assert ok.status_code == 200, ok.text
         assert ok.json()["persisted"] is True
-        assert ok.json()["created_by_caregiver_id"] == "contract-caregiver-1"
+        assert ok.json()["created_by_caregiver_id"] == caregiver_id
 
         denied = client.post("/api/v1/care-delta/reconcile", headers=auth, json={
-            "person_id": "contract-person-2",
+            "person_id": other_person_id,
             "source": "Caregiver report",
             "content": "Cross-record access must fail.",
         })
         assert denied.status_code == 403
 
-        history = client.get("/api/v1/care-delta/runs/contract-person-2", headers=auth)
+        history = client.get(f"/api/v1/care-delta/runs/{other_person_id}", headers=auth)
         assert history.status_code == 403
         other_history = client.get(
-            "/api/v1/care-delta/runs/contract-person-1",
+            f"/api/v1/care-delta/runs/{person_id}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert other_history.status_code == 403
@@ -214,12 +214,12 @@ def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):
 
 
 def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatch):
-    client, token, other_token = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         payload = {
-            "person_id": "contract-person-1",
-            "caregiver_id": "contract-caregiver-1",
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
             "medications": [{
                 "medication_name": "Caregiver-reported medication",
                 "status": "administered",
@@ -237,7 +237,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         assert saved.status_code == 200, saved.text
         assert saved.json()["success"] is True
 
-        events = client.get("/api/v1/events/contract-person-1", headers=auth)
+        events = client.get(f"/api/v1/events/{person_id}", headers=auth)
         assert events.status_code == 200, events.text
         row = next(event for event in events.json() if event["id"] == saved.json()["id"])
         import json as json_module
@@ -246,7 +246,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         assert stored["medications"][0]["medication_name"] == "Caregiver-reported medication"
 
         denied = client.get(
-            f"/api/v1/events/contract-person-1",
+            f"/api/v1/events/{person_id}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 403
