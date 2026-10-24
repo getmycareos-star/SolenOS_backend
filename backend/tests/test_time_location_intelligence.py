@@ -420,7 +420,7 @@ def test_daily_intelligence_surfaces_open_actions_with_source_and_deadline():
     assert overdue["source_passage"] == "Please call the clinic tomorrow."
     medication = next(item for item in items if item["source_id"] == "action-med-review")
     assert medication["priority"] == "review_required"
-    assert "not medication authority" in medication["message"]
+    assert "medication authority or a dosing instruction" in medication["message"]
     assert all(item.get("source_id") != "action-prohibited" for item in items)
 
 
