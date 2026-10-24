@@ -622,8 +622,7 @@ def test_qwen_support_assist_is_scoped_read_only_and_never_claims_authority(monk
             headers={"Authorization": f"Bearer {token}"},
             json={"workflow": "handoff", "text": "Help me with this handoff.", "evidence_ids": ["not-owned"]},
         )
-        assert wrong_scope.status_code == 200, wrong_scope.text
-        assert wrong_scope.json()["written_to_lcr"] is False
+        assert wrong_scope.status_code == 403, wrong_scope.text
     finally:
         teardown()
 
