@@ -422,8 +422,8 @@ def _is_casual_greeting(text: str) -> bool:
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
     """Reject the observed unexplained token only when it is not in supplied source."""
     return bool(
-        re.search(r"(?i)\bsaba\b, reply or "")
-        and not re.search(r"(?i)\bsaba\b, source_text or "")
+        re.search(r"(?i)\bsaba\b", reply or "")
+        and not re.search(r"(?i)\bsaba\b", source_text or "")
     )
 
 
