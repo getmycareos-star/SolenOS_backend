@@ -13,7 +13,15 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-database_url = configure_database_url(settings.database_url, railway_runtime=True)
+database_url = configure_database_url(
+    settings.database_url,
+    railway_runtime=(
+        is_railway_runtime()
+        or settings.database_url.strip().startswith(
+            ("postgres://", "postgresql://", "postgresql+psycopg2://")
+        )
+    ),
+)
 # Enforce Supabase Session Pooler username here as well: Railway pre-deploy
 # must never attempt authentication as the unqualified "postgres" user.
 _parsed_database_url = make_url(database_url)
