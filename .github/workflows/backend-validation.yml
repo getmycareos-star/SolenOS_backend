@@ -45,21 +45,50 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
-      - name: Verify deployed health endpoint
+      - name: Wait for deployed service health and database readiness
+        timeout-minutes: 16
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/health')
-          echo "GET /health returned HTTP $status"
-          test "$status" = "200"
+          base='https://solenosbackend-production.up.railway.app'
+          ready=0
+          for attempt in $(seq 1 48); do
+            health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
+            status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
+            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}"
+            if [ "$health" = "200" ] && [ "$status" = "200" ]; then ready=1; break; fi
+            sleep 20
+          done
+          test "$ready" = "1"
 
-      - name: Verify deployed database readiness endpoint
+      - name: Verify deployed Railway-local Qwen model inventory
+        timeout-minutes: 12
+        shell: bash
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/ready')
-          echo "GET /ready returned HTTP $status"
-          test "$status" = "200"
+          base='https://solenosbackend-production.up.railway.app'
+          session=$(curl --silent --show-error --fail --max-time 30 -X POST "${base}/api/v1/sessions/anonymous" -H 'Content-Type: application/json' -d '{"name":"CI smoke recipient","caregiver_name":"CI smoke caregiver"}')
+          token=$(printf '%s' "$session" | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
+          test -n "$token"
+          available=0
+          for attempt in $(seq 1 36); do
+            status=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 "${base}/api/v1/assistant/status" -H "Authorization: Bearer ${token}" || true)
+            if [ "$status" = "200" ] && python - <<'PY'
+          import json
+          with open("/tmp/qwen-status.json", encoding="utf-8") as stream:
+              data = json.load(stream)
+          assert data.get("available") is True, data
+          assert data.get("model") == "qwen2.5:1.5b", data
+          assert data.get("provider") == "local_ollama", data
+          assert data.get("hosted_inference_api") is False, data
+          print("PASS: Railway reports the bundled local qwen2.5:1.5b model as available.")
+          PY
+            then available=1; break; fi
+            echo "Qwen runtime not yet ready (HTTP ${status}); retrying."
+            sleep 15
+          done
+          test "$available" = "1"
 
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
-          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
+          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
           python - <<'PY'
           import json
           with open("/tmp/solenos-openapi.json", encoding="utf-8") as stream:
@@ -69,6 +98,10 @@ jobs:
               "/api/v1/sessions/refresh",
               "/api/v1/evidence/{person_id}",
               "/api/situation",
+              "/api/v1/share-intake",
+              "/api/v1/share-intake/{share_id}",
+              "/api/v1/assistant/status",
+              "/api/v1/assistant/assist",
           }
           missing = sorted(required - paths)
           if missing:
@@ -79,7 +112,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          base='https://solenosbackend-production-ee6a.up.railway.app'
+          base='https://solenosbackend-production.up.railway.app'
           for path in /health /ready /api/health /api/v1/health /openapi.json /docs /; do
             status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
             printf '%-18s HTTP %s\n' "$path" "$status"
@@ -91,6 +124,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-ee6a.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"

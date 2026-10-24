@@ -1,3 +1,4 @@
+import base64
 import importlib
 from io import BytesIO
 
@@ -531,5 +532,36 @@ def test_casual_greeting_is_rejected_before_situation_capture_writes(monkeypatch
         assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
         assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
         db.close()
+    finally:
+        teardown()
+
+
+
+def test_share_intake_persists_across_requests_and_cannot_be_replayed(monkeypatch):
+    client, _, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        original = b"shared-care-document"
+        encoded = base64.b64encode(original).decode("ascii")
+        created = client.post("/api/v1/share-intake", json={
+            "title": "Shared care note",
+            "text": "Follow-up is scheduled.",
+            "url": "https://example.org/care-note",
+            "files": [{
+                "name": "care-note.txt",
+                "mimeType": "text/plain",
+                "base64": encoded,
+            }],
+        })
+        assert created.status_code == 201, created.text
+        share_id = created.json()["id"]
+        assert len(share_id) >= 40
+
+        claimed = client.get(f"/api/v1/share-intake/{share_id}")
+        assert claimed.status_code == 200, claimed.text
+        assert claimed.json()["text"] == "Follow-up is scheduled."
+        assert claimed.json()["files"][0]["base64"] == encoded
+
+        replay = client.get(f"/api/v1/share-intake/{share_id}")
+        assert replay.status_code == 404
     finally:
         teardown()
