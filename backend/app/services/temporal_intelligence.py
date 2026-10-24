@@ -247,7 +247,7 @@ def infer_temporal_relation(db: Session, fact_a_id: str, fact_b_id: str) -> Opti
         "fact_a_id": fact_a_id,
         "fact_b_id": fact_b_id,
         "relation": relation.value,
-        "confidence": min(fact_a.confidence, fact_b.confidence),
+        "confidence": None,
         "is_derived": True,
         "derivation_method": "temporal_calculation",
     }
