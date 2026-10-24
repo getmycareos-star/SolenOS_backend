@@ -1,5 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -56,7 +57,7 @@ def seed_person_and_caregiver():
 
 
 def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
-    token = f"daily-test-token-{person_id}-{caregiver_id}"
+    token = f"daily-test-token-{person_id}-{caregiver_id}-{uuid4().hex}"
     db = TestingSessionLocal()
     db.add(AnonymousSession(
         person_id=person_id,
