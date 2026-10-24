@@ -1,4 +1,5 @@
 import hashlib
+import importlib
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -6,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-import app.main as main_module
+main_module = importlib.import_module("app.main")
 from app.core.database import Base, get_db
 from app.main import app
 from app.models.collaboration import CommunityPost, ConversationMessage
