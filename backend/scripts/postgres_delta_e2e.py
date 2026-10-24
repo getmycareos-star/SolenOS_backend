@@ -33,7 +33,7 @@ VALID_DELTA = {
         "change_type": "new",
         "name": "fatigue",
         "previous": None,
-        "current": "reported",
+        "current": "fatigue",
         "evidence_excerpt": "Reports fatigue",
         "certainty": "supported",
     }],
