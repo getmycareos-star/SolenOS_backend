@@ -71,7 +71,11 @@ class CompanionCreate(BaseModel):
 
 
 class QwenAssistRequest(BaseModel):
-    workflow: Literal["daily_capture", "document", "community", "appointment", "handoff", "living_care_record"]
+    workflow: Literal[
+        "daily_capture", "document", "community", "appointment", "after_appointment",
+        "handoff", "professional_summary", "open_loops", "two_week_review",
+        "decision_outcome", "medication_day", "living_care_record",
+    ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
@@ -992,12 +996,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
 
     workflow_guidance = {
-        "daily_capture": "Help the caregiver organize or clarify what they reported today. Do not infer a diagnosis, cause, or unreported measurement.",
-        "document": "Explain the supplied document text cautiously. Distinguish quoted source content from interpretation and point out what needs human review.",
-        "community": "Support reflection on the caregiver's observation. Peer posts are experiences, not verified facts or clinical advice.",
-        "appointment": "Help prepare questions or organize facts for the appointment. Never invent appointment details or recommend treatment.",
-        "handoff": "Help make a clear caregiver-to-caregiver handoff from supplied facts. Separate known facts, unknowns, and questions; do not create or send a handoff.",
-        "living_care_record": "Explain only the authorized recorded context. Never edit the Living Care Record or claim a change was saved.",
+        "daily_capture": "Help organize only what the caregiver reported today. Distinguish direct report from inference. Never infer a diagnosis, cause, or unreported measurement.",
+        "document": "Explain only the supplied and authorized document text. Distinguish exact source content from interpretation and flag details that need human review.",
+        "community": "Support reflection on the caregiver's observation. Published peer posts are personal experiences, not verified facts or clinical advice. Do not publish or react on the user's behalf.",
+        "appointment": "Prepare questions and organize recorded facts for an appointment. Use only the selected or recorded appointment details. Never invent details or recommend treatment.",
+        "after_appointment": "Help the caregiver organize what they report after an appointment. Separate the clinician's reported words, caregiver understanding, unanswered questions and next steps. Do not invent instructions or mark anything completed.",
+        "handoff": "Help prepare a clear caregiver-to-caregiver handoff from supplied and recorded facts. Separate known facts, unknowns and questions. Do not create, assign, send or acknowledge a handoff.",
+        "professional_summary": "Help organize an accurate professional-facing summary from authorized recorded facts and explicitly supplied information. Preserve uncertainty and source attribution. Never invent missing details or claim this is a clinician-authored record.",
+        "open_loops": "Identify only explicitly unresolved questions, actions or follow-ups visible in the supplied and authorized context. Do not invent a task, deadline, owner or completion state.",
+        "two_week_review": "Help review the authorized care events and information provided for the recent two-week period. Describe only supported changes, stable facts, unknowns and questions. Do not claim causation or invent a trend.",
+        "decision_outcome": "Help organize a caregiver-reported decision and its reported outcome. Keep the decision, source, uncertainty and outcome separate. Do not infer that a decision caused an outcome.",
+        "medication_day": "Organize only caregiver-reported medication-day observations and the authorized recorded context. Never recommend starting, stopping or changing a medication or dose. Refer medication questions to a qualified professional.",
+        "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative. Never edit it or claim that a change was saved.",
     }[payload.workflow]
 
     prompt = (
