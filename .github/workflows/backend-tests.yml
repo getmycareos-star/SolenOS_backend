@@ -246,7 +246,10 @@ jobs:
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
             http://127.0.0.1:8080/api/v1/daily/log)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"])' "$daily"
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
+          events_after_daily=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
-          echo "PASS: bundled Qwen model answered a real greeting, read-only appointment assist, and Daily Capture candidate extraction through authenticated FastAPI routes."
+          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
 
