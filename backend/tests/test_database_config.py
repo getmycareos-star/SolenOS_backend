@@ -74,3 +74,11 @@ def test_railway_qualifies_plain_username_for_existing_supabase_pooler_url():
     )
     assert "postgres.qyialgkfbwralolryhjx:" in configured
     assert "@aws-0-us-west-1.pooler.supabase.com:5432/" in configured
+
+
+def test_pooler_username_is_qualified_even_without_railway_runtime_marker():
+    configured = configure_database_url(
+        "postgresql://postgres:secret@aws-0-us-west-1.pooler.supabase.com:5432/postgres",
+        railway_runtime=False,
+    )
+    assert "postgres.qyialgkfbwralolryhjx:" in configured
