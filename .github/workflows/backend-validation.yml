@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, "feat/care-continuity-integrity-engine-2026-10-22", "fix/**"]
   push:
-    branches: [main]
+    branches: [main, "feat/care-continuity-integrity-engine-2026-10-22", "fix/**"]
 
 permissions:
   contents: read
@@ -42,7 +42,7 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployed health endpoint
