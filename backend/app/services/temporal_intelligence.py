@@ -150,14 +150,14 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
             reference_frame_name=frame.name if frame else None,
             resolved_point=None,
             is_resolved=False,
-            confidence=0.0,
+            confidence=None,
             derivation_method="missing_reference",
         )
 
     ref_time = frame.reference_time
     text_lower = expression.lower().strip()
     resolved_point = None
-    confidence = 0.9
+    confidence = None  # Temporal inference confidence is not calibrated.
     derivation_method = "relative_calculation"
     lower_bound = None
     upper_bound = None
@@ -196,10 +196,10 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
     elif "before" in text_lower and "after" not in text_lower:
         if ref_time:
             resolved_point = ref_time
-            confidence = 0.5
+            confidence = None
             derivation_method = "relative_ordering"
     else:
-        confidence = 0.0
+        confidence = None
         derivation_method = "unparseable"
 
     if resolved_point:
@@ -221,7 +221,7 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
         reference_frame_name=frame.name if frame else None,
         resolved_point=None,
         is_resolved=False,
-        confidence=0.0,
+        confidence=None,
         derivation_method="unresolved",
     )
 
