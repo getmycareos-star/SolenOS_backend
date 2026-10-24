@@ -51,3 +51,14 @@ class ConversationMessage(Base):
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
+
+
+class EvidenceUpload(Base):
+    __tablename__ = "evidence_uploads"
+    evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True)
+    filename = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    content = Column(__import__("sqlalchemy").LargeBinary, nullable=False)
+    size_bytes = Column(__import__("sqlalchemy").Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
