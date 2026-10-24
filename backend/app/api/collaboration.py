@@ -1,11 +1,13 @@
 import asyncio
+import base64
 import json
 import hashlib
 import os
 import re
+import secrets
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
@@ -20,9 +22,22 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake
 
 router = APIRouter(tags=["community and companion"])
+
+
+class SharedFileInput(BaseModel):
+    name: str = Field(min_length=1, max_length=180)
+    mimeType: str = Field(min_length=1, max_length=128)
+    base64: str = Field(min_length=1, max_length=7_000_000)
+
+
+class ShareIntakeCreate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=500)
+    text: Optional[str] = Field(default=None, max_length=50_000)
+    url: Optional[str] = Field(default=None, max_length=2048)
+    files: list[SharedFileInput] = Field(default_factory=list, max_length=5)
 
 
 class PostCreate(BaseModel):
@@ -402,6 +417,84 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
+
+
+@router.post("/share-intake", status_code=201)
+def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
+    title = (payload.title or "").strip()
+    text = (payload.text or "").strip()
+    shared_url = (payload.url or "").strip()
+    if not title and not text and not shared_url and not payload.files:
+        raise HTTPException(status_code=422, detail="Shared content is empty")
+
+    allowed_mime_types = {
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif",
+        "image/tiff", "image/bmp", "image/avif", "application/pdf", "text/plain", "text/csv",
+        "text/markdown", "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
+        "application/octet-stream",
+    }
+    files = []
+    total_bytes = 0
+    for item in payload.files:
+        mime_type = item.mimeType.lower().strip()
+        filename = os.path.basename(item.name).replace("\\r", "").replace("\\n", "").replace("\\x00", "")[:180]
+        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if mime_type not in allowed_mime_types:
+            raise HTTPException(status_code=415, detail=f"Unsupported shared file type: {mime_type}")
+        if mime_type == "application/octet-stream" and extension not in {"doc", "docx", "rtf", "eml", "msg"}:
+            raise HTTPException(status_code=415, detail="The shared file type could not be verified")
+        try:
+            raw = base64.b64decode(item.base64, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise HTTPException(status_code=422, detail="Shared file data is invalid") from exc
+        if not raw:
+            continue
+        total_bytes += len(raw)
+        if total_bytes > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Shared files exceed the 5 MB total limit")
+        files.append({
+            "name": filename or "shared-file",
+            "mimeType": mime_type,
+            "base64": base64.b64encode(raw).decode("ascii"),
+        })
+
+    share_id = secrets.token_urlsafe(32)
+    row = ShareIntake(
+        id=share_id,
+        payload_json=json.dumps({"title": title, "text": text, "url": shared_url, "files": files}),
+        expires_at=now + timedelta(minutes=15),
+    )
+    db.add(row)
+    db.commit()
+    return {"id": share_id, "expires_at": row.expires_at.isoformat()}
+
+
+@router.get("/share-intake/{share_id}")
+def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
+    row = (
+        db.query(ShareIntake)
+        .filter(ShareIntake.id == share_id, ShareIntake.expires_at > now)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        db.commit()
+        raise HTTPException(status_code=404, detail="Shared intake was not found or has expired")
+    try:
+        payload = json.loads(row.payload_json)
+    except (TypeError, ValueError) as exc:
+        db.delete(row)
+        db.commit()
+        raise HTTPException(status_code=500, detail="Shared intake could not be decoded") from exc
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "id": share_id, **payload}
 
 
 @router.get("/assistant/status")
