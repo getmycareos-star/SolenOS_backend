@@ -135,6 +135,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.scoped_caregiver_id = scoped_caregiver_id
         if path.endswith("/sessions/refresh") and method == "POST":
             return await call_next(request)
+        # Session revocation authenticates the bearer token above; it does not
+        # target a care record and must run before the token is marked revoked.
+        if path.endswith("/sessions/revoke") and method == "POST":
+            return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
         # person_id parameters take precedence; record-specific IDs are resolved

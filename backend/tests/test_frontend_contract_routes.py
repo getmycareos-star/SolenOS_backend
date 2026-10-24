@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.collaboration import CommunityPost, ConversationMessage, ConversationSession
+from app.models.collaboration import CommunityPost, ConversationMessage, ConversationSession, CareNotification, CareNotificationPreference
 from app.models.care import Evidence
 
 main_module = importlib.import_module("app.main")
@@ -456,5 +456,65 @@ def test_feedback_json_contract_requires_scoped_bearer_identity(monkeypatch):
             "detail": "cross-record feedback must be denied",
         })
         assert denied.status_code == 403
+    finally:
+        teardown()
+
+
+def test_notifications_are_scoped_persisted_and_mark_read(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        other_auth = {"Authorization": f"Bearer {other_token}"}
+        db = TestingSessionLocal()
+        row = CareNotification(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            title="Care note needs review",
+            body="A newly recorded care note is awaiting review.",
+            category="care_update",
+            priority="normal",
+        )
+        db.add(row)
+        db.commit()
+        notification_id = row.id
+        db.close()
+
+        feed = client.get("/api/v1/notifications?limit=100&offset=0", headers=auth)
+        assert feed.status_code == 200, feed.text
+        assert len(feed.json()["items"]) == 1
+        assert feed.json()["items"][0]["id"] == notification_id
+        assert feed.json()["items"][0]["is_read"] is False
+
+        unread = client.get("/api/v1/notifications/unread-count", headers=auth)
+        assert unread.status_code == 200 and unread.json()["unread_count"] == 1
+
+        cross_record = client.patch(f"/api/v1/notifications/{notification_id}/read", headers=other_auth, json={})
+        assert cross_record.status_code == 404
+
+        marked = client.patch(f"/api/v1/notifications/{notification_id}/read", headers=auth, json={})
+        assert marked.status_code == 200 and marked.json()["is_read"] is True
+        unread_after = client.get("/api/v1/notifications/unread-count", headers=auth)
+        assert unread_after.json()["unread_count"] == 0
+    finally:
+        teardown()
+
+
+def test_notification_preferences_round_trip_and_session_revocation(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        saved = client.put("/api/v1/notifications/preferences", headers=auth, json={
+            "quiet_hours_enabled": True,
+            "reminders_enabled": False,
+        })
+        assert saved.status_code == 200, saved.text
+        loaded = client.get("/api/v1/notifications/preferences", headers=auth)
+        assert loaded.status_code == 200
+        assert loaded.json() == {"quiet_hours_enabled": True, "reminders_enabled": False}
+
+        revoked = client.post("/api/v1/sessions/revoke", headers=auth, json={})
+        assert revoked.status_code == 200 and revoked.json()["revoked"] is True
+        after_revoke = client.get("/api/v1/notifications/unread-count", headers=auth)
+        assert after_revoke.status_code == 401
     finally:
         teardown()
