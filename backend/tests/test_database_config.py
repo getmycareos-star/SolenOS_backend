@@ -65,3 +65,12 @@ def test_railway_supabase_pooler_rewrite_preserves_encoded_password():
     )
     assert "p%40ss.word@" in configured
     assert "@aws-0-us-west-1.pooler.supabase.com:5432/" in configured
+
+
+def test_railway_qualifies_plain_username_for_existing_supabase_pooler_url():
+    configured = configure_database_url(
+        "postgresql://postgres:secret@aws-0-us-west-1.pooler.supabase.com:5432/postgres",
+        railway_runtime=True,
+    )
+    assert "postgres.qyialgkfbwralolryhjx:" in configured
+    assert "@aws-0-us-west-1.pooler.supabase.com:5432/" in configured
