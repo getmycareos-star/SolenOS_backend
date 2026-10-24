@@ -14,12 +14,14 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router
+from app.api.reminders import router as reminders_router
 from app.api.care_delta import router as care_delta_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.reminder import CareReminder
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
@@ -48,6 +50,7 @@ app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
 app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
