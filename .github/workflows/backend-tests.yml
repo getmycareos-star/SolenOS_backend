@@ -156,3 +156,81 @@ jobs:
           conn.close()
           print("Integrated Task 4 PostgreSQL migration passed; one head, required schema present, no caregiver rows fabricated.")
           PY
+
+      - name: Create populated legacy-schema safety database
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+          from urllib.parse import urlparse, urlunparse
+
+          parsed = urlparse(os.environ["DATABASE_URL"])
+          admin_url = urlunparse(parsed._replace(path="/postgres"))
+          conn = psycopg2.connect(admin_url)
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("CREATE DATABASE solenos_legacy_populated")
+          conn.close()
+          PY
+
+      - name: Verify populated legacy caregivers fail closed without data loss
+        env:
+          DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_legacy_populated
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("""
+                  CREATE TABLE persons (
+                      id VARCHAR PRIMARY KEY,
+                      name VARCHAR NOT NULL,
+                      date_of_birth DATE,
+                      created_at TIMESTAMPTZ DEFAULT now(),
+                      updated_at TIMESTAMPTZ
+                  )
+              """)
+              cur.execute("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      email VARCHAR UNIQUE,
+                      password_hash TEXT,
+                      display_name VARCHAR,
+                      care_recipient_ids JSONB,
+                      role VARCHAR,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+              cur.execute("""
+                  INSERT INTO caregivers (id, email, display_name, role)
+                  VALUES ('legacy-account-1', 'legacy@example.invalid', 'Legacy account', 'caregiver')
+              """)
+          conn.close()
+          PY
+          cd backend
+          if python -m alembic upgrade head >/tmp/populated-legacy-migration.log 2>&1; then
+            cat /tmp/populated-legacy-migration.log
+            echo "Expected populated legacy caregiver schema to fail closed."
+            exit 1
+          fi
+          grep -q "requires a reviewed identity mapping" /tmp/populated-legacy-migration.log
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              cur.execute("SELECT COUNT(*) FROM caregivers WHERE id='legacy-account-1'")
+              assert cur.fetchone()[0] == 1, "legacy account row was changed or deleted"
+              cur.execute("""
+                  SELECT COUNT(*) FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='caregivers'
+                    AND column_name IN ('name','relationship','person_id','timezone')
+              """)
+              assert cur.fetchone()[0] == 0, "migration partially altered the populated caregivers table"
+          conn.close()
+          print("PASS: populated legacy caregiver schema fails closed; original account row and schema are preserved.")
+          PY
