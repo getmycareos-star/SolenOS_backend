@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
+from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
 
@@ -39,12 +40,26 @@ class CompanionCreate(BaseModel):
     session_id: Optional[str] = None
 
 
-def _scope(request: Request) -> tuple[str, str]:
+def _scope(request: Request, db: Session) -> tuple[str, str]:
+    # Prefer middleware-scoped identity. Fallback resolves the same bearer
+    # capability from the database; request-body IDs are never credentials.
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
-        raise HTTPException(status_code=401, detail="A valid SolenOS session is required")
-    return str(person_id), str(caregiver_id)
+    if person_id and caregiver_id:
+        return str(person_id), str(caregiver_id)
+    authorization = request.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    return str(session.person_id), str(session.caregiver_id)
 
 
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
@@ -83,7 +98,7 @@ async def upload_evidence(
     caregiver_id: str = Form(...),
     db: Session = Depends(get_db),
 ):
-    scoped_person_id, scoped_caregiver_id = _scope(request)
+    scoped_person_id, scoped_caregiver_id = _scope(request, db)
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
     mime_type = (file.content_type or "").lower()
