@@ -580,3 +580,20 @@ def test_owner_can_read_care_record_and_delta_runs_but_other_session_cannot():
 
         denied = client.get(path, headers=second_headers)
         assert denied.status_code == 403, f"{path}: expected cross-record denial, got {denied.status_code}: {denied.text}"
+
+
+def test_actions_list_uses_frontend_route_and_enforces_session_scope():
+    """The frontend collection path must be mounted and remain person-scoped."""
+    client = TestClient(app)
+    owner = create_session(client, "Actions owner")
+    other = create_session(client, "Other actions scope")
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    person_id = owner["person"]["id"]
+
+    own_actions = client.get(f"/api/v1/actions/{person_id}?status=active", headers=owner_headers)
+    assert own_actions.status_code == 200, own_actions.text
+    assert isinstance(own_actions.json(), list), own_actions.text
+
+    denied = client.get(f"/api/v1/actions/{person_id}?status=active", headers=other_headers)
+    assert denied.status_code == 403, denied.text
