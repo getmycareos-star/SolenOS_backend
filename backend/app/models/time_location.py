@@ -98,6 +98,7 @@ class DailyIntelligence(Base):
     upcoming_items = Column(JSONList, nullable=True)
     active_windows = Column(JSONList, nullable=True)
     expired_windows = Column(JSONList, nullable=True)
+    proactive_items = Column(JSONList, nullable=True)
     daily_summary = Column(Text, nullable=True)
     source_event_ids = Column(JSONList, nullable=True)
     source_appointment_ids = Column(JSONList, nullable=True)
