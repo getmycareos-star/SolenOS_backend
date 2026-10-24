@@ -160,6 +160,30 @@ def parse_natural_language_time(
         reference_time = utc_now()
 
     text_lower = text.lower().strip()
+
+    # Do not turn vague day-parts or relative periods into invented clock times
+    # (for example, "tonight" -> 20:00 or "this morning" -> 09:00).
+    vague_periods = (
+        "tonight",
+        "this evening",
+        "this morning",
+        "this afternoon",
+        "earlier today",
+        "later this week",
+    )
+    explicit_clock_time = re.search(r"\\b\\d{1,2}(?::\\d{2})?\\s*(?:a\\.?m\\.?|p\\.?m\\.?)\\b", text_lower)
+    if any(period in text_lower for period in vague_periods) and not explicit_clock_time:
+        return {
+            "original_text": text,
+            "parsed_datetime": None,
+            "timezone": tz.tzname(datetime.now(tz)) if tz else None,
+            "timezone_id": source_tz,
+            "confidence": 0.0,
+            "interpretation": "The time period is too broad to assign an exact date and time; clarify the date and/or time.",
+            "is_ambiguous": True,
+            "provenance": "caregiver_entered",
+        }
+
     confidence = 0.9
     interpretation = ""
     parsed_dt = None
