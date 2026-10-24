@@ -22,7 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord, CareNotification, CareNotificationPreference
-from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 
 router = APIRouter(tags=["community and companion"])
 
@@ -726,6 +726,14 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
+
+
+@router.get("/assistant/status")
+def qwen_assistant_status(request: Request, db: Session = Depends(get_db)):
+    # Keep runtime diagnostics behind the same care-session authorization as
+    # other assistant endpoints; do not expose model infrastructure publicly.
+    _scope(request, db)
+    return qwen_runtime_status()
 
 
 @router.post("/assistant/extract-candidates")
