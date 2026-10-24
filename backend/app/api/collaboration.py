@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
+from app.models.action import Action as ActionModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
@@ -71,7 +72,7 @@ class CompanionCreate(BaseModel):
 
 
 class QwenAssistRequest(BaseModel):
-    workflow: Literal["daily_capture", "document", "community", "appointment", "handoff", "living_care_record"]
+    workflow: Literal["daily_capture", "document", "community", "appointment", "after_appointment", "handoff", "professional_summary", "open_loops", "two_week_review", "decision_outcome", "medication_day", "living_care_record"]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
@@ -922,11 +923,15 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_evidence_ids: list[str] = []
 
     # Context is always fetched under the bearer session's server-derived scope.
+    event_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+    if payload.workflow == "two_week_review":
+        event_query = event_query.filter(
+            CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14)
+        )
+    event_limit = 20 if payload.workflow == "two_week_review" else 5
     recent_events = (
-        db.query(CareEvent)
-        .filter(CareEvent.person_id == person_id)
-        .order_by(CareEvent.occurred_at.desc())
-        .limit(5)
+        event_query.order_by(CareEvent.occurred_at.desc())
+        .limit(event_limit)
         .all()
     )
     for event in recent_events:
@@ -968,12 +973,12 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
             source_evidence_ids.append(str(row.id))
 
-    if payload.workflow == "handoff":
+    if payload.workflow in {"handoff", "professional_summary", "after_appointment", "open_loops", "two_week_review"}:
         handoffs = (
             db.query(CaregiverHandoff)
             .filter(CaregiverHandoff.person_id == person_id)
             .order_by(CaregiverHandoff.timestamp.desc())
-            .limit(5)
+            .limit(10 if payload.workflow in {"open_loops", "two_week_review"} else 5)
             .all()
         )
         for handoff in handoffs:
@@ -981,6 +986,24 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Recorded caregiver handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
                 f"scope={handoff.scope or 'not specified'}; acceptance={getattr(handoff.acceptance_status, 'value', handoff.acceptance_status)}; "
                 f"completed={bool(handoff.is_completed)}; context={(handoff.context or '')[:800]}"
+            )
+
+    if payload.workflow in {"open_loops", "two_week_review", "decision_outcome", "professional_summary", "after_appointment", "medication_day"}:
+        action_query = db.query(ActionModel).filter(ActionModel.person_id == person_id)
+        if payload.workflow == "medication_day":
+            action_query = action_query.filter(ActionModel.is_medication_action.is_(True))
+        else:
+            action_query = action_query.filter(ActionModel.status.in_([
+                "detected", "pending_confirmation", "active", "conditional", "blocked"
+            ]))
+        actions = action_query.order_by(ActionModel.deadline.asc().nullslast(), ActionModel.created_at.desc()).limit(15).all()
+        for action in actions:
+            context_lines.append(
+                f"Recorded action [{action.id}]: status={action.status}; type={action.action_type}; "
+                f"subject={action.subject_label or action.subject_type}; action={action.normalized_action}; "
+                f"deadline={action.deadline.isoformat() if action.deadline else 'not recorded'}; "
+                f"source passage={(action.source_passage or '')[:500]}; "
+                f"medication_action={bool(action.is_medication_action)}"
             )
 
     if payload.workflow == "community":
@@ -995,8 +1018,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "daily_capture": "Help the caregiver organize or clarify what they reported today. Do not infer a diagnosis, cause, or unreported measurement.",
         "document": "Explain the supplied document text cautiously. Distinguish quoted source content from interpretation and point out what needs human review.",
         "community": "Support reflection on the caregiver's observation. Peer posts are experiences, not verified facts or clinical advice.",
-        "appointment": "Help prepare questions or organize facts for the appointment. Never invent appointment details or recommend treatment.",
+        "appointment": "Help prepare questions or organize facts for an upcoming appointment. Never invent appointment details or recommend treatment.",
+        "after_appointment": "Help organize only the appointment outcomes and follow-up steps explicitly supplied or recorded. Flag missing outcome details and do not claim the visit happened if no record says so.",
         "handoff": "Help make a clear caregiver-to-caregiver handoff from supplied facts. Separate known facts, unknowns, and questions; do not create or send a handoff.",
+        "professional_summary": "Prepare a draft summary from authorized recorded facts for a professional conversation. Preserve source distinctions and uncertainty; do not send it or add facts.",
+        "open_loops": "Help review recorded incomplete actions, blocked items, pending confirmations and handoffs. Do not invent tasks, mark anything complete, or create reminders.",
+        "two_week_review": "Summarize only the care events returned from the last fourteen days and relevant recorded open actions. Identify what changed, what remains unclear and what may need caregiver review; do not infer causes.",
+        "decision_outcome": "Help the caregiver organize a decision, its stated reason, known evidence and recorded outcome. Do not decide for the caregiver or treat missing outcomes as success.",
+        "medication_day": "Help organize recorded medication observations and questions only. Never recommend starting, stopping, changing, or timing a dose; direct medication decisions to a qualified professional.",
         "living_care_record": "Explain only the authorized recorded context. Never edit the Living Care Record or claim a change was saved.",
     }[payload.workflow]
 
