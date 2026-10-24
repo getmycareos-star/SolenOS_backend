@@ -41,9 +41,9 @@ async def extract_document(
     )
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
-    filename = (file.filename or "upload").strip()[:255] or "upload"
+    filename = PurePath(file.filename or "upload").name.replace("\r", "").replace("\n", "").strip()[:255] or "upload"
     suffix = PurePath(filename).suffix.lower()
-    content_type = (file.content_type or "").lower()
+    content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     await file.close()
 
@@ -54,7 +54,7 @@ async def extract_document(
 
     source = "text"
     if suffix == ".pdf" or content_type == "application/pdf":
-        source = "text"
+        source = "pdf_text"
         try:
             reader = PdfReader(io.BytesIO(data), strict=True)
             if len(reader.pages) > MAX_PDF_PAGES:
