@@ -565,3 +565,51 @@ def test_share_intake_persists_across_requests_and_cannot_be_replayed(monkeypatc
         assert replay.status_code == 404
     finally:
         teardown()
+
+
+
+def test_upload_preserves_medication_photo_default_and_accepts_word_documents(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    headers = {"Authorization": f"Bearer {token}"}
+    try:
+        png_bytes = b"\\x89PNG\\r\\n\\x1a\\n" + b"medication image bytes"
+        medication = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={"person_id": person_id, "caregiver_id": caregiver_id},
+            files={"file": ("medication.png", png_bytes, "image/png")},
+        )
+        assert medication.status_code == 201, medication.text
+        medication_id = medication.json()["evidence_id"]
+
+        docx_bytes = b"PK\\x03\\x04" + b"minimal docx fixture"
+        document = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": "Discharge note source text",
+            },
+            files={"file": (
+                "discharge.docx",
+                docx_bytes,
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )},
+        )
+        assert document.status_code == 201, document.text
+        document_id = document.json()["evidence_id"]
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(Evidence).filter_by(id=medication_id).one().type == "medication_photo"
+            assert db.query(Evidence).filter_by(id=document_id).one().type == "document"
+        finally:
+            db.close()
+
+        downloaded = client.get(f"/api/v1/upload/{document_id}", headers=headers)
+        assert downloaded.status_code == 200
+        assert downloaded.content == docx_bytes
+    finally:
+        teardown()
