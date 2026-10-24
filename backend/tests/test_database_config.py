@@ -46,3 +46,22 @@ def test_local_sqlite_remains_available_for_development():
     assert configure_database_url("sqlite:///./solenos.db", railway_runtime=False) == (
         "sqlite:///./solenos.db"
     )
+
+
+def test_railway_supabase_direct_url_uses_session_pooler():
+    configured = configure_database_url(
+        "postgresql://postgres:secret@db.qyialgkfbwralolryhjx.supabase.co:5432/postgres",
+        railway_runtime=True,
+    )
+    assert "@aws-0-us-west-1.pooler.supabase.com:5432/" in configured
+    assert "postgres.qyialgkfbwralolryhjx:" in configured
+    assert "sslmode=require" in configured
+
+
+def test_railway_supabase_pooler_rewrite_preserves_encoded_password():
+    configured = configure_database_url(
+        "postgresql://postgres:p%40ss.word@db.qyialgkfbwralolryhjx.supabase.co:5432/postgres",
+        railway_runtime=True,
+    )
+    assert "p%40ss.word@" in configured
+    assert "@aws-0-us-west-1.pooler.supabase.com:5432/" in configured
