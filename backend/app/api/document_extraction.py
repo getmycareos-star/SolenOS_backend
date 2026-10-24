@@ -108,38 +108,59 @@ def extract_document_content(filename: str, content_type: str, data: bytes) -> d
         except Exception as exc:
             raise ValueError("This PDF could not be opened. The file may be damaged or unsupported.") from exc
 
-        if not text.strip():
+        # Mixed PDFs often contain selectable text on some pages and scanned images
+        # on others. OCR only the pages without embedded text so those pages are not
+        # silently omitted from the saved evidence.
+        missing_text_pages = [index for index, part in enumerate(page_text) if not part]
+        if missing_text_pages:
             try:
                 import fitz
                 from PIL import Image
                 document = fitz.open(stream=data, filetype="pdf")
-                if document.page_count > MAX_PDF_PAGES:
-                    warnings.append(f"Only the first {MAX_PDF_PAGES} of {document.page_count} scanned pages were processed.")
-                ocr_parts: list[str] = []
+                ocr_by_page: dict[int, str] = {}
                 page_confidences: list[float] = []
-                for page in document[:MAX_PDF_PAGES]:
-                    page_rect = page.rect
-                    rendered_width = int(page_rect.width * PDF_OCR_SCALE)
-                    rendered_height = int(page_rect.height * PDF_OCR_SCALE)
-                    if rendered_width <= 0 or rendered_height <= 0 or rendered_width * rendered_height > MAX_OCR_PIXELS:
-                        raise ValueError("A scanned PDF page exceeds the safe OCR processing limit. Export a smaller page and try again.")
-                    pixmap = page.get_pixmap(matrix=fitz.Matrix(PDF_OCR_SCALE, PDF_OCR_SCALE), alpha=False)
-                    image_obj = Image.open(io.BytesIO(pixmap.tobytes("png")))
-                    page_text_value, page_confidence = _ocr_image(image_obj)
-                    if page_text_value:
-                        ocr_parts.append(page_text_value)
-                    if page_confidence is not None:
-                        page_confidences.append(page_confidence)
-                document.close()
-                text = "\n\n".join(ocr_parts)
-                confidence = sum(page_confidences) / len(page_confidences) if page_confidences else None
-                source = "pdf_ocr"
+                ocr_unavailable = False
+                try:
+                    for page_index in missing_text_pages:
+                        page = document[page_index]
+                        page_rect = page.rect
+                        rendered_width = int(page_rect.width * PDF_OCR_SCALE)
+                        rendered_height = int(page_rect.height * PDF_OCR_SCALE)
+                        if rendered_width <= 0 or rendered_height <= 0 or rendered_width * rendered_height > MAX_OCR_PIXELS:
+                            raise ValueError("A scanned PDF page exceeds the safe OCR processing limit. Export a smaller page and try again.")
+                        pixmap = page.get_pixmap(matrix=fitz.Matrix(PDF_OCR_SCALE, PDF_OCR_SCALE), alpha=False)
+                        with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image_obj:
+                            try:
+                                page_text_value, page_confidence = _ocr_image(image_obj)
+                            except RuntimeError:
+                                ocr_unavailable = True
+                                break
+                        if page_text_value:
+                            ocr_by_page[page_index] = page_text_value
+                        if page_confidence is not None:
+                            page_confidences.append(page_confidence)
+                finally:
+                    document.close()
+
+                for page_index, page_ocr_text in ocr_by_page.items():
+                    page_text[page_index] = page_ocr_text
+                text = "\n\n".join(part for part in page_text if part)
+                if ocr_by_page:
+                    source = "pdf_text_ocr" if any(part for index, part in enumerate(page_text) if index not in ocr_by_page) else "pdf_ocr"
+                if page_confidences:
+                    confidence = sum(page_confidences) / len(page_confidences)
+                if ocr_unavailable:
+                    warnings.append("OCR was unavailable for one or more scanned pages; embedded text from readable pages was preserved.")
+                    if not text.strip():
+                        raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.")
             except RuntimeError as exc:
-                raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.") from exc
+                if not text.strip():
+                    raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.") from exc
+                warnings.append("OCR was unavailable for one or more scanned pages; embedded text from readable pages was preserved.")
             except ValueError:
                 raise
             except Exception as exc:
-                raise ValueError("Text could not be extracted from this scanned PDF.") from exc
+                raise ValueError("Text could not be extracted from scanned PDF pages.") from exc
     else:
         try:
             from PIL import Image
