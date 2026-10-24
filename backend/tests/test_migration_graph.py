@@ -21,15 +21,15 @@ def test_task2_and_care_continuity_migrations_form_one_head():
         revision.revision: revision.down_revision
         for revision in revisions
     }
-    assert down_revisions["t0_caregiver_schema_guard_20261024"] is None
-    assert down_revisions["20261021_0001"] == "t0_caregiver_schema_guard_20261024"
+    assert down_revisions["t0_caregiver_guard_20261024"] is None
+    assert down_revisions["20261021_0001"] == "t0_caregiver_guard_20261024"
     assert down_revisions["20261022_01"] == "20261022_0005"
     assert down_revisions["20261022_03"] == "20261022_02"
     assert down_revisions["t2_care_continuity_20261024"] == "20261022_03"
     assert down_revisions["20261023_04"] == "t2_care_continuity_20261024"
     assert down_revisions["t2_completion_20261023"] == "20261023_05"
-    assert down_revisions["t2_caregiver_schema_reconcile_20261024"] == "t2_delivery_attempts_20261023"
-    assert down_revisions["t2_auth_reconcile_20261023"] == "t2_caregiver_schema_reconcile_20261024"
+    assert down_revisions["t2_caregiver_guard_20261024"] == "t2_delivery_attempts_20261023"
+    assert down_revisions["t2_auth_reconcile_20261023"] == "t2_caregiver_guard_20261024"
     assert down_revisions["t3_care_handoffs_20261023"] == "t2_auth_reconcile_20261023"
     assert down_revisions["t4_document_assets_20261023"] == "t3_care_handoffs_20261023"
 
@@ -41,7 +41,7 @@ def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
     assert "qualname = root" in root_section
 
 
-def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_20261024.py"):
+def _load_caregiver_schema_migration(filename="t2_caregiver_guard_20261024.py"):
     import importlib.util
 
     backend_dir = Path(__file__).resolve().parents[1]
@@ -54,9 +54,9 @@ def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_202
 
 
 @pytest.mark.parametrize("filename", [
-    "t0_caregiver_schema_guard_20261024.py",
+    "t0_caregiver_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
-    "t2_caregiver_schema_reconcile_20261024.py",
+    "t2_caregiver_guard_20261024.py",
 ])
 def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_table(filename):
     from alembic.migration import MigrationContext
@@ -78,9 +78,9 @@ def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_ta
 
 
 @pytest.mark.parametrize("filename", [
-    "t0_caregiver_schema_guard_20261024.py",
+    "t0_caregiver_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
-    "t2_caregiver_schema_reconcile_20261024.py",
+    "t2_caregiver_guard_20261024.py",
 ])
 def test_caregiver_schema_reconciliation_refuses_to_guess_existing_identity_mapping(filename):
     import pytest
