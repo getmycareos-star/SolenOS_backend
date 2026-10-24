@@ -17,6 +17,7 @@ from app.api.care_continuity import router as care_continuity_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_circle import router as care_circle_router
 from app.api.collaboration import router as collaboration_router
+from app.models.collaboration import ConsentRecord
 from app.api.causal import router as causal_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -84,6 +85,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
+        return await call_next(request)
+    # Share-target payloads are temporary one-time capabilities with a random
+    # 256-bit ID and a 15-minute TTL; they intentionally precede caregiver login.
+    if path == "/api/v1/share-intake" and method == "POST":
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > 8 * 1024 * 1024:
+            return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
+        return await call_next(request)
+    if path.startswith("/api/v1/share-intake/") and method == "GET":
         return await call_next(request)
     if (path, method) in PUBLIC_V1_ENDPOINTS:
         return await call_next(request)
@@ -190,6 +203,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 target_person_id = parts[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
+        # A query/body/path ID is a requested target, never authority.
+        # Reject any resolved care-record target outside the bearer session.
+        if target_person_id and str(target_person_id) != str(scoped_person_id):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "This session is not authorised for that care record"},
+            )
+
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
@@ -313,6 +334,24 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "This session is not authorised for that care record"},
             )
+
+        # Revocation is enforced server-side for every write, not only by the UI.
+        # Consent can be reaccepted through the consent endpoint itself.
+        if method in {"POST", "PUT", "PATCH", "DELETE"} and path != "/api/v1/consent":
+            # Refresh identity-map state before enforcing revocation. Consent may
+            # have been changed by the immediately preceding request.
+            db.expire_all()
+            consent_record = db.query(ConsentRecord).populate_existing().filter_by(
+                person_id=scoped_person_id, caregiver_id=scoped_caregiver_id
+            ).first()
+            if consent_record and consent_record.revoked_at is not None:
+                return JSONResponse(
+                    status_code=403,
+                    content={
+                        "detail": "Consent has been revoked. Reaccept the required terms before writing care data.",
+                        "code": "consent_revoked",
+                    },
+                )
 
     return await call_next(request)
 

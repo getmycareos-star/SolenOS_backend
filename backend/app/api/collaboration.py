@@ -1,11 +1,13 @@
 import asyncio
+import base64
 import json
 import hashlib
 import os
 import re
+import secrets
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -18,9 +20,34 @@ from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 
 router = APIRouter(tags=["community and companion"])
+
+
+class SharedFileInput(BaseModel):
+    name: str = Field(min_length=1, max_length=180)
+    mimeType: str = Field(min_length=1, max_length=128)
+    base64: str = Field(min_length=1, max_length=7_000_000)
+
+
+class ShareIntakeCreate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=500)
+    text: Optional[str] = Field(default=None, max_length=50_000)
+    url: Optional[str] = Field(default=None, max_length=2048)
+    files: list[SharedFileInput] = Field(default_factory=list, max_length=5)
+
+
+class ConsentUpdate(BaseModel):
+    person_id: str
+    caregiver_id: str
+    action: Optional[str] = None
+    medical_disclaimer_acknowledged: Optional[bool] = None
+    privacy_model_acknowledged: Optional[bool] = None
+    multi_caregiver_acknowledged: Optional[bool] = None
+    no_advertising_acknowledged: Optional[bool] = None
+    data_improvement_consent: Optional[bool] = None
+    accepted_terms_version: Optional[str] = Field(default=None, max_length=64)
 
 
 class PostCreate(BaseModel):
@@ -39,6 +66,194 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+CONSENT_TERMS_VERSION = "2026-10"
+
+
+def _consent_is_verified(record: Optional[ConsentRecord]) -> bool:
+    return bool(
+        record
+        and record.revoked_at is None
+        and record.medical_disclaimer_acknowledged
+        and record.privacy_model_acknowledged
+        and record.multi_caregiver_acknowledged
+        and record.no_advertising_acknowledged
+    )
+
+
+def _consent_response(record: Optional[ConsentRecord]) -> dict:
+    verified = _consent_is_verified(record)
+    return {
+        "verified": verified,
+        "required": not verified,
+        "terms_version": record.accepted_terms_version if record else CONSENT_TERMS_VERSION,
+        "one_line_agreement": "SolenOS organizes caregiver-reported information and does not replace clinical judgment.",
+        "data_improvement_statement": "Data improvement is optional and can be changed later.",
+        "no_advertising_statement": "Your care information is not sold or used for advertising.",
+        "signup_improvement_copy": "You can help improve SolenOS only if you choose to opt in.",
+        "profile": {
+            "data_improvement_consent": bool(record and record.data_improvement_consent and record.revoked_at is None),
+            "limited_mode": bool(record and record.revoked_at is not None),
+        },
+        "consent": {
+            "medical_disclaimer_acknowledged": bool(record and record.medical_disclaimer_acknowledged),
+            "privacy_model_acknowledged": bool(record and record.privacy_model_acknowledged),
+            "multi_caregiver_acknowledged": bool(record and record.multi_caregiver_acknowledged),
+            "no_advertising_acknowledged": bool(record and record.no_advertising_acknowledged),
+            "accepted_at": record.accepted_at.isoformat() if record and record.accepted_at else None,
+            "revoked_at": record.revoked_at.isoformat() if record and record.revoked_at else None,
+        },
+    }
+
+
+@router.get("/consent")
+def get_consent(request: Request, person_id: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, caregiver_id = _scope(request, db)
+    if person_id and person_id != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    record = db.query(ConsentRecord).filter_by(person_id=scoped_person_id, caregiver_id=caregiver_id).first()
+    return _consent_response(record)
+
+
+@router.post("/consent")
+def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    if payload.person_id != person_id or payload.caregiver_id != caregiver_id:
+        raise HTTPException(status_code=403, detail="Consent identity does not match this caregiver session")
+    record = db.query(ConsentRecord).filter_by(person_id=person_id, caregiver_id=caregiver_id).first()
+    now = datetime.now(timezone.utc)
+
+    if payload.action == "revoke":
+        if record is None:
+            record = ConsentRecord(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                accepted_terms_version=CONSENT_TERMS_VERSION,
+                revoked_at=now,
+                data_improvement_consent=False,
+            )
+            db.add(record)
+        else:
+            record.revoked_at = now
+            record.data_improvement_consent = False
+        db.commit()
+        db.refresh(record)
+        return {"ok": True, **_consent_response(record)}
+
+    if payload.action == "update_data_improvement":
+        if not _consent_is_verified(record):
+            raise HTTPException(status_code=409, detail="Accept the required privacy terms before changing improvement preferences")
+        if payload.data_improvement_consent is None:
+            raise HTTPException(status_code=422, detail="data_improvement_consent is required")
+        record.data_improvement_consent = payload.data_improvement_consent
+        db.commit()
+        db.refresh(record)
+        return {"ok": True, **_consent_response(record)}
+
+    required_acks = (
+        payload.medical_disclaimer_acknowledged,
+        payload.privacy_model_acknowledged,
+        payload.multi_caregiver_acknowledged,
+        payload.no_advertising_acknowledged,
+    )
+    if not all(value is True for value in required_acks):
+        raise HTTPException(status_code=422, detail="All required privacy and safety acknowledgements must be accepted")
+    if record is None:
+        record = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
+        db.add(record)
+    record.medical_disclaimer_acknowledged = True
+    record.privacy_model_acknowledged = True
+    record.multi_caregiver_acknowledged = True
+    record.no_advertising_acknowledged = True
+    record.data_improvement_consent = bool(payload.data_improvement_consent)
+    record.accepted_terms_version = payload.accepted_terms_version or CONSENT_TERMS_VERSION
+    record.accepted_at = now
+    record.revoked_at = None
+    db.commit()
+    db.refresh(record)
+    return {"ok": True, **_consent_response(record)}
+
+
+@router.post("/share-intake", status_code=201)
+def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
+    title = (payload.title or "").strip()
+    text = (payload.text or "").strip()
+    shared_url = (payload.url or "").strip()
+    if not title and not text and not shared_url and not payload.files:
+        raise HTTPException(status_code=422, detail="Shared content is empty")
+
+    allowed_mime_types = {
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif",
+        "image/tiff", "image/bmp", "image/avif", "application/pdf", "text/plain", "text/csv",
+        "text/markdown", "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
+        "application/octet-stream",
+    }
+    files = []
+    total_bytes = 0
+    for item in payload.files:
+        mime_type = item.mimeType.lower().strip()
+        filename = os.path.basename(item.name).replace("\\r", "").replace("\\n", "").replace("\\x00", "")[:180]
+        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if mime_type not in allowed_mime_types:
+            raise HTTPException(status_code=415, detail=f"Unsupported shared file type: {mime_type}")
+        if mime_type == "application/octet-stream" and extension not in {"doc", "docx", "rtf", "eml", "msg"}:
+            raise HTTPException(status_code=415, detail="The shared file type could not be verified")
+        try:
+            raw = base64.b64decode(item.base64, validate=True)
+        except (ValueError, base64.binascii.Error) as exc:
+            raise HTTPException(status_code=422, detail="Shared file data is invalid") from exc
+        if not raw:
+            continue
+        total_bytes += len(raw)
+        if total_bytes > 5 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Shared files exceed the 5 MB total limit")
+        files.append({
+            "name": filename or "shared-file",
+            "mimeType": mime_type,
+            "base64": base64.b64encode(raw).decode("ascii"),
+        })
+
+    if len(files) > 5:
+        raise HTTPException(status_code=413, detail="At most five files can be shared at once")
+    share_id = secrets.token_urlsafe(32)
+    stored_payload = {"title": title, "text": text, "url": shared_url, "files": files}
+    row = ShareIntake(
+        id=share_id,
+        payload_json=json.dumps(stored_payload),
+        expires_at=now + timedelta(minutes=15),
+    )
+    db.add(row)
+    db.commit()
+    return {"id": share_id, "expires_at": row.expires_at.isoformat()}
+
+
+@router.get("/share-intake/{share_id}")
+def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
+    row = (
+        db.query(ShareIntake)
+        .filter(ShareIntake.id == share_id, ShareIntake.expires_at > now)
+        .with_for_update()
+        .first()
+    )
+    if row is None:
+        db.commit()
+        raise HTTPException(status_code=404, detail="Shared intake was not found or has expired")
+    try:
+        payload = json.loads(row.payload_json)
+    except (TypeError, ValueError) as exc:
+        db.delete(row)
+        db.commit()
+        raise HTTPException(status_code=500, detail="Shared intake could not be decoded") from exc
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "id": share_id, **payload}
 
 
 def _scope(request: Request, db: Session) -> tuple[str, str]:
@@ -97,44 +312,81 @@ async def upload_evidence(
     file: UploadFile = File(...),
     person_id: str = Form(...),
     caregiver_id: str = Form(...),
+    evidence_type: str = Form("medication_photo"),
+    extracted_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
+
     mime_type = (file.content_type or "").lower()
-    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
-        raise HTTPException(status_code=415, detail="Only JPEG, PNG, WebP, and GIF images are supported")
+    filename = (file.filename or "caregiver-upload")[:180]
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    image_types = {
+        "image/jpeg", "image/png", "image/webp", "image/gif",
+        "image/heic", "image/heif", "image/tiff", "image/bmp", "image/avif",
+    }
+    document_types = image_types | {
+        "application/pdf", "text/plain", "text/csv", "text/markdown",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
+        "application/json",
+    }
+    if evidence_type not in {"medication_photo", "document"}:
+        raise HTTPException(status_code=422, detail="Unsupported evidence type")
+    allowed = image_types if evidence_type == "medication_photo" else document_types
+    octet_stream_document = evidence_type == "document" and mime_type == "application/octet-stream" and extension in {"doc", "docx", "rtf", "eml", "msg"}
+    if mime_type not in allowed and not octet_stream_document:
+        raise HTTPException(status_code=415, detail="This file type is not supported for the selected evidence type")
+    extracted = (extracted_text or "").strip()
+    if len(extracted) > 100_000:
+        raise HTTPException(status_code=413, detail="Extracted text exceeds the 100,000 character limit")
+
     data = await file.read(5 * 1024 * 1024 + 1)
     if not data:
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
     if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
+        raise HTTPException(status_code=413, detail="The uploaded file exceeds the 5 MB limit")
+
     caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
     evidence = EvidenceModel(
         person_id=scoped_person_id,
-        type="medication_photo",
-        source_text="Caregiver-uploaded medication photo",
+        type=evidence_type,
+        source_text=extracted or ("Caregiver-uploaded medication photo" if evidence_type == "medication_photo" else "Caregiver-uploaded document"),
         original_file_path=None,
         uploaded_by_caregiver_id=scoped_caregiver_id,
-        extra_metadata=json.dumps({"filename": (file.filename or "medication-photo")[:180], "mime_type": mime_type}),
+        extra_metadata=json.dumps({
+            "filename": filename,
+            "mime_type": mime_type,
+            "evidence_type": evidence_type,
+            "extraction_source": "tika_tesseract" if extracted else None,
+        }),
         source_type="caregiver_upload",
-        evidence_status="recorded",
+        evidence_status="reported" if evidence_type == "document" else "recorded",
     )
     db.add(evidence)
     db.flush()
     db.add(EvidenceUpload(
         evidence_id=evidence.id,
-        filename=(file.filename or "medication-photo")[:180],
+        filename=filename,
         mime_type=mime_type,
         content=data,
         size_bytes=len(data),
         sha256=hashlib.sha256(data).hexdigest(),
     ))
     db.commit()
-    return {"evidence_id": evidence.id, "size_bytes": len(data), "mime_type": mime_type, "persisted": True}
+    return {
+        "evidence_id": evidence.id,
+        "size_bytes": len(data),
+        "mime_type": mime_type,
+        "evidence_type": evidence_type,
+        "persisted": True,
+    }
 
 
 @router.get("/upload/{evidence_id}")

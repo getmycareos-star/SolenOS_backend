@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
@@ -124,11 +126,19 @@ from app.services.temporal_intelligence import (
 )
 import hashlib
 from app.models.anonymous_session import AnonymousSession as AnonymousSessionModel
+from app.models.collaboration import ConsentRecord
 from app.models.action import Action as ActionModel
 from app.models.care_continuity import CareActionOutcome as CareActionOutcomeModel, CareAssertion as CareAssertionModel
 from app.api.actions import router as actions_router
 
 router = APIRouter()
+
+
+class FeedbackPayload(BaseModel):
+    person_id: str
+    caregiver_id: str
+    category: str = Field(min_length=1, max_length=80)
+    detail: str = Field(min_length=1, max_length=4000)
 
 
 def _require_session_scope(request: Request, db: Session, person_id: str, caregiver_id: Optional[str] = None) -> AnonymousSessionModel:
@@ -311,6 +321,23 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
+    # Defence in depth: enforce revocation on the persistence path itself, not
+    # only in middleware, so a revoked consent can never create a care event.
+    from app.models.collaboration import ConsentRecord
+    consent_record = (
+        db.query(ConsentRecord)
+        .populate_existing()
+        .filter_by(person_id=person_id, caregiver_id=caregiver_id)
+        .first()
+    )
+    if consent_record and consent_record.revoked_at is not None:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "Consent has been revoked. Reaccept the required terms before writing care data.",
+                "code": "consent_revoked",
+            },
+        )
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -1009,8 +1036,39 @@ def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
-    person_id: str, category: str, detail: str, caregiver_id: str, db: Session = Depends(get_db)
+    request: Request,
+    payload: Optional[FeedbackPayload] = Body(default=None),
+    person_id: Optional[str] = Query(default=None),
+    category: Optional[str] = Query(default=None),
+    detail: Optional[str] = Query(default=None),
+    caregiver_id: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
 ):
+    if payload is not None:
+        person_id = payload.person_id
+        caregiver_id = payload.caregiver_id
+        category = payload.category
+        detail = payload.detail
+    if not person_id or not caregiver_id or not category or not detail:
+        raise HTTPException(status_code=422, detail="person_id, caregiver_id, category and detail are required")
+    _require_session_scope(request, db, person_id, caregiver_id)
+    if category in {"help_improve", "human_validation"}:
+        consent = db.query(ConsentRecord).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id
+        ).first()
+        if not (
+            consent
+            and consent.revoked_at is None
+            and consent.data_improvement_consent
+            and consent.medical_disclaimer_acknowledged
+            and consent.privacy_model_acknowledged
+            and consent.multi_caregiver_acknowledged
+            and consent.no_advertising_acknowledged
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="Enable optional system-improvement consent in Privacy Settings before sending this feedback.",
+            )
     engine = LearningEngine(db)
     engine.record_feedback(person_id, category, detail, caregiver_id)
     engine.after_save(person_id)

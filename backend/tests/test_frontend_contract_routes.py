@@ -1,3 +1,4 @@
+import base64
 import importlib
 
 from fastapi.testclient import TestClient
@@ -7,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, ConversationSession
+from app.models.care import Evidence
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -269,5 +271,190 @@ def test_companion_provider_unavailable_returns_503_without_orphan_session(monke
         assert db.query(ConversationSession).count() == 0
         assert db.query(ConversationMessage).count() == 0
         db.close()
+    finally:
+        teardown()
+
+
+
+def test_original_document_upload_is_reused_by_situation_capture(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        original = b"%PDF-1.4 test fixture"
+        extracted_text = "Discharge document: follow-up appointment in two weeks."
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": extracted_text,
+            },
+            files={"file": ("discharge.pdf", original, "application/pdf")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        assert uploaded.json()["evidence_type"] == "document"
+
+        saved = client.post("/api/situation", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "client_care_key": "local-workspace-key",
+            "raw_input": "",
+            "documents": [{
+                "id": "local-document-id",
+                "evidence_id": evidence_id,
+                "name": "discharge.pdf",
+                "extracted_text": extracted_text,
+                "mime_type": "application/pdf",
+                "ocr_confidence": 0.92,
+            }],
+        })
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["evidence_id"] == evidence_id
+        event_id = saved.json()["care_event_id"]
+
+        events = client.get(f"/api/v1/events/{person_id}", headers=auth)
+        assert events.status_code == 200, events.text
+        event = next(row for row in events.json() if row["id"] == event_id)
+        assert evidence_id in event["evidence_ids"]
+
+        downloaded = client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+        assert downloaded.status_code == 200
+        assert downloaded.content == original
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).filter_by(id=evidence_id).count() == 1
+        db.close()
+    finally:
+        teardown()
+
+
+
+def test_share_intake_is_persisted_and_claimed_once_without_account_session(monkeypatch):
+    client, _, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        original = b"shared-care-document"
+        created = client.post("/api/v1/share-intake", json={
+            "title": "Shared care note",
+            "text": "Follow-up is scheduled.",
+            "url": "https://example.org/care-note",
+            "files": [{
+                "name": "care-note.txt",
+                "mimeType": "text/plain",
+                "base64": base64.b64encode(original).decode("ascii"),
+            }],
+        })
+        assert created.status_code == 201, created.text
+        share_id = created.json()["id"]
+        assert len(share_id) >= 40
+
+        claimed = client.get(f"/api/v1/share-intake/{share_id}")
+        assert claimed.status_code == 200, claimed.text
+        assert claimed.json()["text"] == "Follow-up is scheduled."
+        assert claimed.json()["files"][0]["base64"] == base64.b64encode(original).decode("ascii")
+
+        second_claim = client.get(f"/api/v1/share-intake/{share_id}")
+        assert second_claim.status_code == 404
+    finally:
+        teardown()
+
+
+
+def test_consent_acceptance_preferences_revocation_and_scope(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        status = client.get(f"/api/v1/consent?person_id={person_id}", headers=auth)
+        assert status.status_code == 200
+        assert status.json()["required"] is True
+
+        accepted = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        })
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["verified"] is True
+        assert accepted.json()["profile"]["data_improvement_consent"] is False
+
+        changed = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "action": "update_data_improvement",
+            "data_improvement_consent": True,
+        })
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["profile"]["data_improvement_consent"] is True
+
+        revoked = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "action": "revoke",
+        })
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["verified"] is False
+        assert revoked.json()["profile"]["limited_mode"] is True
+
+        blocked_write = client.post("/api/v1/daily/log", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "raw_input": "This must not be persisted after consent revocation.",
+        })
+        assert blocked_write.status_code == 403
+        assert blocked_write.json()["code"] == "consent_revoked"
+
+        cross_record = client.get(
+            f"/api/v1/consent?person_id={person_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert cross_record.status_code == 403
+    finally:
+        teardown()
+
+
+
+def test_feedback_json_contract_requires_scoped_bearer_identity(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        feedback_payload = {
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "category": "human_validation",
+            "detail": "{\"interaction_id\":\"interaction-1\",\"helpful_yes_no\":true,\"reduced_confusion_yes_no\":true}",
+        }
+        no_consent = client.post("/api/v1/feedback", headers=auth, json=feedback_payload)
+        assert no_consent.status_code == 403
+        assert "system-improvement consent" in no_consent.json()["detail"]
+
+        accepted = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": True,
+        })
+        assert accepted.status_code == 200, accepted.text
+
+        response = client.post("/api/v1/feedback", headers=auth, json=feedback_payload)
+        assert response.status_code == 200, response.text
+        assert response.json()["event_type"] == "feedback"
+
+        denied = client.post("/api/v1/feedback", headers=auth, json={
+            "person_id": other_person_id,
+            "caregiver_id": caregiver_id,
+            "category": "human_validation",
+            "detail": "cross-record feedback must be denied",
+        })
+        assert denied.status_code == 403
     finally:
         teardown()
