@@ -125,7 +125,7 @@ async def upload_evidence(
     file: UploadFile = File(...),
     person_id: str = Form(...),
     caregiver_id: str = Form(...),
-    evidence_type: str = Form("document"),
+    evidence_type: str = Form("medication_photo"),
     extracted_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
@@ -148,12 +148,16 @@ async def upload_evidence(
     allowed_mime_types = {
         "text/plain", "text/markdown", "text/csv", "application/json", "application/xml",
         "text/xml", "application/yaml", "application/pdf",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
         "image/jpeg", "image/png", "image/webp", "image/gif",
     }
-    if mime_type not in allowed_mime_types:
+    octet_stream_document = mime_type == "application/octet-stream" and suffix in {"doc", "docx", "rtf", "eml", "msg"}
+    if mime_type not in allowed_mime_types and not octet_stream_document:
         raise HTTPException(
             status_code=415,
-            detail="This file type cannot be stored by SolenOS. Use a text file, text-based PDF, JPEG, PNG, WebP, or GIF.",
+            detail="This file type cannot be stored by SolenOS. Use a supported text file, PDF, Word/RTF document, email file, JPEG, PNG, WebP, or GIF.",
         )
 
     data = await file.read(10 * 1024 * 1024 + 1)
