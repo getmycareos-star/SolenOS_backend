@@ -96,3 +96,29 @@ def test_one_source_sentence_can_yield_multiple_review_candidates_with_exact_spa
         assert source[start:end] == candidate["source_quote"]
         assert candidate["source_evidence_id"] == "evidence-123"
         assert candidate["review_status"] == "pending_review"
+
+
+
+def test_mixed_pdf_ocr_extracts_scanned_pages_without_losing_embedded_text(monkeypatch):
+    import fitz
+    import app.api.document_extraction as extraction
+
+    pdf = fitz.open()
+    text_page = pdf.new_page()
+    text_page.insert_text((72, 72), "Discharge summary: embedded text is available.")
+    pdf.new_page()  # Simulates a scanned page with no embedded text.
+    payload = pdf.tobytes()
+    pdf.close()
+
+    monkeypatch.setattr(
+        extraction,
+        "_ocr_image",
+        lambda image: ("Scanned medication instruction: follow up next week.", 0.88),
+    )
+    result = extract_document_content("mixed-discharge.pdf", "application/pdf", payload)
+    document = result["document"]
+
+    assert "embedded text is available" in document["extracted_text"]
+    assert "Scanned medication instruction" in document["extracted_text"]
+    assert document["extraction_source"] == "pdf_text_ocr"
+    assert document["ocr_confidence"] == 0.88
