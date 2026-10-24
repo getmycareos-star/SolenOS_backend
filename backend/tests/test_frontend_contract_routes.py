@@ -76,6 +76,35 @@ def teardown():
     Base.metadata.drop_all(bind=engine)
 
 
+def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
+    client = TestClient(app)
+    allowed = client.options(
+        "/api/v1/sessions/anonymous",
+        headers={
+            "Origin": "https://solenosai.netlify.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert allowed.status_code == 200
+    assert allowed.headers.get("access-control-allow-origin") == "https://solenosai.netlify.app"
+    assert allowed.headers.get("access-control-allow-credentials") == "true"
+    allowed_headers = allowed.headers.get("access-control-allow-headers", "").lower()
+    assert "authorization" in allowed_headers
+    assert "content-type" in allowed_headers
+
+    denied = client.options(
+        "/api/v1/sessions/anonymous",
+        headers={
+            "Origin": "https://unapproved.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers
+
+
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
