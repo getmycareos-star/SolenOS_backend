@@ -32,3 +32,59 @@ def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
     config_text = (backend_dir / "alembic.ini").read_text(encoding="utf-8")
     root_section = config_text.split("[logger_root]", 1)[1].split("[", 1)[0]
     assert "qualname = root" in root_section
+
+
+def _load_caregiver_schema_migration():
+    import importlib.util
+
+    backend_dir = Path(__file__).resolve().parents[1]
+    path = backend_dir / "alembic" / "versions" / "t2_caregiver_schema_reconcile_20261024.py"
+    spec = importlib.util.spec_from_file_location("caregiver_schema_reconcile_migration", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_table():
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect, text
+
+    engine = create_engine("sqlite://")
+    migration = _load_caregiver_schema_migration()
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE caregivers (id VARCHAR PRIMARY KEY, email VARCHAR)"))
+            with Operations.context(MigrationContext.configure(connection)):
+                migration.upgrade()
+            columns = {column["name"] for column in inspect(connection).get_columns("caregivers")}
+            assert {"name", "relationship", "person_id", "timezone"} <= columns
+    finally:
+        engine.dispose()
+
+
+def test_caregiver_schema_reconciliation_refuses_to_guess_existing_identity_mapping():
+    import pytest
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    from sqlalchemy import create_engine, inspect, text
+
+    engine = create_engine("sqlite://")
+    migration = _load_caregiver_schema_migration()
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE caregivers (id VARCHAR PRIMARY KEY, email VARCHAR)"))
+            connection.execute(text("INSERT INTO caregivers (id, email) VALUES ('existing-account', 'account@example.invalid')"))
+            with Operations.context(MigrationContext.configure(connection)):
+                with pytest.raises(RuntimeError, match="reviewed identity mapping"):
+                    migration.upgrade()
+            columns = {column["name"] for column in inspect(connection).get_columns("caregivers")}
+            assert "name" not in columns
+            assert "relationship" not in columns
+            assert "person_id" not in columns
+            assert "timezone" not in columns
+    finally:
+        engine.dispose()
