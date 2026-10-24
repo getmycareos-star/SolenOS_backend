@@ -617,9 +617,39 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
     )
-    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
-        reply, payload.text + "\n" + "\n".join(context_lines)
-    ):
+    source_context = payload.text + "\n" + "\n".join(context_lines)
+    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
+        # Ask the same local model to repair style only; never substitute a canned
+        # phrase or relax source-grounding. A second failed response is unavailable.
+        reply = await asyncio.to_thread(
+            qwen_chat,
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Revise the draft into a clear, natural, accessible response of 55 words or fewer. "
+                        "Preserve only claims supported by the authorized context and the caregiver's request. "
+                        "Remove unexplained foreign words, unrequested transliterations, internal jargon and repetition. "
+                        "Do not add facts, people, appointments, tasks, owners, deadlines, diagnoses or advice. "
+                        "SolenOS and the caregiver remain authoritative; do not claim that anything was saved. "
+                        "Return only the revised response, not an explanation."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {
+                            "workflow": payload.workflow,
+                            "caregiver_request": payload.text.strip(),
+                            "authorized_context": context_lines,
+                            "draft_response": reply,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+        )
+    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
     return {
         "workflow": payload.workflow,
