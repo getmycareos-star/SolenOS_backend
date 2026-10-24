@@ -40,7 +40,7 @@ def teardown_db():
 
 
 def test_actions_router_exposes_frontend_collection_path():
-    paths = {route.path for route in app.routes}
+    paths = set(app.openapi()["paths"])
     assert "/api/v1/actions/{person_id}" in paths
     assert "/api/v1/actions/actions/{person_id}" not in paths
 
