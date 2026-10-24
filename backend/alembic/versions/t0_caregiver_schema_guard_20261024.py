@@ -3,7 +3,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "t0_caregiver_schema_guard_20261024"
+revision = "t0_caregiver_guard_20261024"
 down_revision = None
 branch_labels = None
 depends_on = None
