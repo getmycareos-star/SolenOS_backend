@@ -204,7 +204,10 @@ async def upload_evidence(
     mime_type = (file.content_type or "").lower()
     filename = (file.filename or "caregiver-upload")[:180]
     extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    image_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    image_types = {
+        "image/jpeg", "image/png", "image/webp", "image/gif",
+        "image/heic", "image/heif", "image/tiff", "image/bmp", "image/avif",
+    }
     document_types = image_types | {
         "application/pdf", "text/plain", "text/csv", "text/markdown",
         "application/msword",
