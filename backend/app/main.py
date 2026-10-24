@@ -203,6 +203,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 target_person_id = parts[-1]
         if path.endswith("/situation") and method == "GET":
             target_person_id = scoped_person_id
+        # A query/body/path ID is a requested target, never authority.
+        # Reject any resolved care-record target outside the bearer session.
+        if target_person_id and str(target_person_id) != str(scoped_person_id):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "This session is not authorised for that care record"},
+            )
+
         query_person_id = request.query_params.get("person_id")
         if target_person_id and query_person_id and str(target_person_id) != str(query_person_id):
             return JSONResponse(status_code=403, content={"detail": "Conflicting care-record scope"})
