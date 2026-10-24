@@ -13,6 +13,8 @@ from app.api.change import router as change_router
 from app.api.caregiver_intelligence import router as caregiver_intelligence_router
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
+from app.api.collaboration import router as collaboration_router
+from app.api.care_delta import router as care_delta_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -45,6 +47,8 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(care_delta_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -122,6 +126,11 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        # Community is shared between caregivers, but each request still requires a
+        # valid session. Bind its authorization check to that session rather than
+        # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
+        if path.startswith("/api/v1/community") or path == "/api/v1/upload":
+            target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
@@ -254,10 +263,23 @@ def get_situation(
     query values are UI continuity keys only and never authorize data access.
     This endpoint does not synthesize clinical interpretation or sample data.
     """
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_scope_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_scope_id:
+    # Resolve the bearer capability at the route boundary as well as in
+    # middleware. This avoids relying on request.state propagation between ASGI
+    # middleware layers and ensures the database scope always comes from the token.
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    authorized_session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if authorized_session is None:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    person_id = str(authorized_session.person_id)
+    caregiver_scope_id = str(authorized_session.caregiver_id)
 
     person = db.query(Person).filter(Person.id == person_id).first()
     if not person:

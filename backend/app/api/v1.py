@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
+import hashlib
 from app.core.database import get_db
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -124,6 +126,26 @@ from app.services.temporal_intelligence import (
 from app.api.actions import router as actions_router
 
 router = APIRouter()
+
+
+def _require_session_scope(request: Request, db: Session, person_id: str, caregiver_id: Optional[str] = None) -> AnonymousSession:
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    if str(session.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if caregiver_id and str(session.caregiver_id) != str(caregiver_id):
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
+    return session
 
 
 def _require_person_and_linked_caregiver(
@@ -272,11 +294,12 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
-def list_evidence(person_id: str, db: Session = Depends(get_db)):
+def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
 
 
-def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Session):
+def _save_daily_capture_event(payload: dict, event_type: str, title: str, request: Request, db: Session):
     person_id = payload.get("person_id")
     caregiver_id = payload.get("caregiver_id") or payload.get("created_by_caregiver_id")
     if not isinstance(person_id, str) or not person_id.strip():
@@ -284,6 +307,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Se
     if not isinstance(caregiver_id, str) or not caregiver_id.strip():
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
+    _require_session_scope(request, db, person_id, caregiver_id)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -326,13 +350,13 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Se
 
 
 @router.post("/daily/log")
-def create_structured_daily_log(payload: dict, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", db)
+def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
 
 
 @router.post("/daily-care/entries")
-def create_daily_care_entry(payload: dict, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "daily_care_entry", "Daily care entry", db)
+def create_daily_care_entry(payload: dict, request: Request, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "daily_care_entry", "Daily care entry", request, db)
 
 
 @router.post("/events", response_model=CareEventSchema)
@@ -357,7 +381,8 @@ def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/events/{person_id}", response_model=List[CareEventSchema])
-def list_events(person_id: str, db: Session = Depends(get_db)):
+def list_events(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
