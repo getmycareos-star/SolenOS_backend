@@ -66,6 +66,25 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     if payload.documents:
         for doc in payload.documents:
+            if doc.evidence_id:
+                # Reuse the already-persisted original evidence instead of
+                # duplicating it. Scope both person and uploader to the
+                # authenticated care record; a client-supplied ID is not proof
+                # of ownership.
+                existing = (
+                    db.query(Evidence)
+                    .filter(
+                        Evidence.id == doc.evidence_id,
+                        Evidence.person_id == payload.person_id,
+                        Evidence.uploaded_by_caregiver_id == payload.caregiver_id,
+                    )
+                    .first()
+                )
+                if existing is None:
+                    raise ValueError("Attached evidence does not belong to this care record")
+                if existing.id not in evidence_ids:
+                    evidence_ids.append(existing.id)
+                continue
             if doc.extracted_text and doc.extracted_text.strip():
                 create_evidence(doc.extracted_text.strip(), doc)
 

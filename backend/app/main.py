@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 import hashlib
+import os
 import json
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -14,6 +15,7 @@ from app.api.caregiver_intelligence import router as caregiver_intelligence_rout
 from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router
+from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -28,16 +30,22 @@ from app.services.situation import process_situation_input
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
+# CORS is configurable per deployment. The Netlify production site is the
+# default; additional origins must be explicitly listed in CORS_ORIGINS.
+# This is an origin allowlist, not a wildcard. Comma-separated values are
+# normalized and empty entries ignored.
+cors_origins_env = os.getenv("CORS_ORIGINS", "https://solenosai.netlify.app")
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in cors_origins_env.split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://solenosai.netlify.app",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
@@ -48,6 +56,7 @@ app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
 app.include_router(collaboration_router, prefix="/api/v1")
+app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one

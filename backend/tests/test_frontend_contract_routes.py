@@ -1,4 +1,8 @@
 import importlib
+from io import BytesIO
+
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -7,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.care import CareEvent, Caregiver
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -24,6 +29,27 @@ def override_db():
         yield db
     finally:
         db.close()
+
+
+def make_text_pdf(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    font_ref = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})
+    })
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode("ascii"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def setup_client(monkeypatch):
@@ -50,8 +76,37 @@ def teardown():
     Base.metadata.drop_all(bind=engine)
 
 
+def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
+    client = TestClient(app)
+    allowed = client.options(
+        "/api/v1/sessions/anonymous",
+        headers={
+            "Origin": "https://solenosai.netlify.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert allowed.status_code == 200
+    assert allowed.headers.get("access-control-allow-origin") == "https://solenosai.netlify.app"
+    assert allowed.headers.get("access-control-allow-credentials") == "true"
+    allowed_headers = allowed.headers.get("access-control-allow-headers", "").lower()
+    assert "authorization" in allowed_headers
+    assert "content-type" in allowed_headers
+
+    denied = client.options(
+        "/api/v1/sessions/anonymous",
+        headers={
+            "Origin": "https://unapproved.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert denied.status_code == 400
+    assert "access-control-allow-origin" not in denied.headers
+
+
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
-    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
         forged = client.post("/api/v1/community", headers=auth, json={
@@ -139,10 +194,18 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
 
 
 def test_original_upload_download_and_cross_record_denial(monkeypatch):
-    client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        original = b"test-image-bytes"
+        original = b"\x89PNG\r\n\x1a\n" + b"test-image-bytes"
+        spoofed = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={"person_id": person_id, "caregiver_id": caregiver_id},
+            files={"file": ("spoof.png", b"not a PNG", "image/png")},
+        )
+        assert spoofed.status_code == 422, spoofed.text
+
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
@@ -158,14 +221,137 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert downloaded.content == original
         assert downloaded.headers["content-type"] == "image/png"
 
+        linked = client.post("/api/situation", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "raw_input": "Caregiver notes a detail that needs later review.",
+            "documents": [{
+                "id": "client-document-image",
+                "name": "medication.png",
+                "extracted_text": "",
+                "evidence_id": evidence_id,
+                "mime_type": "image/png",
+            }],
+        })
+        assert linked.status_code == 200, linked.text
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=linked.json()["care_event_id"]).first()
+        assert event is not None
+        assert evidence_id in (event.evidence_ids or [])
+        other_caregiver = db.query(Caregiver).filter_by(person_id=other_person_id).first()
+        assert other_caregiver is not None
+        other_caregiver_id = other_caregiver.id
+        db.close()
+
+        cross_record = client.post("/api/situation", headers={"Authorization": f"Bearer {other_token}"}, json={
+            "person_id": other_person_id,
+            "caregiver_id": other_caregiver_id,
+            "raw_input": "This record must not link another person's evidence.",
+            "documents": [{
+                "id": "foreign-document-image",
+                "name": "medication.png",
+                "extracted_text": "",
+                "evidence_id": evidence_id,
+                "mime_type": "image/png",
+            }],
+        })
+        assert cross_record.status_code == 400, cross_record.text
+
         denied = client.get(
             f"/api/v1/upload/{evidence_id}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 404
+
+        text_bytes = b"Caregiver note text; not yet promoted to a care assertion."
+        text_upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": text_bytes.decode("utf-8"),
+            },
+            files={"file": ("care-note.txt", text_bytes, "text/plain")},
+        )
+        assert text_upload.status_code == 201, text_upload.text
+        assert text_upload.json()["persisted"] is True
+        assert len(text_upload.json()["sha256"]) == 64
+        text_id = text_upload.json()["evidence_id"]
+        text_download = client.get(f"/api/v1/upload/{text_id}", headers=auth)
+        assert text_download.status_code == 200
+        assert text_download.content == text_bytes
+        assert text_download.headers["content-type"].startswith("text/plain")
+        text_denied = client.get(
+            f"/api/v1/upload/{text_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert text_denied.status_code == 404
     finally:
         teardown()
 
+
+
+def test_document_extraction_requires_session_and_supports_utf8_text(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        original_text = b"Caregiver note: a follow-up question remains open."
+        unauthenticated = client.post(
+            "/api/extract",
+            files={"file": ("care-note.txt", original_text, "text/plain")},
+        )
+        assert unauthenticated.status_code == 401, unauthenticated.text
+
+        response = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("care-note.txt", original_text, "text/plain")},
+        )
+        assert response.status_code == 200, response.text
+        document = response.json()["document"]
+        assert response.json()["ok"] is True
+        assert document["extracted_text"] == original_text.decode("utf-8")
+        assert document["extraction_source"] == "text"
+
+        pdf_bytes = make_text_pdf("Text based care note for extraction")
+        pdf_response = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("care-note.pdf", pdf_bytes, "application/pdf")},
+        )
+        assert pdf_response.status_code == 200, pdf_response.text
+        pdf_document = pdf_response.json()["document"]
+        assert "Text based care note for extraction" in pdf_document["extracted_text"]
+        assert pdf_document["extraction_source"] == "pdf_text"
+
+        stored_pdf = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": pdf_document["extracted_text"],
+            },
+            files={"file": ("care-note.pdf", pdf_bytes, "application/pdf")},
+        )
+        assert stored_pdf.status_code == 201, stored_pdf.text
+        pdf_id = stored_pdf.json()["evidence_id"]
+        pdf_download = client.get(f"/api/v1/upload/{pdf_id}", headers={"Authorization": f"Bearer {token}"})
+        assert pdf_download.status_code == 200
+        assert pdf_download.content == pdf_bytes
+        assert pdf_download.headers["content-type"] == "application/pdf"
+
+        unsupported = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("scan.png", b"not-a-real-image", "image/png")},
+        )
+        assert unsupported.status_code == 415, unsupported.text
+        assert "scanned images require OCR" in unsupported.json()["detail"]
+    finally:
+        teardown()
 
 
 def test_care_delta_routes_bind_person_and_caregiver_to_session(monkeypatch):

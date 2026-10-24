@@ -97,29 +97,86 @@ async def upload_evidence(
     file: UploadFile = File(...),
     person_id: str = Form(...),
     caregiver_id: str = Form(...),
+    evidence_type: str = Form("document"),
+    extracted_text: str = Form(""),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
-    mime_type = (file.content_type or "").lower()
-    if mime_type not in {"image/jpeg", "image/png", "image/webp", "image/gif"}:
-        raise HTTPException(status_code=415, detail="Only JPEG, PNG, WebP, and GIF images are supported")
-    data = await file.read(5 * 1024 * 1024 + 1)
+
+    filename = os.path.basename(file.filename or "upload").replace("\r", "").replace("\n", "").strip()[:255] or "upload"
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    mime_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+    mime_by_extension = {
+        "txt": "text/plain", "md": "text/markdown", "csv": "text/csv",
+        "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
+        "yml": "application/yaml", "pdf": "application/pdf", "jpg": "image/jpeg",
+        "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+    }
+    if mime_type in {"", "application/octet-stream"} and suffix in mime_by_extension:
+        mime_type = mime_by_extension[suffix]
+
+    allowed_mime_types = {
+        "text/plain", "text/markdown", "text/csv", "application/json", "application/xml",
+        "text/xml", "application/yaml", "application/pdf",
+        "image/jpeg", "image/png", "image/webp", "image/gif",
+    }
+    if mime_type not in allowed_mime_types:
+        raise HTTPException(
+            status_code=415,
+            detail="This file type cannot be stored by SolenOS. Use a text file, text-based PDF, JPEG, PNG, WebP, or GIF.",
+        )
+
+    data = await file.read(10 * 1024 * 1024 + 1)
+    await file.close()
     if not data:
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Image exceeds the 5 MB upload limit")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Files must be 10 MiB or smaller")
+
+    signatures = {
+        "application/pdf": lambda blob: blob.startswith(b"%PDF-"),
+        "image/jpeg": lambda blob: blob.startswith(b"\xff\xd8\xff"),
+        "image/png": lambda blob: blob.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/gif": lambda blob: blob.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
+    }
+    signature_check = signatures.get(mime_type)
+    if signature_check is not None and not signature_check(data):
+        raise HTTPException(status_code=422, detail="The file contents do not match the declared file type")
+    if mime_type.startswith("text/") or mime_type in {"application/json", "application/xml", "application/yaml"}:
+        try:
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=415, detail="Text uploads must use UTF-8 encoding") from exc
+
+    evidence_type = evidence_type.strip().lower()
+    if evidence_type not in {"document", "medication_photo", "care_photo"}:
+        raise HTTPException(status_code=422, detail="Unsupported evidence type")
+
     caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+    # Uploaded text remains source evidence; it is not promoted to a care assertion.
+    # The extraction label is client-provided and is recorded as such, never trusted
+    # as proof that OCR or review happened on the server.
+    bounded_text = extracted_text.strip()[:100_000]
+    digest = hashlib.sha256(data).hexdigest()
     evidence = EvidenceModel(
         person_id=scoped_person_id,
-        type="medication_photo",
-        source_text="Caregiver-uploaded medication photo",
+        type=evidence_type,
+        source_text=bounded_text,
         original_file_path=None,
         uploaded_by_caregiver_id=scoped_caregiver_id,
-        extra_metadata=json.dumps({"filename": (file.filename or "medication-photo")[:180], "mime_type": mime_type}),
+        extra_metadata=json.dumps({
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": len(data),
+            "sha256": digest,
+            "text_source": "client_supplied" if bounded_text else "not_available",
+        }),
         source_type="caregiver_upload",
         evidence_status="recorded",
     )
@@ -127,14 +184,20 @@ async def upload_evidence(
     db.flush()
     db.add(EvidenceUpload(
         evidence_id=evidence.id,
-        filename=(file.filename or "medication-photo")[:180],
+        filename=filename,
         mime_type=mime_type,
         content=data,
         size_bytes=len(data),
-        sha256=hashlib.sha256(data).hexdigest(),
+        sha256=digest,
     ))
     db.commit()
-    return {"evidence_id": evidence.id, "size_bytes": len(data), "mime_type": mime_type, "persisted": True}
+    return {
+        "evidence_id": evidence.id,
+        "size_bytes": len(data),
+        "mime_type": mime_type,
+        "sha256": digest,
+        "persisted": True,
+    }
 
 
 @router.get("/upload/{evidence_id}")
