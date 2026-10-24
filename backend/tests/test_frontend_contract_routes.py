@@ -271,3 +271,59 @@ def test_companion_provider_unavailable_returns_503_without_orphan_session(monke
         db.close()
     finally:
         teardown()
+
+
+
+def test_original_document_upload_is_reused_by_situation_capture(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        original = b"%PDF-1.4 test fixture"
+        extracted_text = "Discharge document: follow-up appointment in two weeks."
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": extracted_text,
+            },
+            files={"file": ("discharge.pdf", original, "application/pdf")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        assert uploaded.json()["evidence_type"] == "document"
+
+        saved = client.post("/api/situation", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "client_care_key": "local-workspace-key",
+            "raw_input": "",
+            "documents": [{
+                "id": "local-document-id",
+                "evidence_id": evidence_id,
+                "name": "discharge.pdf",
+                "extracted_text": extracted_text,
+                "mime_type": "application/pdf",
+                "ocr_confidence": 0.92,
+            }],
+        })
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["evidence_id"] == evidence_id
+        event_id = saved.json()["care_event_id"]
+
+        events = client.get(f"/api/v1/events/{person_id}", headers=auth)
+        assert events.status_code == 200, events.text
+        event = next(row for row in events.json() if row["id"] == event_id)
+        assert evidence_id in event["evidence_ids"]
+
+        downloaded = client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
+        assert downloaded.status_code == 200
+        assert downloaded.content == original
+
+        db = TestingSessionLocal()
+        assert db.query(CommunityPost).count() == 0
+        db.close()
+    finally:
+        teardown()
