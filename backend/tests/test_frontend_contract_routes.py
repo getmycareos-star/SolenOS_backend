@@ -1,4 +1,8 @@
 import importlib
+from io import BytesIO
+
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -25,6 +29,27 @@ def override_db():
         yield db
     finally:
         db.close()
+
+
+def make_text_pdf(text: str) -> bytes:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=612, height=792)
+    font = DictionaryObject({
+        NameObject("/Type"): NameObject("/Font"),
+        NameObject("/Subtype"): NameObject("/Type1"),
+        NameObject("/BaseFont"): NameObject("/Helvetica"),
+    })
+    font_ref = writer._add_object(font)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})
+    })
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = DecodedStreamObject()
+    stream.set_data(f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode("ascii"))
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def setup_client(monkeypatch):
@@ -240,7 +265,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
 
 
 def test_document_extraction_requires_session_and_supports_utf8_text(monkeypatch):
-    client, token, _, _, _, _ = setup_client(monkeypatch)
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     try:
         original_text = b"Caregiver note: a follow-up question remains open."
         unauthenticated = client.post(
@@ -259,6 +284,35 @@ def test_document_extraction_requires_session_and_supports_utf8_text(monkeypatch
         assert response.json()["ok"] is True
         assert document["extracted_text"] == original_text.decode("utf-8")
         assert document["extraction_source"] == "text"
+
+        pdf_bytes = make_text_pdf("Text based care note for extraction")
+        pdf_response = client.post(
+            "/api/extract",
+            headers={"Authorization": f"Bearer {token}"},
+            files={"file": ("care-note.pdf", pdf_bytes, "application/pdf")},
+        )
+        assert pdf_response.status_code == 200, pdf_response.text
+        pdf_document = pdf_response.json()["document"]
+        assert "Text based care note for extraction" in pdf_document["extracted_text"]
+        assert pdf_document["extraction_source"] == "pdf_text"
+
+        stored_pdf = client.post(
+            "/api/v1/upload",
+            headers={"Authorization": f"Bearer {token}"},
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": pdf_document["extracted_text"],
+            },
+            files={"file": ("care-note.pdf", pdf_bytes, "application/pdf")},
+        )
+        assert stored_pdf.status_code == 201, stored_pdf.text
+        pdf_id = stored_pdf.json()["evidence_id"]
+        pdf_download = client.get(f"/api/v1/upload/{pdf_id}", headers={"Authorization": f"Bearer {token}"})
+        assert pdf_download.status_code == 200
+        assert pdf_download.content == pdf_bytes
+        assert pdf_download.headers["content-type"] == "application/pdf"
 
         unsupported = client.post(
             "/api/extract",
