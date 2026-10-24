@@ -221,14 +221,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # These legacy list endpoints use the care-recipient ID as the final
             # path segment. Resolve it explicitly before the session-scope check.
             target_person_id = path.rsplit("/", 1)[-1]
-        if not target_person_id and any(
+        if path.startswith("/api/v1/reasoning/") and path.endswith("/summary"):
+            target_person_id = path.split("/")[4]
+        elif not target_person_id and any(
             path.startswith(prefix)
             for prefix in (
                 "/api/v1/caregivers/",
                 "/api/v1/appointments/",
                 "/api/v1/insights/",
                 "/api/v1/observations/",
-                "/api/v1/reasoning/",
                 "/api/v1/daily-intelligence/",
             )
         ):
