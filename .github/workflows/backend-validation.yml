@@ -47,14 +47,14 @@ jobs:
     steps:
       - name: Verify deployed health endpoint
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-8773.up.railway.app/health')
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 'https://solenosbackend-production-ee6a.up.railway.app/health')
           echo "GET /health returned HTTP $status"
           test "$status" = "200"
       - name: Diagnose deployed route paths
         if: always()
         shell: bash
         run: |
-          base='https://solenosbackend-production-8773.up.railway.app'
+          base='https://solenosbackend-production-ee6a.up.railway.app'
           for path in /health /ready /api/health /api/v1/health /openapi.json /docs /; do
             status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
             printf '%-18s HTTP %s\n' "$path" "$status"
@@ -66,6 +66,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-8773.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production-ee6a.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
