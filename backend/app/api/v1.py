@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
+import hashlib
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import (
