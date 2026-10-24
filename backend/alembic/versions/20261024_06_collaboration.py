@@ -29,6 +29,16 @@ def _create_index_if_missing(bind, name, table, columns, unique=False):
 def upgrade():
     bind = op.get_bind()
     _create_table_if_missing(
+        bind, "evidence_uploads",
+        sa.Column("evidence_id", sa.String(), sa.ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True),
+        sa.Column("filename", sa.String(), nullable=False),
+        sa.Column("mime_type", sa.String(), nullable=False),
+        sa.Column("content", sa.LargeBinary(), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("sha256", sa.String(length=64), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
+    _create_table_if_missing(
         bind, "community_posts",
         sa.Column("id", sa.String(), primary_key=True),
         sa.Column("caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
@@ -102,6 +112,6 @@ def upgrade():
 
 def downgrade():
     bind = op.get_bind()
-    for table in ("conversation_messages", "conversation_sessions", "community_reactions", "community_posts"):
+    for table in ("conversation_messages", "conversation_sessions", "community_reactions", "community_posts", "evidence_uploads"):
         if inspect(bind).has_table(table):
             op.drop_table(table)
