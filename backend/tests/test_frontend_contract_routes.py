@@ -359,3 +359,53 @@ def test_share_intake_is_persisted_and_claimed_once_without_account_session(monk
         assert second_claim.status_code == 404
     finally:
         teardown()
+
+
+
+def test_consent_acceptance_preferences_revocation_and_scope(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        status = client.get(f"/api/v1/consent?person_id={person_id}", headers=auth)
+        assert status.status_code == 200
+        assert status.json()["required"] is True
+
+        accepted = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        })
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["verified"] is True
+        assert accepted.json()["profile"]["data_improvement_consent"] is False
+
+        changed = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "action": "update_data_improvement",
+            "data_improvement_consent": True,
+        })
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["profile"]["data_improvement_consent"] is True
+
+        revoked = client.post("/api/v1/consent", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "action": "revoke",
+        })
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json()["verified"] is False
+        assert revoked.json()["profile"]["limited_mode"] is True
+
+        cross_record = client.get(
+            f"/api/v1/consent?person_id={person_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert cross_record.status_code == 403
+    finally:
+        teardown()
