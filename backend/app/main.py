@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+import asyncio
 import hashlib
 import os
 import json
@@ -610,7 +611,7 @@ async def post_situation(
     # successfully persisted caregiver capture.
     source_parts = [payload.raw_input.strip()] if payload.raw_input and payload.raw_input.strip() else []
     source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
-    source_text = "\\n".join(source_parts).strip()
+    source_text = "\n".join(source_parts).strip()
     if source_text:
         try:
             candidates = await asyncio.to_thread(
