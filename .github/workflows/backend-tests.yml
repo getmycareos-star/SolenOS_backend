@@ -87,6 +87,15 @@ jobs:
           conn.autocommit = True
           with conn.cursor() as cur:
               cur.execute("""
+                  CREATE TABLE persons (
+                      id VARCHAR PRIMARY KEY,
+                      name VARCHAR NOT NULL,
+                      date_of_birth DATE,
+                      created_at TIMESTAMPTZ DEFAULT now(),
+                      updated_at TIMESTAMPTZ
+                  )
+              """)
+              cur.execute("""
                   CREATE TABLE caregivers (
                       id VARCHAR PRIMARY KEY,
                       email VARCHAR UNIQUE,
