@@ -2,9 +2,11 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+import asyncio
 import hashlib
 import os
 import json
+import re
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -26,6 +28,7 @@ from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
+from app.services.qwen_gateway import extract_review_candidates
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -436,11 +439,23 @@ def update_situation_display_name(
     }
 
 
+def _is_casual_conversation_only(text: str) -> bool:
+    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
+    normalized = " ".join(normalized.split())
+    return normalized in {
+        "hi", "hello", "hey", "hiya", "howdy",
+        "how are you", "how are you doing", "how are you today",
+        "how's it going", "hows it going", "what's up", "whats up",
+        "good morning", "good afternoon", "good evening", "good night",
+        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
+    }
+
+
 @situation_router.post(
     "/situation",
     response_model=SituationResponse | InteractionPauseResponse,
 )
-def post_situation(
+async def post_situation(
     payload: SituationInput,
     request: Request,
     db: Session = Depends(get_db),
@@ -530,6 +545,19 @@ def post_situation(
             "care_reality_preserved": True,
         }
 
+    # Free-text greetings belong in Companion, not in the authoritative care
+    # record. Reject before any evidence/event write, even for older clients.
+    if not payload.documents and _is_casual_conversation_only(payload.raw_input):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "code": "conversation_only",
+                    "message": "This is casual conversation, not a care update. Send it to Companion; nothing was added to the Living Care Record.",
+                }
+            },
+        )
+
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
@@ -577,6 +605,35 @@ def post_situation(
         "events": hydration["events"],
         "situations": response_payload.get("situations") or hydration["situations"],
     })
+
+    # Qwen can suggest source-grounded observations for human review, but its
+    # output is never persisted as an LCR fact. A model outage must not undo a
+    # successfully persisted caregiver capture.
+    source_parts = [payload.raw_input.strip()] if payload.raw_input and payload.raw_input.strip() else []
+    source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
+    source_text = "\n".join(source_parts).strip()
+    if source_text:
+        try:
+            candidates = await asyncio.to_thread(
+                extract_review_candidates,
+                source_text,
+                source_event_id=result.care_event_id,
+                source_evidence_id=result.evidence_id,
+            )
+            response_payload["qwen_extraction_status"] = "available"
+            response_payload["qwen_candidates"] = candidates
+            response_payload["qwen_review_required"] = True
+            response_payload["qwen_written_to_lcr"] = False
+        except Exception:
+            response_payload["qwen_extraction_status"] = "unavailable"
+            response_payload["qwen_candidates"] = None
+            response_payload["qwen_review_required"] = True
+            response_payload["qwen_written_to_lcr"] = False
+    else:
+        response_payload["qwen_extraction_status"] = "not_applicable"
+        response_payload["qwen_candidates"] = None
+        response_payload["qwen_review_required"] = False
+        response_payload["qwen_written_to_lcr"] = False
     return response_payload
 
 

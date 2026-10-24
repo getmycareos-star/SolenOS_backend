@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
-from app.models.care import CareEvent, Caregiver
+from app.models.care import CareEvent, Caregiver, Evidence
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -436,5 +436,100 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 403
+    finally:
+        teardown()
+
+
+
+def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "I can help organize the recorded information and identify what still needs review.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        workflows = [
+            "daily_capture", "document", "community", "appointment",
+            "after_appointment", "handoff", "professional_summary",
+            "open_loops", "two_week_review", "decision_outcome",
+            "medication_day", "living_care_record",
+        ]
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        for workflow in workflows:
+            response = client.post(
+                "/api/v1/assistant/assist",
+                headers=headers,
+                json={"workflow": workflow, "text": f"Help me organize the {workflow.replace('_', ' ')} details."},
+            )
+            assert response.status_code == 200, f"{workflow}: {response.text}"
+            data = response.json()
+            assert data["workflow"] == workflow
+            assert data["ai_generated"] is True
+            assert data["review_required"] is True
+            assert data["written_to_lcr"] is False
+            assert data["persistence"] == "read_only_assistance"
+            assert data["authority"] == "solenos_care_record_and_caregiver"
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+    finally:
+        teardown()
+
+
+def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        calls = []
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+        def generated_reply(base, model, messages):
+            calls.append(messages)
+            return "Hi there. I'm here if you need help."
+        monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["ai_generated"] is True
+        assert len(calls) == 2, "A greeting must use Qwen generation and a Qwen language-quality pass"
+        events = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert events.status_code == 200
+        assert events.json() == []
+        assert response.json()["reply"] == "Hi there. I'm here if you need help."
+    finally:
+        teardown()
+
+
+def test_casual_greeting_is_rejected_before_situation_capture_writes(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        response = client.post(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "raw_input": "hi",
+                "documents": [],
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"]["code"] == "conversation_only"
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+        db.close()
     finally:
         teardown()

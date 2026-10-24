@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-import httpx
 from fastapi import HTTPException
+from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -133,26 +133,8 @@ DELTA_JSON_CONTRACT = {
 
 
 def _local_ollama_url() -> tuple[str, str, float]:
-    base_url = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "").strip()
-    try:
-        timeout = max(5.0, min(float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "60")), 180.0))
-    except ValueError:
-        timeout = 60.0
-    if not base_url or not model:
-        raise HTTPException(status_code=503, detail="The configured local SolenOS model is unavailable: OLLAMA_BASE_URL and OLLAMA_MODEL must be configured.")
-    parsed = urlparse(base_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
-        raise HTTPException(status_code=503, detail="Local model configuration must use an HTTP(S) service URL.")
-    environment = (
-        os.getenv("RAILWAY_ENVIRONMENT_NAME") or os.getenv("RAILWAY_ENVIRONMENT")
-        or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or ""
-    ).strip().lower()
-    if environment in {"production", "prod"}:
-        hostname = parsed.hostname.casefold()
-        if hostname in {"localhost", "127.0.0.1", "::1"} or not hostname.endswith(".railway.internal"):
-            raise HTTPException(status_code=503, detail="Production Delta inference must use the private SolenOS model service; loopback and public model hosts are rejected.")
-    return base_url, model, timeout
+    # Delta and every other AI workflow share the same local/private Qwen gateway.
+    return get_ollama_config()
 
 
 
@@ -329,29 +311,21 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "json_schema": DELTA_JSON_CONTRACT,
     }
     try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(
-                f"{base_url}/api/chat",
-                json={
-                    "model": model,
-                    "stream": False,
-                    "format": DELTA_JSON_CONTRACT,
-                    "options": {"temperature": 0},
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-                    ],
-                },
-            )
-            response.raise_for_status()
-            model_result = response.json()
-            content_json = model_result.get("message", {}).get("content")
-            if not isinstance(content_json, str):
-                raise ValueError("missing message.content")
-    except httpx.TimeoutException as exc:
-        raise HTTPException(status_code=504, detail="The local SolenOS model timed out. The care event remains unchanged.") from exc
-    except (httpx.HTTPError, ValueError) as exc:
-        raise HTTPException(status_code=503, detail="The local SolenOS model could not complete reconciliation. No fallback model was used and no delta was persisted.") from exc
+        content_json = qwen_chat(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            timeout=timeout,
+            response_format=DELTA_JSON_CONTRACT,
+            options={"temperature": 0},
+        )
+    except HTTPException as exc:
+        if exc.status_code == 504:
+            raise HTTPException(status_code=504, detail="The local SolenOS model timed out. The care event remains unchanged.") from exc
+        if exc.status_code == 503:
+            raise HTTPException(status_code=503, detail="The local SolenOS model could not complete reconciliation. No fallback model was used and no delta was persisted.") from exc
+        raise
 
     result = _parse_model_json(content_json)
 

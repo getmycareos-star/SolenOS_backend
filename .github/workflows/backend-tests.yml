@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - "backend/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
       - ".github/workflows/backend-tests.yml"
   pull_request:
     paths:
@@ -112,7 +116,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261024_07":
+              if revision != "20261024_08":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -121,3 +125,21 @@ jobs:
           conn.close()
           print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
           PY
+
+
+  qwen-image-build:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build production image with the actual Qwen model
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: solenos-backend:qwen-ci
