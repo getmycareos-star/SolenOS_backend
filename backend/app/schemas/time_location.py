@@ -191,7 +191,7 @@ class NaturalLanguageTimeParse(BaseModel):
     parsed_datetime: Optional[datetime] = None
     timezone: Optional[str] = None
     timezone_id: Optional[str] = None
-    confidence: float = Field(ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     interpretation: str
     is_ambiguous: bool = False
     provenance: Optional[str] = None
