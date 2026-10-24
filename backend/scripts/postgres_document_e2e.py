@@ -33,9 +33,9 @@ def main():
 
     log_path = Path("/tmp/solenos-document-e2e-uvicorn.log")
     log = log_path.open("wb")
+    os.environ["STAGING_API_BASE_URL"] = BASE_URL
+    os.environ["SOLENOS_CI_SMOKE"] = "1"
     env = os.environ.copy()
-    env["STAGING_API_BASE_URL"] = BASE_URL
-    env["SOLENOS_CI_SMOKE"] = "1"
     server = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8013"],
         cwd=Path(__file__).resolve().parents[1],
