@@ -34,7 +34,10 @@ def main() -> None:
 
     api_base = api_origin[:-7] if api_origin.endswith("/api/v1") else api_origin
     api = api_base + "/api/v1"
-    engine = create_engine(database_url, pool_pre_ping=True)
+    engine_url = database_url
+    if engine_url.startswith("postgresql://"):
+        engine_url = "postgresql+psycopg2://" + engine_url[len("postgresql://"):]
+    engine = create_engine(engine_url, pool_pre_ping=True)
     created: list[dict] = []
     stamp = f"{int(time.time())}-{os.getpid()}"
     payload = (
