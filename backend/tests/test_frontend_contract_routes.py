@@ -11,7 +11,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
-from app.models.care import CareEvent, Caregiver
+from app.models.care import CareEvent, Caregiver, Evidence
+import app.api.collaboration as collaboration_api
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -436,5 +437,60 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 403
+    finally:
+        teardown()
+
+
+
+def test_social_greeting_is_not_saved_as_care_and_companion_uses_qwen_prompt(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        capture = client.post("/api/situation", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "care_session_id": "greeting-only-session",
+            "raw_input": "hi",
+            "documents": [],
+        })
+        assert capture.status_code == 422, capture.text
+        detail = capture.json()["detail"]
+        assert detail["code"] == "conversation_only"
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
+
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama.railway.internal:11434")
+        monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+        monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+        seen = {}
+
+        def qwen_reply(base, model, messages):
+            seen["base"] = base
+            seen["model"] = model
+            seen["messages"] = messages
+            return "Hi! I'm doing well, thanks for asking. How are you?"
+
+        monkeypatch.setattr(collaboration_api, "_ollama_chat", qwen_reply)
+        response = client.post("/api/v1/conversation/message", headers=auth, json={
+            "person_id": person_id,
+            "text": "hi",
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is True
+        assert data["reply"] == "Hi! I'm doing well, thanks for asking. How are you?"
+        system_prompt = seen["messages"][0]["content"].lower()
+        assert "fixed greeting templates" in system_prompt
+        assert "unexplained slang" in system_prompt
+        assert "respond to the user's actual message first" in system_prompt
+        assert seen["model"] == "qwen2.5:1.5b"
+
+        db = TestingSessionLocal()
+        assert db.query(Evidence).filter_by(person_id=person_id).count() == 0
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
     finally:
         teardown()
