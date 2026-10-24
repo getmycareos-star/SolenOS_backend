@@ -143,7 +143,9 @@ def extract_review_candidates(
         },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
     ]
-    raw = qwen_chat(messages)
+    # Ollama's native JSON mode avoids fragile prompt-only formatting while
+    # keeping source-quote validation as the final authority boundary.
+    raw = qwen_chat(messages, response_format="json", options={"temperature": 0})
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError) as exc:
