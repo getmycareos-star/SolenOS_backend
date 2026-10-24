@@ -21,7 +21,7 @@ def upgrade():
     count = bind.execute(text("SELECT COUNT(*) FROM caregivers")).scalar_one()
     if count:
         raise RuntimeError(
-            "Caregiver schema repair needs reviewed identity mapping; "
+            "Caregiver schema reconciliation requires a reviewed identity mapping; "
             f"{count} existing rows and missing columns {missing}. No DDL applied."
         )
     additions = {
