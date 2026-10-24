@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "t5_handoff_accountability_20261023"
+revision = "t5_handoff_20261023"
 down_revision = "t4_document_assets_20261023"
 branch_labels = None
 depends_on = None
