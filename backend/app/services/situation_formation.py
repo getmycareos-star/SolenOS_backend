@@ -289,7 +289,7 @@ def _form_pattern_situation(
 ) -> Optional[Situation]:
     if len(patterns) < 2:
         return None
-    active_patterns = [p for p in patterns if p.confidence >= 0.4]
+    active_patterns = [p for p in patterns if len(p.change_ids or []) >= 2 or len(p.event_ids or []) >= 2]
     if len(active_patterns) < 2:
         return None
     signal_ids = []
@@ -353,8 +353,8 @@ def _build_converged_context(db: Session, person_id: str, patterns: List[Pattern
     ctx: Dict[str, Any] = {
         "type": "converged_situation_understanding",
         "significance_verdict": SignificanceVerdict.MEANINGFUL_CANDIDATE.value,
-        "significance_confidence": min(s.significance_confidence for s in change_sigs.values()) if change_sigs else 0.0,
-        "evidence_confidence": min(s.evidence_confidence for s in change_sigs.values()) if change_sigs else 0.0,
+        "significance_confidence": min(s.significance_confidence for s in change_sigs.values()) if change_sigs else None,
+        "evidence_confidence": min(s.evidence_confidence for s in change_sigs.values()) if change_sigs else None,
         "evidence_status": max(
             (s.evidence_status for s in change_sigs.values()),
             key=lambda e: 0 if e == EvidenceStatus.CONFIRMED else
