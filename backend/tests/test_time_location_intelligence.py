@@ -484,3 +484,39 @@ def test_daily_intelligence_marks_past_appointment_for_outcome_confirmation_not_
     assert item["kind"] == "appointment_status_check"
     assert item["source_evidence_ids"] == ["appointment-evidence"]
     assert "Confirm whether it occurred" in item["message"]
+
+
+
+def test_daily_intelligence_keeps_todays_appointments_and_events_source_linked():
+    ref = datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc)
+    result = generate_daily_intelligence(
+        "person-task5",
+        events=[{
+            "id": "event-today",
+            "title": "Morning mobility observation",
+            "event_type": "mobility",
+            "occurred_at": datetime(2026, 10, 24, 8, 0, tzinfo=timezone.utc).isoformat(),
+            "status": "recorded",
+            "evidence_ids": ["evidence-mobility"],
+            "time_provenance": "caregiver_reported_event_time",
+        }],
+        appointments=[{
+            "id": "appointment-today",
+            "title": "Clinic review",
+            "scheduled_at": datetime(2026, 10, 24, 11, 0, tzinfo=timezone.utc).isoformat(),
+            "status": "scheduled",
+            "location": "Clinic",
+            "evidence_ids": ["evidence-appointment"],
+            "time_provenance": "caregiver_entered",
+        }],
+        windows=[],
+        reference_time=ref,
+    )
+    appointment = next(item for item in result["upcoming_items"] if item["type"] == "appointment")
+    event = next(item for item in result["upcoming_items"] if item["type"] == "event")
+    assert appointment["id"] == "appointment-today"
+    assert appointment["source_evidence_ids"] == ["evidence-appointment"]
+    assert appointment["time_provenance"] == "caregiver_entered"
+    assert event["id"] == "event-today"
+    assert event["source_evidence_ids"] == ["evidence-mobility"]
+    assert event["time_provenance"] == "caregiver_reported_event_time"
