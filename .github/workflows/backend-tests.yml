@@ -90,7 +90,8 @@ jobs:
                   raise SystemExit(f"unexpected fresh-schema Alembic head: {revision}")
               for table in (
                   "care_state_revisions", "care_assertions", "care_action_outcomes",
-                  "care_delta_runs", "care_circles", "care_circle_memberships",\n              "care_notifications", "care_notification_preferences", "caregiver_consents", "share_intakes",
+                  "care_delta_runs", "care_circles", "care_circle_memberships",
+              "care_notifications", "care_notification_preferences", "caregiver_consents", "share_intakes",
               ):
                   cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
                   if cur.fetchone()[0] is None:
