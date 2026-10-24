@@ -323,7 +323,7 @@ def test_original_document_upload_is_reused_by_situation_capture(monkeypatch):
         assert downloaded.content == original
 
         db = TestingSessionLocal()
-        assert db.query(CommunityPost).count() == 0
+        assert db.query(Evidence).filter_by(id=evidence_id).count() == 1
         db.close()
     finally:
         teardown()
