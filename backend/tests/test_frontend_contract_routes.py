@@ -11,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.care import Evidence
+from app.api import collaboration as collaboration_module
 from app.models.care import CareEvent, Caregiver
 
 main_module = importlib.import_module("app.main")
@@ -436,5 +438,75 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert denied.status_code == 403
+    finally:
+        teardown()
+
+
+
+def test_standalone_greeting_is_rejected_before_any_care_evidence_is_written(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        response = client.post(
+            "/api/situation",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "raw_input": "hi",
+            },
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "conversation_only"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).count() == 0
+        assert db.query(Evidence).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+def test_companion_greeting_uses_model_and_revises_unusable_language(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    calls = []
+
+    def fake_chat(base_url, model, messages):
+        calls.append(messages)
+        if len(calls) == 1:
+            return "Saba, saba, saba."
+        return "Hi! I'm here. What's on your mind?"
+
+    monkeypatch.setattr(
+        collaboration_module,
+        "_ollama_url",
+        lambda: ("http://ollama.internal:11434", "qwen2.5:1.5b"),
+    )
+    monkeypatch.setattr(collaboration_module, "_ollama_chat", fake_chat)
+
+    try:
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["reply"] == "Hi! I'm here. What's on your mind?"
+        assert data["ai_generated"] is True
+        assert len(calls) == 2
+        system_prompt = calls[0][0]["content"].lower()
+        assert "fixed or hardcoded greeting" in system_prompt
+        assert "plain, idiomatic, accessible english" in system_prompt
+        assert "do not automatically ask" in system_prompt
+        review_prompt = calls[1][0]["content"].lower()
+        assert "remove unfamiliar foreign terms" in review_prompt
+
+        db = TestingSessionLocal()
+        rows = db.query(ConversationMessage).filter_by(session_id=data["session_id"]).order_by(ConversationMessage.created_at.asc()).all()
+        assert [row.role for row in rows] == ["user", "assistant"]
+        assert rows[-1].content == "Hi! I'm here. What's on your mind?"
+        assert db.query(CareEvent).count() == 0
+        assert db.query(Evidence).count() == 0
+        db.close()
     finally:
         teardown()
