@@ -1,6 +1,6 @@
 import pytest
 
-from seed import _assert_demo_seed_allowed
+from tests.fixtures.demo_seed import _assert_demo_seed_allowed
 
 
 def clear_environment(monkeypatch):
