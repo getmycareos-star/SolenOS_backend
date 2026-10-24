@@ -156,7 +156,13 @@ jobs:
             --env SECRET_KEY=ci-only-secret \
             solenos-backend:qwen-ci
           cleanup() {
+            exit_code=$?
+            trap - EXIT
+            if [ "$exit_code" -ne 0 ]; then
+              docker logs solenos-qwen-e2e >&2 || true
+            fi
             docker rm --force solenos-qwen-e2e >/dev/null 2>&1 || true
+            exit "$exit_code"
           }
           trap cleanup EXIT
 
@@ -183,16 +189,19 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
+          echo "QWEN_E2E: runtime status"
           status=$(curl --fail --silent --show-error -H "$auth_header" \
             http://127.0.0.1:8080/api/v1/assistant/status)
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:1.5b"' "$status"
 
+          echo "QWEN_E2E: Companion greeting"
           greeting=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
             http://127.0.0.1:8080/api/v1/conversation/message)
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert len(reply.split()) <= 55' "$greeting"
 
+          echo "QWEN_E2E: appointment assist"
           assist=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
             -d '{"workflow":"appointment","text":"Help organize the available appointment details and unanswered questions."}' \
@@ -201,6 +210,7 @@ jobs:
 
           # Exercise every supported read-only workflow against the actual model.
           for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+            echo "QWEN_E2E: workflow=$workflow"
             workflow_response=$(curl --fail --silent --show-error \
               -H "$auth_header" -H "Content-Type: application/json" \
               -d "{\"workflow\":\"$workflow\",\"text\":\"Help organize the available information and identify what remains unknown.\"}" \
@@ -209,6 +219,7 @@ jobs:
           done
 
           # Verify a real Qwen summary is grounded in a real, published CI-only community post.
+          echo "QWEN_E2E: Community post and Qwen summary"
           post=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
             -d '{"post_type":"experience","content":"A quiet routine helped us prepare for bedtime.","care_stage":"unspecified","tags":["routine"]}' \
@@ -221,6 +232,7 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert sys.argv[2] in d["post_ids"]; assert isinstance(d["summary"],str) and d["summary"].strip()' "$community_summary" "$post_id"
 
           # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
+          echo "QWEN_E2E: authorized document evidence"
           printf 'CI-only document: follow-up date is not stated.\\n' > /tmp/solenos-qwen-document.txt
           upload=$(curl --fail --silent --show-error \
             -H "$auth_header" \
@@ -242,6 +254,7 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
 
+          echo "QWEN_E2E: Daily Capture extraction"
           daily=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
