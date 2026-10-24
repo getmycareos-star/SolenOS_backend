@@ -640,8 +640,18 @@ def generate_daily_intelligence(
             "last_recorded_at": latest_time.isoformat(),
             "source_type": "care_event",
             "source_ids": [pair[0].get("id") for pair in records if pair[0].get("id")],
+            "source_records": [
+                {
+                    "event_id": pair[0].get("id"),
+                    "occurred_at": pair[1].isoformat(),
+                    "time_provenance": pair[0].get("time_provenance"),
+                    "status": pair[0].get("status"),
+                    "evidence_ids": pair[0].get("evidence_ids") or [],
+                }
+                for pair in records
+            ],
             "source_evidence_ids": sorted({eid for pair in records for eid in (pair[0].get("evidence_ids") or [])}),
-            "time_provenance": "care_event_occurred_at",
+            "time_provenance": "recorded_event_timestamps; inspect each source record for its own provenance",
         })
 
     proactive.sort(key=lambda item: (
