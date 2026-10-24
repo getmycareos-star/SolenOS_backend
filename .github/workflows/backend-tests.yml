@@ -35,6 +35,9 @@ jobs:
       - name: Run backend tests
         run: python -m pytest backend/tests -q
 
+      - name: Syntax-check staging verification scripts
+        run: python -m py_compile backend/scripts/verify_staging_schema.py backend/scripts/staging_document_smoke.py
+
       - name: Smoke-test the complete Alembic upgrade on SQLite
         run: |
           cd backend
