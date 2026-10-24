@@ -107,7 +107,7 @@ async def upload_evidence(
 
     filename = (file.filename or "upload").strip()[:255] or "upload"
     suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    mime_type = (file.content_type or "").lower()
+    mime_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     mime_by_extension = {
         "txt": "text/plain", "md": "text/markdown", "csv": "text/csv",
         "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
@@ -134,6 +134,22 @@ async def upload_evidence(
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Files must be 10 MiB or smaller")
+
+    signatures = {
+        "application/pdf": lambda blob: blob.startswith(b"%PDF-"),
+        "image/jpeg": lambda blob: blob.startswith(b"\\xff\\xd8\\xff"),
+        "image/png": lambda blob: blob.startswith(b"\\x89PNG\\r\\n\\x1a\\n"),
+        "image/gif": lambda blob: blob.startswith((b"GIF87a", b"GIF89a")),
+        "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
+    }
+    signature_check = signatures.get(mime_type)
+    if signature_check is not None and not signature_check(data):
+        raise HTTPException(status_code=422, detail="The file contents do not match the declared file type")
+    if mime_type.startswith("text/") or mime_type in {"application/json", "application/xml", "application/yaml"}:
+        try:
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=415, detail="Text uploads must use UTF-8 encoding") from exc
 
     evidence_type = evidence_type.strip().lower()
     if evidence_type not in {"document", "medication_photo", "care_photo"}:
