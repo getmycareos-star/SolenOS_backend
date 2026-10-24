@@ -191,6 +191,7 @@ def main():
         second_action_cues = [item for item in intelligence_again.get("proactive_items", []) if item.get("source_id") == action_id]
         require(len(second_action_cues) == 1, "repeated dashboard read duplicated the same proactive cue")
 
+        from app.core.database import SessionLocal
         from app.models.time_location import DailyIntelligence
         db = SessionLocal()
         try:
