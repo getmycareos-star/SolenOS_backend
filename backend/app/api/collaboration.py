@@ -629,16 +629,62 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
+async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
     _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
     if not observation:
         raise HTTPException(status_code=422, detail="observation is required")
     matches = _literal_matches(db, observation)
+    summary = None
+    provider_status = "unavailable"
+    ai_generated = False
+    if matches:
+        try:
+            summary = await asyncio.to_thread(
+                qwen_chat,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
+                            "published peer experiences. They are personal reports, not verified facts, clinical "
+                            "evidence, or advice. Do not infer diagnosis or cause, do not recommend treatment, "
+                            "do not invent themes not present in the posts, and state briefly that experiences differ. "
+                            "Use plain, accessible English and no unexplained foreign words. Return at most three short sentences."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"caregiver_observation": observation, "published_peer_posts": [
+                                {"post_id": m["post_id"], "content": m["content"]} for m in matches
+                            ]},
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+            )
+            if _companion_reply_needs_revision(summary) or re.search(r"(?i)\\bsaba\\b", summary):
+                summary = None
+                provider_status = "invalid_response"
+            else:
+                provider_status = "available"
+                ai_generated = True
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            provider_status = "unavailable"
     return {
-        "summary": None, "matches": matches, "post_ids": [m["post_id"] for m in matches],
-        "provider_status": "not_configured", "ai_generated": False,
-        "notice": "These are literal matches from published caregiver posts. No AI summary was generated.",
+        "summary": summary,
+        "matches": matches,
+        "post_ids": [m["post_id"] for m in matches],
+        "provider_status": provider_status,
+        "ai_generated": ai_generated,
+        "notice": (
+            "Qwen summarized published peer experiences; these are not authoritative care facts."
+            if ai_generated else
+            "These are literal matches from published caregiver posts. No AI summary was generated."
+        ),
         "matching_method": "literal_keyword_overlap_not_clinical_advice",
     }
 
