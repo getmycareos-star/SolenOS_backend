@@ -6,6 +6,7 @@ from datetime import datetime, date, timezone
 import json
 import hashlib
 from app.core.database import get_db
+from app.services.qwen_gateway import extract_review_candidates
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import (
     Person as PersonModel,
@@ -346,7 +347,29 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         source_id=event.id,
         caregiver_id=caregiver_id,
     )
-    return {"success": True, "id": event.id, "event_type": event.event_type, "recorded_at": event.recorded_at}
+
+    # Analyze the saved capture through the shared Railway-local Qwen gateway.
+    # This response is a review aid only; candidate output is never written as
+    # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
+    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
+    qwen_status = "unavailable"
+    qwen_candidates = None
+    try:
+        qwen_candidates = extract_review_candidates(source_text, source_event_id=event.id)
+        qwen_status = "available"
+    except Exception:
+        qwen_status = "unavailable"
+
+    return {
+        "success": True,
+        "id": event.id,
+        "event_type": event.event_type,
+        "recorded_at": event.recorded_at,
+        "qwen_extraction_status": qwen_status,
+        "qwen_candidates": qwen_candidates,
+        "qwen_review_required": True,
+        "qwen_written_to_lcr": False,
+    }
 
 
 @router.post("/daily/log")
