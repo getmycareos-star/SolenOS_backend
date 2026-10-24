@@ -103,6 +103,15 @@ def main() -> None:
                 fail(f"Cross-care-record file access was not denied (HTTP {cross_record.status_code}).")
             print("Cross-care-record download denial passed.")
 
+            cross_review = client.post(
+                api + f"/documents/{evidence_id}/candidates/0/review",
+                headers=other_headers,
+                json={"decision": "reject"},
+            )
+            if cross_review.status_code not in {403, 404}:
+                fail(f"Cross-care-record candidate review was not denied (HTTP {cross_review.status_code}).")
+            print("Cross-care-record candidate-review denial passed.")
+
             review = client.post(
                 api + f"/documents/{evidence_id}/candidates/0/review",
                 headers=owner_headers,
@@ -124,6 +133,45 @@ def main() -> None:
             if repeat.status_code != 409:
                 fail("A second decision was not rejected as an already-reviewed candidate.")
             print("Persisted caregiver review attribution and duplicate-review rejection passed.")
+
+            # Exercise the actual Tesseract path with a generated high-contrast
+            # scanned image. Runtime version/language checks alone are insufficient.
+            from PIL import Image, ImageDraw, ImageFont
+            import io
+
+            scanned = Image.new("RGB", (1600, 260), "white")
+            draw = ImageDraw.Draw(scanned)
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 48)
+            except OSError:
+                font = ImageFont.load_default()
+            draw.text((70, 45), "FOLLOW-UP APPOINTMENT", fill="black", font=font)
+            draw.text((70, 125), "IN TWO WEEKS", fill="black", font=font)
+            image_buffer = io.BytesIO()
+            scanned.save(image_buffer, format="PNG")
+            scanned_bytes = image_buffer.getvalue()
+
+            ocr_upload = client.post(
+                api + "/documents/intake",
+                headers=owner_headers,
+                files={"file": (f"staging-smoke-ocr-{stamp}.png", scanned_bytes, "image/png")},
+            )
+            if ocr_upload.status_code != 201:
+                fail(f"Authenticated scanned-image upload failed with HTTP {ocr_upload.status_code}.")
+            ocr_doc = ocr_upload.json()
+            if ocr_doc.get("extraction_status") != "extracted" or ocr_doc.get("extraction_source") != "image_ocr":
+                fail("A real scanned-image upload did not complete the Tesseract OCR path.")
+            if not ocr_doc.get("extracted_char_count") or ocr_doc.get("candidate_count", 0) < 1:
+                fail("OCR returned no usable text or no source-linked review candidates.")
+            print("End-to-end scanned-image OCR and source-candidate extraction passed.")
+
+            ocr_download = client.get(
+                api + f"/documents/{ocr_doc['evidence_id']}/file",
+                headers=owner_headers,
+            )
+            if ocr_download.status_code != 200 or ocr_download.content != scanned_bytes:
+                fail("Original scanned-image download did not preserve the exact uploaded bytes.")
+            print("Original scanned-image byte integrity passed.")
 
     finally:
         # Delete only the synthetic records created by this run. The evidence and
