@@ -41,7 +41,7 @@ def test_alembic_root_logger_configuration_supports_upgrade_smoke_test():
     assert "qualname = root" in root_section
 
 
-def _load_caregiver_schema_migration(filename="t2_caregiver_guard_20261024.py"):
+def _load_caregiver_schema_migration(filename="t2_caregiver_schema_reconcile_20261024.py"):
     import importlib.util
 
     backend_dir = Path(__file__).resolve().parents[1]
@@ -56,7 +56,7 @@ def _load_caregiver_schema_migration(filename="t2_caregiver_guard_20261024.py"):
 @pytest.mark.parametrize("filename", [
     "t0_caregiver_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
-    "t2_caregiver_guard_20261024.py",
+    "t2_caregiver_schema_reconcile_20261024.py",
 ])
 def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_table(filename):
     from alembic.migration import MigrationContext
@@ -80,7 +80,7 @@ def test_caregiver_schema_reconciliation_adds_columns_only_to_an_empty_legacy_ta
 @pytest.mark.parametrize("filename", [
     "t0_caregiver_guard_20261024.py",
     "20261022_03_caregiver_schema_reconciliation.py",
-    "t2_caregiver_guard_20261024.py",
+    "t2_caregiver_schema_reconcile_20261024.py",
 ])
 def test_caregiver_schema_reconciliation_refuses_to_guess_existing_identity_mapping(filename):
     import pytest
