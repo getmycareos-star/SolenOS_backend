@@ -989,13 +989,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
 
     if payload.workflow in {"open_loops", "two_week_review", "decision_outcome", "professional_summary", "after_appointment", "medication_day"}:
-        action_query = db.query(ActionModel).filter(ActionModel.person_id == person_id)
+        action_query = db.query(ActionModel).filter(
+            ActionModel.person_id == person_id,
+            ActionModel.status.in_([
+                "detected", "pending_confirmation", "active", "conditional", "blocked"
+            ]),
+        )
         if payload.workflow == "medication_day":
             action_query = action_query.filter(ActionModel.is_medication_action.is_(True))
-        else:
-            action_query = action_query.filter(ActionModel.status.in_([
-                "detected", "pending_confirmation", "active", "conditional", "blocked"
-            ]))
         actions = action_query.order_by(ActionModel.deadline.asc().nullslast(), ActionModel.created_at.desc()).limit(15).all()
         for action in actions:
             context_lines.append(
