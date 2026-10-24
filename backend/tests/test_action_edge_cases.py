@@ -250,8 +250,10 @@ def test_completion_evidence_strength():
 
         lifecycle = ActionLifecycleService()
         result = lifecycle.verify_completion_evidence(action, ["ev1"], db)
-        assert result["verified"] is True
-        assert result["confidence"] >= 0.5
+        assert result["verified"] is False
+        assert result["confidence"] is None
+        assert result["review_required"] is True
+        assert result["evidence_count"] == 1
 
         weak_evidence = Evidence(
             id="ev2", person_id=person.id, type="patient_report",
@@ -260,7 +262,9 @@ def test_completion_evidence_strength():
         db.add(weak_evidence)
         db.commit()
         result = lifecycle.verify_completion_evidence(action, ["ev2"], db)
-        assert result["confidence"] < 0.7
+        assert result["verified"] is False
+        assert result["confidence"] is None
+        assert result["review_required"] is True
         db.close()
     finally:
         teardown_db()
@@ -300,8 +304,10 @@ def test_self_reported_vs_documented_completion():
 
         lifecycle = ActionLifecycleService()
         result = lifecycle.verify_completion_evidence(action, ["ev1"], db)
-        assert result["verified"] is True
-        assert result["confidence"] == 0.6
+        assert result["verified"] is False
+        assert result["confidence"] is None
+        assert result["review_required"] is True
+        assert "unverified" in result["reason"]
         db.close()
     finally:
         teardown_db()
