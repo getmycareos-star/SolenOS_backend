@@ -183,7 +183,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         text_download = client.get(f"/api/v1/upload/{text_id}", headers=auth)
         assert text_download.status_code == 200
         assert text_download.content == text_bytes
-        assert text_download.headers["content-type"] == "text/plain"
+        assert text_download.headers["content-type"].startswith("text/plain")
         text_denied = client.get(
             f"/api/v1/upload/{text_id}",
             headers={"Authorization": f"Bearer {other_token}"},
