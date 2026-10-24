@@ -42,7 +42,7 @@ def upgrade():
     additions = {
         "name": sa.Column("name", sa.String(), nullable=False),
         "relationship": sa.Column("relationship", sa.String(), nullable=False),
-        "person_id": sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id"), nullable=False),
+        "person_id": sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", name="fk_caregivers_person_id_persons"), nullable=False),
         "timezone": sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
     }
     if bind.dialect.name == "sqlite":
