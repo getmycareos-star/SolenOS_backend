@@ -75,7 +75,7 @@ jobs:
           cache-dependency-path: backend/pyproject.toml
 
       - name: Install backend and PostgreSQL driver
-        run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary httpx
 
       - name: Recreate legacy account-oriented caregivers table
         run: |
