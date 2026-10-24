@@ -13,17 +13,16 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
+_raw_database_url = settings.database_url.strip()
+# Treat actual Railway runtime or a Supabase pooler URL as production TLS.
+# Do not force TLS for disposable localhost PostgreSQL used by integration CI.
+_is_supabase_pooler = ".pooler.supabase.com" in _raw_database_url.lower()
 database_url = configure_database_url(
     settings.database_url,
-    railway_runtime=(
-        is_railway_runtime()
-        or settings.database_url.strip().startswith(
-            ("postgres://", "postgresql://", "postgresql+psycopg2://")
-        )
-    ),
+    railway_runtime=(is_railway_runtime() or _is_supabase_pooler),
 )
-# Enforce Supabase Session Pooler username here as well: Railway pre-deploy
-# must never attempt authentication as the unqualified "postgres" user.
+# Enforce the project-qualified Supabase Session Pooler username even when
+# Railway's pre-deploy process omits injected runtime markers.
 _parsed_database_url = make_url(database_url)
 if (
     _parsed_database_url.host
