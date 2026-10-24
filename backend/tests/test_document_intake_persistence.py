@@ -207,3 +207,49 @@ def test_image_intake_uses_ocr_text_but_keeps_it_as_unverified_source_candidates
                 assert all(candidate["review_status"] == "pending_review" for candidate in json.loads(evidence.extra_metadata)["document_candidates"])
     finally:
         teardown_db()
+
+
+
+def test_candidate_review_fails_closed_on_malformed_persisted_metadata():
+    setup_db()
+    try:
+        with TestClient(app) as client:
+            headers, session = create_session(client, "Malformed Review Metadata")
+            response = client.post(
+                "/api/v1/documents/intake",
+                headers=headers,
+                files={"file": ("care.txt", b"Follow-up appointment: call the clinic next week.", "text/plain")},
+            )
+            assert response.status_code == 201, response.text
+            evidence_id = response.json()["evidence_id"]
+
+            with TestingSessionLocal() as db:
+                evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+                metadata = json.loads(evidence.extra_metadata)
+                metadata["document_candidates"] = [None]
+                metadata["document_review_history"] = "not-a-list"
+                evidence.extra_metadata = json.dumps(metadata)
+                db.commit()
+
+            malformed_candidate = client.post(
+                f"/api/v1/documents/{evidence_id}/candidates/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert malformed_candidate.status_code == 409, malformed_candidate.text
+            assert "malformed" in malformed_candidate.json()["detail"].lower()
+
+            with TestingSessionLocal() as db:
+                evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+                evidence.extra_metadata = json.dumps(["unexpected", "metadata", "shape"])
+                db.commit()
+
+            malformed_metadata = client.post(
+                f"/api/v1/documents/{evidence_id}/candidates/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert malformed_metadata.status_code == 409, malformed_metadata.text
+            assert "metadata" in malformed_metadata.json()["detail"].lower()
+    finally:
+        teardown_db()
