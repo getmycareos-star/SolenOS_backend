@@ -517,8 +517,8 @@ def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/assistant/status")
-def qwen_assistant_status(request: Request, db: Session = Depends(get_db)):
-    _scope(request, db)
+def qwen_assistant_status():
+    # Infrastructure-only health data: no care-record context is read or returned.
     return qwen_runtime_status()
 
 
