@@ -40,7 +40,7 @@ def configure_database_url(url: str, *, railway_runtime: bool) -> str:
 
     # The Session Pooler always needs a project-qualified username, including
     # pre-deploy contexts where Railway's injected runtime markers may be absent.
-    if parsed.host == pooler_host and parsed.username == "postgres":
+    if parsed.host and parsed.host.endswith(".pooler.supabase.com") and parsed.username == "postgres":
         parsed = parsed.set(username=f"postgres.{_SUPABASE_PROJECT_REF}")
 
     if railway_runtime and parsed.host == _SUPABASE_DIRECT_HOST:
