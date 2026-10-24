@@ -307,6 +307,7 @@ def test_daily_capture_conflicting_medication_reports_are_preserved():
         for dose in ("5 mg", "10 mg"):
             response = client.post(
                 "/api/v1/daily-care/entries",
+                headers=session_headers("person-daily-test", "caregiver-daily-test"),
                 json={
                     "person_id": "person-daily-test",
                     "caregiver_id": "caregiver-daily-test",
