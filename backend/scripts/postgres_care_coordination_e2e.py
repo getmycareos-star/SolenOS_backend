@@ -44,10 +44,12 @@ def require(condition, message):
 def start_server():
     log_path = Path("/tmp/solenos-coordination-e2e-uvicorn.log")
     log = log_path.open("ab")
+    server_env = os.environ.copy()
+    server_env["ENABLE_REMINDER_SCHEDULER"] = "false"
     process = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8014"],
         cwd=Path(__file__).resolve().parents[1],
-        env=os.environ.copy(),
+        env=server_env,
         stdout=log,
         stderr=subprocess.STDOUT,
     )
