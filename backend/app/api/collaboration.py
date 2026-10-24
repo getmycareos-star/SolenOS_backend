@@ -24,6 +24,7 @@ router = APIRouter(tags=["community and companion"])
 
 
 class PostCreate(BaseModel):
+    caregiver_id: Optional[str] = None
     content: str = Field(min_length=1, max_length=5000)
     post_type: str = Field(default="experience", pattern="^(experience|question)$")
     care_stage: str = Field(default="unspecified", pattern="^(early|moderate|late|unspecified)$")
@@ -165,6 +166,8 @@ def community_feed(request: Request, limit: int = Query(50, ge=1, le=100), db: S
 @router.post("/community", status_code=201)
 def create_community_post(payload: PostCreate, request: Request, db: Session = Depends(get_db)):
     _, caregiver_id = _scope(request, db)
+    if payload.caregiver_id and payload.caregiver_id != caregiver_id:
+        raise HTTPException(status_code=403, detail="Post attribution does not match this caregiver session")
     if not db.query(Caregiver.id).filter(Caregiver.id == caregiver_id).first():
         raise HTTPException(status_code=403, detail="The session caregiver is not available")
     content = payload.content.strip()
