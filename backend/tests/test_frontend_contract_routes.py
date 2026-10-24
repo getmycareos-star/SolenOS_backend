@@ -142,7 +142,15 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
     client, token, person_id, caregiver_id, other_token, _ = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        original = b"test-image-bytes"
+        original = b"\x89PNG\r\n\x1a\n" + b"test-image-bytes"
+        spoofed = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={"person_id": person_id, "caregiver_id": caregiver_id},
+            files={"file": ("spoof.png", b"not a PNG", "image/png")},
+        )
+        assert spoofed.status_code == 422, spoofed.text
+
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
