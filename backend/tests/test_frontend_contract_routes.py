@@ -327,3 +327,33 @@ def test_original_document_upload_is_reused_by_situation_capture(monkeypatch):
         db.close()
     finally:
         teardown()
+
+
+
+def test_share_intake_is_persisted_and_claimed_once_without_account_session(monkeypatch):
+    client, _, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        original = b"shared-care-document"
+        created = client.post("/api/v1/share-intake", json={
+            "title": "Shared care note",
+            "text": "Follow-up is scheduled.",
+            "url": "https://example.org/care-note",
+            "files": [{
+                "name": "care-note.txt",
+                "mimeType": "text/plain",
+                "base64": base64.b64encode(original).decode("ascii"),
+            }],
+        })
+        assert created.status_code == 201, created.text
+        share_id = created.json()["id"]
+        assert len(share_id) >= 40
+
+        claimed = client.get(f"/api/v1/share-intake/{share_id}")
+        assert claimed.status_code == 200, claimed.text
+        assert claimed.json()["text"] == "Follow-up is scheduled."
+        assert claimed.json()["files"][0]["base64"] == base64.b64encode(original).decode("ascii")
+
+        second_claim = client.get(f"/api/v1/share-intake/{share_id}")
+        assert second_claim.status_code == 404
+    finally:
+        teardown()
