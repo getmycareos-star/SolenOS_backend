@@ -515,11 +515,22 @@ async def review_document_candidate(
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
     if not person_id or not caregiver_id:
         raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    # Validate both sides of the session scope. A caregiver ID supplied by session
+    # middleware is not, by itself, proof that the caregiver belongs to this person.
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
+
+    # Lock the evidence row so simultaneous review attempts serialize on PostgreSQL.
+    # This prevents two concurrent requests from both accepting a pending candidate.
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
         Evidence.type == "document",
-    ).first()
+    ).with_for_update().first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Document evidence not found for this care record.")
     try:
@@ -533,9 +544,13 @@ async def review_document_candidate(
         metadata = json.loads(evidence.extra_metadata or "{}")
     except (TypeError, ValueError):
         raise HTTPException(status_code=409, detail="Document metadata is unreadable; review cannot be safely saved.")
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=409, detail="Document metadata is not in a reviewable format.")
     candidates = metadata.get("document_candidates")
     if not isinstance(candidates, list) or candidate_index < 0 or candidate_index >= len(candidates):
         raise HTTPException(status_code=404, detail="Document candidate not found.")
+    if not isinstance(candidates[candidate_index], dict):
+        raise HTTPException(status_code=409, detail="Document candidate metadata is malformed; review cannot be safely saved.")
     candidate = dict(candidates[candidate_index])
     if candidate.get("review_status") != "pending_review":
         raise HTTPException(status_code=409, detail="This candidate already has a review decision.")
@@ -544,7 +559,10 @@ async def review_document_candidate(
     candidate["reviewed_at"] = now
     candidate["reviewed_by_caregiver_id"] = caregiver_id
     candidates[candidate_index] = candidate
-    history = list(metadata.get("document_review_history") or [])
+    history_value = metadata.get("document_review_history", [])
+    if not isinstance(history_value, list):
+        raise HTTPException(status_code=409, detail="Document review history is malformed; review cannot be safely saved.")
+    history = list(history_value)
     history.append({
         "candidate_index": candidate_index,
         "decision": decision,
