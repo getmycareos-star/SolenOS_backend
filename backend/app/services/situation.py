@@ -6,6 +6,7 @@ from app.models.care import Caregiver, Person, Evidence, CareEvent
 from app.schemas.situation import SituationInput, SituationResponse, SituationEvent, SituationDocument
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
+from app.services.qwen_gateway import extract_review_candidates
 
 
 def _utc_now() -> datetime:
@@ -35,6 +36,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         occurred_at = _utc_now()
 
     evidence_ids: List[str] = []
+    evidence_sources: List[tuple[str, str]] = []
     event_ids: List[str] = []
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
@@ -59,6 +61,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         db.add(evidence)
         db.flush()
         evidence_ids.append(evidence.id)
+        evidence_sources.append((str(evidence.id), source_text))
         return evidence
 
     if payload.raw_input and payload.raw_input.strip():
@@ -95,6 +98,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 existing.extra_metadata = json.dumps(metadata)
                 existing.evidence_status = "reported"
                 evidence_ids.append(existing.id)
+                evidence_sources.append((str(existing.id), extracted_text))
             else:
                 create_evidence(extracted_text, doc)
 
@@ -198,6 +202,30 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             "follow_up_candidate": s.follow_up_candidate,
         })
 
+    qwen_extraction_status = "unavailable"
+    qwen_candidates = {"observations": [], "open_questions": []}
+    try:
+        for source_evidence_id, source_text in evidence_sources[:5]:
+            candidate_result = extract_review_candidates(
+                source_text,
+                source_event_id=str(care_event.id),
+                source_evidence_id=source_evidence_id,
+            )
+            qwen_candidates["observations"].extend(candidate_result["observations"])
+            qwen_candidates["open_questions"].extend(candidate_result["open_questions"])
+        qwen_candidates["observations"] = qwen_candidates["observations"][:12]
+        qwen_candidates["open_questions"] = list(dict.fromkeys(qwen_candidates["open_questions"]))[:3]
+        qwen_extraction_status = "pending_review"
+    except Exception as exc:
+        # The care event was already committed. Model failure must not turn a
+        # successful capture into a failed write or invite duplicate submission.
+        from fastapi import HTTPException
+        if isinstance(exc, HTTPException) and exc.status_code == 503:
+            qwen_extraction_status = "invalid_response" if "invalid candidate structure" in str(exc.detail) else "unavailable"
+        else:
+            qwen_extraction_status = "unavailable"
+        qwen_candidates = None
+
     return SituationResponse(
         ok=True,
         situation_id=care_event.id,
@@ -217,4 +245,6 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         what_changed=what_changed,
         analysis_status=analysis_status,
         analysis_warning=analysis_warning,
+        qwen_extraction_status=qwen_extraction_status,
+        qwen_candidates=qwen_candidates,
     )
