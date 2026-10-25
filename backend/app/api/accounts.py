@@ -5,7 +5,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -18,12 +18,12 @@ SESSION_TTL_DAYS = 365
 
 
 class AccountCreate(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=12, max_length=256)
 
 
 class AccountLogin(BaseModel):
-    email: EmailStr
+    email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -33,6 +33,16 @@ class AccountDelete(BaseModel):
 
 def _email(value: str) -> str:
     return value.strip().casefold()
+
+
+def _validate_email(value: str) -> str:
+    normalized = _email(value)
+    if len(normalized) > 320 or normalized.count('@') != 1:
+        raise HTTPException(status_code=422, detail='Enter a valid email address.')
+    local, _, domain = normalized.partition('@')
+    if not local or not domain or '.' not in domain or domain.startswith('.') or domain.endswith('.'):
+        raise HTTPException(status_code=422, detail='Enter a valid email address.')
+    return normalized
 
 
 def _hash_password(password: str) -> str:
@@ -81,7 +91,7 @@ def get_my_account(request: Request, db: Session = Depends(get_db)):
 @router.post("", status_code=201)
 def create_account(payload: AccountCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_ids(request)
-    email = _email(str(payload.email))
+    email = _validate_email(payload.email)
     if db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first():
         raise HTTPException(status_code=409, detail="An account already uses this email address.")
     existing = db.query(CaregiverAccount).filter(CaregiverAccount.person_id == person_id).first()
@@ -105,7 +115,7 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
 
 @router.post("/login")
 def login(payload: AccountLogin, db: Session = Depends(get_db)):
-    email = _email(str(payload.email))
+    email = _email(payload.email)
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first()
     if not account or not _verify_password(payload.password, account.password_hash):
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
