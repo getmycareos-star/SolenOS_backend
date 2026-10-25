@@ -51,7 +51,7 @@ def _normalise_email(value: str) -> str:
 def _hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     derived = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=_SCRYPT_N, r=_SCRYPT_R, p=_SCRYPT_P, dklen=64)
-    return f"scrypt\${_SCRYPT_N}\${_SCRYPT_R}\${_SCRYPT_P}\${salt.hex()}\${derived.hex()}"
+    return "scrypt$%d$%d$%d$%s$%s" % (_SCRYPT_N, _SCRYPT_R, _SCRYPT_P, salt.hex(), derived.hex())
 
 
 def _verify_password(password: str, encoded: str) -> bool:
@@ -101,8 +101,7 @@ def register_account(payload: AccountRegister, db: Session = Depends(get_db)):
         account = CaregiverAccount(email=email, password_hash=_hash_password(payload.password), person_id=person.id, caregiver_id=caregiver.id)
         db.add(account)
         db.flush()
-        result = _issue_account_session(db, account)
-        return result
+        return _issue_account_session(db, account)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An account with this email already exists. Log in instead.")
