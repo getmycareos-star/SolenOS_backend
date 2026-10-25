@@ -461,36 +461,40 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if not invalid_style and not unrequested_foreign_token:
             break
         repair_instruction = (
-            "Rewrite the draft as one clear, natural, accessible answer of at most 25 words. "
-            "Use only claims supported by the user's request and authorized context. "
+            "Rewrite the answer as one clear, natural, accessible response of at most 25 words. "
+            "Use only claims supported by the caregiver request and authorized context. "
             "Do not invent facts, events, appointments, tasks, owners, deadlines, diagnoses or advice. "
-            "Do not use unexplained foreign words or transliterations. Do not repeat words or phrases. "
-            "Do not claim anything was saved, changed, verified or reviewed. Return only the revised answer."
+            "Use plain English. Do not repeat words or phrases, use unexplained foreign words, "
+            "or claim anything was saved, changed, verified or reviewed. Return only the answer."
         )
+        if unrequested_foreign_token:
+            repair_instruction += (
+                " The previous answer contained an unrequested foreign token. Do not reproduce it "
+                "or discuss the rejected answer; answer the caregiver's request directly."
+            )
         if repair_attempt == 2:
             repair_instruction = (
-                "Produce a concise answer in plain English, at most 15 words. "
-                "Use only supplied information. No foreign words, repetition, invented facts, or claims of saved actions. "
-                "Return only the answer."
+                "Answer the caregiver directly in plain English, at most 15 words. "
+                "Use only supplied information. No invented facts, repetition, foreign words, "
+                "or claims of saved actions. Return only the answer."
             )
+        repair_payload = {
+            "workflow": payload.workflow,
+            "caregiver_request": payload.text.strip(),
+            "authorized_context": context_lines,
+            "invalid_style": invalid_style,
+            "unrequested_foreign_token": unrequested_foreign_token,
+        }
+        # Do not feed an invalid draft back to the model when the rejection was
+        # triggered by an unrequested foreign token; doing so can make the model
+        # repeat the exact token that caused the rejection.
+        if not unrequested_foreign_token:
+            repair_payload["draft_response"] = reply
         reply = await asyncio.to_thread(
             qwen_chat,
             [
                 {"role": "system", "content": repair_instruction},
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "workflow": payload.workflow,
-                            "caregiver_request": payload.text.strip(),
-                            "authorized_context": context_lines,
-                            "draft_response": reply,
-                            "invalid_style": invalid_style,
-                            "unrequested_foreign_token": unrequested_foreign_token,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
+                {"role": "user", "content": json.dumps(repair_payload, ensure_ascii=False)},
             ],
             options={"temperature": 0, "num_predict": 64},
         )
