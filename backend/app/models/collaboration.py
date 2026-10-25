@@ -7,7 +7,9 @@ from app.core.database import Base
 class CommunityPost(Base):
     __tablename__ = "community_posts"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True, index=True)
+    professional_id = Column(String, ForeignKey("professional_accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    title = Column(String(200), nullable=True)
     author_type = Column(String, nullable=False, default="peer_caregiver")
     author_label = Column(String, nullable=False, default="Anonymous caregiver")
     post_type = Column(String, nullable=False, default="experience")
