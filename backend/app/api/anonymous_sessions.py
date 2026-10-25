@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.models.auth_account import AuthSession
 from app.models.care import Caregiver, Person
 
 router = APIRouter(prefix="/sessions", tags=["anonymous sessions"])
@@ -76,7 +77,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
-        "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
+        "expires_in_seconds": max(0, int((expires_at - now).total_seconds())),
     }
 
 
@@ -93,8 +94,28 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     )
     if not session:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=SESSION_TTL_DAYS)
+    if session.account_id:
+        account_session = (
+            db.query(AuthSession)
+            .filter(
+                AuthSession.account_id == session.account_id,
+                AuthSession.revoked_at.is_(None),
+                AuthSession.expires_at > now,
+            )
+            .order_by(AuthSession.created_at.desc())
+            .first()
+        )
+        if account_session is None:
+            session.revoked_at = now
+            db.commit()
+            raise HTTPException(status_code=401, detail="Account session expired; sign in again")
+        account_expiry = account_session.expires_at
+        if account_expiry.tzinfo is None:
+            account_expiry = account_expiry.replace(tzinfo=timezone.utc)
+        expires_at = min(expires_at, account_expiry)
     raw_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
     session.token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     session.expires_at = expires_at
     db.commit()
