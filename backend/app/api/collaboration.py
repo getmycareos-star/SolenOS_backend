@@ -558,7 +558,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "living_care_record", "appointment", "after_appointment",
         "handoff", "professional_summary", "open_loops", "two_week_review",
     }
-    if payload.appointment_id or payload.workflow in appointment_workflows:
+    if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
         if payload.appointment_id:
             appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
