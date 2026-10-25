@@ -694,6 +694,25 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"read={notification.read_at is not None}; body={(notification.body or '')[:500]}"
             )
 
+    # These workflows cannot infer live account, permission, delivery, or persistence
+    # state from caregiver prose. Make the absence explicit to Qwen so the
+    # output guard can reject unsupported assertions instead of guessing.
+    authoritative_state_limits = {
+        "roles_access": "No authoritative role or permission state is available to this request.",
+        "account_recovery": "No authoritative account verification or recovery state is available to this request.",
+        "settings_security": "No authoritative security-setting state is available to this request.",
+        "record_lifecycle": "No authoritative record lifecycle or retention state is available to this request.",
+        "offline_sync": "No authoritative synchronization or server-confirmation state is available to this request.",
+        "ai_reliability": "No authoritative current Qwen service status is available to this request.",
+        "audit_review": "No authoritative audit-review or acceptance status is available to this request.",
+    }
+    if payload.workflow in authoritative_state_limits:
+        context_lines.append(authoritative_state_limits[payload.workflow])
+    elif payload.workflow == "reminders_notifications" and not any(
+        line.startswith("Recorded notification [") for line in context_lines
+    ):
+        context_lines.append("No authoritative reminder delivery receipt or notification state is available to this request.")
+
     guidance = {
         "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed care-record entry or correction from supplied words. Identify missing date, source or detail as unknown; never claim anything was saved.",
