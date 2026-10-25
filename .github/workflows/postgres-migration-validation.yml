@@ -90,7 +90,10 @@ jobs:
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261024_12"
           for table in care_state_revisions care_assertions care_action_outcomes share_intakes caregiver_consents care_notifications care_notification_preferences qwen_review_candidates; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
-            test "$found" = "$table"
+            if [ "$found" != "$table" ]; then
+              echo "Expected migrated table '$table' is missing (to_regclass returned '$found')."
+              exit 1
+            fi
           done
 
       - name: Test empty legacy caregivers table is reconciled on PostgreSQL
