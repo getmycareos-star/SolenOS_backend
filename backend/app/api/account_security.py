@@ -38,7 +38,10 @@ def _now():
 
 
 def _email_hash(email: str) -> str:
-    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+    key = os.getenv("ACCOUNT_SECURITY_KEY", "")
+    if len(key.encode()) < 32:
+        raise HTTPException(status_code=503, detail="Account security is not configured")
+    return hmac.new(key.encode(), email.strip().lower().encode(), hashlib.sha256).hexdigest()
 
 
 def _ip_hash(ip: str) -> str:
