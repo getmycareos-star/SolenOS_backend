@@ -7,7 +7,9 @@ export OLLAMA_NO_CLOUD="true"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 # Keep warm-up and API inference on the same runner context.
-export OLLAMA_CONTEXT_LENGTH="${OLLAMA_NUM_CTX:-1536}"
+export OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-1024}"
+export OLLAMA_NUM_THREADS="${OLLAMA_NUM_THREADS:-2}"
+export OLLAMA_CONTEXT_LENGTH="$OLLAMA_NUM_CTX"
 # The model shares the Railway container with FastAPI. Serialize inference and
 # keep one loaded model so parallel requests cannot multiply KV-cache memory.
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
@@ -54,7 +56,35 @@ ollama list | grep -Fq "$OLLAMA_MODEL" || {
 # while Railway's /ready health check repeatedly receives service-unavailable.
 warmup_timeout="${QWEN_WARMUP_TIMEOUT_SECONDS:-180}"
 if ! timeout --signal=TERM --kill-after=10s "${warmup_timeout}s" \
-  ollama run "$OLLAMA_MODEL" "Reply with the single word READY." >/tmp/qwen-warmup.log 2>&1; then
+  python - <<'PY' >/tmp/qwen-warmup.log 2>&1
+import json
+import os
+import urllib.request
+
+threads = max(1, min(int(os.getenv("OLLAMA_NUM_THREADS", "2")), 8))
+context = max(256, min(int(os.getenv("OLLAMA_NUM_CTX", "1024")), 4096))
+payload = {
+    "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
+    "prompt": "Reply with the single word READY.",
+    "stream": False,
+    "options": {
+        "num_ctx": context,
+        "num_predict": 8,
+        "num_thread": threads,
+        "temperature": 0,
+    },
+}
+request = urllib.request.Request(
+    "http://127.0.0.1:11434/api/generate",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urllib.request.urlopen(request, timeout=150) as response:
+    result = json.loads(response.read().decode("utf-8"))
+print(result.get("response", ""))
+PY
+then
   cat /tmp/qwen-warmup.log >&2 || true
   cat /tmp/ollama-runtime.log >&2 || true
   echo "Bundled Qwen model failed or timed out during startup inference; refusing to report readiness." >&2
