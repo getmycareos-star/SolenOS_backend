@@ -12,7 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -485,6 +485,47 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
+def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
+    from datetime import datetime, timezone
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="private-lcr-context",
+            person_id=person_id,
+            event_type="care_note",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="PRIVATE LCR detail must not enter Community",
+            description="Private care detail that Community Qwen must not receive.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        captured = {}
+
+        def capture_qwen(messages, **kwargs):
+            captured["messages"] = messages
+            return "I found no matching published peer experiences."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "community", "text": "bedtime routine", "appointment_id": "private-appointment"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = "\n".join(message["content"] for message in captured["messages"])
+        assert "PRIVATE LCR detail must not enter Community" not in prompt
+        assert "Private care detail that Community Qwen must not receive" not in prompt
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
@@ -492,7 +533,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
 
         calls = []
         monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
-        def generated_reply(base, model, messages):
+        def generated_reply(base, model, messages, options=None):
             calls.append(messages)
             return "Hi there. I'm here if you need help."
         monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
@@ -504,7 +545,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         )
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
-        assert len(calls) == 2, "A greeting must use Qwen generation and a Qwen language-quality pass"
+        assert len(calls) == 1, "A greeting must be generated dynamically by Qwen without a canned second-pass response"
         events = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert events.status_code == 200
         assert events.json() == []
@@ -613,3 +654,188 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         assert downloaded.content == docx_bytes
     finally:
         teardown()
+
+
+
+def test_companion_rejects_unrequested_saba_in_any_reply_without_saving(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+        monkeypatch.setattr(
+            collaboration,
+            "_ollama_chat",
+            lambda base, model, messages, options=None: "Saba, saba. I can help organize the appointment details.",
+        )
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Help me prepare questions for the appointment."},
+        )
+        assert response.status_code == 503, response.text
+        assert "clear" in response.json()["detail"].lower()
+
+        db = TestingSessionLocal()
+        assert db.query(ConversationMessage).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+def test_read_only_qwen_assist_rejects_unrequested_saba_without_lcr_write(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "Saba is the key thing to remember. Saba, saba.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+        before_ids = {row["id"] for row in before.json()}
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "appointment", "text": "Help organize my appointment questions."},
+        )
+        assert response.status_code == 503, response.text
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert {row["id"] for row in after.json()} == before_ids
+    finally:
+        teardown()
+
+
+
+def test_qwen_status_is_public_health_and_assist_is_session_scoped(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+            "available": True,
+            "model": "qwen2.5:1.5b",
+            "provider": "local_ollama",
+            "inference_api": "ollama_native_http",
+            "hosted_inference_api": False,
+            "runtime": "bundled_railway_sidecar",
+        })
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: "I can help organize the available appointment details and identify unanswered questions.",
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        db = TestingSessionLocal()
+        persons_before = db.query(Person).count()
+        caregivers_before = db.query(Caregiver).count()
+        db.close()
+
+        # Runtime health is infrastructure-only and must not mint a synthetic care record.
+        status = client.get("/api/v1/assistant/status")
+        assert status.status_code == 200, status.text
+        assert status.json()["provider"] == "local_ollama"
+        assert status.json()["hosted_inference_api"] is False
+
+        db = TestingSessionLocal()
+        assert db.query(Person).count() == persons_before
+        assert db.query(Caregiver).count() == caregivers_before
+        db.close()
+
+        assist = client.post("/api/v1/assistant/assist", headers=headers, json={
+            "workflow": "appointment",
+            "text": "Help organize the appointment details and questions.",
+        })
+        assert assist.status_code == 200, assist.text
+        assert assist.json()["written_to_lcr"] is False
+        assert assist.json()["authority"] == "solenos_care_record_and_caregiver"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+
+def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fallback(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        replies = iter([
+            "Saba, saba. I can help organize the recorded handoff information and identify what remains unknown.",
+            "I can organize the recorded handoff details and flag missing information without inventing a handoff.",
+        ])
+        calls = []
+        def qwen_chat(messages, **kwargs):
+            calls.append(messages)
+            return next(replies)
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_chat)
+        headers = {"Authorization": f"Bearer {token}"}
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "handoff", "text": "Help me organize the handoff."},
+        )
+        assert response.status_code == 200, response.text
+        assert len(calls) == 2
+        assert response.json()["reply"] == "I can organize the recorded handoff details and flag missing information without inventing a handoff."
+        assert response.json()["ai_generated"] is True
+        assert response.json()["written_to_lcr"] is False
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
+        db.close()
+    finally:
+        teardown()
+
+
+
+def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
+    import json
+    from app.services import qwen_gateway
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": "A real generated reply."}}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", fake_urlopen)
+
+    reply = qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "hi"}],
+        options={"temperature": 0},
+    )
+
+    assert reply == "A real generated reply."
+    assert captured["url"] == "http://ollama:11434/api/chat"
+    assert captured["payload"]["model"] == "qwen2.5:1.5b"
+    assert captured["payload"]["keep_alive"] == "30m"
+    assert captured["payload"]["options"]["num_ctx"] == 1536
+    assert captured["payload"]["options"]["num_predict"] == 96
+    assert captured["payload"]["options"]["temperature"] == 0

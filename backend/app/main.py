@@ -66,6 +66,9 @@ app.include_router(care_delta_router, prefix="/api/v1")
 # person. The anonymous bootstrap is the only way to obtain a new capability;
 # caller-supplied person/caregiver IDs are never accepted as credentials.
 PUBLIC_V1_ENDPOINTS = {
+    # Infrastructure-only status exposes no care data and permits health checks
+    # without creating a synthetic caregiver/person record.
+    ("/api/v1/assistant/status", "GET"),
     ("/api/v1/time/now", "GET"),
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
@@ -153,7 +156,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
-        if path.startswith("/api/v1/community") or path == "/api/v1/upload":
+        if (
+            path.startswith("/api/v1/community")
+            or path == "/api/v1/upload"
+            or path.startswith("/api/v1/assistant/")
+        ):
+            # These operations use the bearer session as their record scope.
+            # Assistant requests intentionally omit client-selected person IDs;
+            # the session remains the authority for any loaded care context.
             target_person_id = scoped_person_id
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")

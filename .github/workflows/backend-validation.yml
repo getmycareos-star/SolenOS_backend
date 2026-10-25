@@ -59,17 +59,14 @@ jobs:
           done
           test "$ready" = "1"
 
-      - name: Verify deployed Railway-local Qwen model inventory
+      - name: Verify deployed Railway-local Qwen model inventory without creating care records
         timeout-minutes: 12
         shell: bash
         run: |
           base='https://solenosbackend-production.up.railway.app'
-          session=$(curl --silent --show-error --fail --max-time 30 -X POST "${base}/api/v1/sessions/anonymous" -H 'Content-Type: application/json' -d '{"name":"CI smoke recipient","caregiver_name":"CI smoke caregiver"}')
-          token=$(printf '%s' "$session" | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')
-          test -n "$token"
           available=0
           for attempt in $(seq 1 36); do
-            status=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 "${base}/api/v1/assistant/status" -H "Authorization: Bearer ${token}" || true)
+            status=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 "${base}/api/v1/assistant/status" || true)
             if [ "$status" = "200" ] && python - <<'PY'
           import json
           with open("/tmp/qwen-status.json", encoding="utf-8") as stream:
