@@ -774,12 +774,48 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_messages,
             {"temperature": 0, "num_predict": 32} if greeting_only else None,
         )
-        # Apply the language-quality gate to every model-generated reply, not
-        # greetings alone. A failed guard must not persist a confusing answer.
+        # Apply a Qwen-generated language repair before failing closed. No canned
+        # greeting or acknowledgement is ever substituted by application code.
+        source_context = payload.text + "\\n" + "\\n".join(context_lines)
+        needs_language_repair = (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
+        )
+        if needs_language_repair:
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
+                            "For a greeting, use 1–8 words, mirror the greeting naturally, and do not ask a question or introduce care topics. "
+                            "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
+                            "Do not add facts or claim that anything was saved. Return only the revised reply."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "user_message": payload.text.strip(),
+                                "authorized_context": context_lines,
+                                "draft_reply": reply,
+                                "greeting_only": greeting_only,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                {"temperature": 0, "num_predict": 32 if greeting_only else 96},
+            )
         if (
             _companion_reply_needs_revision(reply)
-            or _contains_unrequested_saba(reply, payload.text + "\n" + "\n".join(context_lines))
-            or (_is_casual_greeting(payload.text) and _greeting_reply_needs_revision(reply))
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
