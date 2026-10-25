@@ -313,6 +313,8 @@ def enroll_mfa(request: Request, db: Session = Depends(get_db)):
     account = _account_from_bearer(request, db)
     if getattr(account, "email_verified_at", None) is None:
         raise HTTPException(status_code=403, detail="Verify your email before enabling MFA")
+    if account.mfa_enabled:
+        raise HTTPException(status_code=409, detail="MFA is already enabled; disable it before enrolling a replacement authenticator")
     secret = secrets.token_bytes(20)
     ciphertext = _seal(secret)
     db.execute(text("""INSERT INTO account_mfa_secrets (account_id, secret_ciphertext, confirmed_at, updated_at)
