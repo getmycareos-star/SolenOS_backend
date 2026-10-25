@@ -485,6 +485,47 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
+def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
+    from datetime import datetime, timezone
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="private-lcr-context",
+            person_id=person_id,
+            event_type="care_note",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="PRIVATE LCR detail must not enter Community",
+            description="Private care detail that Community Qwen must not receive.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        captured = {}
+
+        def capture_qwen(messages, **kwargs):
+            captured["messages"] = messages
+            return "I found no matching published peer experiences."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "community", "text": "bedtime routine"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = "\\n".join(message["content"] for message in captured["messages"])
+        assert "PRIVATE LCR detail must not enter Community" not in prompt
+        assert "Private care detail that Community Qwen must not receive" not in prompt
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
