@@ -18,6 +18,8 @@ Base = declarative_base()
 # Register all ORM models before local schema creation or Alembic autogeneration.
 import app.models.care  # noqa: E402, F401
 import app.models.anonymous_session  # noqa: E402, F401
+import app.models.account  # noqa: E402, F401
+import app.models.professional_account  # noqa: E402, F401
 import app.models.interaction_session  # noqa: E402, F401
 import app.models.memory  # noqa: E402, F401
 import app.models.time_location  # noqa: E402, F401
