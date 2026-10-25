@@ -1,14 +1,14 @@
 """Add email/password accounts scoped to a single care record.
 
-Revision ID: 20261025_01
-Revises: 20261024_12
+Revision ID: 20261025_02_caregiver_accounts_chat
+Revises: 20261025_01
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261025_01"
-down_revision = "20261024_12"
+revision = "20261025_02_caregiver_accounts_chat"
+down_revision = "20261025_01"
 branch_labels = None
 depends_on = None
 
