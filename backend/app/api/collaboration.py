@@ -1049,7 +1049,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             base,
             model,
             model_messages,
-            {"temperature": 0, "num_predict": 8} if greeting_only else None,
+            {"temperature": 0.2, "num_predict": 24} if greeting_only else None,
         )
         # Apply a Qwen-generated language repair before failing closed. No canned
         # greeting or acknowledgement is ever substituted by application code.
@@ -1068,11 +1068,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     {
                         "role": "system",
                         "content": (
-                            "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
-                            "For a greeting, return one declarative greeting of 1–5 words with no question mark and no follow-up question. " 
-                            "Do not ask how the user is or how you can help. Do not introduce care topics. "
-                            "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
-                            "Do not add facts or claim that anything was saved. Return only the revised reply."
+                            "You are replying to a user who sent a simple greeting. Produce one ordinary English greeting, such as a brief hello, in 1–5 words. "
+                            "Do not ask a question, offer help, mention care, or add any factual claim. "
+                            "Do not repeat the rejected wording. Return only the greeting."
                         ),
                     },
                     {
@@ -1107,10 +1105,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     {
                         "role": "system",
                         "content": (
-                            "Write a fresh, natural acknowledgement to the user's greeting. "
-                            "Use 1–4 words only. No question mark. Do not use the words how, what, can, help, or assist. "
-                            "Do not use 'saba' or any unrequested foreign word. Do not repeat any word three times. "
-                            "Do not mention care, tasks, or services. Do not reuse the draft. Return only the reply."
+                            "Respond to the user's greeting with a simple, natural English greeting of 1–5 words. "
+                            "No question, no offer, no care topic, no foreign word unless the user used it. "
+                            "Do not copy the rejected draft. Return only the greeting."
                         ),
                     },
                     {
@@ -1121,7 +1118,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         ),
                     },
                 ],
-                {"temperature": 0, "num_predict": 8},
+                {"temperature": 0.2, "num_predict": 24},
             )
 
         if (
