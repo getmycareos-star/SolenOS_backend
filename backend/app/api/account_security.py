@@ -8,6 +8,7 @@ closed rather than issuing plaintext secrets or bypassing a required factor.
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import secrets
 import smtplib
@@ -27,6 +28,7 @@ from app.models.account import CaregiverAccount
 from app.models.anonymous_session import AnonymousSession
 
 router = APIRouter(prefix="/account-security", tags=["caregiver account security"])
+logger = logging.getLogger(__name__)
 TOKEN_TTLS = {"verify_email": timedelta(hours=24), "password_reset": timedelta(minutes=30), "account_recovery": timedelta(minutes=30)}
 LOGIN_WINDOW = timedelta(minutes=15)
 LOGIN_MAX_EMAIL = 8
@@ -238,7 +240,10 @@ def request_email_verification(payload: TokenRequest, request: Request, db: Sess
     if account is not None and getattr(account, "email_verified_at", None) is None:
         raw = _issue_token(db, account, "verify_email", request)
         db.commit()
-        _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={raw}\n\nIf you did not request this, ignore this message.")
+        try:
+            _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={raw}\n\nIf you did not request this, ignore this message.")
+        except HTTPException as exc:
+            logger.warning("Verification email delivery failed: %s", exc.detail)
     return {"message": "If the account exists and needs verification, instructions will be sent."}
 
 
@@ -263,7 +268,10 @@ def request_password_reset(payload: TokenRequest, request: Request, db: Session 
     if account is not None:
         raw = _issue_token(db, account, "password_reset", request)
         db.commit()
-        _send_email(email, "Reset your SolenOS password", f"Reset your password within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/reset-password?token={raw}\n\nIf you did not request this, ignore this message.")
+        try:
+            _send_email(email, "Reset your SolenOS password", f"Reset your password within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/reset-password?token={raw}\n\nIf you did not request this, ignore this message.")
+        except HTTPException as exc:
+            logger.warning("Password-reset email delivery failed: %s", exc.detail)
     return {"message": "If the account exists, password reset instructions will be sent."}
 
 
@@ -291,7 +299,10 @@ def request_account_recovery(payload: TokenRequest, request: Request, db: Sessio
     if account is not None:
         raw = _issue_token(db, account, "account_recovery", request)
         db.commit()
-        _send_email(email, "Recover your SolenOS account", f"Recover your account within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/recover-account?token={raw}\n\nIf you did not request this, ignore this message.")
+        try:
+            _send_email(email, "Recover your SolenOS account", f"Recover your account within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/recover-account?token={raw}\n\nIf you did not request this, ignore this message.")
+        except HTTPException as exc:
+            logger.warning("Account-recovery email delivery failed: %s", exc.detail)
     return {"message": "If the account exists, recovery instructions will be sent."}
 
 
