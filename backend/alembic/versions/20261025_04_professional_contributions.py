@@ -29,6 +29,8 @@ def upgrade():
 
 def downgrade():
     bind = op.get_bind()
+    if bind.execute(sa.text("SELECT 1 FROM community_posts WHERE professional_id IS NOT NULL LIMIT 1")).first():
+        raise RuntimeError("Cannot downgrade while professional contributions exist; export or explicitly remove them first.")
     columns = {c["name"] for c in inspect(bind).get_columns("community_posts")}
     indexes = {i["name"] for i in inspect(bind).get_indexes("community_posts")}
     if "ix_community_posts_professional_id" in indexes:
