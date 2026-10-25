@@ -836,7 +836,7 @@ def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
     assert captured["url"] == "http://ollama:11434/api/chat"
     assert captured["payload"]["model"] == "qwen2.5:1.5b"
     assert captured["payload"]["keep_alive"] == "30m"
-    assert captured["payload"]["options"]["num_ctx"] == 1536
+    assert captured["payload"]["options"]["num_ctx"] == 1024
     assert captured["payload"]["options"]["num_predict"] == 96
     assert captured["payload"]["options"]["temperature"] == 0
 
