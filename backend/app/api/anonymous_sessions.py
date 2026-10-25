@@ -121,10 +121,18 @@ def login_account(payload: AccountLogin, db: Session = Depends(get_db)):
 @router.get("/me")
 def current_session(request: Request, db: Session = Depends(get_db)):
     """Identify whether the current scoped bearer capability belongs to an account."""
-    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not caregiver_id:
+    scheme, _, raw_token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid session is required")
-    account = db.query(CaregiverAccount).filter(CaregiverAccount.caregiver_id == caregiver_id).first()
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="A valid session is required")
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.caregiver_id == session.caregiver_id).first()
     if account is None:
         return {"authenticated": False, "account": None, "session_type": "anonymous"}
     return {"authenticated": True, "account": {"id": account.id, "email": account.email}, "session_type": "account"}
