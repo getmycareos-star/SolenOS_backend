@@ -1124,10 +1124,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 {"temperature": 0.2, "num_predict": 24},
             )
 
+        # Greeting-specific style checks trigger model repair, but must not turn
+        # an otherwise safe, concise real-model reply into a hard 503 merely because
+        # the small model asks a follow-up question. Keep the substantive safety and
+        # disclosure guards strict; never substitute a canned application response.
         if (
             _companion_reply_needs_revision(reply)
             or _contains_unrequested_saba(reply, source_context)
-            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
