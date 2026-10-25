@@ -35,10 +35,18 @@ def _verify_password(password: str, encoded: str) -> bool:
         return False
 
 
-def _issue_sessions(db: Session, account: AuthAccount, person: Person, caregiver: Caregiver):
+def _issue_sessions(
+    db: Session,
+    account: AuthAccount,
+    person: Person,
+    caregiver: Caregiver,
+    *,
+    existing_care_session: AnonymousSession | None = None,
+    existing_care_token: str | None = None,
+):
     now = datetime.now(timezone.utc)
     account_token = secrets.token_urlsafe(32)
-    care_token = secrets.token_urlsafe(32)
+    care_token = existing_care_token or secrets.token_urlsafe(32)
     account_expires = now + ACCOUNT_SESSION_TTL
     care_expires = account_expires
     account_session = AuthSession(
@@ -46,14 +54,22 @@ def _issue_sessions(db: Session, account: AuthAccount, person: Person, caregiver
         token_digest=hashlib.sha256(account_token.encode("utf-8")).hexdigest(),
         expires_at=account_expires,
     )
-    care_session = AnonymousSession(
-        person_id=person.id,
-        caregiver_id=caregiver.id,
-        account_id=account.id,
-        token_hash=hashlib.sha256(care_token.encode("utf-8")).hexdigest(),
-        expires_at=care_expires,
-    )
-    db.add_all([account_session, care_session])
+    if existing_care_session is not None:
+        # Preserve the exact anonymous record and bearer token the caregiver is
+        # already using; account creation must not fork or abandon that record.
+        existing_care_session.account_id = account.id
+        existing_care_session.expires_at = care_expires
+        care_session = existing_care_session
+    else:
+        care_session = AnonymousSession(
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            account_id=account.id,
+            token_hash=hashlib.sha256(care_token.encode("utf-8")).hexdigest(),
+            expires_at=care_expires,
+        )
+        db.add(care_session)
+    db.add(account_session)
     db.commit()
     return {
         "account": {"id": account.id, "email": account.email, "display_name": account.display_name},
@@ -94,12 +110,36 @@ def _resolve_account(db: Session, authorization: str | None) -> tuple[AuthAccoun
 def signup(payload: AccountSignupInput, db: Session = Depends(get_db)):
     if db.query(AuthAccount).filter(AuthAccount.email == payload.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
-    person = Person(name=payload.care_recipient_name)
-    db.add(person)
-    db.flush()
-    caregiver = Caregiver(name=payload.display_name, email=None, relationship="Family", person_id=person.id)
-    db.add(caregiver)
-    db.flush()
+
+    existing_care_session = None
+    existing_care_token = None
+    if payload.existing_care_session_token:
+        existing_care_token = payload.existing_care_session_token.strip()
+        token_digest = hashlib.sha256(existing_care_token.encode("utf-8")).hexdigest()
+        existing_care_session = db.query(AnonymousSession).filter(
+            AnonymousSession.token_hash == token_digest,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        if existing_care_session is None:
+            raise HTTPException(status_code=401, detail="The existing care session is invalid or expired; no new record was created")
+        if existing_care_session.account_id:
+            raise HTTPException(status_code=409, detail="This care record is already linked to an account; sign in instead")
+        person = db.query(Person).filter(Person.id == existing_care_session.person_id).first()
+        caregiver = db.query(Caregiver).filter(
+            Caregiver.id == existing_care_session.caregiver_id,
+            Caregiver.person_id == existing_care_session.person_id,
+        ).first()
+        if person is None or caregiver is None:
+            raise HTTPException(status_code=409, detail="The existing care record is unavailable; no new record was created")
+    else:
+        person = Person(name=payload.care_recipient_name)
+        db.add(person)
+        db.flush()
+        caregiver = Caregiver(name=payload.display_name, email=None, relationship="Family", person_id=person.id)
+        db.add(caregiver)
+        db.flush()
+
     account = AuthAccount(
         email=payload.email,
         password_hash=_hash_password(payload.password),
@@ -110,7 +150,14 @@ def signup(payload: AccountSignupInput, db: Session = Depends(get_db)):
     db.add(account)
     try:
         db.flush()
-        result = _issue_sessions(db, account, person, caregiver)
+        result = _issue_sessions(
+            db,
+            account,
+            person,
+            caregiver,
+            existing_care_session=existing_care_session,
+            existing_care_token=existing_care_token,
+        )
         return result
     except IntegrityError:
         db.rollback()
