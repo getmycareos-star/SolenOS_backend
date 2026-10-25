@@ -70,3 +70,21 @@ class ShareIntake(Base):
     payload_json = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class QwenReviewCandidate(Base):
+    """Non-authoritative Qwen suggestion requiring explicit caregiver review."""
+    __tablename__ = "qwen_review_candidates"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_event_id = Column(String, ForeignKey("care_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="SET NULL"), nullable=True, index=True)
+    subject = Column(String(120), nullable=False)
+    observation = Column(Text, nullable=False)
+    source_quote = Column(Text, nullable=False)
+    status = Column(String(24), nullable=False, default="pending_review", index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    review_note = Column(Text, nullable=True)
