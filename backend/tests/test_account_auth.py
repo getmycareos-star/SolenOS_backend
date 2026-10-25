@@ -37,6 +37,10 @@ def setup_function():
     sent_messages.clear()
     os.environ["ACCOUNT_SECURITY_KEY"] = "test-key-that-is-at-least-32-bytes-long"
     os.environ["APP_PUBLIC_URL"] = "https://solenos.test"
+    os.environ["SMTP_HOST"] = "smtp.test.invalid"
+    os.environ["SMTP_USERNAME"] = "test-user"
+    os.environ["SMTP_PASSWORD"] = "test-password"
+    os.environ["SMTP_FROM_EMAIL"] = "no-reply@solenos.test"
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_security_tokens (
