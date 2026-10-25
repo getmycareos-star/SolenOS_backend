@@ -161,7 +161,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
-        if path.startswith("/api/v1/accounts"):
+        if path.startswith("/api/v1/accounts") or path == "/api/v1/sessions/revoke":
             target_person_id = scoped_person_id
         if (
             path.startswith("/api/v1/community")
