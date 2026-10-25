@@ -61,34 +61,18 @@ def _security_key() -> bytes:
 
 
 def _seal(value: bytes) -> str:
-    # Encrypt-then-MAC using HMAC-derived stream blocks; authenticated and stdlib-only.
-    key = _security_key()
-    nonce = secrets.token_bytes(16)
-    stream = b""
-    counter = 0
-    while len(stream) < len(value):
-        stream += hmac.new(key, b"stream" + nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
-        counter += 1
-    cipher = bytes(a ^ b for a, b in zip(value, stream))
-    tag = hmac.new(key, b"tag" + nonce + cipher, hashlib.sha256).digest()
-    return base64.urlsafe_b64encode(nonce + tag + cipher).decode()
+    from cryptography.fernet import Fernet
+    key = base64.urlsafe_b64encode(_security_key())
+    return Fernet(key).encrypt(value).decode()
 
 
 def _unseal(value: str) -> bytes:
-    key = _security_key()
-    raw = base64.urlsafe_b64decode(value.encode())
-    if len(raw) < 48:
-        raise ValueError("invalid encrypted secret")
-    nonce, tag, cipher = raw[:16], raw[16:48], raw[48:]
-    expected = hmac.new(key, b"tag" + nonce + cipher, hashlib.sha256).digest()
-    if not hmac.compare_digest(tag, expected):
-        raise ValueError("invalid encrypted secret")
-    stream = b""
-    counter = 0
-    while len(stream) < len(cipher):
-        stream += hmac.new(key, b"stream" + nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
-        counter += 1
-    return bytes(a ^ b for a, b in zip(cipher, stream))
+    from cryptography.fernet import Fernet, InvalidToken
+    key = base64.urlsafe_b64encode(_security_key())
+    try:
+        return Fernet(key).decrypt(value.encode())
+    except InvalidToken as exc:
+        raise ValueError("invalid encrypted secret") from exc
 
 
 def _totp(secret: bytes, at: int | None = None) -> str:
