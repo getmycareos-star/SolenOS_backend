@@ -488,8 +488,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
 
     # When authoritative state is explicitly missing, reject confident status claims.
     missing_state = re.search(
-        r"\b(?:no|not|never|without)\b.{0,70}\b"
-        r"(?:current\s+)?(?:record\s+|service\s+|account\s+|setting\s+|sync\s+|reminder\s+|delivery\s+|verification\s+)?"
+        r"\b(?:no|not|never|without)\b.{0,100}\b"
         r"(?:state|status|confirmation|details|information|evidence)\b.{0,50}\b"
         r"(?:supplied|provided|available|known|confirmed)\b",
         source,
