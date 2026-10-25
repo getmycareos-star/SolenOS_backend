@@ -986,8 +986,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if _is_casual_greeting(payload.text):
             system_prompt += (
                 "\nThis message is only a greeting or brief pleasantry. Generate one natural, declarative "
-                "greeting of 1–5 words. Do not use a question mark. Do not ask how the user is, how you "
-                "can help, or any follow-up question. Do not introduce care topics. Return only the greeting."
+                "greeting of 1–4 words. For the input 'hi', a natural answer is 'Hi there!' or 'Hello!'. "
+                "Do not use a question mark. Do not ask how the user is, how you can help, or any follow-up "
+                "question. Do not introduce care topics or add an offer of help. Return only the greeting."
             )
         prior_messages = (
             db.query(ConversationMessage)
