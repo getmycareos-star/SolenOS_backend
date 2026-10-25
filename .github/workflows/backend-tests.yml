@@ -276,7 +276,7 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
 
           # Exercise every supported read-only workflow against the actual model.
-          for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+          for workflow in daily_capture add_record document living_care_record care_history_search care_situation_change delta_engine evidence_provenance uncertainty_contradictions returning_caregiver appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day reminders_notifications care_coordination community companion caregiver_feedback sharing_export roles_access account_recovery settings_security record_lifecycle offline_sync ai_reliability audit_review; do
             echo "QWEN_E2E: workflow=$workflow"
             workflow_response=$(curl --fail --silent --show-error \
               -H "$auth_header" -H "Content-Type: application/json" \
