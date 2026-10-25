@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -5,23 +6,38 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
 from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead
 
 router = APIRouter(tags=["care reminders"])
 
 
-def _session_scope(request: Request) -> tuple[str, str]:
+def _session_scope(request: Request, db: Session) -> tuple[str, str]:
+    # FastAPI's request.state may not receive mutations made by the outer
+    # function middleware. Resolve the bearer token again at the route boundary.
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
-        raise HTTPException(status_code=401, detail="A valid SolenOS care session is required")
-    return str(person_id), str(caregiver_id)
+    if person_id and caregiver_id:
+        return str(person_id), str(caregiver_id)
+
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
+    token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.token_hash == token_hash,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    return str(session.person_id), str(session.caregiver_id)
 
 
 @router.post("/reminders", response_model=CareReminderRead, status_code=201)
 def create_reminder(payload: CareReminderCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _session_scope(request)
+    person_id, caregiver_id = _session_scope(request, db)
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if payload.due_at.tzinfo is None or payload.due_at.utcoffset() is None:
@@ -51,7 +67,7 @@ def list_reminders(
     status: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    scoped_person_id, _ = _session_scope(request)
+    scoped_person_id, _ = _session_scope(request, db)
     if person_id != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if status and status not in {"open", "completed", "cancelled"}:
@@ -69,7 +85,7 @@ def complete_reminder(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _session_scope(request)
+    person_id, caregiver_id = _session_scope(request, db)
     reminder = (
         db.query(CareReminder)
         .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
@@ -93,7 +109,7 @@ def complete_reminder(
 
 @router.patch("/reminders/{reminder_id}/cancel", response_model=CareReminderRead)
 def cancel_reminder(reminder_id: str, request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _session_scope(request)
+    person_id, caregiver_id = _session_scope(request, db)
     reminder = (
         db.query(CareReminder)
         .filter(CareReminder.id == reminder_id, CareReminder.person_id == person_id)
