@@ -478,6 +478,32 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             terms = re.findall(r"[a-z]+", claim)
             if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
                 return True
+    # Never ask caregivers to disclose credentials or one-time verification secrets.
+    if re.search(
+        r"\b(?:provide|share|send|tell me|give me|enter)\b.{0,70}\b"
+        r"(?:password|verification code|authentication code|one[- ]time code|otp|recovery code|security code)\b",
+        text,
+    ):
+        return True
+
+    # When authoritative state is explicitly missing, reject confident status claims.
+    missing_state = re.search(
+        r"\b(?:no|not|never|without)\b.{0,70}\b"
+        r"(?:current\s+)?(?:record\s+|service\s+|account\s+|setting\s+|sync\s+|reminder\s+|delivery\s+|verification\s+)?"
+        r"(?:state|status|confirmation|details|information|evidence)\b.{0,50}\b"
+        r"(?:supplied|provided|available|known|confirmed)\b",
+        source,
+    )
+    unsupported_state_claims = (
+        r"\b(?:the\s+)?(?:qwen|system|service|backend|account|record|setting|reminder|note|data|sync|verification|appointment)\s+"
+        r"(?:is|was|has been|remains|is currently)\s+(?:currently\s+)?"
+        r"(?:unavailable|available|saved|synced|verified|retained|deleted|archived|accepted|completed|enabled|disabled|sent|delivered|confirmed)\b",
+        r"\b(?:yes|no),?\s+(?:an?\s+)?(?:archived|deleted|pinned|restored|exported|shared|synced|saved|verified|accepted|completed)\s+"
+        r"(?:note|record|data|change|setting|reminder)\s+(?:is|was|has been|remains|still)\s+"
+        r"(?:retained|available|saved|synced|verified|accepted|completed|deleted|archived)\b",
+    )
+    if missing_state and any(re.search(pattern, text) for pattern in unsupported_state_claims):
+        return True
     return False
 
 
@@ -705,6 +731,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
+        "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
         "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
@@ -734,7 +761,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "Preserve only claims directly supported by the exact caregiver text or authorized context. "
                         "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
                         "unreported clinical outcome into a fact. Do not infer diagnosis, treatment response, test results, "
-                        "medication status, symptom change, appointments, tasks, owners or deadlines. If a detail is absent, "
+                        "medication status, symptom change, appointments, tasks, owners or deadlines. "
+                        "Never ask for a password, verification code, one-time code or recovery secret. "
+                        "If a detail is absent, "
                         "say it was not supplied or ask for clarification. Remove internal jargon and repetition. "
                         "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
                         "Return only the revised response, not an explanation."
