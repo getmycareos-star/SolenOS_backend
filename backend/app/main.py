@@ -85,7 +85,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
-    if path == "/api/v1/sessions/anonymous" and method == "POST":
+    if path in {"/api/v1/sessions/anonymous", "/api/v1/sessions/register", "/api/v1/sessions/login"} and method == "POST":
         return await call_next(request)
     # The share receiver stores a short-lived, random one-time capability, not
     # a care record. Only these two routes bypass caregiver bearer auth.
@@ -134,7 +134,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
         request.state.scoped_caregiver_id = scoped_caregiver_id
-        if path.endswith("/sessions/refresh") and method == "POST":
+        if path == "/api/v1/sessions/me" and method == "GET":
+            return await call_next(request)
+        if path.endswith(("/sessions/refresh", "/sessions/revoke")) and method == "POST":
             return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
