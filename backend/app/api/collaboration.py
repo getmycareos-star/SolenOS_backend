@@ -76,7 +76,7 @@ class QwenAssistRequest(BaseModel):
         "care_situation_change", "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff", "professional_summary",
         "open_loops", "two_week_review", "decision_outcome", "medication_day",
-        "reminders_notifications", "care_coordination", "community", "companion",
+        "reminders_notifications", "care_coordination", "companion",
         "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
         "settings_security", "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
     ]
@@ -328,229 +328,10 @@ def remove_reaction(post_id: str, request: Request, db: Session = Depends(get_db
     return {"ok": True, "removed": reaction is not None}
 
 
-def _literal_matches(db: Session, observation: str) -> list[dict]:
-    terms = {term.lower() for term in re.findall(r"[a-zA-Z0-9']{3,}", observation)}
-    posts = (db.query(CommunityPost)
-        .filter(CommunityPost.visibility == "public", CommunityPost.moderation_status == "published")
-        .order_by(CommunityPost.created_at.desc()).limit(200).all())
-    scored = []
-    for post in posts:
-        words = {term.lower() for term in re.findall(r"[a-zA-Z0-9']{3,}", post.content + " " + (post.care_stage or "") + " " + (post.tags_json or ""))}
-        overlap = terms & words
-        if overlap:
-            scored.append((len(overlap), post, sorted(overlap)))
-    scored.sort(key=lambda row: row[0], reverse=True)
-    return [{
-        "post_id": post.id, "author_label": "Anonymous caregiver", "author_type": "peer_caregiver",
-        "content": post.content, "tags": json.loads(post.tags_json or "[]"),
-        "matched_terms": terms_hit, "match_type": "literal_keyword_overlap_not_clinical_advice",
-    } for _, post, terms_hit in scored[:4]]
-
-
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
-    _scope(request, db)
-    observation = str(payload.get("observation", "")).strip()
-    if not observation:
-        raise HTTPException(status_code=422, detail="observation is required")
-    matches = _literal_matches(db, observation)
-    summary = None
-    provider_status = "unavailable"
-    ai_generated = False
-    if matches:
-        try:
-            summary = await asyncio.to_thread(
-                qwen_chat,
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
-                            "published peer experiences. They are personal reports, not verified facts, clinical "
-                            "evidence, or advice. Do not infer diagnosis or cause, recommend treatment, or invent "
-                            "themes not present in the posts. State briefly that experiences differ. Use plain, "
-                            "accessible English, no unexplained foreign words, and at most three short sentences."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps({
-                            "caregiver_observation": observation,
-                            "published_peer_posts": [
-                                {"post_id": item["post_id"], "content": item["content"]}
-                                for item in matches
-                            ],
-                        }, ensure_ascii=False),
-                    },
-                ],
-            )
-            if _companion_reply_needs_revision(summary) or _contains_unrequested_saba(
-                summary,
-                observation + "\n" + "\n".join(item["content"] for item in matches),
-            ):
-                summary = None
-                provider_status = "invalid_response"
-            else:
-                provider_status = "available"
-                ai_generated = True
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
-            provider_status = "unavailable"
-    return {
-        "summary": summary,
-        "matches": matches,
-        "post_ids": [m["post_id"] for m in matches],
-        "provider_status": provider_status,
-        "ai_generated": ai_generated,
-        "notice": (
-            "Qwen summarized published peer experiences; these are not authoritative care facts."
-            if ai_generated else
-            "These are literal matches from published caregiver posts. No AI summary was generated."
-        ),
-        "matching_method": "literal_keyword_overlap_not_clinical_advice",
-    }
-
-
-def _ollama_url() -> tuple[str, str]:
-    base, model, _ = get_ollama_config()
-    return base, model
-
-
-def _ollama_chat(
-    base: str, model: str, messages: list[dict], options: dict | None = None
-) -> str:
-    # All SolenOS workflows use the same local/private Qwen gateway.
-    return qwen_chat(messages, options=options)
-
-
-def _is_casual_greeting(text: str) -> bool:
-    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
-    normalized = " ".join(normalized.split())
-    return normalized in {
-        "hi", "hello", "hey", "hiya", "howdy",
-        "how are you", "how are you doing", "how are you today",
-        "how's it going", "hows it going", "what's up", "whats up",
-        "good morning", "good afternoon", "good evening", "good night",
-        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
-    }
-
-
-def _greeting_reply_needs_revision(reply: str) -> bool:
-    """Greeting-only replies should mirror the user, not start a new interview."""
-    words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
-    normalized = (reply or "").casefold()
-    repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
-    introduces_automatic_question = "?" in (reply or "")
-    common_interview_opening = bool(re.search(
-        r"\b(?:how can i help|what can i help|what can i do for you|is there anything i can do)\b",
-        normalized,
-    ))
-    return (
-        not words
-        or len(words) > 12
-        or repeats_automatic_question
-        or introduces_automatic_question
-        or common_interview_opening
-    )
-
-
-def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
-    """Reject the observed unexplained token only when it is not in supplied source."""
-    return bool(
-        re.search(r"(?i)\bsaba\b", reply or "")
-        and not re.search(r"(?i)\bsaba\b", source_text or "")
-    )
-
-
-def _companion_reply_needs_revision(text: str) -> bool:
-    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
-    if not words or len(words) > 55:
-        return True
-    if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
-        return True
-    normalized = " ".join(words)
-    internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
-    return any(term in normalized for term in internal_terms)
-
-
-@router.post("/share-intake", status_code=201)
-def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
-    title = (payload.title or "").strip()
-    text = (payload.text or "").strip()
-    shared_url = (payload.url or "").strip()
-    if not title and not text and not shared_url and not payload.files:
-        raise HTTPException(status_code=422, detail="Shared content is empty")
-
-    allowed_mime_types = {
-        "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif",
-        "image/tiff", "image/bmp", "image/avif", "application/pdf", "text/plain", "text/csv",
-        "text/markdown", "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
-        "application/octet-stream",
-    }
-    files = []
-    total_bytes = 0
-    for item in payload.files:
-        mime_type = item.mimeType.lower().strip()
-        filename = os.path.basename(item.name).replace("\\r", "").replace("\\n", "").replace("\\x00", "")[:180]
-        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if mime_type not in allowed_mime_types:
-            raise HTTPException(status_code=415, detail=f"Unsupported shared file type: {mime_type}")
-        if mime_type == "application/octet-stream" and extension not in {"doc", "docx", "rtf", "eml", "msg"}:
-            raise HTTPException(status_code=415, detail="The shared file type could not be verified")
-        try:
-            raw = base64.b64decode(item.base64, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
-            raise HTTPException(status_code=422, detail="Shared file data is invalid") from exc
-        if not raw:
-            continue
-        total_bytes += len(raw)
-        if total_bytes > 5 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Shared files exceed the 5 MB total limit")
-        files.append({
-            "name": filename or "shared-file",
-            "mimeType": mime_type,
-            "base64": base64.b64encode(raw).decode("ascii"),
-        })
-
-    share_id = secrets.token_urlsafe(32)
-    row = ShareIntake(
-        id=share_id,
-        payload_json=json.dumps({"title": title, "text": text, "url": shared_url, "files": files}),
-        expires_at=now + timedelta(minutes=15),
-    )
-    db.add(row)
-    db.commit()
-    return {"id": share_id, "expires_at": row.expires_at.isoformat()}
-
-
-@router.get("/share-intake/{share_id}")
-def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
-    row = (
-        db.query(ShareIntake)
-        .filter(ShareIntake.id == share_id, ShareIntake.expires_at > now)
-        .with_for_update()
-        .first()
-    )
-    if row is None:
-        db.commit()
-        raise HTTPException(status_code=404, detail="Shared intake was not found or has expired")
-    try:
-        payload = json.loads(row.payload_json)
-    except (TypeError, ValueError) as exc:
-        db.delete(row)
-        db.commit()
-        raise HTTPException(status_code=500, detail="Shared intake could not be decoded") from exc
-    db.delete(row)
-    db.commit()
-    return {"ok": True, "id": share_id, **payload}
+async def community_experience_disabled():
+    raise HTTPException(status_code=410, detail="Community Qwen assistance is disabled.")
 
 
 @router.get("/assistant/status")
@@ -860,13 +641,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"correction={(outcome.correction_text or '')[:300]}"
             )
 
-    if payload.workflow == "community":
-        for match in _literal_matches(db, payload.text)[:3]:
-            context_lines.append(
-                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
-                f"{match['content'][:700]}"
-            )
-
     guidance = {
         "daily_capture": "Organize only what the caregiver reports. Preserve their meaning and separate reported facts from interpretation. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed record entry or correction. Preserve the original meaning and identify missing details. This assistance does not save or correct a record.",
@@ -888,7 +662,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
         "reminders_notifications": "Explain only persisted reminder and notification details in the supplied context. Do not create, schedule, send, or claim delivery of a reminder.",
         "care_coordination": "Prepare proposed coordination language from supplied facts. Do not assign responsibilities or claim a handoff was accepted or completed.",
-        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
         "companion": "Answer the caregiver's immediate question conversationally using only authorized context. Be concise, admit uncertainty and do not claim to save anything.",
         "caregiver_feedback": "Use the caregiver's correction to revise the current interpretation, acknowledge uncertainty and ask for clarification when needed. Do not claim model learning or silently alter history.",
         "sharing_export": "Help draft a source-aware summary for the intended recipient. Do not share, export or claim that content was sent.",
