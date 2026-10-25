@@ -377,8 +377,9 @@ def verify_mfa_login(db: Session, account: CaregiverAccount, code: str | None) -
             return False
     # Recovery codes are single-use and are consumed atomically.
     hashed = _token_hash(code)
+    lock_clause = " FOR UPDATE" if db.bind is not None and db.bind.dialect.name == "postgresql" else ""
     recovery = db.execute(text("""SELECT id FROM account_mfa_recovery_codes
-        WHERE account_id=:id AND code_hash=:hash AND used_at IS NULL FOR UPDATE"""), {"id": account.id, "hash": hashed}).mappings().first()
+        WHERE account_id=:id AND code_hash=:hash AND used_at IS NULL""" + lock_clause), {"id": account.id, "hash": hashed}).mappings().first()
     if recovery:
         db.execute(text("UPDATE account_mfa_recovery_codes SET used_at=:now WHERE id=:id AND used_at IS NULL"), {"now": _now(), "id": recovery["id"]})
         return True
