@@ -266,7 +266,7 @@ jobs:
             exit 1
           fi
           greeting=$(cat /tmp/solenos-greeting.json)
-          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply; messages=d["messages"]; assert any(m["role"]=="user" and m["text"]=="hi" for m in messages); assert any(m["role"]=="assistant" and m["text"]==reply for m in messages)' "$greeting"
 
           echo "QWEN_E2E: appointment assist"
           assist=$(curl --fail --silent --show-error \
