@@ -438,6 +438,37 @@ def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
     )
 
 
+def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
+    """Reject high-impact care-status claims when the supplied source does not support them.
+
+    This is a conservative guardrail, not a general semantic-entailment proof. If
+    a claim cannot be grounded by the source wording, prefer retry/unavailable to
+    presenting a fabricated care status as fact.
+    """
+    source = (source_text or "").casefold()
+    text = (reply or "").casefold()
+    patterns = (
+        r"\bpositive response\b",
+        r"\bnegative response\b",
+        r"\b(?:effective|ineffective) treatment\b",
+        r"\bappointment\s+(?:was\s+)?(?:scheduled|confirmed|cancelled|canceled|rescheduled)\b",
+        r"\b(?:diagnosed with|diagnosis of|prescribed|recommended|ordered)\b",
+        r"\b(?:symptom|symptoms|condition)\s+(?:improved|worsened|resolved)\b",
+        r"\b(?:patient|person)\s+(?:responded|improved|worsened)\b",
+        r"\b(?:dose|medication|treatment)\s+(?:was|has been|had been)\s+(?:changed|increased|decreased|stopped|started|administered|missed)\b",
+        r"\b(?:test|scan|result)\s+(?:was|came back)\s+(?:positive|negative|normal|abnormal)\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            claim = match.group(0)
+            # All meaningful terms in these high-impact phrases must be present
+            # in source text; exact wording is intentionally required here.
+            terms = re.findall(r"[a-z]+", claim)
+            if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
+                return True
+    return False
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
@@ -648,9 +679,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
-    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
-        # Ask the same local model to repair style only; never substitute a canned
-        # phrase or relax source-grounding. A second failed response is unavailable.
+    if (
+        _companion_reply_needs_revision(reply)
+        or _contains_unrequested_saba(reply, source_context)
+        or _contains_unsupported_care_claim(reply, source_context)
+    ):
+        # Ask the same local model to repair style and source fidelity. A second
+        # unsupported high-impact claim is rejected instead of shown to a caregiver.
         reply = await asyncio.to_thread(
             qwen_chat,
             [
@@ -658,10 +693,12 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     "role": "system",
                     "content": (
                         "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
-                        "Preserve only claims supported by the authorized context and the caregiver's request. "
-                        "Remove unexplained foreign words, unrequested transliterations, internal jargon and repetition. "
-                        "Do not add facts, people, appointments, tasks, owners, deadlines, diagnoses or advice. "
-                        "SolenOS and the caregiver remain authoritative; do not claim that anything was saved. "
+                        "Preserve only claims directly supported by the exact caregiver text or authorized context. "
+                        "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
+                        "unreported clinical outcome into a fact. Do not infer diagnosis, treatment response, test results, "
+                        "medication status, symptom change, appointments, tasks, owners or deadlines. If a detail is absent, "
+                        "say it was not supplied or ask for clarification. Remove internal jargon and repetition. "
+                        "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
                         "Return only the revised response, not an explanation."
                     ),
                 },
@@ -680,8 +717,15 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             ],
             options={"temperature": 0, "num_predict": 96},
         )
-    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
-        raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
+    if (
+        _companion_reply_needs_revision(reply)
+        or _contains_unrequested_saba(reply, source_context)
+        or _contains_unsupported_care_claim(reply, source_context)
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
+        )
     return {
         "workflow": payload.workflow,
         "reply": reply,
