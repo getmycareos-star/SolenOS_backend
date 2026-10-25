@@ -6,7 +6,7 @@ Qwen is one optional, shared language-assistance layer used from the Companion a
 
 The backend is authoritative for identity, permissions, retrieved context, persistence, record lifecycle, notification status, and review attribution. The Qwen assist endpoint is read-only and returns `written_to_lcr: false`.
 
-## Workflow contract (31)
+## Workflow contract (30)
 
 | Workflow ID | Scope | Required boundary |
 |---|---|---|
@@ -30,7 +30,6 @@ The backend is authoritative for identity, permissions, retrieved context, persi
 | `medication_day` | Organize medication-day observations | No prescribing or dose-change advice |
 | `reminders_notifications` | Explain persisted reminder state | Scheduler/delivery status comes from backend |
 | `care_coordination` | Draft coordination language | No invented assignment or completion |
-| `community` | Summarize dementia peer experiences | Peer stories are not individual care facts |
 | `companion` | General conversational support | Authorized context only; no fake fallback |
 | `caregiver_feedback` | Revise current interpretation from feedback | No silent history edits or false model-learning claims |
 | `sharing_export` | Draft a recipient-specific summary | Does not share/export content |
@@ -48,14 +47,14 @@ The endpoint retrieves only the current bearer session's person/caregiver scope.
 
 ## What the contract test proves
 
-`backend/tests/test_qwen_all_workflow_contract.py` verifies that all 31 workflow identifiers are accepted by the Pydantic request schema and an unknown identifier is rejected. It does **not** prove that Qwen inference is available, that every frontend screen is connected, that each workflow retrieves all relevant context, or that the production deployment is healthy.
+`backend/tests/test_qwen_all_workflow_contract.py` verifies that all 30 enabled workflow identifiers are accepted by the Pydantic request schema and an unknown identifier is rejected. It does **not** prove that Qwen inference is available, that every frontend screen is connected, that each workflow retrieves all relevant context, or that the production deployment is healthy.
 
 ## Required verification before release
 
 1. Run the backend test suite and backend validation workflow.
 2. Confirm the frontend TypeScript/build checks pass on the workflow selector changes.
 3. With a valid anonymous bearer session, call `GET /api/v1/assistant/status` and require the backend to identify the configured local Ollama runtime as available.
-4. For each of the 31 workflow IDs, call `POST /api/v1/assistant/assist` with a real non-sensitive test request and verify `ai_generated=true`, `provider_status=available`, `written_to_lcr=false`, and `persistence=read_only_assistance`.
+4. For each of the 30 enabled workflow IDs, call `POST /api/v1/assistant/assist` with a real non-sensitive test request and verify `ai_generated=true`, `provider_status=available`, `written_to_lcr=false`, and `persistence=read_only_assistance`.
 5. Confirm invalid/expired bearer sessions are rejected and a second care record's evidence cannot be retrieved by the first session.
 6. Confirm model outage yields an explicit error; no fabricated answer appears and no care record is changed.
 7. Test candidate extraction separately: source quote is preserved, candidate status is `pending_review`, accept/reject records the actual caregiver, and neither operation silently writes an authoritative LCR fact.
@@ -64,3 +63,10 @@ The endpoint retrieves only the current bearer session's person/caregiver scope.
 ## Known release blocker
 
 The previously observed Railway deployment could not locate Alembic revision `20261024_11`, and an authenticated Companion request returned HTTP 503. These changes must not be described as live-verified until the migration chain is reconciled safely and the live inference path is retested.
+
+
+## Background execution status
+
+These 30 workflow IDs are synchronous, request-triggered assistance contracts, not 30 autonomous background jobs. Current implementation does not establish a durable Qwen job queue or scheduled worker for all workflows. Qwen must not independently create reminders, send handoffs, alter records, approve candidates, or continuously inspect care data. Any future background inference must use a durable queue, idempotency, bounded retries, status tracking, caregiver-scoped authorization, and explicit review before LCR changes. Do not claim background processing until those components and production behavior are verified.
+
+Community Qwen is disabled: the `community` workflow is not accepted, and community experience summary endpoints return HTTP 410 without invoking the model.
