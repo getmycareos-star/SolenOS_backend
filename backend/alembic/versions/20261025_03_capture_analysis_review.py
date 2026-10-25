@@ -1,13 +1,13 @@
 """Persist source-linked Daily Capture extraction candidates and review decisions.
 
-Revision ID: 20261025_03_capture_analysis_review
+Revision ID: 20261025_03_capture_review
 Revises: 20261025_02_accounts
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261025_03_capture_analysis_review"
+revision = "20261025_03_capture_review"
 down_revision = "20261025_02_accounts"
 branch_labels = None
 depends_on = None
