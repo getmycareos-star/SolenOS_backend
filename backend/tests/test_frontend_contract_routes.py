@@ -488,6 +488,75 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
+def test_qwen_open_loops_and_decision_support_use_persisted_state(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.models.reminder import CareReminder
+    from app.models.uncertainty import OpenQuestion
+    from app.models.care_continuity import CareActionOutcome
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        db.add(OpenQuestion(
+            id="unresolved-appointment-question",
+            person_id=person_id,
+            question="Ask the clinician whether the new sleep pattern needs follow-up.",
+            subject_type="care_recipient",
+            subject_id=person_id,
+            status="open",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.add(CareReminder(
+            id="persisted-open-reminder",
+            person_id=person_id,
+            created_by_caregiver_id=caregiver_id,
+            title="Bring medication list to appointment",
+            note="Use the current list; do not change doses.",
+            due_at=datetime.now(timezone.utc) + timedelta(days=1),
+            status="open",
+        ))
+        db.add(CareActionOutcome(
+            id="recorded-action-outcome",
+            person_id=person_id,
+            action_id="follow-up-call",
+            action_type="caregiver_follow_up",
+            outcome_status="completed",
+            notes="Clinic called back and asked us to bring the medication list.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        captured = {}
+        def capture_qwen(messages, **kwargs):
+            captured["prompt"] = "\\n".join(message["content"] for message in messages)
+            return "I found the saved follow-up details. Please review them with the care team."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        open_loops = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "open_loops", "text": "What follow-ups are still open?"},
+        )
+        assert open_loops.status_code == 200, open_loops.text
+        assert "Ask the clinician whether the new sleep pattern needs follow-up." in captured["prompt"]
+        assert "Bring medication list to appointment" in captured["prompt"]
+
+        decision = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "decision_outcome", "text": "Summarize the recorded follow-up outcome."},
+        )
+        assert decision.status_code == 200, decision.text
+        assert "Clinic called back and asked us to bring the medication list." in captured["prompt"]
+        assert decision.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
     from datetime import datetime, timezone
     import app.api.collaboration as collaboration
