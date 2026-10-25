@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -106,29 +107,53 @@ def qwen_chat(
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="SolenOS local Qwen timed out; no model response was generated.",
-        ) from exc
-    except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), TimeoutError):
+    result = None
+    last_error = None
+    # Ollama may briefly return 503 while its CPU runner is loading/restarting.
+    # Retry only transient transport/overload failures; never substitute text.
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code in {429, 502, 503} and attempt < 4:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+        except TimeoutError as exc:
             raise HTTPException(
                 status_code=504,
                 detail="SolenOS local Qwen timed out; no model response was generated.",
             ) from exc
+        except urllib.error.URLError as exc:
+            if isinstance(getattr(exc, "reason", None), TimeoutError):
+                raise HTTPException(
+                    status_code=504,
+                    detail="SolenOS local Qwen timed out; no model response was generated.",
+                ) from exc
+            last_error = exc
+            if attempt < 4:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+    if result is None:
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
-    except (ValueError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
+        ) from last_error
     content = result.get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(
