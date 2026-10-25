@@ -158,10 +158,17 @@ def extract_review_candidates(
                 "Return valid JSON only with exactly this shape: "
                 '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
                 '"open_questions":["string"]}. '
-                "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
-                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source. "
-                "If there are no supported observations, return an empty observations array. Ask at most three short "
-                "clarifying questions. Never treat greetings or small talk as care observations."
+                "Extract concrete events or observations explicitly stated in the source, including ordinary daily "
+                "activities, food or drink intake, sleep, mobility, mood, symptoms as reported, medication taken as reported, "
+                "appointments, and changes in routine. Do not discard an explicit observation merely because it seems mundane. "
+                "Create one candidate for each independently stated observation. The subject must be the person or entity "
+                "identified in the source; do not invent a name or assume who 'Mom' or 'she' refers to beyond the wording. "
+                "The observation must be a concise, neutral paraphrase of the stated fact. Every source_quote must be the exact "
+                "shortest phrase from the source that supports that candidate, copied verbatim including its wording. "
+                "Only return an empty observations array when the source contains no explicit care-relevant fact, such as a "
+                "greeting, thanks, or unsupported question. Do not infer diagnosis, cause, risk, intention, or medication changes. "
+                "Ask at most three short clarifying questions only if the source genuinely needs clarification. "
+                "Never turn a question, greeting, or model assumption into a recorded fact."
             ),
         },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
