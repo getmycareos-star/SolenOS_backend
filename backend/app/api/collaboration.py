@@ -651,7 +651,7 @@ async def qwen_extract_saved_event_candidates(
     db.commit()
     return {
         "event_id": event.id,
-        "qwen_extraction_status": "pending_review",
+        "qwen_extraction_status": "pending_review" if persisted else "no_candidates",
         "qwen_candidates": {
             "observations": persisted,
             "open_questions": list(dict.fromkeys(generated["open_questions"]))[:3],
