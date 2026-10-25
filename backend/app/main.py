@@ -91,23 +91,34 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     if method == "OPTIONS":
         return await call_next(request)
 
-    # Community is suspended at the API boundary, not merely hidden in the UI.
-    # Preserve the route implementation and stored records for a future re-enable.
-    path_segments = {segment for segment in path.lower().split("/") if segment}
-    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and "community" in path_segments:
+    # Community is suspended at the API boundary, before bearer-session checks.
+    # Check both ASGI scope and reconstructed URL to account for reverse-proxy root_path
+    # handling; keep route implementations and persisted data intact.
+    request_paths = {
+        str(request.scope.get("path") or "").lower().rstrip("/"),
+        str(request.url.path or "").lower().rstrip("/"),
+    }
+    community_path = any(
+        any(segment == "community" for segment in candidate.split("/") if segment)
+        for candidate in request_paths
+    )
+    community_enabled = COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED
+    if not community_enabled and community_path:
         return JSONResponse(
             status_code=404,
             content={"detail": "Community is currently unavailable"},
         )
 
-    # The general assistant endpoint supports several care workflows. Reject the
-    # Community workflow specifically, even when called directly without the UI.
-    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and path.lower().endswith("/assistant/assist") and method == "POST":
+    # Community is also a selectable assistant workflow, so reject that workflow
+    # independently while preserving all other Companion workflows.
+    if not community_enabled and method == "POST" and any(
+        candidate.endswith("/assistant/assist") for candidate in request_paths
+    ):
         try:
-            requested_workflow = (await request.json()).get("workflow")
+            payload = await request.json()
         except Exception:
-            requested_workflow = None
-        if requested_workflow == "community":
+            payload = {}
+        if isinstance(payload, dict) and str(payload.get("workflow", "")).lower() == "community":
             return JSONResponse(
                 status_code=404,
                 content={"detail": "Community is currently unavailable"},
