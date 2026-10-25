@@ -264,6 +264,8 @@ def test_password_reset_revokes_existing_sessions():
     token = re.search(r"token=([A-Za-z0-9_-]+)", message[2]).group(1)
     reset = client.post("/api/v1/account-security/password-reset/confirm", json={"token": token, "new_password": "a-different-long-password"})
     assert reset.status_code == 200, reset.text
+    replay = client.post("/api/v1/account-security/password-reset/confirm", json={"token": token, "new_password": "another-different-password"})
+    assert replay.status_code == 400
     assert client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {old_token}"}).status_code == 401
     login = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "a-different-long-password"})
     assert login.status_code == 200, login.text
@@ -286,3 +288,34 @@ def test_mfa_is_enforced_during_login_and_recovery_codes_are_single_use():
     assert login.status_code == 200, login.text
     replay = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "long-enough-password", "mfa_code": recovery_code})
     assert replay.status_code == 401
+
+
+
+def test_persistent_login_throttle_survives_new_database_sessions():
+    client = TestClient(app)
+    register(client)
+    for _ in range(8):
+        response = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "wrong-password"})
+        assert response.status_code == 401
+    # A fresh DB session/client shares the same durable attempt table.
+    db = TestSessionLocal()
+    try:
+        persisted = db.execute(text("SELECT COUNT(*) FROM account_login_attempts WHERE email_hash=:email AND succeeded=false"), {"email": account_security._email_hash("caregiver@example.com")}).scalar_one()
+        assert persisted >= 8
+    finally:
+        db.close()
+    limited = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "long-enough-password"})
+    assert limited.status_code == 429
+
+
+def test_security_request_throttle_is_persistent_and_does_not_enumerate_email():
+    client = TestClient(app)
+    register(client)
+    for _ in range(3):
+        response = client.post("/api/v1/account-security/password-reset/request", json={"email": "unknown@example.com"})
+        assert response.status_code == 202
+    limited_unknown = client.post("/api/v1/account-security/password-reset/request", json={"email": "unknown@example.com"})
+    assert limited_unknown.status_code == 429
+    # The same limit applies to existing addresses; response shape doesn't reveal account existence.
+    existing = client.post("/api/v1/account-security/password-reset/request", json={"email": "caregiver@example.com"})
+    assert existing.status_code == 202
