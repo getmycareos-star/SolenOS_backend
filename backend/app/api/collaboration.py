@@ -423,7 +423,7 @@ def _is_casual_greeting(text: str) -> bool:
 
 def _greeting_reply_needs_revision(reply: str) -> bool:
     """Greeting-only replies should mirror the user, not start a new interview."""
-    words = re.findall(r"[^\\W_]+", reply or "", flags=re.UNICODE)
+    words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     return not words or len(words) > 8 or "?" in (reply or "")
 
 
