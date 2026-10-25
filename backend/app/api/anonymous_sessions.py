@@ -170,12 +170,14 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
 @router.post("/revoke")
 def revoke_current_session(request: Request, db: Session = Depends(get_db)):
     """Revoke only the bearer session presented with this request."""
-    session_id = getattr(request.state, "anonymous_session_id", None)
-    if not session_id:
+    scheme, _, raw_token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
         raise HTTPException(status_code=401, detail="A valid session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
     session = db.query(AnonymousSession).filter(
-        AnonymousSession.id == session_id,
+        AnonymousSession.token_hash == token_hash,
         AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Session is invalid")
