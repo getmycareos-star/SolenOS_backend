@@ -995,3 +995,55 @@ def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff
         "The caregiver reported a dementia diagnosis.",
         "The caregiver reported a dementia diagnosis.",
     )
+
+
+def test_qwen_grounding_guard_rejects_invented_first_person_community_experience():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    source = (
+        "I feel exhausted because my father asks the same question several times each morning. "
+        "I would like to hear what helped other caregivers."
+    )
+    assert _contains_unsupported_care_claim(
+        "I've found that a few strategies can help. These methods have made my day more manageable.",
+        source,
+    )
+    assert not _contains_unsupported_care_claim(
+        "I feel exhausted because my father asks the same question several times each morning.",
+        source,
+    )
+
+
+def test_qwen_community_experience_is_not_fabricated_or_written_to_lcr(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        generated = []
+        fabricated = (
+            '"Facing the same daily question, I have found that a few strategies help. '
+            'These methods have made my day more manageable."'
+        )
+
+        def qwen_response(messages, **kwargs):
+            generated.append(messages)
+            return fabricated
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
+        before = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert before.status_code == 200, before.text
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "community",
+                "text": "I feel exhausted because my father asks the same question each morning. I want to hear other caregivers' experiences.",
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert len(generated) == 2
+        after = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert after.status_code == 200, after.text
+        assert after.json() == before.json()
+    finally:
+        teardown()
