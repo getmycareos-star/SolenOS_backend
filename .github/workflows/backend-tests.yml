@@ -13,6 +13,10 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - "railway.json"
+      - ".dockerignore"
       - ".github/workflows/backend-tests.yml"
 
 permissions:
