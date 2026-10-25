@@ -739,7 +739,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if _is_casual_greeting(payload.text):
             system_prompt += (
-                "\\nThis message is only a greeting or brief pleasantry. Reply in 1–8 words, "
+                "\nThis message is only a greeting or brief pleasantry. Reply in 1–8 words, "
                 "naturally mirror the greeting, and do not ask a question or introduce a care topic."
             )
         prior_messages = (
