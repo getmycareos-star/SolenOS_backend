@@ -988,6 +988,14 @@ def test_qwen_grounding_guard_rejects_credential_requests_and_unsupported_system
         "The current account status was not supplied. Use the official recovery process.",
         "The user cannot access their account. No verification or account status is supplied.",
     )
+    assert _contains_unsupported_care_claim(
+        "No breakfast intake reported today.",
+        "The only supplied information is a note from today about breakfast intake.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Professional-reported information.",
+        "The caregiver reports dizziness this morning. No professional note is supplied.",
+    )
 
 
 def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff_assignment():
