@@ -261,15 +261,28 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
 
-          echo "QWEN_E2E: Daily Capture extraction"
+          echo "QWEN_E2E: Daily Capture save remains independent from model inference"
           daily=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
-            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
+            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: Mom ate breakfast at 8 AM and walked to the kitchen.\"}" \
             http://127.0.0.1:8080/api/v1/daily/log)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "not_run"; assert d["qwen_candidates"] is None; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True' "$daily"
+          event_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$daily")
+
+          echo "QWEN_E2E: Qwen candidate extraction and persisted review"
+          candidates=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"event_id\":\"$event_id\"}" \
+            http://127.0.0.1:8080/api/v1/assistant/extract-candidates)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["qwen_extraction_status"] == "pending_review"; assert d["written_to_lcr"] is False; rows=d["qwen_candidates"]["observations"]; assert len(rows) >= 1, d; assert all(x["review_status"] == "pending_review" and x["candidate_id"] for x in rows); assert all(x["source_quote"] and x["source_quote"] in "CI-only daily capture: Mom ate breakfast at 8 AM and walked to the kitchen." for x in rows)' "$candidates"
+          candidate_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["qwen_candidates"]["observations"][0]["candidate_id"])' <<< "$candidates")
+          review=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"decision":"accepted","review_note":"CI end-to-end review"}' \
+            "http://127.0.0.1:8080/api/v1/assistant/candidates/$candidate_id/review")
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "accepted"; assert d["written_to_lcr"] is False; assert d["reviewed_by_caregiver_id"] == sys.argv[2]' "$review" "$caregiver_id"
           events_after_daily=$(curl --fail --silent --show-error -H "$auth_header" \
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
-          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
-
+          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and persisted Daily Capture candidate review; support calls wrote no LCR facts."
