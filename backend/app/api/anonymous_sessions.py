@@ -79,7 +79,7 @@ def _issue_account_session(db: Session, account: CaregiverAccount) -> dict:
         "caregiver": {"id": account.caregiver_id, "name": account.caregiver.name, "relationship": account.caregiver.relationship},
         "session_id": session.id, "access_token": raw_token, "token_type": "Bearer",
         "expires_at": expires_at.isoformat(), "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
-        "session_type": "account",
+        "session_type": "account", "mfa_enabled": bool(account.mfa_enabled),
     }
 
 
