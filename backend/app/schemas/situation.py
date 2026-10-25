@@ -77,7 +77,7 @@ class SituationResponse(BaseModel):
     active_care_situation: Optional[Dict[str, Any]] = None
     active_care_situation_turn: Optional[Dict[str, Any]] = None
     return_continuity: Optional[Dict[str, Any]] = None
-    qwen_extraction_status: Literal["available", "unavailable", "not_applicable"] = "not_applicable"
+    qwen_extraction_status: Literal["pending_review", "available", "unavailable", "invalid_response", "not_applicable", "not_run"] = "not_applicable"
     qwen_candidates: Optional[Dict[str, Any]] = None
     qwen_review_required: bool = False
     qwen_written_to_lcr: bool = False

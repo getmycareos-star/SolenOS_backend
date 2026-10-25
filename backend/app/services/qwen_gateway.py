@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -106,29 +107,53 @@ def qwen_chat(
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="SolenOS local Qwen timed out; no model response was generated.",
-        ) from exc
-    except urllib.error.URLError as exc:
-        if isinstance(getattr(exc, "reason", None), TimeoutError):
+    result = None
+    last_error = None
+    # Ollama may briefly return 503 while its CPU runner is loading/restarting.
+    # Retry only transient transport/overload failures; never substitute text.
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
+                result = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            if exc.code in {429, 502, 503} and attempt < 4:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+        except TimeoutError as exc:
             raise HTTPException(
                 status_code=504,
                 detail="SolenOS local Qwen timed out; no model response was generated.",
             ) from exc
+        except urllib.error.URLError as exc:
+            if isinstance(getattr(exc, "reason", None), TimeoutError):
+                raise HTTPException(
+                    status_code=504,
+                    detail="SolenOS local Qwen timed out; no model response was generated.",
+                ) from exc
+            last_error = exc
+            if attempt < 4:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            ) from exc
+    if result is None:
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
-    except (ValueError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
+        ) from last_error
     content = result.get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(
@@ -158,10 +183,17 @@ def extract_review_candidates(
                 "Return valid JSON only with exactly this shape: "
                 '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
                 '"open_questions":["string"]}. '
-                "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
-                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source. "
-                "If there are no supported observations, return an empty observations array. Ask at most three short "
-                "clarifying questions. Never treat greetings or small talk as care observations."
+                "Extract concrete events or observations explicitly stated in the source, including ordinary daily "
+                "activities, food or drink intake, sleep, mobility, mood, symptoms as reported, medication taken as reported, "
+                "appointments, and changes in routine. Do not discard an explicit observation merely because it seems mundane. "
+                "Create one candidate for each independently stated observation. The subject must be the person or entity "
+                "identified in the source; do not invent a name or assume who 'Mom' or 'she' refers to beyond the wording. "
+                "The observation must be a concise, neutral paraphrase of the stated fact. Every source_quote must be the exact "
+                "shortest phrase from the source that supports that candidate, copied verbatim including its wording. "
+                "Only return an empty observations array when the source contains no explicit care-relevant fact, such as a "
+                "greeting, thanks, or unsupported question. Do not infer diagnosis, cause, risk, intention, or medication changes. "
+                "Ask at most three short clarifying questions only if the source genuinely needs clarification. "
+                "Never turn a question, greeting, or model assumption into a recorded fact."
             ),
         },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
@@ -219,7 +251,7 @@ def extract_review_candidates(
 
 
 def qwen_runtime_status() -> dict:
-    """Confirm the configured model is actually served by the local Ollama runtime."""
+    """Confirm model inventory and a real local inference without reading care data."""
     base, model, timeout = get_ollama_config()
     request = urllib.request.Request(
         base + "/api/tags",
@@ -243,6 +275,22 @@ def qwen_runtime_status() -> dict:
             status_code=503,
             detail="The configured Qwen model is not installed in the local runtime.",
         )
+
+    # An installed model can still be unable to infer (for example while its
+    # runner is loading or after a runner crash). Verify a real, short local
+    # inference before reporting the assistant as available. The probe is not
+    # returned to the caregiver and does not read or write care data.
+    probe = qwen_chat(
+        [{"role": "user", "content": "Reply with the single word READY."}],
+        timeout=min(timeout, 30.0),
+        options={"num_predict": 8, "temperature": 0},
+    )
+    if not probe.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The configured local Qwen model did not complete its inference check.",
+        )
+
     return {
         "available": True,
         "model": model,

@@ -21,8 +21,11 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
+from app.models.care_continuity import CareActionOutcome
+from app.models.reminder import CareReminder
+from app.models.uncertainty import OpenQuestion
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, QwenReviewCandidate
 
 router = APIRouter(tags=["community and companion"])
 
@@ -56,6 +59,15 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+class QwenCandidateRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+
+
+class QwenCandidateReview(BaseModel):
+    decision: Literal["accepted", "rejected"]
+    review_note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class QwenAssistRequest(BaseModel):
@@ -425,8 +437,19 @@ def _greeting_reply_needs_revision(reply: str) -> bool:
     """Greeting-only replies should mirror the user, not start a new interview."""
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
-    repeats_automatic_question = bool(re.search(r"\\bhow are you(?: doing)?\\b", normalized))
-    return not words or len(words) > 12 or repeats_automatic_question
+    repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
+    introduces_automatic_question = "?" in (reply or "")
+    common_interview_opening = bool(re.search(
+        r"\b(?:how can i help|what can i help|what can i do for you|is there anything i can do)\b",
+        normalized,
+    ))
+    return (
+        not words
+        or len(words) > 12
+        or repeats_automatic_question
+        or introduces_automatic_question
+        or common_interview_opening
+    )
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -532,6 +555,175 @@ def qwen_assistant_status():
     return qwen_runtime_status()
 
 
+@router.post("/assistant/extract-candidates")
+async def qwen_extract_saved_event_candidates(
+    payload: QwenCandidateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Analyze a saved event and persist suggestions outside the authoritative LCR."""
+    person_id, caregiver_id = _scope(request, db)
+    event = db.query(CareEvent).filter(
+        CareEvent.id == payload.event_id,
+        CareEvent.person_id == person_id,
+    ).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Saved care event not found in this care record")
+
+    sources: list[tuple[str | None, str]] = []
+    evidence_ids = list(event.evidence_ids or [])
+    if evidence_ids:
+        rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(evidence_ids),
+        ).all()
+        by_id = {str(row.id): row for row in rows}
+        for evidence_id in evidence_ids:
+            row = by_id.get(str(evidence_id))
+            if row and isinstance(row.source_text, str) and row.source_text.strip():
+                sources.append((str(row.id), row.source_text.strip()))
+    elif isinstance(event.description, str) and event.description.strip():
+        sources.append((None, event.description.strip()))
+
+    if not sources:
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": "no_source_text",
+            "qwen_candidates": {"observations": [], "open_questions": []},
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    generated = {"observations": [], "open_questions": []}
+    try:
+        for evidence_id, source_text in sources[:5]:
+            candidate_set = await asyncio.to_thread(
+                extract_review_candidates,
+                source_text,
+                source_event_id=str(event.id),
+                source_evidence_id=evidence_id,
+            )
+            generated["observations"].extend(candidate_set["observations"])
+            generated["open_questions"].extend(candidate_set["open_questions"])
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        detail = str(exc.detail).casefold()
+        status = "invalid_response" if "invalid candidate structure" in detail else "unavailable"
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": status,
+            "qwen_candidates": None,
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    persisted = []
+    for item in generated["observations"][:12]:
+        source_evidence_id = item.get("source_evidence_id")
+        query = db.query(QwenReviewCandidate).filter(
+            QwenReviewCandidate.person_id == person_id,
+            QwenReviewCandidate.source_event_id == str(event.id),
+            QwenReviewCandidate.source_quote == item["source_quote"],
+            QwenReviewCandidate.observation == item["observation"],
+        )
+        if source_evidence_id:
+            query = query.filter(QwenReviewCandidate.source_evidence_id == source_evidence_id)
+        else:
+            query = query.filter(QwenReviewCandidate.source_evidence_id.is_(None))
+        candidate = query.first()
+        if candidate is None:
+            candidate = QwenReviewCandidate(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_event_id=str(event.id),
+                source_evidence_id=source_evidence_id,
+                subject=item["subject"],
+                observation=item["observation"],
+                source_quote=item["source_quote"],
+                status="pending_review",
+            )
+            db.add(candidate)
+            db.flush()
+        item["candidate_id"] = candidate.id
+        item["review_status"] = candidate.status
+        persisted.append(item)
+    db.commit()
+    return {
+        "event_id": event.id,
+        "qwen_extraction_status": "pending_review" if persisted else "no_candidates",
+        "qwen_candidates": {
+            "observations": persisted,
+            "open_questions": list(dict.fromkeys(generated["open_questions"]))[:3],
+        },
+        "ai_generated": True,
+        "written_to_lcr": False,
+        "candidates_persisted": True,
+    }
+
+
+@router.get("/assistant/candidates")
+def list_qwen_candidates(
+    request: Request,
+    status: Optional[str] = Query(default="pending_review", pattern="^(pending_review|accepted|rejected|all)$"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    person_id, _caregiver_id = _scope(request, db)
+    query = db.query(QwenReviewCandidate).filter(QwenReviewCandidate.person_id == person_id)
+    if status != "all":
+        query = query.filter(QwenReviewCandidate.status == status)
+    rows = query.order_by(QwenReviewCandidate.created_at.desc()).limit(limit).all()
+    return [{
+        "id": row.id,
+        "person_id": row.person_id,
+        "source_event_id": row.source_event_id,
+        "source_evidence_id": row.source_evidence_id,
+        "subject": row.subject,
+        "observation": row.observation,
+        "source_quote": row.source_quote,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
+        "review_note": row.review_note,
+        "written_to_lcr": False,
+    } for row in rows]
+
+
+@router.post("/assistant/candidates/{candidate_id}/review")
+def review_qwen_candidate(
+    candidate_id: str,
+    payload: QwenCandidateReview,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    candidate = db.query(QwenReviewCandidate).filter(
+        QwenReviewCandidate.id == candidate_id,
+        QwenReviewCandidate.person_id == person_id,
+    ).first()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Review candidate not found in this care record")
+    if candidate.status != "pending_review":
+        raise HTTPException(status_code=409, detail="This candidate has already been reviewed")
+    candidate.status = payload.decision
+    candidate.reviewed_at = datetime.now(timezone.utc)
+    candidate.reviewed_by_caregiver_id = caregiver_id
+    candidate.review_note = payload.review_note.strip() if payload.review_note else None
+    db.commit()
+    db.refresh(candidate)
+    return {
+        "id": candidate.id,
+        "status": candidate.status,
+        "reviewed_by_caregiver_id": candidate.reviewed_by_caregiver_id,
+        "reviewed_at": candidate.reviewed_at.isoformat() if candidate.reviewed_at else None,
+        "written_to_lcr": False,
+        "message": "Review decision saved. This does not create or change an authoritative Living Care Record fact.",
+    }
+
+
+
 @router.post("/assistant/assist")
 async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
     """Read-only Qwen support across SolenOS; never mutates the Living Care Record."""
@@ -607,6 +799,50 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Recorded handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
                 f"scope={handoff.scope or 'not specified'}; completed={bool(handoff.is_completed)}; "
                 f"context={(handoff.context or '')[:800]}"
+            )
+
+    # Open-loop and continuity workflows must see durable unresolved questions
+    # and reminder state, not infer follow-ups from narrative alone.
+    if payload.workflow in {"open_loops", "two_week_review", "handoff", "living_care_record"}:
+        questions = (
+            db.query(OpenQuestion)
+            .filter(OpenQuestion.person_id == person_id, OpenQuestion.status == "open")
+            .order_by(OpenQuestion.asked_at.desc())
+            .limit(8)
+            .all()
+        )
+        for question in questions:
+            context_lines.append(
+                f"Recorded unresolved question [{question.id}]: {question.question}; "
+                f"priority={getattr(question.priority, 'value', question.priority)}"
+            )
+        reminders = (
+            db.query(CareReminder)
+            .filter(CareReminder.person_id == person_id, CareReminder.status == "open")
+            .order_by(CareReminder.due_at.asc())
+            .limit(8)
+            .all()
+        )
+        for reminder in reminders:
+            context_lines.append(
+                f"Persisted open reminder [{reminder.id}]: {reminder.title}; "
+                f"due={reminder.due_at.isoformat() if reminder.due_at else 'unknown'}; "
+                f"note={(reminder.note or '')[:300]}"
+            )
+
+    if payload.workflow in {"decision_outcome", "two_week_review", "living_care_record"}:
+        outcomes = (
+            db.query(CareActionOutcome)
+            .filter(CareActionOutcome.person_id == person_id)
+            .order_by(CareActionOutcome.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        for outcome in outcomes:
+            context_lines.append(
+                f"Recorded action outcome [{outcome.id}]: action_type={outcome.action_type}; "
+                f"status={outcome.outcome_status}; notes={(outcome.notes or '')[:400]}; "
+                f"correction={(outcome.correction_text or '')[:300]}"
             )
 
     if payload.workflow == "community":
@@ -749,8 +985,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if _is_casual_greeting(payload.text):
             system_prompt += (
-                "\nThis message is only a greeting or brief pleasantry. Reply in 1–8 words, "
-                "naturally mirror the greeting, and do not ask a question or introduce a care topic."
+                "\nThis message is only a greeting or brief pleasantry. Generate one natural, declarative "
+                "greeting of 1–5 words. Do not use a question mark. Do not ask how the user is, how you "
+                "can help, or any follow-up question. Do not introduce care topics. Return only the greeting."
             )
         prior_messages = (
             db.query(ConversationMessage)
@@ -774,12 +1011,83 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_messages,
             {"temperature": 0, "num_predict": 32} if greeting_only else None,
         )
-        # Apply the language-quality gate to every model-generated reply, not
-        # greetings alone. A failed guard must not persist a confusing answer.
+        # Apply a Qwen-generated language repair before failing closed. No canned
+        # greeting or acknowledgement is ever substituted by application code.
+        source_context = payload.text + "\n" + "\n".join(context_lines)
+        needs_language_repair = (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
+        )
+        if needs_language_repair:
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
+                            "For a greeting, return one declarative greeting of 1–5 words with no question mark and no follow-up question. " 
+                            "Do not ask how the user is or how you can help. Do not introduce care topics. "
+                            "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
+                            "Do not add facts or claim that anything was saved. Return only the revised reply."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "user_message": payload.text.strip(),
+                                "authorized_context": context_lines,
+                                "draft_reply": reply,
+                                "greeting_only": greeting_only,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                {"temperature": 0, "num_predict": 16 if greeting_only else 96},
+            )
+
+        # Small local models sometimes repeat an interview-style greeting even
+        # after a rewrite. Ask Qwen once more with a stricter constraint; still
+        # no canned reply is substituted by application code.
+        if greeting_only and (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, source_context)
+            or _greeting_reply_needs_revision(reply)
+        ):
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Write a fresh, natural acknowledgement to the user's greeting. "
+                            "Use 1–4 words only. No question mark. Do not use the words how, what, can, help, or assist. "
+                            "Do not use 'saba' or any unrequested foreign word. Do not repeat any word three times. "
+                            "Do not mention care, tasks, or services. Do not reuse the draft. Return only the reply."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"user_message": payload.text.strip(), "rejected_draft": reply},
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                {"temperature": 0, "num_predict": 8},
+            )
+
         if (
             _companion_reply_needs_revision(reply)
-            or _contains_unrequested_saba(reply, payload.text + "\n" + "\n".join(context_lines))
-            or (_is_casual_greeting(payload.text) and _greeting_reply_needs_revision(reply))
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,

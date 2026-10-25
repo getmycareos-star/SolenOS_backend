@@ -116,7 +116,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261025_01":
+              if revision != "20261025_02":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -124,6 +124,50 @@ jobs:
                   raise SystemExit(f"expected empty fixture table, got {count} rows")
           conn.close()
           print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
+          PY
+
+      - name: Verify upgrade from the exact deployed Alembic stamp (20261024_11)
+        working-directory: backend
+        env:
+          PGPASSWORD: solenos_ci_only
+        run: |
+          createdb -h 127.0.0.1 -U solenos_test solenos_stamped_11
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 python - <<'PY'
+          import os
+          import psycopg2
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      email VARCHAR UNIQUE,
+                      password_hash TEXT,
+                      display_name VARCHAR,
+                      care_recipient_ids JSONB,
+                      role VARCHAR,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+          conn.close()
+          PY
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 alembic upgrade 20261024_11
+          test "$(PGPASSWORD=solenos_ci_only psql "postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11" -Atc "SELECT version_num FROM alembic_version")" = "20261024_11"
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 alembic upgrade head
+          python - <<'PY'
+          import psycopg2
+          conn = psycopg2.connect("postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11")
+          with conn.cursor() as cur:
+              cur.execute("SELECT version_num FROM alembic_version")
+              revision = cur.fetchone()[0]
+              if revision != "20261025_02":
+                  raise SystemExit(f"deployed-stamp upgrade ended at {revision}, expected 20261025_02")
+              for table in ("caregiver_consents", "care_notifications", "care_reminders", "qwen_review_candidates"):
+                  cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+                  if cur.fetchone()[0] != table:
+                      raise SystemExit(f"required table missing after deployed-stamp upgrade: {table}")
+          conn.close()
+          print("PASS: database stamped at deployed revision 20261024_11 upgrades to 20261025_02.")
           PY
 
       - name: Run real HTTP + PostgreSQL identity and persistence E2E
@@ -196,17 +240,33 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
+          echo "QWEN_E2E: casual greeting cannot become a care-record capture"
+          capture_status=$(curl --silent --show-error -o /tmp/greeting-capture.json -w "%{http_code}" \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"raw_input\":\"hi\",\"documents\":[]}" \
+            http://127.0.0.1:8080/api/situation)
+          test "$capture_status" = "422"
+          events_before_greeting=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events_before_greeting"
+
           echo "QWEN_E2E: runtime status"
           status=$(curl --fail --silent --show-error -H "$auth_header" \
             http://127.0.0.1:8080/api/v1/assistant/status)
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:1.5b"' "$status"
 
           echo "QWEN_E2E: Companion greeting"
-          greeting=$(curl --fail --silent --show-error \
+          greeting_status=$(curl --silent --show-error -o /tmp/solenos-greeting.json -w "%{http_code}" \
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
             http://127.0.0.1:8080/api/v1/conversation/message)
-          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
+          if [ "$greeting_status" != "200" ]; then
+            echo "Companion greeting returned HTTP $greeting_status; response body follows:" >&2
+            cat /tmp/solenos-greeting.json >&2 || true
+            exit 1
+          fi
+          greeting=$(cat /tmp/solenos-greeting.json)
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert d["ai_generated"] is True; assert d["guard_verdict"] == "passed"; assert isinstance(reply,str) and reply.strip(); assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply; messages=d["messages"]; assert any(m["role"]=="user" and m["text"]=="hi" for m in messages); assert any(m["role"]=="assistant" and m["text"]==reply for m in messages)' "$greeting"
 
           echo "QWEN_E2E: appointment assist"
           assist=$(curl --fail --silent --show-error \
@@ -261,15 +321,28 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events"
 
-          echo "QWEN_E2E: Daily Capture extraction"
+          echo "QWEN_E2E: Daily Capture save remains independent from model inference"
           daily=$(curl --fail --silent --show-error \
             -H "$auth_header" -H "Content-Type: application/json" \
-            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: no observation supplied.\"}" \
+            -d "{\"person_id\":\"$person_id\",\"caregiver_id\":\"$caregiver_id\",\"medications\":[],\"vitals\":[],\"scales\":[],\"notes\":\"CI-only daily capture: Mom ate breakfast at 8 AM and walked to the kitchen.\"}" \
             http://127.0.0.1:8080/api/v1/daily/log)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "available"; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True; candidates=d["qwen_candidates"]; assert isinstance(candidates,dict) and isinstance(candidates.get("observations"),list) and isinstance(candidates.get("open_questions"),list); assert all(x.get("review_status") == "pending_review" for x in candidates["observations"]); assert all(x.get("source_quote") and x["source_quote"] in "CI-only daily capture: no observation supplied." for x in candidates["observations"])' "$daily"
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["success"] is True; assert d["qwen_extraction_status"] == "not_run"; assert d["qwen_candidates"] is None; assert d["qwen_written_to_lcr"] is False; assert d["qwen_review_required"] is True' "$daily"
+          event_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$daily")
+
+          echo "QWEN_E2E: Qwen candidate extraction and persisted review"
+          candidates=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"event_id\":\"$event_id\"}" \
+            http://127.0.0.1:8080/api/v1/assistant/extract-candidates)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["qwen_extraction_status"] == "pending_review"; assert d["written_to_lcr"] is False; rows=d["qwen_candidates"]["observations"]; assert len(rows) >= 1, d; assert all(x["review_status"] == "pending_review" and x["candidate_id"] for x in rows); assert all(x["source_quote"] and x["source_quote"] in "CI-only daily capture: Mom ate breakfast at 8 AM and walked to the kitchen." for x in rows)' "$candidates"
+          candidate_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["qwen_candidates"]["observations"][0]["candidate_id"])' <<< "$candidates")
+          review=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"decision":"accepted","review_note":"CI end-to-end review"}' \
+            "http://127.0.0.1:8080/api/v1/assistant/candidates/$candidate_id/review")
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "accepted"; assert d["written_to_lcr"] is False; assert d["reviewed_by_caregiver_id"] == sys.argv[2]' "$review" "$caregiver_id"
           events_after_daily=$(curl --fail --silent --show-error -H "$auth_header" \
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
-          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
-
+          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and persisted Daily Capture candidate review; support calls wrote no LCR facts."

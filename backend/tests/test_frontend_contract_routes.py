@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.collaboration import CommunityPost, ConversationMessage, QwenReviewCandidate
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
@@ -235,8 +235,11 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
             }],
         })
         assert linked.status_code == 200, linked.text
+        linked_payload = linked.json()
+        assert linked_payload.get("care_event_id")
+        assert linked_payload.get("active_care_situation") is not None, linked_payload
         db = TestingSessionLocal()
-        event = db.query(CareEvent).filter_by(id=linked.json()["care_event_id"]).first()
+        event = db.query(CareEvent).filter_by(id=linked_payload["care_event_id"]).first()
         assert event is not None
         assert evidence_id in (event.evidence_ids or [])
         other_caregiver = db.query(Caregiver).filter_by(person_id=other_person_id).first()
@@ -485,6 +488,75 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
+def test_qwen_open_loops_and_decision_support_use_persisted_state(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from app.models.reminder import CareReminder
+    from app.models.uncertainty import OpenQuestion
+    from app.models.care_continuity import CareActionOutcome
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        db = TestingSessionLocal()
+        db.add(OpenQuestion(
+            id="unresolved-appointment-question",
+            person_id=person_id,
+            question="Ask the clinician whether the new sleep pattern needs follow-up.",
+            subject_type="care_recipient",
+            subject_id=person_id,
+            status="open",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.add(CareReminder(
+            id="persisted-open-reminder",
+            person_id=person_id,
+            created_by_caregiver_id=caregiver_id,
+            title="Bring medication list to appointment",
+            note="Use the current list; do not change doses.",
+            due_at=datetime.now(timezone.utc) + timedelta(days=1),
+            status="open",
+        ))
+        db.add(CareActionOutcome(
+            id="recorded-action-outcome",
+            person_id=person_id,
+            action_id="follow-up-call",
+            action_type="caregiver_follow_up",
+            outcome_status="completed",
+            notes="Clinic called back and asked us to bring the medication list.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        captured = {}
+        def capture_qwen(messages, **kwargs):
+            captured["prompt"] = "\\n".join(message["content"] for message in messages)
+            return "I found the saved follow-up details. Please review them with the care team."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        open_loops = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "open_loops", "text": "What follow-ups are still open?"},
+        )
+        assert open_loops.status_code == 200, open_loops.text
+        assert "Ask the clinician whether the new sleep pattern needs follow-up." in captured["prompt"]
+        assert "Bring medication list to appointment" in captured["prompt"]
+
+        decision = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={"workflow": "decision_outcome", "text": "Summarize the recorded follow-up outcome."},
+        )
+        assert decision.status_code == 200, decision.text
+        assert "Clinic called back and asked us to bring the medication list." in captured["prompt"]
+        assert decision.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
     from datetime import datetime, timezone
     import app.api.collaboration as collaboration
@@ -524,6 +596,16 @@ def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch)
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_greeting_quality_guard_rejects_automatic_questions_but_allows_natural_acknowledgements():
+    import app.api.collaboration as collaboration
+
+    assert collaboration._greeting_reply_needs_revision("Hi! How can I help you?")
+    assert collaboration._greeting_reply_needs_revision("Hello. What can I do for you?")
+    assert collaboration._greeting_reply_needs_revision("Hi, how are you doing?")
+    assert not collaboration._greeting_reply_needs_revision("Hi there.")
+    assert not collaboration._greeting_reply_needs_revision("Hello, good to hear from you.")
 
 
 def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypatch):
@@ -923,5 +1005,123 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
             json={"person_id": person_id, "title": "Ambiguous time", "due_at": "2030-01-01T12:00:00"},
         )
         assert naive_due_date.status_code == 422, naive_due_date.text
+    finally:
+        teardown()
+
+
+def test_companion_repairs_unprompted_greeting_question_with_qwen_not_a_canned_phrase(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        calls = []
+        generated = iter(["Hi! How are you doing?", "Hi!"])
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+
+        def generated_reply(base, model, messages, options=None):
+            calls.append(messages)
+            return next(generated)
+
+        monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Hi!"
+        assert response.json()["ai_generated"] is True
+        assert len(calls) == 2
+        assert "draft_reply" in calls[1][-1]["content"]
+        events = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert events.status_code == 200
+        assert events.json() == []
+    finally:
+        teardown()
+
+
+def test_greeting_guard_detects_unrequested_automatic_question():
+    import app.api.collaboration as collaboration
+
+    assert collaboration._greeting_reply_needs_revision("Hi! How are you doing?")
+    assert not collaboration._greeting_reply_needs_revision("Hi!")
+
+
+def test_qwen_candidate_extraction_persists_review_attribution_and_never_writes_lcr(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        other_auth = {"Authorization": f"Bearer {other_token}"}
+        saved = client.post("/api/v1/daily/log", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "Mom ate breakfast at 8 AM.",
+        })
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["success"] is True
+        assert saved.json()["qwen_extraction_status"] == "not_run"
+
+        import app.api.collaboration as collaboration
+        monkeypatch.setattr(
+            collaboration,
+            "extract_review_candidates",
+            lambda source_text, **kwargs: {
+                "observations": [{
+                    "subject": "meal",
+                    "observation": "The caregiver reports that Mom ate breakfast at 8 AM.",
+                    "source_quote": "Mom ate breakfast at 8 AM.",
+                    "review_status": "pending_review",
+                    "source_event_id": kwargs["source_event_id"],
+                }],
+                "open_questions": ["Was this typical for her morning routine?"],
+            },
+        )
+        extracted = client.post(
+            "/api/v1/assistant/extract-candidates",
+            headers=auth,
+            json={"event_id": saved.json()["id"]},
+        )
+        assert extracted.status_code == 200, extracted.text
+        body = extracted.json()
+        assert body["ai_generated"] is True
+        assert body["written_to_lcr"] is False
+        assert body["qwen_extraction_status"] == "pending_review"
+        candidate = body["qwen_candidates"]["observations"][0]
+        candidate_id = candidate["candidate_id"]
+        assert candidate["review_status"] == "pending_review"
+        assert candidate["source_quote"] == "Mom ate breakfast at 8 AM."
+
+        listed = client.get("/api/v1/assistant/candidates", headers=auth)
+        assert listed.status_code == 200, listed.text
+        assert any(row["id"] == candidate_id and row["status"] == "pending_review" for row in listed.json())
+
+        cross_record_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=other_auth,
+            json={"decision": "accepted"},
+        )
+        assert cross_record_review.status_code == 404, cross_record_review.text
+
+        reviewed = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=auth,
+            json={"decision": "accepted", "review_note": "Confirmed against the original note."},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == "accepted"
+        assert reviewed.json()["written_to_lcr"] is False
+        db = TestingSessionLocal()
+        row = db.query(QwenReviewCandidate).filter_by(id=candidate_id).one()
+        assert row.reviewed_by_caregiver_id == caregiver_id
+        assert row.review_note == "Confirmed against the original note."
+        db.close()
+
+        events = client.get(f"/api/v1/events/{person_id}", headers=auth)
+        assert events.status_code == 200
+        assert len(events.json()) == 1
+        assert events.json()[0]["id"] == saved.json()["id"]
     finally:
         teardown()
