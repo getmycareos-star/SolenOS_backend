@@ -1,5 +1,7 @@
 FROM python:3.12-slim-bookworm
 
+# Railway build context must be the repository root: COPY paths below are rooted here.
+
 # Production runtime and CI must use the same bundled Qwen model; see backend/docs/qwen-provider-setup.md.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
