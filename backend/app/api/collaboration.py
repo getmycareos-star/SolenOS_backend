@@ -23,6 +23,7 @@ from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake
+from app.models.notifications import CareNotification, CareNotificationPreference
 
 router = APIRouter(tags=["community and companion"])
 
@@ -810,3 +811,116 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
     return {"session_id": session.id, "person_id": person_id, "messages": [{"role": row.role, "text": row.content, "created_at": row.created_at.isoformat() if row.created_at else None} for row in rows]}
+
+
+class NotificationPreferenceUpdate(BaseModel):
+    quiet_hours_enabled: Optional[bool] = None
+    reminders_enabled: Optional[bool] = None
+
+
+def _notification_json(item: CareNotification) -> dict:
+    return {
+        "id": item.id,
+        "title": item.title,
+        "body": item.body,
+        "category": item.category,
+        "priority": item.priority,
+        "source_event_id": item.source_event_id,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "is_read": item.read_at is not None,
+        "read_at": item.read_at.isoformat() if item.read_at else None,
+    }
+
+
+def _notification_preferences(db: Session, person_id: str, caregiver_id: str) -> dict:
+    preference = db.query(CareNotificationPreference).filter(
+        CareNotificationPreference.person_id == person_id,
+        CareNotificationPreference.caregiver_id == caregiver_id,
+    ).first()
+    return {
+        "quiet_hours_enabled": bool(preference.quiet_hours_enabled) if preference else False,
+        "reminders_enabled": bool(preference.reminders_enabled) if preference else True,
+        "updated_at": preference.updated_at.isoformat() if preference and preference.updated_at else None,
+    }
+
+
+@router.get("/notifications")
+def list_care_notifications(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    query = db.query(CareNotification).filter(
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+    )
+    total = query.count()
+    items = query.order_by(CareNotification.created_at.desc(), CareNotification.id.desc()).offset(offset).limit(limit).all()
+    return {"items": [_notification_json(item) for item in items], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/notifications/unread-count")
+def count_unread_care_notifications(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    count = db.query(CareNotification).filter(
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+        CareNotification.read_at.is_(None),
+    ).count()
+    return {"unread_count": count}
+
+
+@router.patch("/notifications/{notification_id}/read")
+def mark_care_notification_read(notification_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    item = db.query(CareNotification).filter(
+        CareNotification.id == notification_id,
+        CareNotification.person_id == person_id,
+        CareNotification.caregiver_id == caregiver_id,
+    ).first()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if item.read_at is None:
+        item.read_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(item)
+    return _notification_json(item)
+
+
+@router.get("/notifications/preferences")
+def get_care_notification_preferences(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    return _notification_preferences(db, person_id, caregiver_id)
+
+
+@router.put("/notifications/preferences")
+def update_care_notification_preferences(
+    payload: NotificationPreferenceUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if payload.quiet_hours_enabled is None and payload.reminders_enabled is None:
+        raise HTTPException(status_code=422, detail="Choose at least one notification preference to update")
+    person_id, caregiver_id = _scope(request, db)
+    preference = db.query(CareNotificationPreference).filter(
+        CareNotificationPreference.person_id == person_id,
+        CareNotificationPreference.caregiver_id == caregiver_id,
+    ).first()
+    if preference is None:
+        preference = CareNotificationPreference(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            quiet_hours_enabled=False,
+            reminders_enabled=True,
+        )
+        db.add(preference)
+    if payload.quiet_hours_enabled is not None:
+        preference.quiet_hours_enabled = payload.quiet_hours_enabled
+    if payload.reminders_enabled is not None:
+        preference.reminders_enabled = payload.reminders_enabled
+    preference.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(preference)
+    return _notification_preferences(db, person_id, caregiver_id)
