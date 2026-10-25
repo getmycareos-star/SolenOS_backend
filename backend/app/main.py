@@ -26,6 +26,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
+from app.api.accounts import router as accounts_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
@@ -53,6 +54,7 @@ app.add_middleware(
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
+app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
@@ -158,6 +160,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
+        if path.startswith("/api/v1/accounts"):
+            target_person_id = scoped_person_id
         if (
             path.startswith("/api/v1/community")
             or path == "/api/v1/upload"
