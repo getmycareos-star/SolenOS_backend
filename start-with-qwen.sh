@@ -43,6 +43,29 @@ ollama list | grep -q 'qwen2.5:1.5b' || {
   exit 1
 }
 
+# Warm the actual bundled model before FastAPI reports readiness. Ollama's
+# /api/tags can list a model while its inference engine is still loading it;
+# without this warm-up the first caregiver greeting may receive a false 503.
+warm=0
+for attempt in $(seq 1 60); do
+  if ollama run "$OLLAMA_MODEL" "Reply with the single word READY." >/tmp/qwen-warmup.log 2>&1; then
+    warm=1
+    break
+  fi
+  if ! kill -0 "$ollama_pid" 2>/dev/null; then
+    cat /tmp/ollama-runtime.log >&2 || true
+    echo "Ollama exited during Qwen warm-up." >&2
+    exit 1
+  fi
+  sleep 1
+done
+if [[ "$warm" -ne 1 ]]; then
+  cat /tmp/qwen-warmup.log >&2 || true
+  cat /tmp/ollama-runtime.log >&2 || true
+  echo "Bundled Qwen model did not complete its startup inference; refusing to report readiness." >&2
+  exit 1
+fi
+
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &
 uvicorn_pid=$!
 set +e
