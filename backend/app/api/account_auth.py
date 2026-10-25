@@ -169,7 +169,7 @@ def signup(payload: AccountSignupInput, request: Request, db: Session = Depends(
 
 
 @router.post("/login")
-def login(payload: AccountLoginInput, db: Session = Depends(get_db)):
+def login(payload: AccountLoginInput, request: Request, db: Session = Depends(get_db)):
     account = db.query(AuthAccount).filter(AuthAccount.email == payload.email).first()
     if account is None or not account.is_active or not _verify_password(payload.password, account.password_hash):
         raise HTTPException(status_code=401, detail="Email or password is incorrect")
@@ -177,6 +177,35 @@ def login(payload: AccountLoginInput, db: Session = Depends(get_db)):
     caregiver = db.query(Caregiver).filter(Caregiver.id == account.caregiver_id, Caregiver.person_id == account.person_id).first()
     if person is None or caregiver is None:
         raise HTTPException(status_code=409, detail="The account's care record is unavailable; access was not recreated")
+
+    auth_header = request.headers.get("authorization", "")
+    scheme, _, presented_token = auth_header.partition(" ")
+    if auth_header and (scheme.lower() != "bearer" or not presented_token.strip()):
+        raise HTTPException(status_code=401, detail="The current care session credential is invalid")
+    if presented_token.strip():
+        digest = hashlib.sha256(presented_token.strip().encode("utf-8")).hexdigest()
+        current_session = db.query(AnonymousSession).filter(
+            AnonymousSession.token_hash == digest,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        if current_session is None:
+            raise HTTPException(status_code=401, detail="The current care session is invalid or expired")
+        if current_session.person_id != account.person_id or current_session.caregiver_id != account.caregiver_id:
+            raise HTTPException(
+                status_code=409,
+                detail="This browser has a different anonymous care record. It was not changed or merged; sign in from a clean browser or link that record through account creation.",
+            )
+        if current_session.account_id not in (None, account.id):
+            raise HTTPException(status_code=409, detail="This care record is linked to another account")
+        return _issue_sessions(
+            db,
+            account,
+            person,
+            caregiver,
+            existing_care_session=current_session,
+            existing_care_token=presented_token.strip(),
+        )
     return _issue_sessions(db, account, person, caregiver)
 
 
