@@ -129,6 +129,8 @@ def _consume_token(db: Session, raw: str, purpose: str):
         WHERE token_hash=:hash AND purpose=:purpose""" + lock_clause),
         {"hash": _token_hash(raw), "purpose": purpose}).mappings().first()
     expires_at = row["expires_at"] if row else None
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at)
     if expires_at is not None and expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if not row or row["consumed_at"] is not None or expires_at <= _now():
