@@ -7,6 +7,7 @@ import json
 import hashlib
 from app.core.database import get_db
 from app.services.qwen_gateway import extract_review_candidates
+from app.services.capture_review import persist_capture_analysis
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import (
     Person as PersonModel,
@@ -360,6 +361,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     except Exception:
         qwen_status = "unavailable"
 
+    analysis = persist_capture_analysis(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_event_id=event.id,
+        source_evidence_id=None,
+        source_text=source_text,
+        extraction_status=qwen_status,
+        candidates=qwen_candidates if qwen_status == "available" else None,
+    )
+
     return {
         "success": True,
         "id": event.id,
@@ -367,6 +379,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "recorded_at": event.recorded_at,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
+        "qwen_analysis_id": analysis.id,
         "qwen_review_required": True,
         "qwen_written_to_lcr": False,
     }
