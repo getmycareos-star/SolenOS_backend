@@ -842,14 +842,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(12)
             .all()
         )
-        model_messages = [{"role": "system", "content": system_prompt}]
-        model_messages.extend(
-            {"role": row.role, "content": row.content}
-            for row in reversed(prior_messages)
-            if row.role in {"user", "assistant"}
-        )
-        model_messages.append({"role": "user", "content": payload.text.strip()})
         greeting_only = _is_casual_greeting(payload.text)
+        model_messages = [{"role": "system", "content": system_prompt}]
+        # A greeting is a fresh turn. Do not let earlier interview-style
+        # exchanges bias Qwen into asking another question after every greeting.
+        if not greeting_only:
+            model_messages.extend(
+                {"role": row.role, "content": row.content}
+                for row in reversed(prior_messages)
+                if row.role in {"user", "assistant"}
+            )
+        model_messages.append({"role": "user", "content": payload.text.strip()})
         reply = await asyncio.to_thread(
             _ollama_chat,
             base,
@@ -857,12 +860,41 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_messages,
             {"temperature": 0, "num_predict": 32} if greeting_only else None,
         )
-        # Apply the language-quality gate to every model-generated reply, not
-        # greetings alone. A failed guard must not persist a confusing answer.
+        source_context = payload.text + "\n" + "\n".join(context_lines)
+        # Repair greeting style with a second real Qwen completion before
+        # failing closed. No canned phrase is substituted by application code.
         if (
             _companion_reply_needs_revision(reply)
-            or _contains_unrequested_saba(reply, payload.text + "\n" + "\n".join(context_lines))
-            or (_is_casual_greeting(payload.text) and _greeting_reply_needs_revision(reply))
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
+        ):
+            repair_system = (
+                "Rewrite the draft as one natural, plain-English greeting of 1–5 words. "
+                "Do not ask a question, offer help, mention care, or add a factual claim. "
+                "Return only the revised greeting."
+                if greeting_only else
+                "Rewrite the draft into a clear, accessible response of 35 words or fewer. "
+                "Use only claims supported by the user's message and authorized context. "
+                "Do not add facts, and return only the revised response."
+            )
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                [
+                    {"role": "system", "content": repair_system},
+                    {"role": "user", "content": json.dumps({
+                        "user_message": payload.text.strip(),
+                        "authorized_context": context_lines,
+                        "draft_reply": reply,
+                    }, ensure_ascii=False)},
+                ],
+                {"temperature": 0, "num_predict": 16 if greeting_only else 64},
+            )
+        if (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
