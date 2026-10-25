@@ -126,6 +126,50 @@ jobs:
           print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
           PY
 
+      - name: Verify upgrade from the exact deployed Alembic stamp (20261024_11)
+        working-directory: backend
+        env:
+          PGPASSWORD: solenos_ci_only
+        run: |
+          createdb -h 127.0.0.1 -U solenos_test solenos_stamped_11
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 python - <<'PY'
+          import os
+          import psycopg2
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          conn.autocommit = True
+          with conn.cursor() as cur:
+              cur.execute("""
+                  CREATE TABLE caregivers (
+                      id VARCHAR PRIMARY KEY,
+                      email VARCHAR UNIQUE,
+                      password_hash TEXT,
+                      display_name VARCHAR,
+                      care_recipient_ids JSONB,
+                      role VARCHAR,
+                      created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+          conn.close()
+          PY
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 alembic upgrade 20261024_11
+          test "$(PGPASSWORD=solenos_ci_only psql "postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11" -Atc "SELECT version_num FROM alembic_version")" = "20261024_11"
+          DATABASE_URL=postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11 alembic upgrade head
+          python - <<'PY'
+          import psycopg2
+          conn = psycopg2.connect("postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_stamped_11")
+          with conn.cursor() as cur:
+              cur.execute("SELECT version_num FROM alembic_version")
+              revision = cur.fetchone()[0]
+              if revision != "20261025_02":
+                  raise SystemExit(f"deployed-stamp upgrade ended at {revision}, expected 20261025_02")
+              for table in ("caregiver_consents", "care_notifications", "care_reminders", "qwen_review_candidates"):
+                  cur.execute("SELECT to_regclass(%s)", (f"public.{table}",))
+                  if cur.fetchone()[0] != table:
+                      raise SystemExit(f"required table missing after deployed-stamp upgrade: {table}")
+          conn.close()
+          print("PASS: database stamped at deployed revision 20261024_11 upgrades to 20261025_02.")
+          PY
+
       - name: Run real HTTP + PostgreSQL identity and persistence E2E
         env:
           SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
