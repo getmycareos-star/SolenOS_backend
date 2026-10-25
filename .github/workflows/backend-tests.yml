@@ -220,7 +220,7 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
 
           # Exercise every supported read-only workflow against the actual model.
-          for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+          for workflow in daily_capture add_record document living_care_record care_history_search care_situation_change delta_engine evidence_provenance uncertainty_contradictions returning_caregiver appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day reminders_notifications care_coordination companion caregiver_feedback sharing_export roles_access account_recovery settings_security record_lifecycle offline_sync ai_reliability audit_review; do
             echo "QWEN_E2E: workflow=$workflow"
             workflow_response=$(curl --fail --silent --show-error \
               -H "$auth_header" -H "Content-Type: application/json" \
@@ -229,20 +229,7 @@ jobs:
             python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow"
           done
 
-          # Verify a real Qwen summary is grounded in a real, published CI-only community post.
-          echo "QWEN_E2E: Community post and Qwen summary"
-          post=$(curl --fail --silent --show-error \
-            -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"post_type":"experience","content":"A quiet routine helped us prepare for bedtime.","care_stage":"unspecified","tags":["routine"]}' \
-            http://127.0.0.1:8080/api/v1/community)
-          post_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$post")
-          community_summary=$(curl --fail --silent --show-error \
-            -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"observation":"bedtime routine"}' \
-            http://127.0.0.1:8080/api/v1/community/experience/summary)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert sys.argv[2] in d["post_ids"]; assert isinstance(d["summary"],str) and d["summary"].strip()' "$community_summary" "$post_id"
-
-          # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
+          # Community is intentionally disabled: do not call its API or run Qwen for Community.\n\n          # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
           echo "QWEN_E2E: authorized document evidence"
           printf 'CI-only document: follow-up date is not stated.\\n' > /tmp/solenos-qwen-document.txt
           upload=$(curl --fail --silent --show-error \
@@ -275,5 +262,5 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
-          echo "PASS: real Qwen inference succeeded for Companion, all read-only care workflows, Community summary, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
+          echo "PASS: real Qwen inference succeeded for Companion, all 30 enabled read-only care workflows, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
 

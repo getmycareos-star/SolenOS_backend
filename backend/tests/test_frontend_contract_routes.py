@@ -454,10 +454,15 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         )
         headers = {"Authorization": f"Bearer {token}"}
         workflows = [
-            "daily_capture", "document", "community", "appointment",
-            "after_appointment", "handoff", "professional_summary",
-            "open_loops", "two_week_review", "decision_outcome",
-            "medication_day", "living_care_record",
+            "daily_capture", "add_record", "document", "living_care_record",
+            "care_history_search", "care_situation_change", "delta_engine",
+            "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
+            "appointment", "after_appointment", "handoff", "professional_summary",
+            "open_loops", "two_week_review", "decision_outcome", "medication_day",
+            "reminders_notifications", "care_coordination", "companion",
+            "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
+            "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
+            "audit_review",
         ]
         before = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert before.status_code == 200, before.text
@@ -485,43 +490,23 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
-def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
-    from datetime import datetime, timezone
+def test_community_qwen_assist_is_disabled_and_does_not_call_model(monkeypatch):
     import app.api.collaboration as collaboration
 
-    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
-        db = TestingSessionLocal()
-        db.add(CareEvent(
-            id="private-lcr-context",
-            person_id=person_id,
-            event_type="care_note",
-            status="recorded",
-            occurred_at=datetime.now(timezone.utc),
-            title="PRIVATE LCR detail must not enter Community",
-            description="Private care detail that Community Qwen must not receive.",
-            created_by_caregiver_id=caregiver_id,
-        ))
-        db.commit()
-        db.close()
-
-        captured = {}
-
-        def capture_qwen(messages, **kwargs):
-            captured["messages"] = messages
-            return "I found no matching published peer experiences."
-
-        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        calls = []
+        monkeypatch.setattr(collaboration, "qwen_chat", lambda *args, **kwargs: calls.append(args) or "should not run")
         response = client.post(
             "/api/v1/assistant/assist",
             headers={"Authorization": f"Bearer {token}"},
-            json={"workflow": "community", "text": "bedtime routine", "appointment_id": "private-appointment"},
+            json={"workflow": "community", "text": "bedtime routine"},
         )
-        assert response.status_code == 200, response.text
-        prompt = "\n".join(message["content"] for message in captured["messages"])
-        assert "PRIVATE LCR detail must not enter Community" not in prompt
-        assert "Private care detail that Community Qwen must not receive" not in prompt
-        assert response.json()["written_to_lcr"] is False
+        assert response.status_code == 422, response.text
+        assert calls == []
+        events = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert events.status_code == 200
+        assert events.json() == []
     finally:
         teardown()
 
@@ -1014,35 +999,27 @@ def test_qwen_grounding_guard_rejects_invented_first_person_community_experience
     )
 
 
-def test_qwen_community_experience_is_not_fabricated_or_written_to_lcr(monkeypatch):
+def test_qwen_community_experience_is_disabled_without_inference_or_lcr_write(monkeypatch):
     import app.api.collaboration as collaboration
 
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
         generated = []
-        fabricated = (
-            '"Facing the same daily question, I have found that a few strategies help. '
-            'These methods have made my day more manageable."'
-        )
-
-        def qwen_response(messages, **kwargs):
-            generated.append(messages)
-            return fabricated
-
-        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
-        before = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        monkeypatch.setattr(collaboration, "qwen_chat", lambda *args, **kwargs: generated.append(args) or "not called")
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert before.status_code == 200, before.text
         response = client.post(
             "/api/v1/assistant/assist",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
             json={
                 "workflow": "community",
-                "text": "I feel exhausted because my father asks the same question each morning. I want to hear other caregivers' experiences.",
+                "text": "I feel exhausted and want to hear other caregivers' experiences.",
             },
         )
-        assert response.status_code == 503, response.text
-        assert len(generated) == 2
-        after = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 422, response.text
+        assert generated == []
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
         assert after.json() == before.json()
     finally:
