@@ -13,7 +13,7 @@ export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:1.5b}"
 export OLLAMA_SIDECAR_ENABLED="true"
 
-ollama serve >/tmp/ollama-runtime.log 2>&1 &
+ollama serve > >(tee /tmp/ollama-runtime.log >&2) 2>&1 &
 ollama_pid=$!
 uvicorn_pid=""
 
