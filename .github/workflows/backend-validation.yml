@@ -72,10 +72,10 @@ jobs:
           with open("/tmp/qwen-status.json", encoding="utf-8") as stream:
               data = json.load(stream)
           assert data.get("available") is True, data
-          assert data.get("model") == "qwen2.5:1.5b", data
+          assert data.get("model") == "qwen2.5:0.5b", data
           assert data.get("provider") == "local_ollama", data
           assert data.get("hosted_inference_api") is False, data
-          print("PASS: Railway reports the bundled local qwen2.5:1.5b model as available.")
+          print("PASS: Railway reports the bundled local qwen2.5:0.5b model as available.")
           PY
             then available=1; break; fi
             echo "Qwen runtime not yet ready (HTTP ${status}); retrying."
