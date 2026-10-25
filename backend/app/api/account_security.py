@@ -326,7 +326,8 @@ def _account_from_bearer(request: Request, db: Session):
 @router.post("/mfa/confirm")
 def confirm_mfa(payload: MfaConfirm, request: Request, db: Session = Depends(get_db)):
     account = _account_from_bearer(request, db)
-    row = db.execute(text("SELECT secret_ciphertext, confirmed_at FROM account_mfa_secrets WHERE account_id=:id FOR UPDATE"), {"id": account.id}).mappings().first()
+    lock_clause = " FOR UPDATE" if db.bind is not None and db.bind.dialect.name == "postgresql" else ""
+    row = db.execute(text("SELECT secret_ciphertext, confirmed_at FROM account_mfa_secrets WHERE account_id=:id" + lock_clause), {"id": account.id}).mappings().first()
     if not row:
         raise HTTPException(status_code=400, detail="Start MFA enrollment first")
     try:
