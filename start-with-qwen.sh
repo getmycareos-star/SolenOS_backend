@@ -4,6 +4,10 @@ set -Eeuo pipefail
 export OLLAMA_HOST="127.0.0.1:11434"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+# Keep the startup warm-up and API inference on the same runner configuration.
+# Otherwise Ollama may reload the model for a different context length on the
+# first caregiver request and transiently return 503 while the runner restarts.
+export OLLAMA_CONTEXT_LENGTH="${OLLAMA_NUM_CTX:-1536}"
 # The model shares the Railway container with FastAPI. Serialize inference and
 # keep one loaded model so parallel requests cannot multiply KV-cache memory.
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
