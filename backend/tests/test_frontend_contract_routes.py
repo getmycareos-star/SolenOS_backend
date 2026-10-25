@@ -545,7 +545,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         )
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
-        assert len(calls) == 2, "A greeting must use Qwen generation and a Qwen language-quality pass"
+        assert len(calls) == 1, "A greeting must be generated dynamically by Qwen without a canned second-pass response"
         events = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert events.status_code == 200
         assert events.json() == []
