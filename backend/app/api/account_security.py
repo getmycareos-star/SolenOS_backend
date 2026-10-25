@@ -91,10 +91,14 @@ def _valid_totp(secret: bytes, code: str) -> bool:
     return any(hmac.compare_digest(_totp(secret, now + shift * 30), code) for shift in (-1, 0, 1))
 
 
-def _send_email(to_email: str, subject: str, body: str):
+def ensure_mail_configured():
     required = ["SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "APP_PUBLIC_URL"]
     if any(not os.getenv(key) for key in required):
         raise HTTPException(status_code=503, detail="Email delivery is not configured; account security action was not completed")
+
+
+def _send_email(to_email: str, subject: str, body: str):
+    ensure_mail_configured()
     try:
         msg = EmailMessage()
         msg["Subject"] = subject
@@ -209,6 +213,7 @@ class MfaConfirm(BaseModel):
 
 @router.post("/verification/request", status_code=202)
 def request_email_verification(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    ensure_mail_configured()
     email = payload.email.strip().lower()
     ip = request.client.host if request.client else "unknown"
     check_security_action_throttle(db, email, ip, "verify_email")
@@ -234,6 +239,7 @@ def confirm_email_verification(payload: TokenConfirm, db: Session = Depends(get_
 
 @router.post("/password-reset/request", status_code=202)
 def request_password_reset(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    ensure_mail_configured()
     email = payload.email.strip().lower()
     ip = request.client.host if request.client else "unknown"
     check_security_action_throttle(db, email, ip, "password_reset")
@@ -261,6 +267,7 @@ def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(
 
 @router.post("/recovery/request", status_code=202)
 def request_account_recovery(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    ensure_mail_configured()
     email = payload.email.strip().lower()
     ip = request.client.host if request.client else "unknown"
     check_security_action_throttle(db, email, ip, "account_recovery")
