@@ -104,6 +104,13 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         caregiver_id=caregiver_id,
     )
     db.add(account)
+    db.flush()
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    session = db.query(AnonymousSession).filter(AnonymousSession.id == session_id).first() if session_id else None
+    if not session or session.person_id != person_id or session.caregiver_id != caregiver_id:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
+    session.account_id = account.id
     try:
         db.commit()
     except Exception:
@@ -124,6 +131,7 @@ def login(payload: AccountLogin, db: Session = Depends(get_db)):
     session = AnonymousSession(
         person_id=account.person_id,
         caregiver_id=account.caregiver_id,
+        account_id=account.id,
         token_hash=hashlib.sha256(raw_token.encode("utf-8")).hexdigest(),
         expires_at=expires_at,
     )
@@ -152,6 +160,22 @@ def delete_my_account(payload: AccountDelete, request: Request, db: Session = De
         raise HTTPException(status_code=404, detail="There is no account linked to this care record.")
     if not _verify_password(payload.password, account.password_hash):
         raise HTTPException(status_code=401, detail="Password is incorrect. The account was not deleted.")
+    current_session_id = getattr(request.state, "anonymous_session_id", None)
+    linked_sessions = db.query(AnonymousSession).filter(
+        AnonymousSession.account_id == account.id,
+        AnonymousSession.revoked_at.is_(None),
+    ).all()
+    now = datetime.now(timezone.utc)
+    for linked_session in linked_sessions:
+        if linked_session.id == current_session_id:
+            linked_session.account_id = None
+        else:
+            linked_session.revoked_at = now
     db.delete(account)
     db.commit()
-    return {"deleted": True, "care_record_retained": True, "message": "Account deleted. Your existing anonymous care-record session remains available on this device."}
+    return {
+        "deleted": True,
+        "care_record_retained": True,
+        "other_sessions_revoked": True,
+        "message": "Account deleted. Other account-linked sessions were revoked; this device remains in its anonymous care-record session.",
+    }
