@@ -106,50 +106,36 @@ def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
     assert "access-control-allow-origin" not in denied.headers
 
 
-def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
+def test_community_api_is_suspended_without_mutating_stored_posts(monkeypatch):
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        forged = client.post("/api/v1/community", headers=auth, json={
-            "caregiver_id": "caller-controlled-value",
-            "author_type": "solenos_verified",
-            "author_label": "Forged verified identity",
-            "post_type": "experience",
-            "content": "A forged identity must not be accepted.",
-        })
-        assert forged.status_code == 403, forged.text
+        requests = [
+            client.get("/api/v1/community", headers=auth),
+            client.post("/api/v1/community", headers=auth, json={
+                "post_type": "experience",
+                "content": "This must not be stored while Community is suspended.",
+            }),
+            client.post("/api/v1/community/post-id/reactions", headers=auth, json={
+                "reaction_type": "support",
+            }),
+            client.delete("/api/v1/community/post-id/reactions", headers=auth),
+            client.post("/api/v1/community/experience", headers=auth, json={
+                "text": "This must not be processed while Community is suspended.",
+            }),
+            client.post("/api/v1/community/experience/summary", headers=auth, json={
+                "text": "This must not be summarized while Community is suspended.",
+            }),
+        ]
+        for response in requests:
+            assert response.status_code == 404, response.text
+            assert response.json()["detail"] == "Community is currently unavailable"
 
-        created = client.post("/api/v1/community", headers=auth, json={
-            "post_type": "experience",
-            "content": "A quiet routine helped us prepare for bedtime.",
-            "tags": ["routine", "sleep"],
-        })
-        assert created.status_code == 201, created.text
-        post = created.json()
-        assert post["author_type"] == "peer_caregiver"
-        assert post["author_label"] == "Anonymous caregiver"
-
-        feed = client.get("/api/v1/community", headers=auth)
-        assert feed.status_code == 200
-        assert any(row["id"] == post["id"] for row in feed.json()["posts"])
-
-        reaction = client.post(
-            f"/api/v1/community/{post['id']}/reactions",
-            headers=auth,
-            json={"reaction_type": "support"},
-        )
-        assert reaction.status_code == 200, reaction.text
-        assert reaction.json()["reaction_counts"]["support"] == 1
-
-        other_reaction = client.post(
-            f"/api/v1/community/{post['id']}/reactions",
-            headers={"Authorization": f"Bearer {other_token}"},
-            json={"reaction_type": "like"},
-        )
-        assert other_reaction.status_code == 200, other_reaction.text
         db = TestingSessionLocal()
-        assert db.query(CommunityPost).filter_by(id=post["id"]).count() == 1
-        db.close()
+        try:
+            assert db.query(CommunityPost).count() == 0
+        finally:
+            db.close()
     finally:
         teardown()
 
@@ -454,7 +440,7 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         )
         headers = {"Authorization": f"Bearer {token}"}
         workflows = [
-            "daily_capture", "document", "community", "appointment",
+            "daily_capture", "document", "appointment",
             "after_appointment", "handoff", "professional_summary",
             "open_loops", "two_week_review", "decision_outcome",
             "medication_day", "living_care_record",
@@ -485,43 +471,21 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         teardown()
 
 
-def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch):
-    from datetime import datetime, timezone
+def test_community_qwen_assist_is_disabled_before_private_context_is_loaded(monkeypatch):
     import app.api.collaboration as collaboration
 
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     try:
-        db = TestingSessionLocal()
-        db.add(CareEvent(
-            id="private-lcr-context",
-            person_id=person_id,
-            event_type="care_note",
-            status="recorded",
-            occurred_at=datetime.now(timezone.utc),
-            title="PRIVATE LCR detail must not enter Community",
-            description="Private care detail that Community Qwen must not receive.",
-            created_by_caregiver_id=caregiver_id,
-        ))
-        db.commit()
-        db.close()
-
-        captured = {}
-
-        def capture_qwen(messages, **kwargs):
-            captured["messages"] = messages
-            return "I found no matching published peer experiences."
-
-        monkeypatch.setattr(collaboration, "qwen_chat", capture_qwen)
+        calls = []
+        monkeypatch.setattr(collaboration, "qwen_chat", lambda messages, **kwargs: calls.append(messages))
         response = client.post(
             "/api/v1/assistant/assist",
             headers={"Authorization": f"Bearer {token}"},
-            json={"workflow": "community", "text": "bedtime routine", "appointment_id": "private-appointment"},
+            json={"workflow": "community", "text": "bedtime routine"},
         )
-        assert response.status_code == 200, response.text
-        prompt = "\n".join(message["content"] for message in captured["messages"])
-        assert "PRIVATE LCR detail must not enter Community" not in prompt
-        assert "Private care detail that Community Qwen must not receive" not in prompt
-        assert response.json()["written_to_lcr"] is False
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == "Community is currently unavailable"
+        assert calls == []
     finally:
         teardown()
 
