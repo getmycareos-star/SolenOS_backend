@@ -87,8 +87,8 @@ jobs:
             INSERT INTO alembic_version (version_num) VALUES ('20261024_04');
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261025_04"
-          for table in care_state_revisions care_assertions care_action_outcomes share_intakes; do
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261025_05"
+          for table in care_state_revisions care_assertions care_action_outcomes share_intakes account_security_tokens account_mfa_secrets account_mfa_recovery_codes account_login_attempts account_security_requests; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             test "$found" = "$table"
           done
