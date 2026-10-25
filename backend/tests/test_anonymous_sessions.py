@@ -328,3 +328,117 @@ def test_done_for_now_cannot_pause_another_session_scope():
         },
     )
     assert denied.status_code == 403, denied.text
+
+
+def _accept_required_privacy_terms(client, created, *, improvement=False):
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    response = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": improvement,
+            "accepted_terms_version": "2026-10",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["verified"] is True
+    return headers
+
+
+def test_required_privacy_and_optional_improvement_choice_persist_per_session():
+    client = TestClient(app)
+    created = create_session(client, "Consent persistence recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+
+    initial = client.get(
+        f"/api/v1/consent?person_id={created['person']['id']}",
+        headers=headers,
+    )
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["verified"] is False
+    assert initial.json()["required"] is True
+
+    _accept_required_privacy_terms(client, created, improvement=False)
+    saved_off = client.get(
+        f"/api/v1/consent?person_id={created['person']['id']}",
+        headers=headers,
+    )
+    assert saved_off.status_code == 200, saved_off.text
+    assert saved_off.json()["verified"] is True
+    assert saved_off.json()["profile"]["data_improvement_consent"] is False
+
+    opted_in = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": True,
+        },
+    )
+    assert opted_in.status_code == 200, opted_in.text
+    assert opted_in.json()["profile"]["data_improvement_consent"] is True
+
+    opted_out = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": False,
+        },
+    )
+    assert opted_out.status_code == 200, opted_out.text
+    reread = client.get(
+        f"/api/v1/consent?person_id={created['person']['id']}",
+        headers=headers,
+    )
+    assert reread.status_code == 200, reread.text
+    assert reread.json()["profile"]["data_improvement_consent"] is False
+
+
+def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
+    client = TestClient(app)
+    created = create_session(client, "Feedback consent recipient")
+    query = {
+        "person_id": created["person"]["id"],
+        "caregiver_id": created["caregiver"]["id"],
+        "category": "help_improve",
+        "detail": "Deliberately submitted feedback for the opt-in route.",
+    }
+
+    no_session = client.post("/api/v1/feedback", params=query)
+    assert no_session.status_code == 401, no_session.text
+
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    opt_out = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert opt_out.status_code == 403, opt_out.text
+
+    _accept_required_privacy_terms(client, created, improvement=False)
+    still_opted_out = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert still_opted_out.status_code == 403, still_opted_out.text
+
+    enabled = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": True,
+        },
+    )
+    assert enabled.status_code == 200, enabled.text
+
+    recorded = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert recorded.status_code == 200, recorded.text
+    assert recorded.json()["event_type"] == "feedback"
+    assert recorded.json()["source_type"] == "feedback"
