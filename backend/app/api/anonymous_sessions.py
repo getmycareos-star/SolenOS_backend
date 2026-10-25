@@ -86,6 +86,8 @@ def _issue_account_session(db: Session, account: CaregiverAccount) -> dict:
 @router.post("/register", status_code=201)
 def register_account(payload: AccountRegister, request: Request, db: Session = Depends(get_db)):
     """Create an email/password caregiver account and a durable initial care record."""
+    from app.api.account_security import ensure_mail_configured
+    ensure_mail_configured()
     email = _normalise_email(payload.email)
     caregiver_name = payload.caregiver_name.strip()
     recipient_name = payload.care_recipient_name.strip()
