@@ -160,7 +160,7 @@ def create_contribution(payload: ProfessionalContribution, request: Request, db:
         post_type="experience",
         content=body,
         care_stage="unspecified",
-        tags_json=__import__("json").dumps(["professional", payload.contribution_type]),
+        tags_json=json.dumps(["professional", payload.contribution_type]),
         visibility="public",
         moderation_status="published",
     )
