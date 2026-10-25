@@ -22,7 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, QwenReviewCandidate
 
 router = APIRouter(tags=["community and companion"])
 
@@ -56,6 +56,15 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+class QwenCandidateRequest(BaseModel):
+    event_id: str = Field(min_length=1, max_length=128)
+
+
+class QwenCandidateReview(BaseModel):
+    decision: Literal["accepted", "rejected"]
+    review_note: Optional[str] = Field(default=None, max_length=2000)
 
 
 class QwenAssistRequest(BaseModel):
@@ -530,6 +539,175 @@ def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
 def qwen_assistant_status():
     # Infrastructure-only health data: no care-record context is read or returned.
     return qwen_runtime_status()
+
+
+@router.post("/assistant/extract-candidates")
+async def qwen_extract_saved_event_candidates(
+    payload: QwenCandidateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Analyze a saved event and persist suggestions outside the authoritative LCR."""
+    person_id, caregiver_id = _scope(request, db)
+    event = db.query(CareEvent).filter(
+        CareEvent.id == payload.event_id,
+        CareEvent.person_id == person_id,
+    ).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Saved care event not found in this care record")
+
+    sources: list[tuple[str | None, str]] = []
+    evidence_ids = list(event.evidence_ids or [])
+    if evidence_ids:
+        rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(evidence_ids),
+        ).all()
+        by_id = {str(row.id): row for row in rows}
+        for evidence_id in evidence_ids:
+            row = by_id.get(str(evidence_id))
+            if row and isinstance(row.source_text, str) and row.source_text.strip():
+                sources.append((str(row.id), row.source_text.strip()))
+    elif isinstance(event.description, str) and event.description.strip():
+        sources.append((None, event.description.strip()))
+
+    if not sources:
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": "no_source_text",
+            "qwen_candidates": {"observations": [], "open_questions": []},
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    generated = {"observations": [], "open_questions": []}
+    try:
+        for evidence_id, source_text in sources[:5]:
+            candidate_set = await asyncio.to_thread(
+                extract_review_candidates,
+                source_text,
+                source_event_id=str(event.id),
+                source_evidence_id=evidence_id,
+            )
+            generated["observations"].extend(candidate_set["observations"])
+            generated["open_questions"].extend(candidate_set["open_questions"])
+    except HTTPException as exc:
+        if exc.status_code != 503:
+            raise
+        detail = str(exc.detail).casefold()
+        status = "invalid_response" if "invalid candidate structure" in detail else "unavailable"
+        return {
+            "event_id": event.id,
+            "qwen_extraction_status": status,
+            "qwen_candidates": None,
+            "ai_generated": False,
+            "written_to_lcr": False,
+        }
+
+    persisted = []
+    for item in generated["observations"][:12]:
+        source_evidence_id = item.get("source_evidence_id")
+        query = db.query(QwenReviewCandidate).filter(
+            QwenReviewCandidate.person_id == person_id,
+            QwenReviewCandidate.source_event_id == str(event.id),
+            QwenReviewCandidate.source_quote == item["source_quote"],
+            QwenReviewCandidate.observation == item["observation"],
+        )
+        if source_evidence_id:
+            query = query.filter(QwenReviewCandidate.source_evidence_id == source_evidence_id)
+        else:
+            query = query.filter(QwenReviewCandidate.source_evidence_id.is_(None))
+        candidate = query.first()
+        if candidate is None:
+            candidate = QwenReviewCandidate(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_event_id=str(event.id),
+                source_evidence_id=source_evidence_id,
+                subject=item["subject"],
+                observation=item["observation"],
+                source_quote=item["source_quote"],
+                status="pending_review",
+            )
+            db.add(candidate)
+            db.flush()
+        item["candidate_id"] = candidate.id
+        item["review_status"] = candidate.status
+        persisted.append(item)
+    db.commit()
+    return {
+        "event_id": event.id,
+        "qwen_extraction_status": "pending_review",
+        "qwen_candidates": {
+            "observations": persisted,
+            "open_questions": list(dict.fromkeys(generated["open_questions"]))[:3],
+        },
+        "ai_generated": True,
+        "written_to_lcr": False,
+        "candidates_persisted": True,
+    }
+
+
+@router.get("/assistant/candidates")
+def list_qwen_candidates(
+    request: Request,
+    status: Optional[str] = Query(default="pending_review", pattern="^(pending_review|accepted|rejected|all)$"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    person_id, _caregiver_id = _scope(request, db)
+    query = db.query(QwenReviewCandidate).filter(QwenReviewCandidate.person_id == person_id)
+    if status != "all":
+        query = query.filter(QwenReviewCandidate.status == status)
+    rows = query.order_by(QwenReviewCandidate.created_at.desc()).limit(limit).all()
+    return [{
+        "id": row.id,
+        "person_id": row.person_id,
+        "source_event_id": row.source_event_id,
+        "source_evidence_id": row.source_evidence_id,
+        "subject": row.subject,
+        "observation": row.observation,
+        "source_quote": row.source_quote,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
+        "review_note": row.review_note,
+        "written_to_lcr": False,
+    } for row in rows]
+
+
+@router.post("/assistant/candidates/{candidate_id}/review")
+def review_qwen_candidate(
+    candidate_id: str,
+    payload: QwenCandidateReview,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    candidate = db.query(QwenReviewCandidate).filter(
+        QwenReviewCandidate.id == candidate_id,
+        QwenReviewCandidate.person_id == person_id,
+    ).first()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Review candidate not found in this care record")
+    if candidate.status != "pending_review":
+        raise HTTPException(status_code=409, detail="This candidate has already been reviewed")
+    candidate.status = payload.decision
+    candidate.reviewed_at = datetime.now(timezone.utc)
+    candidate.reviewed_by_caregiver_id = caregiver_id
+    candidate.review_note = payload.review_note.strip() if payload.review_note else None
+    db.commit()
+    db.refresh(candidate)
+    return {
+        "id": candidate.id,
+        "status": candidate.status,
+        "reviewed_by_caregiver_id": candidate.reviewed_by_caregiver_id,
+        "reviewed_at": candidate.reviewed_at.isoformat() if candidate.reviewed_at else None,
+        "written_to_lcr": False,
+        "message": "Review decision saved. This does not create or change an authoritative Living Care Record fact.",
+    }
+
 
 
 @router.post("/assistant/assist")
