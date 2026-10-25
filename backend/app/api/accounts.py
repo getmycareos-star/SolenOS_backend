@@ -104,15 +104,18 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         caregiver_id=caregiver_id,
     )
     db.add(account)
-    db.flush()
-    session_id = getattr(request.state, "anonymous_session_id", None)
-    session = db.query(AnonymousSession).filter(AnonymousSession.id == session_id).first() if session_id else None
-    if not session or session.person_id != person_id or session.caregiver_id != caregiver_id:
-        db.rollback()
-        raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
-    session.account_id = account.id
     try:
+        db.flush()
+        session_id = getattr(request.state, "anonymous_session_id", None)
+        session = db.query(AnonymousSession).filter(AnonymousSession.id == session_id).first() if session_id else None
+        if not session or session.person_id != person_id or session.caregiver_id != caregiver_id:
+            db.rollback()
+            raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
+        session.account_id = account.id
         db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception:
         db.rollback()
         raise HTTPException(status_code=409, detail="We could not create this account. The email or care record may already be registered.")
