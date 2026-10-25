@@ -16,6 +16,7 @@ class AnonymousSession(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=True, index=True)
     token_hash = Column(String(64), nullable=False, unique=True, index=True)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
