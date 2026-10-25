@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.feature_flags import COMMUNITY_ENABLED, PROFESSIONAL_COMMUNITY_ENABLED
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
@@ -534,6 +535,8 @@ def qwen_assistant_status():
 
 @router.post("/assistant/assist")
 async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
+    if payload.workflow == "community" and not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED):
+        raise HTTPException(status_code=404, detail="Community is currently unavailable")
     """Read-only Qwen support across SolenOS; never mutates the Living Care Record."""
     person_id, caregiver_id = _scope(request, db)
     context_lines: list[str] = []

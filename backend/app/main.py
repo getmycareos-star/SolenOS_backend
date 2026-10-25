@@ -33,6 +33,7 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
+from app.core.feature_flags import COMMUNITY_ENABLED, PROFESSIONAL_COMMUNITY_ENABLED
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -63,7 +64,19 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
-app.include_router(collaboration_router, prefix="/api/v1")
+# Register the collaboration router selectively: keep its implementation in
+# source control, but do not expose Community endpoints while suspended.
+if COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED:
+    app.include_router(collaboration_router, prefix="/api/v1")
+else:
+    suspended_community_router = APIRouter(tags=collaboration_router.tags)
+    for collaboration_route in collaboration_router.routes:
+        route_path = str(getattr(collaboration_route, "path", "")).lower()
+        route_segments = {part for part in route_path.split("/") if part}
+        if "community" in route_segments:
+            continue
+        suspended_community_router.routes.append(collaboration_route)
+    app.include_router(suspended_community_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
@@ -80,6 +93,9 @@ PUBLIC_V1_ENDPOINTS = {
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
     ("/api/v1/accounts/login", "POST"),
+    # The assistant validates bearer identity inside its handler after checking the
+    # disabled Community workflow, so other workflows remain protected.
+    ("/api/v1/assistant/assist", "POST"),
 }
 
 
@@ -89,8 +105,54 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
+
+    # Community is suspended at the API boundary, before bearer-session checks.
+    # Check both ASGI scope and reconstructed URL to account for reverse-proxy root_path
+    # handling; keep route implementations and persisted data intact.
+    request_paths = {
+        str(request.scope.get("path") or "").lower().rstrip("/"),
+        str(request.url.path or "").lower().rstrip("/"),
+    }
+    community_path = any(
+        any(segment == "community" for segment in candidate.split("/") if segment)
+        for candidate in request_paths
+    )
+    community_enabled = COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED
+    if not community_enabled and community_path:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Community is currently unavailable"},
+        )
+
+    # Community is also a selectable assistant workflow, so reject that workflow
+    # independently while preserving all other Companion workflows.
+    if not community_enabled and method == "POST" and any(
+        candidate.endswith("/assistant/assist") for candidate in request_paths
+    ):
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict) and str(payload.get("workflow", "")).lower() == "community":
+            return JSONResponse(
+                status_code=404,
+                content={"detail": "Community is currently unavailable"},
+            )
+
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
+    # Suspended Community routes are deliberately not registered. Let FastAPI
+    # return its normal 404 rather than masking the disabled feature as 401.
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and any(
+        segment == "community"
+        for candidate in (path.lower(), str(request.url.path or "").lower())
+        for segment in candidate.split("/")
+        if segment
+    ):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Community is currently unavailable"},
+        )
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
     # The share receiver stores a short-lived, random one-time capability, not
