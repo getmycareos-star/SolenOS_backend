@@ -978,3 +978,20 @@ def test_qwen_support_fails_closed_after_repeated_unsupported_clinical_claim(mon
         assert after.json() == before.json(), "Qwen assistance must not write to the Living Care Record."
     finally:
         teardown()
+
+
+def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff_assignment():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    assert _contains_unsupported_care_claim(
+        "Repeated questions can be a sign of dementia.",
+        "My father asked the same question several times today.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Lunch is unconfirmed. Handoff to the caregiver.",
+        "Lunch not yet confirmed.",
+    )
+    assert not _contains_unsupported_care_claim(
+        "The caregiver reported a dementia diagnosis.",
+        "The caregiver reported a dementia diagnosis.",
+    )
