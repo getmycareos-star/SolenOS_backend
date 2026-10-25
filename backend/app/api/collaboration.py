@@ -685,7 +685,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "workflow": payload.workflow,
         "reply": reply,
         "ai_generated": True,
-        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
         "authority": "solenos_care_record_and_caregiver",
         "review_required": True,
         "written_to_lcr": False,
