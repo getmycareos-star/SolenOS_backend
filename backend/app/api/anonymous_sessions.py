@@ -107,3 +107,21 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
         "expires_at": expires_at.isoformat(),
         "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
     }
+
+
+@router.post("/revoke")
+def revoke_anonymous_session(request: Request, db: Session = Depends(get_db)):
+    """Revoke the current bearer capability without deleting its care record."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="A valid anonymous session is required")
+    session = (
+        db.query(AnonymousSession)
+        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+    session.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"revoked": True, "care_record_retained": True}
