@@ -425,7 +425,7 @@ def _greeting_reply_needs_revision(reply: str) -> bool:
     """Greeting-only replies should mirror the user, not start a new interview."""
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
-    repeats_automatic_question = bool(re.search(r"\\bhow are you(?: doing)?\\b", normalized))
+    repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     return not words or len(words) > 12 or repeats_automatic_question
 
 
@@ -776,7 +776,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         # Apply a Qwen-generated language repair before failing closed. No canned
         # greeting or acknowledgement is ever substituted by application code.
-        source_context = payload.text + "\\n" + "\\n".join(context_lines)
+        source_context = payload.text + "\n" + "\n".join(context_lines)
         needs_language_repair = (
             _companion_reply_needs_revision(reply)
             or _contains_unrequested_saba(reply, source_context)
