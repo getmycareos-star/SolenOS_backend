@@ -134,3 +134,47 @@ def test_account_session_can_be_revoked_server_side():
     assert revoked.json()["revoked"] is True
     current = client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {token}"})
     assert current.status_code == 401, current.text
+
+
+def test_signup_safely_claims_existing_anonymous_record_and_revokes_old_capability():
+    client = TestClient(app)
+    anonymous = client.post("/api/v1/sessions/anonymous", json={
+        "name": "Mum", "caregiver_name": "David"
+    })
+    assert anonymous.status_code == 201, anonymous.text
+    old = anonymous.json()
+    registered = client.post("/api/v1/sessions/register", json={
+        "email": "claim@example.com",
+        "password": "claim-long-password",
+        "caregiver_name": "David",
+        "care_recipient_name": "Mum",
+        "anonymous_access_token": old["access_token"],
+    })
+    assert registered.status_code == 201, registered.text
+    claimed = registered.json()
+    assert claimed["claimed_existing_record"] is True
+    assert claimed["person"]["id"] == old["person"]["id"]
+    assert claimed["caregiver"]["id"] == old["caregiver"]["id"]
+    assert client.get("/api/v1/sessions/me", headers={
+        "Authorization": f"Bearer {old['access_token']}"
+    }).status_code == 401
+    assert client.get("/api/v1/sessions/me", headers={
+        "Authorization": f"Bearer {claimed['access_token']}"
+    }).json()["account"]["email"] == "claim@example.com"
+
+
+def test_signup_does_not_claim_record_without_valid_anonymous_ownership_proof():
+    client = TestClient(app)
+    response = client.post("/api/v1/sessions/register", json={
+        "email": "unproven-claim@example.com",
+        "password": "claim-long-password",
+        "caregiver_name": "David",
+        "care_recipient_name": "Mum",
+        "anonymous_access_token": "not-a-real-session-token",
+    })
+    assert response.status_code == 401, response.text
+    db = TestSessionLocal()
+    try:
+        assert db.query(CaregiverAccount).filter_by(email="unproven-claim@example.com").first() is None
+    finally:
+        db.close()
