@@ -529,6 +529,16 @@ def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch)
         teardown()
 
 
+def test_greeting_quality_guard_rejects_automatic_questions_but_allows_natural_acknowledgements():
+    import app.api.collaboration as collaboration
+
+    assert collaboration._greeting_reply_needs_revision("Hi! How can I help you?")
+    assert collaboration._greeting_reply_needs_revision("Hello. What can I do for you?")
+    assert collaboration._greeting_reply_needs_revision("Hi, how are you doing?")
+    assert not collaboration._greeting_reply_needs_revision("Hi there.")
+    assert not collaboration._greeting_reply_needs_revision("Hello, good to hear from you.")
+
+
 def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypatch):
     client, token, person_id, _, _, _ = setup_client(monkeypatch)
     try:
