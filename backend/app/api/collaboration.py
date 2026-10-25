@@ -99,10 +99,10 @@ def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None)
             counts[reaction.reaction_type] += 1
     return {
         "id": post.id,
-        "author_type": "peer_caregiver",
-        "author_label": "Anonymous caregiver",
-        "author_avatar_seed": "caregiver",
-        "title": post.content[:100] if post.post_type == "question" else None,
+        "author_type": post.author_type or "peer_caregiver",
+        "author_label": post.author_label or "Anonymous caregiver",
+        "author_avatar_seed": "professional" if post.professional_id else "caregiver",
+        "title": post.title or (post.content[:100] if post.post_type == "question" else None),
         "body": post.content,
         "content": post.content,
         "media": [],
@@ -111,7 +111,7 @@ def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None)
         "tags": json.loads(post.tags_json or "[]"),
         "created_at": post.created_at.isoformat() if post.created_at else datetime.now(timezone.utc).isoformat(),
         "updated_at": post.updated_at.isoformat() if post.updated_at else None,
-        "provenance_source": "caregiver_submitted",
+        "provenance_source": "verified_professional" if post.professional_id else "caregiver_submitted",
         "reaction_counts": counts,
         "comment_count": 0,
         "user_reaction": next((r.reaction_type for r in reactions if actor_id and r.caregiver_id == actor_id), None),
