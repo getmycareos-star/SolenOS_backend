@@ -59,6 +59,8 @@ def setup_function():
         conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_security_requests (
             id VARCHAR(36) PRIMARY KEY, email_hash VARCHAR(64) NOT NULL, ip_hash VARCHAR(64) NOT NULL,
             purpose VARCHAR(32) NOT NULL, requested_at DATETIME NOT NULL)""")
+        for table in ("account_security_tokens", "account_mfa_secrets", "account_mfa_recovery_codes", "account_login_attempts", "account_security_requests"):
+            conn.exec_driver_sql(f"DELETE FROM {table}")
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
     account_security._send_email = lambda to, subject, body: sent_messages.append((to, subject, body))
