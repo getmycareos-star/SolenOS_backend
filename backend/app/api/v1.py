@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.models.anonymous_session import AnonymousSession
+from app.models.collaboration import ConsentRecord
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -584,17 +585,45 @@ def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
-    person_id: str, category: str, detail: str, caregiver_id: str, db: Session = Depends(get_db)
+    request: Request,
+    person_id: str,
+    category: str,
+    detail: str,
+    caregiver_id: str,
+    db: Session = Depends(get_db),
 ):
+    # Feedback is an optional improvement route, not a general unauthenticated
+    # write endpoint. Resolve identity from the bearer session and require the
+    # caregiver's persisted opt-in before recording or learning from any detail.
+    session = _require_session_scope(request, db, person_id, caregiver_id)
+    consent = (
+        db.query(ConsentRecord)
+        .filter_by(person_id=session.person_id, caregiver_id=session.caregiver_id)
+        .first()
+    )
+    consent_verified = bool(
+        consent
+        and consent.revoked_at is None
+        and consent.medical_disclaimer_acknowledged
+        and consent.privacy_model_acknowledged
+        and consent.multi_caregiver_acknowledged
+        and consent.no_advertising_acknowledged
+    )
+    if not consent_verified or consent.data_improvement_consent is not True:
+        raise HTTPException(
+            status_code=403,
+            detail="Optional improvement feedback requires a verified privacy acknowledgement and an explicit opt-in.",
+        )
+
     engine = LearningEngine(db)
-    engine.record_feedback(person_id, category, detail, caregiver_id)
-    engine.after_save(person_id)
+    engine.record_feedback(session.person_id, category, detail, session.caregiver_id)
+    engine.after_save(session.person_id)
     event = LearningEventModel(
-        person_id=person_id,
+        person_id=session.person_id,
         event_type="feedback",
         detail=f"{category}: {detail}",
         source_type="feedback",
-        caregiver_id=caregiver_id,
+        caregiver_id=session.caregiver_id,
     )
     db.add(event)
     db.commit()
