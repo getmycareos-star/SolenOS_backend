@@ -1,4 +1,4 @@
-""""Contract checks for the enabled SolenOS Qwen workflows.
+"""Contract checks for the enabled SolenOS Qwen workflows.
 
 These checks prove accepted workflow IDs and Community exclusion only. They do
 not claim live inference or durable background-job execution; those require
