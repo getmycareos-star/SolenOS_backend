@@ -64,7 +64,19 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
-app.include_router(collaboration_router, prefix="/api/v1")
+# Register the collaboration router selectively: keep its implementation in
+# source control, but do not expose Community endpoints while suspended.
+if COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED:
+    app.include_router(collaboration_router, prefix="/api/v1")
+else:
+    suspended_community_router = APIRouter(tags=collaboration_router.tags)
+    for collaboration_route in collaboration_router.routes:
+        route_path = str(getattr(collaboration_route, "path", "")).lower()
+        route_segments = {part for part in route_path.split("/") if part}
+        if "community" in route_segments:
+            continue
+        suspended_community_router.routes.append(collaboration_route)
+    app.include_router(suspended_community_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
