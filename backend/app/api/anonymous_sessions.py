@@ -167,6 +167,23 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
     }
 
 
+@router.post("/revoke")
+def revoke_current_session(request: Request, db: Session = Depends(get_db)):
+    """Revoke only the bearer session presented with this request."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="A valid session is required")
+    session = db.query(AnonymousSession).filter(
+        AnonymousSession.id == session_id,
+        AnonymousSession.revoked_at.is_(None),
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=401, detail="Session is invalid")
+    session.revoked_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"revoked": True}
+
+
 @router.post("/refresh")
 def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     """Rotate a still-valid bearer capability without changing record ownership."""
