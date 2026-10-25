@@ -364,6 +364,16 @@ def _companion_reply_needs_revision(text: str) -> bool:
     return any(term in normalized for term in internal_terms)
 
 
+def _greeting_reply_needs_revision(text: str) -> bool:
+    """Reject malformed or interview-style replies to a simple greeting."""
+    raw = (text or "").strip()
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", raw.casefold(), flags=re.UNICODE)
+    if not words or len(words) > 5 or "?" in raw:
+        return True
+    disallowed = {"how", "what", "can", "help", "assist", "need"}
+    return bool(disallowed.intersection(words))
+
+
 @router.post("/share-intake", status_code=201)
 def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
