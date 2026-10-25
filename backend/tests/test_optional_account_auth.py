@@ -244,3 +244,38 @@ def test_signup_rejects_expired_or_invalid_existing_session_without_creating_a_r
         assert db.query(AnonymousSession).count() == 0
     finally:
         db.close()
+
+def test_login_does_not_silently_switch_a_different_anonymous_care_record():
+    client = TestClient(app)
+    created = signup(client)
+    assert created.status_code == 201, created.text
+    account = created.json()
+
+    other = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Separate anonymous record", "caregiver_name": "Different caregiver"},
+    )
+    assert other.status_code == 201, other.text
+    anonymous = other.json()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        headers={"Authorization": f"Bearer {anonymous['access_token']}"},
+        json={"email": "caregiver@example.com", "password": "a-long-caregiver-password-2026"},
+    )
+    assert login.status_code == 409, login.text
+    assert "different anonymous care record" in login.json()["detail"]
+
+    # The existing record and bearer are not revoked, merged, or replaced.
+    still_valid = client.get(
+        f"/api/v1/events/{anonymous['person']['id']}",
+        headers={"Authorization": f"Bearer {anonymous['access_token']}"},
+    )
+    assert still_valid.status_code != 401
+    db = TestSessionLocal()
+    try:
+        current = db.query(AnonymousSession).filter_by(id=anonymous["session_id"]).one()
+        assert current.revoked_at is None
+        assert db.query(AuthSession).filter_by(account_id=account["account"]["id"]).count() == 1
+    finally:
+        db.close()
