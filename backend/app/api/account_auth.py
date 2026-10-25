@@ -144,7 +144,10 @@ def me(authorization: str | None = Header(default=None), db: Session = Depends(g
 def logout(authorization: str | None = Header(default=None), db: Session = Depends(get_db)):
     account, session = _resolve_account(db, authorization)
     now = datetime.now(timezone.utc)
-    session.revoked_at = now
+    db.query(AuthSession).filter(
+        AuthSession.account_id == account.id,
+        AuthSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
     db.query(AnonymousSession).filter(
         AnonymousSession.account_id == account.id,
         AnonymousSession.revoked_at.is_(None),
