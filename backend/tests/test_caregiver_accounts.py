@@ -94,3 +94,26 @@ def test_account_cannot_be_created_for_another_care_record():
         json={"email": "caregiver@example.com", "password": "a-long-test-password-123", "person_id": second["person"]["id"]},
     )
     assert response.status_code == 403, response.text
+
+
+def test_revoke_endpoint_revokes_only_the_current_bearer_session():
+    client = TestClient(app)
+    current = create_session(client)
+    other = create_session(client)
+    response = client.post(
+        "/api/v1/sessions/revoke",
+        headers={"Authorization": f"Bearer {current['access_token']}"},
+        json={},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["revoked"] is True
+    revoked_read = client.get(
+        f"/api/v1/evidence/{current['person']['id']}",
+        headers={"Authorization": f"Bearer {current['access_token']}"},
+    )
+    assert revoked_read.status_code == 401
+    other_read = client.get(
+        f"/api/v1/evidence/{other['person']['id']}",
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert other_read.status_code == 200, other_read.text
