@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer, Boolean
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -70,3 +70,20 @@ class ShareIntake(Base):
     payload_json = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+
+
+class ConsentRecord(Base):
+    __tablename__ = "caregiver_consents"
+    __table_args__ = (UniqueConstraint("person_id", "caregiver_id", name="uq_caregiver_consent_person_actor"),)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    medical_disclaimer_acknowledged = Column(Boolean, nullable=False, default=False)
+    privacy_model_acknowledged = Column(Boolean, nullable=False, default=False)
+    multi_caregiver_acknowledged = Column(Boolean, nullable=False, default=False)
+    no_advertising_acknowledged = Column(Boolean, nullable=False, default=False)
+    data_improvement_consent = Column(Boolean, nullable=False, default=False)
+    accepted_terms_version = Column(String, nullable=False, default="2026-10")
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
