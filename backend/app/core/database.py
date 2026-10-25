@@ -31,6 +31,7 @@ import app.models.causal  # noqa: E402, F401
 import app.models.collaboration  # noqa: E402, F401
 import app.models.care_continuity  # noqa: E402, F401
 import app.models.safety  # noqa: E402, F401
+import app.models.reminder  # noqa: E402, F401
 
 
 def get_db():
