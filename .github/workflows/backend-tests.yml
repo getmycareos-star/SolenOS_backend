@@ -200,10 +200,24 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
-          echo "QWEN_E2E: runtime status"
-          status=$(curl --fail --silent --show-error -H "$auth_header" \
-            http://127.0.0.1:8080/api/v1/assistant/status)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:0.5b"' "$status"
+          echo "QWEN_E2E: wait for bundled Qwen runtime"
+          qwen_ready=0
+          for attempt in $(seq 1 90); do
+            if status=$(curl --fail --silent -H "$auth_header" \
+              http://127.0.0.1:8080/api/v1/assistant/status 2>/dev/null); then
+              if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:0.5b"' "$status" 2>/dev/null; then
+                qwen_ready=1
+                break
+              fi
+            fi
+            sleep 2
+          done
+          if [ "$qwen_ready" -ne 1 ]; then
+            echo "Bundled Qwen runtime did not become available within 180 seconds." >&2
+            docker logs solenos-qwen-e2e >&2 || true
+            docker exec solenos-qwen-e2e bash -lc 'cat /tmp/ollama-runtime.log' >&2 || true
+            exit 1
+          fi
 
           echo "QWEN_E2E: Companion greeting"
           greeting=$(curl --fail --silent --show-error \
