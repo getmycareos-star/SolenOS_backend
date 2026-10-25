@@ -518,7 +518,7 @@ def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch)
             json={"workflow": "community", "text": "bedtime routine"},
         )
         assert response.status_code == 200, response.text
-        prompt = "\\n".join(message["content"] for message in captured["messages"])
+        prompt = "\n".join(message["content"] for message in captured["messages"])
         assert "PRIVATE LCR detail must not enter Community" not in prompt
         assert "Private care detail that Community Qwen must not receive" not in prompt
         assert response.json()["written_to_lcr"] is False
