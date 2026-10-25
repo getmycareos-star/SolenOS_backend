@@ -20,6 +20,7 @@ from app.api.collaboration import router as collaboration_router
 from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
 from app.api.reminders import router as reminders_router
+from app.api.capture_review import router as capture_review_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -31,6 +32,7 @@ from app.schemas.situation import InteractionPauseResponse, SituationInput, Situ
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
+from app.services.capture_review import persist_capture_analysis
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -65,6 +67,7 @@ app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(capture_review_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -168,6 +171,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path == "/api/v1/upload"
             or path.startswith("/api/v1/assistant/")
             or path.startswith("/api/v1/reminders")
+            or path.startswith("/api/v1/capture/analyses/")
         ):
             # These operations use the bearer session as their record scope.
             # Assistant requests intentionally omit client-selected person IDs;
@@ -643,6 +647,7 @@ async def post_situation(
     source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
     source_text = "\n".join(source_parts).strip()
     if source_text:
+        candidates = None
         try:
             candidates = await asyncio.to_thread(
                 extract_review_candidates,
@@ -650,18 +655,28 @@ async def post_situation(
                 source_event_id=result.care_event_id,
                 source_evidence_id=result.evidence_id,
             )
-            response_payload["qwen_extraction_status"] = "available"
-            response_payload["qwen_candidates"] = candidates
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
+            extraction_status = "available"
         except Exception:
-            response_payload["qwen_extraction_status"] = "unavailable"
-            response_payload["qwen_candidates"] = None
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
+            extraction_status = "unavailable"
+        analysis = persist_capture_analysis(
+            db,
+            person_id=scoped_person_id,
+            caregiver_id=scoped_caregiver_id,
+            source_event_id=result.care_event_id,
+            source_evidence_id=result.evidence_id,
+            source_text=source_text,
+            extraction_status=extraction_status,
+            candidates=candidates if extraction_status == "available" else None,
+        )
+        response_payload["qwen_extraction_status"] = extraction_status
+        response_payload["qwen_candidates"] = candidates
+        response_payload["qwen_analysis_id"] = analysis.id
+        response_payload["qwen_review_required"] = True
+        response_payload["qwen_written_to_lcr"] = False
     else:
         response_payload["qwen_extraction_status"] = "not_applicable"
         response_payload["qwen_candidates"] = None
+        response_payload["qwen_analysis_id"] = None
         response_payload["qwen_review_required"] = False
         response_payload["qwen_written_to_lcr"] = False
     return response_payload
