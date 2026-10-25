@@ -64,7 +64,7 @@ class QwenAssistRequest(BaseModel):
         "care_situation_change", "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff", "professional_summary",
         "open_loops", "two_week_review", "decision_outcome", "medication_day",
-        "reminders_notifications", "care_coordination", "community", "companion",
+        "reminders_notifications", "care_coordination", "companion",
         "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
         "settings_security", "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
     ]
@@ -338,6 +338,7 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
 async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
+    raise HTTPException(status_code=410, detail="Community Qwen assistance is disabled.")
     _scope(request, db)
     observation = str(payload.get("observation", "")).strip()
     if not observation:
@@ -644,7 +645,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
         "reminders_notifications": "Explain only persisted reminder and notification details in the supplied context. Do not create, schedule, send, or claim delivery of a reminder.",
         "care_coordination": "Prepare proposed coordination language from supplied facts. Do not assign responsibilities or claim a handoff was accepted or completed.",
-        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
         "companion": "Answer the caregiver's immediate question conversationally using only authorized context. Be concise, admit uncertainty and do not claim to save anything.",
         "caregiver_feedback": "Use the caregiver's correction to revise the current interpretation, acknowledge uncertainty and ask for clarification when needed. Do not claim model learning or silently alter history.",
         "sharing_export": "Help draft a source-aware summary for the intended recipient. Do not share, export or claim that content was sent.",
