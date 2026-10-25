@@ -119,6 +119,7 @@ def _issue_token(db: Session, account: CaregiverAccount, purpose: str, request: 
     expires = _now() + TOKEN_TTLS[purpose]
     ip = request.client.host if request and request.client else "unknown"
     db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE account_id=:account AND purpose=:purpose AND consumed_at IS NULL"), {"now": _now(), "account": account.id, "purpose": purpose})
+    db.execute(text("DELETE FROM account_security_tokens WHERE expires_at < :cutoff"), {"cutoff": _now() - timedelta(days=7)})
     db.execute(text("""INSERT INTO account_security_tokens
         (id, account_id, purpose, token_hash, expires_at, created_at, request_ip_hash)
         VALUES (:id, :account, :purpose, :hash, :expires, :created, :ip)"""),
@@ -179,6 +180,7 @@ def check_security_action_throttle(db: Session, email: str, ip: str, purpose: st
         {"ip": ihash, "since": since}).scalar_one()
     if email_count >= 3 or ip_count >= 15:
         raise HTTPException(status_code=429, detail="Too many security requests. Try again later.")
+    db.execute(text("DELETE FROM account_security_requests WHERE requested_at < :cutoff"), {"cutoff": _now() - timedelta(days=7)})
     db.execute(text("""INSERT INTO account_security_requests
         (id, email_hash, ip_hash, purpose, requested_at)
         VALUES (:id, :email, :ip, :purpose, :at)"""),
