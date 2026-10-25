@@ -149,7 +149,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         for segment in candidate.split("/")
         if segment
     ):
-        return await call_next(request)
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Community is currently unavailable"},
+        )
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
     # The share receiver stores a short-lived, random one-time capability, not
