@@ -34,6 +34,7 @@ class AccountRegister(BaseModel):
     password: str = Field(min_length=10, max_length=128)
     caregiver_name: str = Field(default="Caregiver", min_length=1, max_length=120)
     care_recipient_name: str = Field(default="Care recipient", min_length=1, max_length=120)
+    anonymous_access_token: Optional[str] = Field(default=None, max_length=200)
 
 
 class AccountLogin(BaseModel):
@@ -92,16 +93,55 @@ def register_account(payload: AccountRegister, db: Session = Depends(get_db)):
     if db.query(CaregiverAccount.id).filter(CaregiverAccount.email == email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists. Log in instead.")
     try:
-        person = Person(name=recipient_name)
-        db.add(person)
-        db.flush()
-        caregiver = Caregiver(name=caregiver_name, email=email, relationship="Family", person_id=person.id)
-        db.add(caregiver)
-        db.flush()
+        claimed_session = None
+        person = None
+        caregiver = None
+        if payload.anonymous_access_token:
+            token_hash = hashlib.sha256(payload.anonymous_access_token.strip().encode("utf-8")).hexdigest()
+            claimed_session = db.query(AnonymousSession).filter(
+                AnonymousSession.token_hash == token_hash,
+                AnonymousSession.revoked_at.is_(None),
+                AnonymousSession.expires_at > datetime.now(timezone.utc),
+            ).with_for_update().first()
+            if claimed_session is None:
+                raise HTTPException(status_code=401, detail="The existing anonymous care session could not be verified. Log in to that session or create an account without claiming it.")
+            if db.query(CaregiverAccount.id).filter(
+                (CaregiverAccount.person_id == claimed_session.person_id) |
+                (CaregiverAccount.caregiver_id == claimed_session.caregiver_id)
+            ).first():
+                raise HTTPException(status_code=409, detail="This care record is already linked to an account.")
+            person = db.query(Person).filter(Person.id == claimed_session.person_id).with_for_update().first()
+            caregiver = db.query(Caregiver).filter(Caregiver.id == claimed_session.caregiver_id).with_for_update().first()
+            if person is None or caregiver is None or caregiver.person_id != person.id:
+                raise HTTPException(status_code=409, detail="The existing care record is incomplete and cannot be safely claimed.")
+            # Only replace generic labels; never overwrite names or care history the user already entered.
+            if person.name.strip().lower() in {"care recipient", "person"}:
+                person.name = recipient_name
+            if caregiver.name.strip().lower() in {"caregiver", "family caregiver"}:
+                caregiver.name = caregiver_name
+            caregiver.email = email
+            # Revoke every anonymous capability for this record before issuing its account-bound session.
+            db.query(AnonymousSession).filter(
+                AnonymousSession.person_id == person.id,
+                AnonymousSession.caregiver_id == caregiver.id,
+                AnonymousSession.revoked_at.is_(None),
+            ).update({"revoked_at": datetime.now(timezone.utc)}, synchronize_session=False)
+        else:
+            person = Person(name=recipient_name)
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(name=caregiver_name, email=email, relationship="Family", person_id=person.id)
+            db.add(caregiver)
+            db.flush()
         account = CaregiverAccount(email=email, password_hash=_hash_password(payload.password), person_id=person.id, caregiver_id=caregiver.id)
         db.add(account)
         db.flush()
-        return _issue_account_session(db, account)
+        result = _issue_account_session(db, account)
+        result["claimed_existing_record"] = claimed_session is not None
+        return result
+    except HTTPException:
+        db.rollback()
+        raise
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An account with this email already exists. Log in instead.")
