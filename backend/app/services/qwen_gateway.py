@@ -80,9 +80,9 @@ def qwen_chat(
     except (TypeError, ValueError):
         num_ctx = 1536
     try:
-        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "192")), 1024))
+        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
     except (TypeError, ValueError):
-        num_predict = 192
+        num_predict = 96
     bounded_options = {
         "num_ctx": num_ctx,
         "num_predict": num_predict,
@@ -168,7 +168,7 @@ def extract_review_candidates(
     ]
     # Ollama's native JSON mode avoids fragile prompt-only formatting while
     # keeping source-quote validation as the final authority boundary.
-    raw = qwen_chat(messages, response_format="json", options={"temperature": 0})
+    raw = qwen_chat(messages, response_format="json", options={"temperature": 0, "num_predict": 384})
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError) as exc:
