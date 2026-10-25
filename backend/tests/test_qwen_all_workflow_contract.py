@@ -15,7 +15,7 @@ WORKFLOWS = (
     "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
     "appointment", "after_appointment", "handoff", "professional_summary",
     "open_loops", "two_week_review", "decision_outcome", "medication_day",
-    "reminders_notifications", "care_coordination", "community", "companion",
+    "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
     "audit_review",
@@ -32,3 +32,8 @@ def test_all_solenos_workflows_are_accepted_by_shared_qwen_contract(workflow):
 def test_unknown_workflow_is_rejected():
     with pytest.raises(ValidationError):
         QwenAssistRequest(workflow="unregistered_workflow", text="Help me.")
+
+
+def test_community_workflow_is_not_supported_while_community_is_disabled():
+    with pytest.raises(ValidationError):
+        QwenAssistRequest(workflow="community", text="Summarize peer experiences.")
