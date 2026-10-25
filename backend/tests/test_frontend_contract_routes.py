@@ -235,8 +235,12 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
             }],
         })
         assert linked.status_code == 200, linked.text
+        linked_payload = linked.json()
+        assert linked_payload.get("care_event_id")
+        assert linked_payload.get("active_care_situation") is not None, linked_payload
+        assert linked_payload.get("return_continuity") is not None, linked_payload
         db = TestingSessionLocal()
-        event = db.query(CareEvent).filter_by(id=linked.json()["care_event_id"]).first()
+        event = db.query(CareEvent).filter_by(id=linked_payload["care_event_id"]).first()
         assert event is not None
         assert evidence_id in (event.evidence_ids or [])
         other_caregiver = db.query(Caregiver).filter_by(person_id=other_person_id).first()
