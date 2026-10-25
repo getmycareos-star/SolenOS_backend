@@ -554,6 +554,44 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         teardown()
 
 
+def test_companion_repairs_unprompted_greeting_question_with_qwen_not_a_canned_phrase(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        calls = []
+        generated = iter(["Hi! How are you doing?", "Hi!"])
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+
+        def generated_reply(base, model, messages, options=None):
+            calls.append(messages)
+            return next(generated)
+
+        monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Hi!"
+        assert response.json()["ai_generated"] is True
+        assert len(calls) == 2
+        assert "draft_reply" in calls[1][-1]["content"]
+        events = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert events.status_code == 200
+        assert events.json() == []
+    finally:
+        teardown()
+
+
+def test_greeting_guard_detects_unrequested_automatic_question():
+    import app.api.collaboration as collaboration
+
+    assert collaboration._greeting_reply_needs_revision("Hi! How are you doing?")
+    assert not collaboration._greeting_reply_needs_revision("Hi!")
+
+
 def test_casual_greeting_is_rejected_before_situation_capture_writes(monkeypatch):
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     try:
