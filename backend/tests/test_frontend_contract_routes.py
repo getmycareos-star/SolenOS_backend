@@ -982,6 +982,27 @@ def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff
     )
 
 
+def test_qwen_grounding_guard_rejects_unanchored_demographics_and_named_appointments():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    empty_source = (
+        "Help organize only the information explicitly provided. "
+        "No source notes or care records were supplied."
+    )
+    assert _contains_unsupported_care_claim(
+        "The patient is a 65-year-old male smoker with a history of hypertension and diabetes.",
+        empty_source,
+    )
+    assert _contains_unsupported_care_claim(
+        "Patient's Name: Qwen. Doctor's Name: Dr. Smith.",
+        empty_source,
+    )
+    assert not _contains_unsupported_care_claim(
+        "The caregiver reported the person is 65-year-old.",
+        "The caregiver reported the person is 65-year-old.",
+    )
+
+
 def test_qwen_grounding_guard_rejects_invented_first_person_community_experience():
     from app.api.collaboration import _contains_unsupported_care_claim
 
