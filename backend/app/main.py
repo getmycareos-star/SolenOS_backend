@@ -33,7 +33,7 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
-from app.core.feature_flags import COMMUNITY_ENABLED
+from app.core.feature_flags import COMMUNITY_ENABLED, PROFESSIONAL_COMMUNITY_ENABLED
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -93,7 +93,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
     # Community is suspended at the API boundary, not merely hidden in the UI.
     # Preserve the route implementation and stored records for a future re-enable.
-    if not COMMUNITY_ENABLED and (
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and (
         path == "/api/v1/community" or path.startswith("/api/v1/community/")
     ):
         return JSONResponse(
@@ -103,7 +103,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
     # The general assistant endpoint supports several care workflows. Reject the
     # Community workflow specifically, even when called directly without the UI.
-    if not COMMUNITY_ENABLED and path == "/api/v1/assistant/assist" and method == "POST":
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and path == "/api/v1/assistant/assist" and method == "POST":
         try:
             requested_workflow = (await request.json()).get("workflow")
         except Exception:
