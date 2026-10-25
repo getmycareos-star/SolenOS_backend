@@ -1052,7 +1052,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Small local models sometimes repeat an interview-style greeting even
         # after a rewrite. Ask Qwen once more with a stricter constraint; still
         # no canned reply is substituted by application code.
-        if greeting_only and _greeting_reply_needs_revision(reply):
+        if greeting_only and (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, source_context)
+            or _greeting_reply_needs_revision(reply)
+        ):
             reply = await asyncio.to_thread(
                 _ollama_chat,
                 base,
@@ -1063,6 +1067,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "content": (
                             "Write a fresh, natural acknowledgement to the user's greeting. "
                             "Use 1–4 words only. No question mark. Do not use the words how, what, can, help, or assist. "
+                            "Do not use 'saba' or any unrequested foreign word. Do not repeat any word three times. "
                             "Do not mention care, tasks, or services. Do not reuse the draft. Return only the reply."
                         ),
                     },
