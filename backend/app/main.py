@@ -628,34 +628,13 @@ async def post_situation(
         "situations": response_payload.get("situations") or hydration["situations"],
     })
 
-    # Qwen can suggest source-grounded observations for human review, but its
-    # output is never persisted as an LCR fact. A model outage must not undo a
-    # successfully persisted caregiver capture.
-    source_parts = [payload.raw_input.strip()] if payload.raw_input and payload.raw_input.strip() else []
-    source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
-    source_text = "\n".join(source_parts).strip()
-    if source_text:
-        try:
-            candidates = await asyncio.to_thread(
-                extract_review_candidates,
-                source_text,
-                source_event_id=result.care_event_id,
-                source_evidence_id=result.evidence_id,
-            )
-            response_payload["qwen_extraction_status"] = "available"
-            response_payload["qwen_candidates"] = candidates
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
-        except Exception:
-            response_payload["qwen_extraction_status"] = "unavailable"
-            response_payload["qwen_candidates"] = None
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
-    else:
-        response_payload["qwen_extraction_status"] = "not_applicable"
-        response_payload["qwen_candidates"] = None
-        response_payload["qwen_review_required"] = False
-        response_payload["qwen_written_to_lcr"] = False
+    # Qwen enrichment is deliberately a separate post-save request. This
+    # response already contains the persisted care-record projection; a model
+    # timeout must not change save status or invite duplicate submissions.
+    response_payload["qwen_extraction_status"] = "not_run" if source_text else "not_applicable"
+    response_payload["qwen_candidates"] = None
+    response_payload["qwen_review_required"] = bool(source_text)
+    response_payload["qwen_written_to_lcr"] = False
     return response_payload
 
 
