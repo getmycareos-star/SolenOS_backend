@@ -124,13 +124,19 @@ def _issue_token(db: Session, account: CaregiverAccount, purpose: str, request: 
 
 
 def _consume_token(db: Session, raw: str, purpose: str):
+    lock_clause = " FOR UPDATE" if db.bind is not None and db.bind.dialect.name == "postgresql" else ""
     row = db.execute(text("""SELECT id, account_id, expires_at, consumed_at FROM account_security_tokens
-        WHERE token_hash=:hash AND purpose=:purpose FOR UPDATE"""),
+        WHERE token_hash=:hash AND purpose=:purpose""" + lock_clause),
         {"hash": _token_hash(raw), "purpose": purpose}).mappings().first()
-    if not row or row["consumed_at"] is not None or row["expires_at"] <= _now():
+    expires_at = row["expires_at"] if row else None
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if not row or row["consumed_at"] is not None or expires_at <= _now():
         raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
-    db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL"),
-                {"now": _now(), "id": row["id"]})
+    consumed = db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL"),
+                          {"now": _now(), "id": row["id"]})
+    if consumed.rowcount != 1:
+        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
     return db.query(CaregiverAccount).filter(CaregiverAccount.id == row["account_id"]).with_for_update().first()
 
 
