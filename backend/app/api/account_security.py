@@ -154,6 +154,26 @@ def check_login_throttle(db: Session, email: str, ip: str):
         raise HTTPException(status_code=429, detail="Too many sign-in attempts. Try again later.")
 
 
+
+def check_security_action_throttle(db: Session, email: str, ip: str, purpose: str):
+    """Persist abuse counters even for unknown email addresses to avoid enumeration."""
+    ehash, ihash = _email_hash(email), _ip_hash(ip)
+    since = _now() - timedelta(minutes=15)
+    email_count = db.execute(text("""SELECT COUNT(*) FROM account_security_requests
+        WHERE email_hash=:email AND purpose=:purpose AND requested_at >= :since"""),
+        {"email": ehash, "purpose": purpose, "since": since}).scalar_one()
+    ip_count = db.execute(text("""SELECT COUNT(*) FROM account_security_requests
+        WHERE ip_hash=:ip AND requested_at >= :since"""),
+        {"ip": ihash, "since": since}).scalar_one()
+    if email_count >= 3 or ip_count >= 15:
+        raise HTTPException(status_code=429, detail="Too many security requests. Try again later.")
+    db.execute(text("""INSERT INTO account_security_requests
+        (id, email_hash, ip_hash, purpose, requested_at)
+        VALUES (:id, :email, :ip, :purpose, :at)"""),
+        {"id": str(uuid.uuid4()), "email": ehash, "ip": ihash, "purpose": purpose, "at": _now()})
+    db.commit()
+
+
 def record_login_attempt(db: Session, email: str, ip: str, succeeded: bool):
     db.execute(text("""INSERT INTO account_login_attempts
         (id, email_hash, ip_hash, attempted_at, succeeded)
@@ -182,6 +202,8 @@ class MfaConfirm(BaseModel):
 @router.post("/verification/request", status_code=202)
 def request_email_verification(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    ip = request.client.host if request.client else "unknown"
+    check_security_action_throttle(db, email, ip, "verify_email")
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
     # Always generic to avoid account enumeration. Unknown accounts do not get a token.
     if account is not None and getattr(account, "email_verified_at", None) is None:
@@ -205,6 +227,8 @@ def confirm_email_verification(payload: TokenConfirm, db: Session = Depends(get_
 @router.post("/password-reset/request", status_code=202)
 def request_password_reset(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    ip = request.client.host if request.client else "unknown"
+    check_security_action_throttle(db, email, ip, "password_reset")
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
     if account is not None:
         raw = _issue_token(db, account, "password_reset", request)
@@ -230,6 +254,8 @@ def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(
 @router.post("/recovery/request", status_code=202)
 def request_account_recovery(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
     email = payload.email.strip().lower()
+    ip = request.client.host if request.client else "unknown"
+    check_security_action_throttle(db, email, ip, "account_recovery")
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
     if account is not None:
         raw = _issue_token(db, account, "account_recovery", request)
