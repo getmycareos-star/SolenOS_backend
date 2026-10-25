@@ -60,10 +60,17 @@ class CompanionCreate(BaseModel):
 
 
 class QwenAssistRequest(BaseModel):
+    # Community is intentionally excluded while that product area is disabled.
     workflow: Literal[
-        "daily_capture", "document", "community", "appointment", "after_appointment",
-        "handoff", "professional_summary", "open_loops", "two_week_review",
-        "decision_outcome", "medication_day", "living_care_record",
+        "daily_capture", "add_record", "document", "living_care_record",
+        "care_history_search", "care_situation_change", "delta_engine",
+        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
+        "appointment", "after_appointment", "handoff", "professional_summary",
+        "open_loops", "two_week_review", "decision_outcome", "medication_day",
+        "reminders_notifications", "care_coordination", "companion",
+        "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
+        "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
+        "audit_review",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
