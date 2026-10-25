@@ -1,105 +1,33 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-export OLLAMA_HOST="127.0.0.1:11434"
-# Disable cloud routing explicitly: all inference must remain in this container.
-export OLLAMA_NO_CLOUD="true"
-export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
-export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
-# Keep warm-up and API inference on the same runner context.
-export OLLAMA_NUM_CTX="${OLLAMA_NUM_CTX:-1024}"
-export OLLAMA_NUM_THREADS="${OLLAMA_NUM_THREADS:-2}"
-export OLLAMA_CONTEXT_LENGTH="$OLLAMA_NUM_CTX"
-# The model shares the Railway container with FastAPI. Serialize inference and
-# keep one loaded model so parallel requests cannot multiply KV-cache memory.
-export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
-export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
-export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-8}"
-export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
-export OLLAMA_SIDECAR_ENABLED="true"
+# Run the bundled Ollama service and FastAPI in the same Railway container.
+ollama serve >/tmp/ollama-runtime.log 2>&1 &
+OLLAMA_PID=$!
+cleanup() { kill "$OLLAMA_PID" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
 
-ollama serve > >(tee /tmp/ollama-runtime.log >&2) 2>&1 &
-ollama_pid=$!
-uvicorn_pid=""
-
-shutdown() {
-  [[ -n "$uvicorn_pid" ]] && kill "$uvicorn_pid" 2>/dev/null || true
-  kill "$ollama_pid" 2>/dev/null || true
-  wait "$ollama_pid" 2>/dev/null || true
-}
-trap shutdown EXIT INT TERM
-
+ready=0
 for attempt in $(seq 1 60); do
-  if ! kill -0 "$ollama_pid" 2>/dev/null; then
-    cat /tmp/ollama-runtime.log >&2 || true
+  if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+    ready=1
+    break
+  fi
+  if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
+    cat /tmp/ollama-runtime.log >&2
     echo "Ollama exited before becoming ready." >&2
     exit 1
   fi
-  if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
-  sleep 1
+  sleep 2
 done
-curl -fsS http://127.0.0.1:11434/api/tags >/dev/null || {
-  cat /tmp/ollama-runtime.log >&2 || true
-  echo "Bundled Ollama runtime did not become ready." >&2
-  exit 1
-}
-ollama list | grep -Fq "$OLLAMA_MODEL" || {
-  echo "Required bundled Qwen model ($OLLAMA_MODEL) is missing; refusing to start without inference." >&2
-  exit 1
-}
-
-# /api/tags can list a model before its inference runner is warm. Complete a
-# real local inference before starting FastAPI, so readiness never advertises
-# a usable assistant while the first request would fail during model loading.
-# Bound the inference itself: a hung local runner must not block startup forever
-# while Railway's /ready health check repeatedly receives service-unavailable.
-warmup_timeout="${QWEN_WARMUP_TIMEOUT_SECONDS:-180}"
-if ! timeout --signal=TERM --kill-after=10s "${warmup_timeout}s" \
-  python - <<'PY' >/tmp/qwen-warmup.log 2>&1
-import json
-import os
-import urllib.request
-
-threads = max(1, min(int(os.getenv("OLLAMA_NUM_THREADS", "2")), 8))
-context = max(256, min(int(os.getenv("OLLAMA_NUM_CTX", "1024")), 4096))
-payload = {
-    "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
-    "prompt": "Reply with the single word READY.",
-    "stream": False,
-    "options": {
-        "num_ctx": context,
-        "num_predict": 8,
-        "num_thread": threads,
-        "temperature": 0,
-    },
-}
-request = urllib.request.Request(
-    "http://127.0.0.1:11434/api/generate",
-    data=json.dumps(payload).encode("utf-8"),
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(request, timeout=150) as response:
-    result = json.loads(response.read().decode("utf-8"))
-print(result.get("response", ""))
-PY
-then
-  cat /tmp/qwen-warmup.log >&2 || true
-  cat /tmp/ollama-runtime.log >&2 || true
-  echo "Bundled Qwen model failed or timed out during startup inference; refusing to report readiness." >&2
-  exit 1
-fi
-if ! grep -qi 'READY' /tmp/qwen-warmup.log; then
-  cat /tmp/qwen-warmup.log >&2 || true
-  echo "Bundled Qwen startup inference returned no expected READY response; refusing to report readiness." >&2
+if [ "$ready" -ne 1 ]; then
+  cat /tmp/ollama-runtime.log >&2
+  echo "Ollama did not become ready within 120 seconds." >&2
   exit 1
 fi
 
-python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &
-uvicorn_pid=$!
-set +e
-wait -n "$ollama_pid" "$uvicorn_pid"
-status=$?
-set -e
-exit "$status"
+if ! ollama list | grep -q 'qwen2.5:0.5b'; then
+  ollama pull qwen2.5:0.5b
+fi
+
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}"
