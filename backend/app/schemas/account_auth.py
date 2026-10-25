@@ -6,7 +6,6 @@ class AccountSignupInput(BaseModel):
     password: str = Field(min_length=12, max_length=1024)
     display_name: str = Field(min_length=1, max_length=120)
     care_recipient_name: str = Field(min_length=1, max_length=200)
-    existing_care_session_token: str | None = Field(default=None, max_length=512)
 
     @field_validator("email")
     @classmethod
