@@ -30,7 +30,6 @@ WORKFLOWS = (
     "medication_day",
     "reminders_notifications",
     "care_coordination",
-    "community",
     "companion",
     "caregiver_feedback",
     "sharing_export",
@@ -75,3 +74,8 @@ def test_clear_short_greeting_passes_quality_guard(reply):
 def test_interview_style_or_empty_greeting_fails_quality_guard(reply):
     assert _greeting_reply_needs_revision(reply) is True
 
+
+
+def test_community_workflow_is_not_supported_while_community_is_disabled():
+    with pytest.raises(ValidationError):
+        QwenAssistRequest(workflow="community", text="Summarize peer experiences.")
