@@ -141,7 +141,7 @@ def register_account(payload: AccountRegister, request: Request, db: Session = D
         verification_token = _issue_token(db, account, "verify_email", request)
         db.commit()
         _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\\n{__import__('os').environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={verification_token}\\n\\nIf you did not request this, ignore this message.")
-        return {"registered": True, "email_verification_required": True, "message": "Check your email to verify your account before signing in.", "claimed_existing_record": claimed_session is not None}
+        return {"registered": True, "email_verification_required": True, "message": "Check your email to verify your account before signing in.", "account": {"id": account.id, "email": account.email}, "person": {"id": person.id, "name": person.name, "date_of_birth": person.date_of_birth.isoformat() if person.date_of_birth else None}, "caregiver": {"id": caregiver.id, "name": caregiver.name, "relationship": caregiver.relationship}, "claimed_existing_record": claimed_session is not None}
     except HTTPException:
         db.rollback()
         raise
