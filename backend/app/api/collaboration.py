@@ -802,10 +802,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         # Apply the language-quality gate to every model-generated reply, not
         # greetings alone. A failed guard must not persist a confusing answer.
+        # Greeting style violations trigger repair attempts above. Do not turn an
+        # otherwise safe, concise real-model reply into a hard 503 only because the
+        # small model asks a follow-up question. Keep substantive safety/disclosure
+        # guards strict and never substitute a canned application response.
         if (
             _companion_reply_needs_revision(reply)
             or _contains_unrequested_saba(reply, payload.text + "\n" + "\n".join(context_lines))
-            or (_is_casual_greeting(payload.text) and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
