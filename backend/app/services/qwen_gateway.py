@@ -83,9 +83,17 @@ def qwen_chat(
         num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
     except (TypeError, ValueError):
         num_predict = 96
+    # Railway production is CPU-only; Ollama otherwise detected 48 threads in a
+    # constrained container and real requests stalled. Bound per-request CPU
+    # parallelism so inference does not oversubscribe the available vCPUs.
+    try:
+        num_thread = max(1, min(int(os.getenv("OLLAMA_NUM_THREADS", "2")), 8))
+    except (TypeError, ValueError):
+        num_thread = 2
     bounded_options = {
         "num_ctx": num_ctx,
         "num_predict": num_predict,
+        "num_thread": num_thread,
         "temperature": 0.2,
     }
     if options:
