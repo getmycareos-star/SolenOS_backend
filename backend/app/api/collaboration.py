@@ -451,23 +451,32 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
-    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
-        # Ask the same local model to repair style only; never substitute a canned
-        # phrase or relax source-grounding. A second failed response is unavailable.
+    # Small local models can miss style constraints on the first rewrite. Retry
+    # with progressively shorter, explicit instructions while retaining the
+    # same source-grounding and disclosure checks. Every candidate is generated
+    # by Qwen; the application never substitutes a canned response.
+    for repair_attempt in range(3):
+        invalid_style = _companion_reply_needs_revision(reply)
+        unrequested_foreign_token = _contains_unrequested_saba(reply, source_context)
+        if not invalid_style and not unrequested_foreign_token:
+            break
+        repair_instruction = (
+            "Rewrite the draft as one clear, natural, accessible answer of at most 25 words. "
+            "Use only claims supported by the user's request and authorized context. "
+            "Do not invent facts, events, appointments, tasks, owners, deadlines, diagnoses or advice. "
+            "Do not use unexplained foreign words or transliterations. Do not repeat words or phrases. "
+            "Do not claim anything was saved, changed, verified or reviewed. Return only the revised answer."
+        )
+        if repair_attempt == 2:
+            repair_instruction = (
+                "Produce a concise answer in plain English, at most 15 words. "
+                "Use only supplied information. No foreign words, repetition, invented facts, or claims of saved actions. "
+                "Return only the answer."
+            )
         reply = await asyncio.to_thread(
             qwen_chat,
             [
-                {
-                    "role": "system",
-                    "content": (
-                        "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
-                        "Preserve only claims supported by the authorized context and the caregiver's request. "
-                        "Remove unexplained foreign words, unrequested transliterations, internal jargon and repetition. "
-                        "Do not add facts, people, appointments, tasks, owners, deadlines, diagnoses or advice. "
-                        "SolenOS and the caregiver remain authoritative; do not claim that anything was saved. "
-                        "Return only the revised response, not an explanation."
-                    ),
-                },
+                {"role": "system", "content": repair_instruction},
                 {
                     "role": "user",
                     "content": json.dumps(
@@ -476,12 +485,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                             "caregiver_request": payload.text.strip(),
                             "authorized_context": context_lines,
                             "draft_response": reply,
+                            "invalid_style": invalid_style,
+                            "unrequested_foreign_token": unrequested_foreign_token,
                         },
                         ensure_ascii=False,
                     ),
                 },
             ],
-            options={"temperature": 0, "num_predict": 96},
+            options={"temperature": 0, "num_predict": 64},
         )
     if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
