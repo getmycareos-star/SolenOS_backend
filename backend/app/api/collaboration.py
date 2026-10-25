@@ -1028,7 +1028,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "role": "system",
                         "content": (
                             "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
-                            "For a greeting, use 1–8 words, mirror the greeting naturally, and do not ask a question or introduce care topics. "
+                            "For a greeting, use 1–4 words, mirror the greeting naturally, and do not ask a question or introduce care topics. "
                             "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
                             "Do not add facts or claim that anything was saved. Return only the revised reply."
                         ),
@@ -1046,8 +1046,37 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         ),
                     },
                 ],
-                {"temperature": 0, "num_predict": 32 if greeting_only else 96},
+                {"temperature": 0, "num_predict": 16 if greeting_only else 96},
             )
+
+        # Small local models sometimes repeat an interview-style greeting even
+        # after a rewrite. Ask Qwen once more with a stricter constraint; still
+        # no canned reply is substituted by application code.
+        if greeting_only and _greeting_reply_needs_revision(reply):
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Write a fresh, natural acknowledgement to the user's greeting. "
+                            "Use 1–4 words only. No question mark. Do not use the words how, what, can, help, or assist. "
+                            "Do not mention care, tasks, or services. Do not reuse the draft. Return only the reply."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {"user_message": payload.text.strip(), "rejected_draft": reply},
+                            ensure_ascii=False,
+                        ),
+                    },
+                ],
+                {"temperature": 0, "num_predict": 8},
+            )
+
         if (
             _companion_reply_needs_revision(reply)
             or _contains_unrequested_saba(reply, source_context)
