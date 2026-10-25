@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.collaboration import CommunityPost, ConversationMessage, QwenReviewCandidate
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
@@ -877,3 +877,83 @@ def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
     assert captured["payload"]["options"]["num_ctx"] == 1536
     assert captured["payload"]["options"]["num_predict"] == 96
     assert captured["payload"]["options"]["temperature"] == 0
+
+
+def test_qwen_candidate_extraction_persists_review_attribution_and_never_writes_lcr(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        other_auth = {"Authorization": f"Bearer {other_token}"}
+        saved = client.post("/api/v1/daily/log", headers=auth, json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "Mom ate breakfast at 8 AM.",
+        })
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["success"] is True
+        assert saved.json()["qwen_extraction_status"] == "not_run"
+
+        import app.api.collaboration as collaboration
+        monkeypatch.setattr(
+            collaboration,
+            "extract_review_candidates",
+            lambda source_text, **kwargs: {
+                "observations": [{
+                    "subject": "meal",
+                    "observation": "The caregiver reports that Mom ate breakfast at 8 AM.",
+                    "source_quote": "Mom ate breakfast at 8 AM.",
+                    "review_status": "pending_review",
+                    "source_event_id": kwargs["source_event_id"],
+                }],
+                "open_questions": ["Was this typical for her morning routine?"],
+            },
+        )
+        extracted = client.post(
+            "/api/v1/assistant/extract-candidates",
+            headers=auth,
+            json={"event_id": saved.json()["id"]},
+        )
+        assert extracted.status_code == 200, extracted.text
+        body = extracted.json()
+        assert body["ai_generated"] is True
+        assert body["written_to_lcr"] is False
+        assert body["qwen_extraction_status"] == "pending_review"
+        candidate = body["qwen_candidates"]["observations"][0]
+        candidate_id = candidate["candidate_id"]
+        assert candidate["review_status"] == "pending_review"
+        assert candidate["source_quote"] == "Mom ate breakfast at 8 AM."
+
+        listed = client.get("/api/v1/assistant/candidates", headers=auth)
+        assert listed.status_code == 200, listed.text
+        assert any(row["id"] == candidate_id and row["status"] == "pending_review" for row in listed.json())
+
+        cross_record_review = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=other_auth,
+            json={"decision": "accepted"},
+        )
+        assert cross_record_review.status_code == 404, cross_record_review.text
+
+        reviewed = client.post(
+            f"/api/v1/assistant/candidates/{candidate_id}/review",
+            headers=auth,
+            json={"decision": "accepted", "review_note": "Confirmed against the original note."},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["status"] == "accepted"
+        assert reviewed.json()["written_to_lcr"] is False
+        db = TestingSessionLocal()
+        row = db.query(QwenReviewCandidate).filter_by(id=candidate_id).one()
+        assert row.reviewed_by_caregiver_id == caregiver_id
+        assert row.review_note == "Confirmed against the original note."
+        db.close()
+
+        events = client.get(f"/api/v1/events/{person_id}", headers=auth)
+        assert events.status_code == 200
+        assert len(events.json()) == 1
+        assert events.json()[0]["id"] == saved.json()["id"]
+    finally:
+        teardown()
