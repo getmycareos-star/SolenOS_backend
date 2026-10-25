@@ -19,6 +19,7 @@ from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router
 from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
+from app.api.reminders import router as reminders_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -28,7 +29,6 @@ from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
-from app.services.qwen_gateway import extract_review_candidates
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -61,6 +61,7 @@ app.include_router(causal_router, prefix="/api/v1")
 app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
+app.include_router(reminders_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -628,9 +629,9 @@ async def post_situation(
         "situations": response_payload.get("situations") or hydration["situations"],
     })
 
-    # Qwen enrichment is deliberately a separate post-save request. This
-    # response already contains the persisted care-record projection; a model
-    # timeout must not change save status or invite duplicate submissions.
+    # Qwen enrichment is a separate post-save request. The capture response
+    # already contains the persisted care-record projection; model latency must
+    # not change save status or invite duplicate submissions.
     response_payload["qwen_extraction_status"] = "not_run" if source_text else "not_applicable"
     response_payload["qwen_candidates"] = None
     response_payload["qwen_review_required"] = bool(source_text)
