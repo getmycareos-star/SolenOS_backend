@@ -301,6 +301,12 @@ def confirm_account_recovery(payload: PasswordResetConfirm, db: Session = Depend
     return {"recovered": True, "sessions_revoked": True, "mfa_reset": True}
 
 
+@router.get("/mfa/status")
+def mfa_status(request: Request, db: Session = Depends(get_db)):
+    account = _account_from_bearer(request, db)
+    return {"enabled": bool(account.mfa_enabled)}
+
+
 @router.post("/mfa/enroll")
 def enroll_mfa(request: Request, db: Session = Depends(get_db)):
     from app.api.anonymous_sessions import _verify_password
