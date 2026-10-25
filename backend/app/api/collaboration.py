@@ -588,11 +588,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # Daily Capture, document-only or Community assistance. Each workflow gets
     # only the record context needed to perform its explicit task.
     event_workflows = {
-        "living_care_record", "care_history_search", "care_situation_change",
+        "add_record", "living_care_record", "care_history_search", "care_situation_change",
         "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
-        "medication_day", "care_coordination", "sharing_export", "audit_review",
+        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -613,7 +613,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     appointment_workflows = {
         "living_care_record", "care_history_search", "care_situation_change",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review", "sharing_export",
+        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -645,7 +645,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
             source_evidence_ids.append(str(row.id))
 
-    if payload.workflow == "handoff":
+    if payload.workflow in {"handoff", "care_coordination"}:
         handoffs = db.query(CaregiverHandoff).filter(
             CaregiverHandoff.person_id == person_id
         ).order_by(CaregiverHandoff.timestamp.desc()).limit(5).all()
@@ -654,6 +654,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Recorded handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
                 f"scope={handoff.scope or 'not specified'}; completed={bool(handoff.is_completed)}; "
                 f"context={(handoff.context or '')[:800]}"
+            )
+
+    if payload.workflow == "reminders_notifications":
+        notifications = db.query(CareNotification).filter(
+            CareNotification.person_id == person_id,
+            CareNotification.caregiver_id == caregiver_id,
+        ).order_by(CareNotification.created_at.desc()).limit(10).all()
+        for notification in notifications:
+            context_lines.append(
+                f"Recorded notification [{notification.id}]: title={notification.title}; "
+                f"category={notification.category}; priority={notification.priority}; "
+                f"read={notification.read_at is not None}; body={(notification.body or '')[:500]}"
             )
 
     guidance = {
