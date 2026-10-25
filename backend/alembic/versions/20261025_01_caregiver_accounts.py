@@ -32,13 +32,14 @@ def upgrade():
         columns = {column["name"] for column in inspector.get_columns("anonymous_sessions")}
         if "account_id" not in columns:
             op.add_column("anonymous_sessions", sa.Column("account_id", sa.String(), nullable=True))
-        foreign_keys = {item.get("name") for item in inspect(bind).get_foreign_keys("anonymous_sessions")}
-        if "fk_anonymous_sessions_account_id_caregiver_accounts" not in foreign_keys:
-            op.create_foreign_key(
-                "fk_anonymous_sessions_account_id_caregiver_accounts",
-                "anonymous_sessions", "caregiver_accounts",
-                ["account_id"], ["id"], ondelete="SET NULL",
-            )
+        if bind.dialect.name != "sqlite":
+            foreign_keys = {item.get("name") for item in inspect(bind).get_foreign_keys("anonymous_sessions")}
+            if "fk_anonymous_sessions_account_id_caregiver_accounts" not in foreign_keys:
+                op.create_foreign_key(
+                    "fk_anonymous_sessions_account_id_caregiver_accounts",
+                    "anonymous_sessions", "caregiver_accounts",
+                    ["account_id"], ["id"], ondelete="SET NULL",
+                )
         indexes = {item["name"] for item in inspect(bind).get_indexes("anonymous_sessions")}
         if "ix_anonymous_sessions_account_id" not in indexes:
             op.create_index("ix_anonymous_sessions_account_id", "anonymous_sessions", ["account_id"])
@@ -60,9 +61,10 @@ def downgrade():
         indexes = {item["name"] for item in inspector.get_indexes("anonymous_sessions")}
         if "ix_anonymous_sessions_account_id" in indexes:
             op.drop_index("ix_anonymous_sessions_account_id", table_name="anonymous_sessions")
-        foreign_keys = {item.get("name") for item in inspect(bind).get_foreign_keys("anonymous_sessions")}
-        if "fk_anonymous_sessions_account_id_caregiver_accounts" in foreign_keys:
-            op.drop_constraint("fk_anonymous_sessions_account_id_caregiver_accounts", "anonymous_sessions", type_="foreignkey")
+        if bind.dialect.name != "sqlite":
+            foreign_keys = {item.get("name") for item in inspect(bind).get_foreign_keys("anonymous_sessions")}
+            if "fk_anonymous_sessions_account_id_caregiver_accounts" in foreign_keys:
+                op.drop_constraint("fk_anonymous_sessions_account_id_caregiver_accounts", "anonymous_sessions", type_="foreignkey")
         columns = {column["name"] for column in inspect(bind).get_columns("anonymous_sessions")}
         if "account_id" in columns:
             op.drop_column("anonymous_sessions", "account_id")
