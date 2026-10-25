@@ -77,7 +77,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
-        "expires_in_seconds": max(0, int((expires_at - now).total_seconds())),
+        "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
     }
 
 
@@ -126,5 +126,5 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
-        "expires_in_seconds": SESSION_TTL_DAYS * 24 * 60 * 60,
+        "expires_in_seconds": max(0, int((expires_at - now).total_seconds())),
     }
