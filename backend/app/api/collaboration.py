@@ -402,9 +402,11 @@ def _ollama_url() -> tuple[str, str]:
     return base, model
 
 
-def _ollama_chat(base: str, model: str, messages: list[dict]) -> str:
+def _ollama_chat(
+    base: str, model: str, messages: list[dict], options: dict | None = None
+) -> str:
     # All SolenOS workflows use the same local/private Qwen gateway.
-    return qwen_chat(messages)
+    return qwen_chat(messages, options=options)
 
 
 def _is_casual_greeting(text: str) -> bool:
@@ -417,6 +419,12 @@ def _is_casual_greeting(text: str) -> bool:
         "good morning", "good afternoon", "good evening", "good night",
         "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
     }
+
+
+def _greeting_reply_needs_revision(reply: str) -> bool:
+    """Greeting-only replies should mirror the user, not start a new interview."""
+    words = re.findall(r"[^\\W_]+", reply or "", flags=re.UNICODE)
+    return not words or len(words) > 8 or "?" in (reply or "")
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -756,7 +764,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if row.role in {"user", "assistant"}
         )
         model_messages.append({"role": "user", "content": payload.text.strip()})
-        reply = await asyncio.to_thread(_ollama_chat, base, model, model_messages)
+        greeting_only = _is_casual_greeting(payload.text)
+        reply = await asyncio.to_thread(
+            _ollama_chat,
+            base,
+            model,
+            model_messages,
+            {"temperature": 0, "num_predict": 32} if greeting_only else None,
+        )
         if _is_casual_greeting(payload.text):
             # Qwen performs a second language-quality pass; there is no canned reply fallback.
             reply = await asyncio.to_thread(
@@ -783,17 +798,41 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     },
                 ],
             )
-            if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
+            if _greeting_reply_needs_revision(reply) or _contains_unrequested_saba(
                 reply, payload.text + "\n" + "\n".join(context_lines)
             ):
-                raise HTTPException(
-                    status_code=503,
-                    detail="Companion could not produce a clear response. No reply was saved; please try again.",
+                # One additional Qwen-only repair enforces the greeting contract;
+                # it still generates language dynamically and has no canned fallback.
+                reply = await asyncio.to_thread(
+                    _ollama_chat,
+                    base,
+                    model,
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Reply naturally to this greeting in the same language. "
+                                "Use 1–8 words only. Do not ask a question, start a care topic, "
+                                "repeat filler, use unexplained foreign words or invent facts. "
+                                "Return only the final greeting."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                {"greeting": payload.text.strip(), "draft": reply},
+                                ensure_ascii=False,
+                            ),
+                        },
+                    ],
+                    {"temperature": 0, "num_predict": 32},
                 )
         # Apply the language-quality gate to every model-generated reply, not
         # greetings alone. A failed guard must not persist a confusing answer.
-        if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(
-            reply, payload.text + "\n" + "\n".join(context_lines)
+        if (
+            _companion_reply_needs_revision(reply)
+            or _contains_unrequested_saba(reply, payload.text + "\n" + "\n".join(context_lines))
+            or (_is_casual_greeting(payload.text) and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
