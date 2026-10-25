@@ -204,8 +204,8 @@ def test_signup_links_existing_anonymous_care_record_without_forking_it():
             "password": "a-long-caregiver-password-2026",
             "display_name": "Account holder",
             "care_recipient_name": "A different name must not create another record",
-            "existing_care_session_token": original["access_token"],
         },
+        headers={"Authorization": f"Bearer {original['access_token']}"},
     )
     assert signup_response.status_code == 201, signup_response.text
     linked = signup_response.json()
@@ -234,8 +234,8 @@ def test_signup_rejects_expired_or_invalid_existing_session_without_creating_a_r
             "password": "a-long-caregiver-password-2026",
             "display_name": "Account holder",
             "care_recipient_name": "Care recipient",
-            "existing_care_session_token": "not-a-real-session-token",
         },
+        headers={"Authorization": "Bearer not-a-real-session-token"},
     )
     assert response.status_code == 401, response.text
     db = TestSessionLocal()
