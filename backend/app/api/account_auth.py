@@ -14,8 +14,8 @@ from app.models.care import Caregiver, Person
 from app.schemas.account_auth import AccountLoginInput, AccountSignupInput
 
 router = APIRouter(prefix="/auth", tags=["optional caregiver accounts"])
-ACCOUNT_SESSION_TTL = timedelta(days=365)
-CARE_SESSION_TTL = timedelta(days=365)
+ACCOUNT_SESSION_TTL = timedelta(days=30)
+CARE_SESSION_TTL = ACCOUNT_SESSION_TTL
 
 
 def _hash_password(password: str) -> str:
