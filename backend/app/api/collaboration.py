@@ -462,6 +462,14 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"\bappointment\s+(?:was\s+)?(?:scheduled|confirmed|cancelled|canceled|rescheduled)\b",
         r"\b(?:diagnosed with|diagnosis of|prescribed|recommended|ordered)\b",
         r"\b(?:symptom|symptoms|condition)\s+(?:improved|worsened|resolved)\b",
+        # Reject concrete demographic, identity, appointment, and medical specifics
+        # when their wording is absent from the caregiver request and authorized context.
+        r"\b\d{1,3}[- ]year[- ]old\b",
+        r"\b(?:male|female|smoker|non-smoker|hypertension|diabetes|heart disease|stroke|cancer|epilepsy|asthma|kidney disease)\b",
+        r"\b(?:patient|doctor|clinician|caregiver)(?:'s)?\s+name\s*:\s*[a-z][a-z-]+\b",
+        r"\bdr\.?\s+[a-z][a-z-]+\b",
+        r"\b(?:history of|has a history of|suffers from)\s+(?:hypertension|diabetes|heart disease|stroke|cancer|epilepsy|asthma|kidney disease)\b",
+        r"\b(?:appointment with|visit with)\s+(?:dr\.?\s+)?[a-z][a-z-]+\b",
         r"\b(?:patient|person)\s+(?:responded|improved|worsened)\b",
         r"\b(?:dose|medication|treatment)\s+(?:was|has been|had been)\s+(?:changed|increased|decreased|stopped|started|administered|missed)\b",
         r"\b(?:test|scan|result)\s+(?:was|came back)\s+(?:positive|negative|normal|abnormal)\b",
