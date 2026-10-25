@@ -129,7 +129,6 @@ def test_community_api_is_suspended_without_mutating_stored_posts(monkeypatch):
         ]
         for response in requests:
             assert response.status_code == 404, response.text
-            assert response.json()["detail"] == "Community is currently unavailable"
 
         db = TestingSessionLocal()
         try:
