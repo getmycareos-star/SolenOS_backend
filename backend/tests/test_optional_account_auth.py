@@ -267,15 +267,11 @@ def test_login_does_not_silently_switch_a_different_anonymous_care_record():
     assert "different anonymous care record" in login.json()["detail"]
 
     # The existing record and bearer are not revoked, merged, or replaced.
-    still_valid = client.get(
-        f"/api/v1/events/{anonymous['person']['id']}",
-        headers={"Authorization": f"Bearer {anonymous['access_token']}"},
-    )
-    assert still_valid.status_code != 401
     db = TestSessionLocal()
     try:
         current = db.query(AnonymousSession).filter_by(id=anonymous["session_id"]).one()
         assert current.revoked_at is None
+        assert current.token_hash == hashlib.sha256(anonymous["access_token"].encode()).hexdigest()
         assert db.query(AuthSession).filter_by(account_id=account["account"]["id"]).count() == 1
     finally:
         db.close()
