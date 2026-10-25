@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import hmac
 import re
@@ -136,7 +137,7 @@ def list_contributions(request: Request, db: Session = Depends(get_db)):
     ).order_by(CommunityPost.created_at.desc()).limit(100).all()
     return {"contributions": [{
         "id": post.id, "title": post.title, "body": post.content,
-        "contribution_type": post.tags_json,
+        "contribution_type": (json.loads(post.tags_json or "[]")[-1] if json.loads(post.tags_json or "[]") else "knowledge"),
         "status": post.moderation_status,
         "created_at": post.created_at.isoformat() if post.created_at else None,
     } for post in posts]}
