@@ -25,7 +25,7 @@ class AuthSession(Base):
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id = Column(String, ForeignKey("auth_accounts.id"), nullable=False, index=True)
-    token_digest = Column(String(64), nullable=False, unique=True, index=True)
+    token_digest = Column(String(64), nullable=False, unique=True)
     expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
