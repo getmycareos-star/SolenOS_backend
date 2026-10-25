@@ -3,7 +3,7 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -107,14 +107,18 @@ def _resolve_account(db: Session, authorization: str | None) -> tuple[AuthAccoun
 
 
 @router.post("/signup", status_code=201)
-def signup(payload: AccountSignupInput, db: Session = Depends(get_db)):
+def signup(payload: AccountSignupInput, request: Request, db: Session = Depends(get_db)):
     if db.query(AuthAccount).filter(AuthAccount.email == payload.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     existing_care_session = None
     existing_care_token = None
-    if payload.existing_care_session_token:
-        existing_care_token = payload.existing_care_session_token.strip()
+    auth_header = request.headers.get("authorization", "")
+    scheme, _, presented_token = auth_header.partition(" ")
+    if auth_header and (scheme.lower() != "bearer" or not presented_token.strip()):
+        raise HTTPException(status_code=401, detail="The existing care session credential is invalid")
+    if presented_token.strip():
+        existing_care_token = presented_token.strip()
         token_digest = hashlib.sha256(existing_care_token.encode("utf-8")).hexdigest()
         existing_care_session = db.query(AnonymousSession).filter(
             AnonymousSession.token_hash == token_digest,
