@@ -10,7 +10,7 @@ class AuthAccount(Base):
     __tablename__ = "auth_accounts"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    email = Column(String(254), nullable=False, unique=True, index=True)
+    email = Column(String(254), nullable=False, unique=True)
     password_hash = Column(Text, nullable=False)
     display_name = Column(String(120), nullable=False)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, unique=True)
