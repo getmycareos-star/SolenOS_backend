@@ -632,7 +632,11 @@ async def post_situation(
     # Qwen enrichment is a separate post-save request. The capture response
     # already contains the persisted care-record projection; model latency must
     # not change save status or invite duplicate submissions.
-    response_payload["qwen_extraction_status"] = "not_run" if source_text else "not_applicable"
+    has_source_text = bool(
+        (payload.raw_input or "").strip()
+        or any((document.extracted_text or "").strip() for document in (payload.documents or []))
+    )
+    response_payload["qwen_extraction_status"] = "not_run" if has_source_text else "not_applicable"
     response_payload["qwen_candidates"] = None
     response_payload["qwen_review_required"] = bool(source_text)
     response_payload["qwen_written_to_lcr"] = False
