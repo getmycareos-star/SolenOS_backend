@@ -160,6 +160,7 @@ jobs:
             trap - EXIT
             if [ "$exit_code" -ne 0 ]; then
               docker logs solenos-qwen-e2e >&2 || true
+              docker exec solenos-qwen-e2e bash -lc 'cat /tmp/ollama-runtime.log' >&2 || true
             fi
             docker rm --force solenos-qwen-e2e >/dev/null 2>&1 || true
             exit "$exit_code"
