@@ -530,28 +530,46 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
 
-    events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
-    if payload.workflow == "two_week_review":
-        from datetime import timedelta
-        events_query = events_query.filter(CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14))
-    events = events_query.order_by(CareEvent.occurred_at.desc()).limit(20 if payload.workflow == "two_week_review" else 8).all()
-    for event in events:
-        context_lines.append(
-            f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
-        )
-        source_event_ids.append(str(event.id))
+    # Data minimization: do not send private LCR events or appointments to
+    # Daily Capture, document-only or Community assistance. Each workflow gets
+    # only the record context needed to perform its explicit task.
+    event_workflows = {
+        "living_care_record", "appointment", "after_appointment", "handoff",
+        "professional_summary", "open_loops", "two_week_review",
+        "decision_outcome", "medication_day",
+    }
+    if payload.workflow in event_workflows:
+        events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+        if payload.workflow == "two_week_review":
+            from datetime import timedelta
+            events_query = events_query.filter(
+                CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14)
+            )
+        events = events_query.order_by(CareEvent.occurred_at.desc()).limit(
+            20 if payload.workflow == "two_week_review" else 8
+        ).all()
+        for event in events:
+            context_lines.append(
+                f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
+            )
+            source_event_ids.append(str(event.id))
 
-    appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
-    if payload.appointment_id:
-        appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
-    appointments = appointments_query.order_by(Appointment.scheduled_at.asc()).limit(8).all()
-    if payload.appointment_id and not appointments:
-        raise HTTPException(status_code=404, detail="Appointment not found in this care record")
-    for appointment in appointments:
-        context_lines.append(
-            f"Recorded appointment [{appointment.id}]: {appointment.title}; status={appointment.status}; "
-            f"scheduled={appointment.scheduled_at.isoformat() if appointment.scheduled_at else 'unknown'}"
-        )
+    appointment_workflows = {
+        "living_care_record", "appointment", "after_appointment",
+        "handoff", "professional_summary", "open_loops", "two_week_review",
+    }
+    if payload.appointment_id or payload.workflow in appointment_workflows:
+        appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        if payload.appointment_id:
+            appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
+        appointments = appointments_query.order_by(Appointment.scheduled_at.asc()).limit(8).all()
+        if payload.appointment_id and not appointments:
+            raise HTTPException(status_code=404, detail="Appointment not found in this care record")
+        for appointment in appointments:
+            context_lines.append(
+                f"Recorded appointment [{appointment.id}]: {appointment.title}; status={appointment.status}; "
+                f"scheduled={appointment.scheduled_at.isoformat() if appointment.scheduled_at else 'unknown'}"
+            )
 
     if payload.evidence_ids:
         evidence_rows = db.query(EvidenceModel).filter(
