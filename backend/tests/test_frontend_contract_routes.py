@@ -1024,3 +1024,54 @@ def test_qwen_community_experience_is_disabled_without_inference_or_lcr_write(mo
         assert after.json() == before.json()
     finally:
         teardown()
+
+
+def test_qwen_grounding_guard_rejects_unsupported_completeness_claims():
+    from app.api.collaboration import _contains_unsupported_completeness_claim
+
+    empty_source = (
+        "Test-only request: no care facts or supporting documents were supplied. "
+        "State what information is missing; do not infer facts."
+    )
+    assert _contains_unsupported_completeness_claim("No information is missing.", empty_source)
+    assert _contains_unsupported_completeness_claim("Nothing else is missing.", empty_source)
+    assert not _contains_unsupported_completeness_claim(
+        "No information is missing.",
+        "The caregiver explicitly stated: No information is missing.",
+    )
+
+
+def test_qwen_fails_closed_when_empty_context_is_misrepresented_as_complete(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        generated = []
+
+        def qwen_response(messages, **kwargs):
+            generated.append(messages)
+            return "No information is missing."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={
+                "workflow": "care_history_search",
+                "text": (
+                    "Test-only request: no care facts or supporting documents were supplied. "
+                    "State what information is missing; do not infer facts."
+                ),
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert len(generated) == 2  # original answer plus one repair attempt
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert after.json() == before.json()
+    finally:
+        teardown()
