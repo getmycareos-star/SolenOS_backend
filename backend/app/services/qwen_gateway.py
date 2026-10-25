@@ -226,7 +226,7 @@ def extract_review_candidates(
 
 
 def qwen_runtime_status() -> dict:
-    """Confirm the configured model is actually served by the local Ollama runtime."""
+    """Confirm model inventory and a real local inference without reading care data."""
     base, model, timeout = get_ollama_config()
     request = urllib.request.Request(
         base + "/api/tags",
@@ -250,6 +250,22 @@ def qwen_runtime_status() -> dict:
             status_code=503,
             detail="The configured Qwen model is not installed in the local runtime.",
         )
+
+    # An installed model can still be unable to infer (for example while its
+    # runner is loading or after a runner crash). Verify a real, short local
+    # inference before reporting the assistant as available. The probe is not
+    # returned to the caregiver and does not read or write care data.
+    probe = qwen_chat(
+        [{"role": "user", "content": "Reply with the single word READY."}],
+        timeout=min(timeout, 30.0),
+        options={"num_predict": 8, "temperature": 0},
+    )
+    if not probe.strip():
+        raise HTTPException(
+            status_code=503,
+            detail="The configured local Qwen model did not complete its inference check.",
+        )
+
     return {
         "available": True,
         "model": model,
