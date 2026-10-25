@@ -1,14 +1,14 @@
 """Add persistent in-app care reminders.
 
 Revision ID: 20261025_01
-Revises: 20261024_10
+Revises: 20261024_12
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261025_01"
-down_revision = "20261024_10"
+down_revision = "20261024_12"
 branch_labels = None
 depends_on = None
 
