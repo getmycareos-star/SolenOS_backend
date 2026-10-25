@@ -638,7 +638,7 @@ async def post_situation(
     )
     response_payload["qwen_extraction_status"] = "not_run" if has_source_text else "not_applicable"
     response_payload["qwen_candidates"] = None
-    response_payload["qwen_review_required"] = bool(source_text)
+    response_payload["qwen_review_required"] = has_source_text
     response_payload["qwen_written_to_lcr"] = False
     return response_payload
 
