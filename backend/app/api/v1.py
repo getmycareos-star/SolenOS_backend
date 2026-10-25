@@ -348,25 +348,15 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         caregiver_id=caregiver_id,
     )
 
-    # Analyze the saved capture through the shared Railway-local Qwen gateway.
-    # This response is a review aid only; candidate output is never written as
-    # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
-    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
-    qwen_status = "unavailable"
-    qwen_candidates = None
-    try:
-        qwen_candidates = extract_review_candidates(source_text, source_event_id=event.id)
-        qwen_status = "available"
-    except Exception:
-        qwen_status = "unavailable"
-
+    # Persist first. The frontend requests Qwen analysis separately using the
+    # returned event ID, so model latency cannot block or duplicate this save.
     return {
         "success": True,
         "id": event.id,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
-        "qwen_extraction_status": qwen_status,
-        "qwen_candidates": qwen_candidates,
+        "qwen_extraction_status": "not_run",
+        "qwen_candidates": None,
         "qwen_review_required": True,
         "qwen_written_to_lcr": False,
     }
