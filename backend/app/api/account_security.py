@@ -1,0 +1,369 @@
+"""Caregiver account verification, recovery, MFA, and durable login throttling.
+
+Mail delivery requires SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD,
+SMTP_FROM_EMAIL and APP_PUBLIC_URL. MFA encryption requires ACCOUNT_SECURITY_KEY
+(a stable random secret of at least 32 bytes). Missing security configuration fails
+closed rather than issuing plaintext secrets or bypassing a required factor.
+"""
+import base64
+import hashlib
+import hmac
+import os
+import secrets
+import smtplib
+import ssl
+import time
+import uuid
+from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.account import CaregiverAccount
+from app.models.anonymous_session import AnonymousSession
+
+router = APIRouter(prefix="/account-security", tags=["caregiver account security"])
+TOKEN_TTLS = {"verify_email": timedelta(hours=24), "password_reset": timedelta(minutes=30), "account_recovery": timedelta(minutes=30)}
+LOGIN_WINDOW = timedelta(minutes=15)
+LOGIN_MAX_EMAIL = 8
+LOGIN_MAX_IP = 30
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _email_hash(email: str) -> str:
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
+def _ip_hash(ip: str) -> str:
+    # Hashing avoids persisting raw client addresses; the keyed hash prevents easy enumeration.
+    key = os.getenv("ACCOUNT_SECURITY_KEY", "")
+    if len(key.encode()) < 32:
+        raise HTTPException(status_code=503, detail="Account security is not configured")
+    return hmac.new(key.encode(), (ip or "unknown").encode(), hashlib.sha256).hexdigest()
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _security_key() -> bytes:
+    raw = os.getenv("ACCOUNT_SECURITY_KEY", "")
+    if len(raw.encode()) < 32:
+        raise HTTPException(status_code=503, detail="Account security is not configured")
+    return hashlib.sha256(raw.encode()).digest()
+
+
+def _seal(value: bytes) -> str:
+    # Encrypt-then-MAC using HMAC-derived stream blocks; authenticated and stdlib-only.
+    key = _security_key()
+    nonce = secrets.token_bytes(16)
+    stream = b""
+    counter = 0
+    while len(stream) < len(value):
+        stream += hmac.new(key, b"stream" + nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
+        counter += 1
+    cipher = bytes(a ^ b for a, b in zip(value, stream))
+    tag = hmac.new(key, b"tag" + nonce + cipher, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(nonce + tag + cipher).decode()
+
+
+def _unseal(value: str) -> bytes:
+    key = _security_key()
+    raw = base64.urlsafe_b64decode(value.encode())
+    if len(raw) < 48:
+        raise ValueError("invalid encrypted secret")
+    nonce, tag, cipher = raw[:16], raw[16:48], raw[48:]
+    expected = hmac.new(key, b"tag" + nonce + cipher, hashlib.sha256).digest()
+    if not hmac.compare_digest(tag, expected):
+        raise ValueError("invalid encrypted secret")
+    stream = b""
+    counter = 0
+    while len(stream) < len(cipher):
+        stream += hmac.new(key, b"stream" + nonce + counter.to_bytes(4, "big"), hashlib.sha256).digest()
+        counter += 1
+    return bytes(a ^ b for a, b in zip(cipher, stream))
+
+
+def _totp(secret: bytes, at: int | None = None) -> str:
+    import struct
+    counter = int((at if at is not None else time.time()) // 30)
+    digest = hmac.new(secret, struct.pack(">Q", counter), hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    number = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000
+    return f"{number:06d}"
+
+
+def _valid_totp(secret: bytes, code: str) -> bool:
+    if not code.isdigit() or len(code) != 6:
+        return False
+    now = time.time()
+    return any(hmac.compare_digest(_totp(secret, now + shift * 30), code) for shift in (-1, 0, 1))
+
+
+def _send_email(to_email: str, subject: str, body: str):
+    required = ["SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_FROM_EMAIL", "APP_PUBLIC_URL"]
+    if any(not os.getenv(key) for key in required):
+        raise HTTPException(status_code=503, detail="Email delivery is not configured; account security action was not completed")
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = os.environ["SMTP_FROM_EMAIL"]
+        msg["To"] = to_email
+        msg.set_content(body)
+        with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.getenv("SMTP_PORT", "587")), timeout=10) as server:
+            server.starttls(context=ssl.create_default_context())
+            server.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
+            server.send_message(msg)
+    except Exception as exc:
+        # Do not return a token to the client as a fallback.
+        raise HTTPException(status_code=503, detail="Email delivery failed; retry later") from exc
+
+
+def _issue_token(db: Session, account: CaregiverAccount, purpose: str, request: Request | None = None) -> str:
+    raw = secrets.token_urlsafe(32)
+    expires = _now() + TOKEN_TTLS[purpose]
+    ip = request.client.host if request and request.client else "unknown"
+    db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE account_id=:account AND purpose=:purpose AND consumed_at IS NULL"), {"now": _now(), "account": account.id, "purpose": purpose})
+    db.execute(text("""INSERT INTO account_security_tokens
+        (id, account_id, purpose, token_hash, expires_at, created_at, request_ip_hash)
+        VALUES (:id, :account, :purpose, :hash, :expires, :created, :ip)"""),
+        {"id": str(uuid.uuid4()), "account": account.id, "purpose": purpose, "hash": _token_hash(raw), "expires": expires, "created": _now(), "ip": _ip_hash(ip)})
+    db.flush()
+    return raw
+
+
+def _consume_token(db: Session, raw: str, purpose: str):
+    row = db.execute(text("""SELECT id, account_id, expires_at, consumed_at FROM account_security_tokens
+        WHERE token_hash=:hash AND purpose=:purpose FOR UPDATE"""),
+        {"hash": _token_hash(raw), "purpose": purpose}).mappings().first()
+    if not row or row["consumed_at"] is not None or row["expires_at"] <= _now():
+        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
+    db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE id=:id AND consumed_at IS NULL"),
+                {"now": _now(), "id": row["id"]})
+    return db.query(CaregiverAccount).filter(CaregiverAccount.id == row["account_id"]).with_for_update().first()
+
+
+def _revoke_sessions(db: Session, account: CaregiverAccount):
+    db.query(AnonymousSession).filter(
+        AnonymousSession.caregiver_id == account.caregiver_id,
+        AnonymousSession.revoked_at.is_(None),
+    ).update({"revoked_at": _now()}, synchronize_session=False)
+
+
+def check_login_throttle(db: Session, email: str, ip: str):
+    ehash, ihash = _email_hash(email), _ip_hash(ip)
+    since = _now() - LOGIN_WINDOW
+    count = db.execute(text("""SELECT COUNT(*) FROM account_login_attempts
+        WHERE attempted_at >= :since AND succeeded = false AND (email_hash=:email OR ip_hash=:ip)"""),
+        {"since": since, "email": ehash, "ip": ihash}).scalar_one()
+    email_count = db.execute(text("""SELECT COUNT(*) FROM account_login_attempts
+        WHERE attempted_at >= :since AND succeeded = false AND email_hash=:email"""),
+        {"since": since, "email": ehash}).scalar_one()
+    if count >= LOGIN_MAX_IP or email_count >= LOGIN_MAX_EMAIL:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Try again later.")
+
+
+def record_login_attempt(db: Session, email: str, ip: str, succeeded: bool):
+    db.execute(text("""INSERT INTO account_login_attempts
+        (id, email_hash, ip_hash, attempted_at, succeeded)
+        VALUES (:id, :email, :ip, :at, :success)"""),
+        {"id": str(uuid.uuid4()), "email": _email_hash(email), "ip": _ip_hash(ip), "at": _now(), "success": succeeded})
+    # Keep the persistent table bounded.
+    db.execute(text("DELETE FROM account_login_attempts WHERE attempted_at < :cutoff"), {"cutoff": _now() - timedelta(days=7)})
+
+
+class TokenRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class TokenConfirm(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+class PasswordResetConfirm(TokenConfirm):
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class MfaConfirm(BaseModel):
+    code: str = Field(min_length=6, max_length=12)
+
+
+@router.post("/verification/request", status_code=202)
+def request_email_verification(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
+    # Always generic to avoid account enumeration. Unknown accounts do not get a token.
+    if account is not None and getattr(account, "email_verified_at", None) is None:
+        raw = _issue_token(db, account, "verify_email", request)
+        db.commit()
+        _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={raw}\n\nIf you did not request this, ignore this message.")
+    return {"message": "If the account exists and needs verification, instructions will be sent."}
+
+
+@router.post("/verification/confirm")
+def confirm_email_verification(payload: TokenConfirm, db: Session = Depends(get_db)):
+    account = _consume_token(db, payload.token, "verify_email")
+    if account is None:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
+    account.email_verified_at = _now()
+    db.commit()
+    return {"verified": True}
+
+
+@router.post("/password-reset/request", status_code=202)
+def request_password_reset(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
+    if account is not None:
+        raw = _issue_token(db, account, "password_reset", request)
+        db.commit()
+        _send_email(email, "Reset your SolenOS password", f"Reset your password within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/reset-password?token={raw}\n\nIf you did not request this, ignore this message.")
+    return {"message": "If the account exists, password reset instructions will be sent."}
+
+
+@router.post("/password-reset/confirm")
+def confirm_password_reset(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    from app.api.anonymous_sessions import _hash_password
+    account = _consume_token(db, payload.token, "password_reset")
+    if account is None:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
+    account.password_hash = _hash_password(payload.new_password)
+    account.updated_at = _now()
+    _revoke_sessions(db, account)
+    db.commit()
+    return {"password_reset": True, "sessions_revoked": True}
+
+
+@router.post("/recovery/request", status_code=202)
+def request_account_recovery(payload: TokenRequest, request: Request, db: Session = Depends(get_db)):
+    email = payload.email.strip().lower()
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
+    if account is not None:
+        raw = _issue_token(db, account, "account_recovery", request)
+        db.commit()
+        _send_email(email, "Recover your SolenOS account", f"Recover your account within 30 minutes using this link:\n{os.environ['APP_PUBLIC_URL'].rstrip('/')}/recover-account?token={raw}\n\nIf you did not request this, ignore this message.")
+    return {"message": "If the account exists, recovery instructions will be sent."}
+
+
+@router.post("/recovery/confirm")
+def confirm_account_recovery(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
+    # Recovery uses control of the previously verified mailbox as the identity check.
+    from app.api.anonymous_sessions import _hash_password
+    account = _consume_token(db, payload.token, "account_recovery")
+    if account is None:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
+    account.password_hash = _hash_password(payload.new_password)
+    account.updated_at = _now()
+    _revoke_sessions(db, account)
+    # Recovery invalidates MFA and all outstanding security tokens.
+    db.execute(text("UPDATE account_mfa_secrets SET confirmed_at=NULL WHERE account_id=:id"), {"id": account.id})
+    account.mfa_enabled = False
+    db.execute(text("UPDATE account_mfa_recovery_codes SET used_at=:now WHERE account_id=:id AND used_at IS NULL"), {"now": _now(), "id": account.id})
+    db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE account_id=:id AND consumed_at IS NULL"), {"now": _now(), "id": account.id})
+    db.commit()
+    return {"recovered": True, "sessions_revoked": True, "mfa_reset": True}
+
+
+@router.post("/mfa/enroll")
+def enroll_mfa(request: Request, db: Session = Depends(get_db)):
+    from app.api.anonymous_sessions import _verify_password
+    account = _account_from_bearer(request, db)
+    if getattr(account, "email_verified_at", None) is None:
+        raise HTTPException(status_code=403, detail="Verify your email before enabling MFA")
+    secret = secrets.token_bytes(20)
+    ciphertext = _seal(secret)
+    db.execute(text("""INSERT INTO account_mfa_secrets (account_id, secret_ciphertext, confirmed_at, updated_at)
+        VALUES (:id, :secret, NULL, :now) ON CONFLICT (account_id) DO UPDATE SET secret_ciphertext=:secret, confirmed_at=NULL, updated_at=:now"""),
+        {"id": account.id, "secret": ciphertext, "now": _now()})
+    db.commit()
+    base32 = base64.b32encode(secret).decode().rstrip("=")
+    label = f"SolenOS:{account.email}"
+    return {"secret": base32, "otpauth_uri": f"otpauth://totp/{label}?secret={base32}&issuer=SolenOS&algorithm=SHA1&digits=6&period=30", "confirmed": False}
+
+
+def _account_from_bearer(request: Request, db: Session):
+    scheme, _, raw = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not raw.strip():
+        raise HTTPException(status_code=401, detail="A valid account session is required")
+    token_hash = hashlib.sha256(raw.strip().encode()).hexdigest()
+    session = db.query(AnonymousSession).filter(AnonymousSession.token_hash == token_hash, AnonymousSession.revoked_at.is_(None), AnonymousSession.expires_at > _now()).first()
+    if not session:
+        raise HTTPException(status_code=401, detail="A valid account session is required")
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.caregiver_id == session.caregiver_id).first()
+    if not account:
+        raise HTTPException(status_code=403, detail="This action requires an account")
+    return account
+
+
+@router.post("/mfa/confirm")
+def confirm_mfa(payload: MfaConfirm, request: Request, db: Session = Depends(get_db)):
+    account = _account_from_bearer(request, db)
+    row = db.execute(text("SELECT secret_ciphertext, confirmed_at FROM account_mfa_secrets WHERE account_id=:id FOR UPDATE"), {"id": account.id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=400, detail="Start MFA enrollment first")
+    try:
+        secret = _unseal(row["secret_ciphertext"])
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="MFA secret cannot be decrypted; contact support") from exc
+    if not _valid_totp(secret, payload.code):
+        raise HTTPException(status_code=400, detail="Invalid authenticator code")
+    account.mfa_enabled = True
+    db.execute(text("UPDATE account_mfa_secrets SET confirmed_at=:now, updated_at=:now WHERE account_id=:id"), {"now": _now(), "id": account.id})
+    codes = [secrets.token_urlsafe(9) for _ in range(10)]
+    db.execute(text("DELETE FROM account_mfa_recovery_codes WHERE account_id=:id"), {"id": account.id})
+    for code in codes:
+        db.execute(text("""INSERT INTO account_mfa_recovery_codes (id, account_id, code_hash, created_at)
+            VALUES (:id, :account, :hash, :now)"""), {"id": str(uuid.uuid4()), "account": account.id, "hash": _token_hash(code), "now": _now()})
+    db.commit()
+    return {"mfa_enabled": True, "recovery_codes": codes, "warning": "Store these codes securely. They are shown only once."}
+
+
+@router.post("/mfa/disable")
+def disable_mfa(payload: MfaConfirm, request: Request, db: Session = Depends(get_db)):
+    account = _account_from_bearer(request, db)
+    row = db.execute(text("SELECT secret_ciphertext FROM account_mfa_secrets WHERE account_id=:id AND confirmed_at IS NOT NULL"), {"id": account.id}).mappings().first()
+    if not row:
+        raise HTTPException(status_code=400, detail="MFA is not enabled")
+    try:
+        secret = _unseal(row["secret_ciphertext"])
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="MFA secret cannot be decrypted; contact support") from exc
+    if not _valid_totp(secret, payload.code):
+        raise HTTPException(status_code=400, detail="Invalid authenticator code")
+    account.mfa_enabled = False
+    db.execute(text("UPDATE account_mfa_secrets SET confirmed_at=NULL, updated_at=:now WHERE account_id=:id"), {"now": _now(), "id": account.id})
+    db.execute(text("UPDATE account_mfa_recovery_codes SET used_at=:now WHERE account_id=:id AND used_at IS NULL"), {"now": _now(), "id": account.id})
+    db.commit()
+    return {"mfa_enabled": False}
+
+
+def verify_mfa_login(db: Session, account: CaregiverAccount, code: str | None) -> bool:
+    if not account.mfa_enabled:
+        return True
+    if not code:
+        return False
+    row = db.execute(text("SELECT secret_ciphertext FROM account_mfa_secrets WHERE account_id=:id AND confirmed_at IS NOT NULL"), {"id": account.id}).mappings().first()
+    if row:
+        try:
+            if _valid_totp(_unseal(row["secret_ciphertext"]), code):
+                return True
+        except Exception:
+            return False
+    # Recovery codes are single-use and are consumed atomically.
+    hashed = _token_hash(code)
+    recovery = db.execute(text("""SELECT id FROM account_mfa_recovery_codes
+        WHERE account_id=:id AND code_hash=:hash AND used_at IS NULL FOR UPDATE"""), {"id": account.id, "hash": hashed}).mappings().first()
+    if recovery:
+        db.execute(text("UPDATE account_mfa_recovery_codes SET used_at=:now WHERE id=:id AND used_at IS NULL"), {"now": _now(), "id": recovery["id"]})
+        return True
+    return False
