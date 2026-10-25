@@ -10,7 +10,7 @@ export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
 export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
 export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-8}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:1.5b}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
 export OLLAMA_SIDECAR_ENABLED="true"
 
 ollama serve > >(tee /tmp/ollama-runtime.log >&2) 2>&1 &
@@ -38,7 +38,7 @@ curl -fsS http://127.0.0.1:11434/api/tags >/dev/null || {
   echo "Bundled Ollama runtime did not become ready." >&2
   exit 1
 }
-ollama list | grep -q 'qwen2.5:1.5b' || {
+ollama list | grep -q 'qwen2.5:0.5b' || {
   echo "Required bundled Qwen model is missing; refusing to start without inference." >&2
   exit 1
 }
