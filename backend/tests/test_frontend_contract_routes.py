@@ -454,10 +454,14 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
         )
         headers = {"Authorization": f"Bearer {token}"}
         workflows = [
-            "daily_capture", "add_record", "document", "living_care_record", "care_history_search",\n            "care_situation_change", "delta_engine", "evidence_provenance", "uncertainty_contradictions",\n            "returning_caregiver", "appointment",
-            "after_appointment", "handoff", "professional_summary",
-            "open_loops", "two_week_review", "decision_outcome",
-            "medication_day", "reminders_notifications", "care_coordination", "companion",\n            "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",\n            "settings_security", "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
+            "daily_capture", "add_record", "document", "living_care_record",
+            "care_history_search", "care_situation_change", "delta_engine",
+            "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
+            "appointment", "after_appointment", "handoff", "professional_summary",
+            "open_loops", "two_week_review", "decision_outcome", "medication_day",
+            "reminders_notifications", "care_coordination", "companion", "caregiver_feedback",
+            "sharing_export", "roles_access", "account_recovery", "settings_security",
+            "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
         ]
         before = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert before.status_code == 200, before.text
