@@ -117,6 +117,19 @@ def login_account(payload: AccountLogin, db: Session = Depends(get_db)):
     return _issue_account_session(db, account)
 
 
+
+@router.get("/me")
+def current_session(request: Request, db: Session = Depends(get_db)):
+    """Identify whether the current scoped bearer capability belongs to an account."""
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid session is required")
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.caregiver_id == caregiver_id).first()
+    if account is None:
+        return {"authenticated": False, "account": None, "session_type": "anonymous"}
+    return {"authenticated": True, "account": {"id": account.id, "email": account.email}, "session_type": "account"}
+
+
 @router.post("/anonymous", status_code=201)
 def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depends(get_db)):
     """Create an optional anonymous care record without an account."""
