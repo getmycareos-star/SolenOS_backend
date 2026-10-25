@@ -926,3 +926,55 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         assert naive_due_date.status_code == 422, naive_due_date.text
     finally:
         teardown()
+
+
+def test_qwen_grounding_guard_rejects_unsupported_care_status_claims():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    assert _contains_unsupported_care_claim(
+        "The clinician reported that the patient had a positive response to the treatment.",
+        "The appointment is over, but I have not provided what the clinician said.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Follow-up appointment scheduled in six weeks.",
+        "Follow-up appointment requested in six weeks.",
+    )
+    assert not _contains_unsupported_care_claim(
+        "The appointment was scheduled for Monday.",
+        "The appointment was scheduled for Monday.",
+    )
+
+
+def test_qwen_support_fails_closed_after_repeated_unsupported_clinical_claim(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        generated = []
+        hallucinated = "The clinician reported that the patient had a positive response to the treatment."
+
+        def qwen_response(messages, **kwargs):
+            generated.append(messages)
+            return hallucinated
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
+        before = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert before.status_code == 200, before.text
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "after_appointment",
+                "text": "The appointment is over, but I have not provided what the clinician said.",
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert "grounded" in response.json()["detail"].lower()
+        assert len(generated) == 2, "Unsupported output should receive one repair attempt, then fail closed."
+
+        after = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert after.status_code == 200, after.text
+        assert after.json() == before.json(), "Qwen assistance must not write to the Living Care Record."
+    finally:
+        teardown()
