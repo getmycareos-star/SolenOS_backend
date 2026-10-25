@@ -240,6 +240,16 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
+          echo "QWEN_E2E: casual greeting cannot become a care-record capture"
+          capture_status=$(curl --silent --show-error -o /tmp/greeting-capture.json -w "%{http_code}" \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\\"person_id\\":\\"$person_id\\",\\"caregiver_id\\":\\"$caregiver_id\\",\\"raw_input\\":\\"hi\\",\\"documents\\":[]}" \
+            http://127.0.0.1:8080/api/situation)
+          test "$capture_status" = "422"
+          events_before_greeting=$(curl --fail --silent --show-error -H "$auth_header" \
+            "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; assert json.loads(sys.argv[1]) == []' "$events_before_greeting"
+
           echo "QWEN_E2E: runtime status"
           status=$(curl --fail --silent --show-error -H "$auth_header" \
             http://127.0.0.1:8080/api/v1/assistant/status)
