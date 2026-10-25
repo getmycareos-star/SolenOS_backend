@@ -754,3 +754,47 @@ def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fal
         db.close()
     finally:
         teardown()
+
+
+
+def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
+    import json
+    from app.services import qwen_gateway
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": "A real generated reply."}}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen2.5:1.5b")
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT_NAME", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", fake_urlopen)
+
+    reply = qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "hi"}],
+        options={"temperature": 0},
+    )
+
+    assert reply == "A real generated reply."
+    assert captured["url"] == "http://ollama:11434/api/chat"
+    assert captured["payload"]["model"] == "qwen2.5:1.5b"
+    assert captured["payload"]["keep_alive"] == "30m"
+    assert captured["payload"]["options"]["num_ctx"] == 2048
+    assert captured["payload"]["options"]["num_predict"] == 256
+    assert captured["payload"]["options"]["temperature"] == 0
