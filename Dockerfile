@@ -8,11 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends bash ca-certificates curl libgomp1 tini zstd; \
-    curl --retry 4 --retry-all-errors --connect-timeout 20 -fsSL \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    curl --retry 4 --retry-all-errors --connect-timeout 20 --fail --show-error --location \
       https://ollama.com/download/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst; \
     tar --zstd -xf /tmp/ollama.tar.zst -C /usr; \
     rm -f /tmp/ollama.tar.zst; \
-    rm -rf /var/lib/apt/lists/*; \
     ollama --version
 
 WORKDIR /app
