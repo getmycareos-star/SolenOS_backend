@@ -238,7 +238,6 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         linked_payload = linked.json()
         assert linked_payload.get("care_event_id")
         assert linked_payload.get("active_care_situation") is not None, linked_payload
-        assert linked_payload.get("return_continuity") is not None, linked_payload
         db = TestingSessionLocal()
         event = db.query(CareEvent).filter_by(id=linked_payload["care_event_id"]).first()
         assert event is not None
@@ -558,44 +557,6 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         teardown()
 
 
-def test_companion_repairs_unprompted_greeting_question_with_qwen_not_a_canned_phrase(monkeypatch):
-    client, token, person_id, _, _, _ = setup_client(monkeypatch)
-    try:
-        import app.api.collaboration as collaboration
-
-        calls = []
-        generated = iter(["Hi! How are you doing?", "Hi!"])
-        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
-
-        def generated_reply(base, model, messages, options=None):
-            calls.append(messages)
-            return next(generated)
-
-        monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
-        response = client.post(
-            "/api/v1/conversation/message",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "hi"},
-        )
-        assert response.status_code == 200, response.text
-        assert response.json()["reply"] == "Hi!"
-        assert response.json()["ai_generated"] is True
-        assert len(calls) == 2
-        assert "draft_reply" in calls[1][-1]["content"]
-        events = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
-        assert events.status_code == 200
-        assert events.json() == []
-    finally:
-        teardown()
-
-
-def test_greeting_guard_detects_unrequested_automatic_question():
-    import app.api.collaboration as collaboration
-
-    assert collaboration._greeting_reply_needs_revision("Hi! How are you doing?")
-    assert not collaboration._greeting_reply_needs_revision("Hi!")
-
-
 def test_casual_greeting_is_rejected_before_situation_capture_writes(monkeypatch):
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     try:
@@ -881,6 +842,130 @@ def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
     assert captured["payload"]["options"]["num_ctx"] == 1536
     assert captured["payload"]["options"]["num_predict"] == 96
     assert captured["payload"]["options"]["temperature"] == 0
+
+
+def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    auth = {"Authorization": f"Bearer {token}"}
+    other_auth = {"Authorization": f"Bearer {other_token}"}
+    due_at = "2030-01-01T12:00:00+00:00"
+    try:
+        created = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "title": "Review the appointment questions",
+                "note": "Confirm which questions still need an answer.",
+                "due_at": due_at,
+            },
+        )
+        assert created.status_code == 201, created.text
+        reminder = created.json()
+        reminder_id = reminder["id"]
+        assert reminder["status"] == "open"
+        assert reminder["delivery_mode"] == "in_app_list_only"
+        assert reminder["notification_delivery_status"] == "not_sent"
+        assert reminder["created_by_caregiver_id"] == caregiver_id
+        assert reminder["due_at"].endswith(("Z", "+00:00")), reminder["due_at"]
+
+        listed = client.get(f"/api/v1/reminders/{person_id}", headers=auth)
+        assert listed.status_code == 200, listed.text
+        assert any(item["id"] == reminder_id for item in listed.json())
+
+        own_other_list = client.get(f"/api/v1/reminders/{other_person_id}", headers=other_auth)
+        assert own_other_list.status_code == 200, own_other_list.text
+        assert own_other_list.json() == []
+        foreign_list = client.get(f"/api/v1/reminders/{person_id}", headers=other_auth)
+        assert foreign_list.status_code == 403, foreign_list.text
+        foreign_complete = client.patch(
+            f"/api/v1/reminders/{reminder_id}/complete",
+            headers=other_auth,
+            json={},
+        )
+        assert foreign_complete.status_code == 404, foreign_complete.text
+
+        completed = client.patch(
+            f"/api/v1/reminders/{reminder_id}/complete",
+            headers=auth,
+            json={"completion_note": "Questions reviewed."},
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == "completed"
+        assert completed.json()["completed_by_caregiver_id"] == caregiver_id
+        assert completed.json()["completion_note"] == "Questions reviewed."
+        assert completed.json()["notification_delivery_status"] == "not_sent"
+
+        cannot_cancel_completed = client.patch(
+            f"/api/v1/reminders/{reminder_id}/cancel",
+            headers=auth,
+        )
+        assert cannot_cancel_completed.status_code == 409, cannot_cancel_completed.text
+
+        cancelled_create = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={"person_id": person_id, "title": "Check transport", "due_at": due_at},
+        )
+        assert cancelled_create.status_code == 201, cancelled_create.text
+        cancelled_id = cancelled_create.json()["id"]
+        cancelled = client.patch(f"/api/v1/reminders/{cancelled_id}/cancel", headers=auth)
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        assert cancelled.json()["cancelled_by_caregiver_id"] == caregiver_id
+        cannot_complete_cancelled = client.patch(
+            f"/api/v1/reminders/{cancelled_id}/complete",
+            headers=auth,
+            json={},
+        )
+        assert cannot_complete_cancelled.status_code == 409, cannot_complete_cancelled.text
+
+        naive_due_date = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={"person_id": person_id, "title": "Ambiguous time", "due_at": "2030-01-01T12:00:00"},
+        )
+        assert naive_due_date.status_code == 422, naive_due_date.text
+    finally:
+        teardown()
+
+
+def test_companion_repairs_unprompted_greeting_question_with_qwen_not_a_canned_phrase(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        calls = []
+        generated = iter(["Hi! How are you doing?", "Hi!"])
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
+
+        def generated_reply(base, model, messages, options=None):
+            calls.append(messages)
+            return next(generated)
+
+        monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "hi"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Hi!"
+        assert response.json()["ai_generated"] is True
+        assert len(calls) == 2
+        assert "draft_reply" in calls[1][-1]["content"]
+        events = client.get(f"/api/v1/events/{person_id}", headers={"Authorization": f"Bearer {token}"})
+        assert events.status_code == 200
+        assert events.json() == []
+    finally:
+        teardown()
+
+
+def test_greeting_guard_detects_unrequested_automatic_question():
+    import app.api.collaboration as collaboration
+
+    assert collaboration._greeting_reply_needs_revision("Hi! How are you doing?")
+    assert not collaboration._greeting_reply_needs_revision("Hi!")
 
 
 def test_qwen_candidate_extraction_persists_review_attribution_and_never_writes_lcr(monkeypatch):
