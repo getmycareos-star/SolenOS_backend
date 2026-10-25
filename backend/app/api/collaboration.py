@@ -457,6 +457,10 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"\b(?:patient|person)\s+(?:responded|improved|worsened)\b",
         r"\b(?:dose|medication|treatment)\s+(?:was|has been|had been)\s+(?:changed|increased|decreased|stopped|started|administered|missed)\b",
         r"\b(?:test|scan|result)\s+(?:was|came back)\s+(?:positive|negative|normal|abnormal)\b",
+        r"\b(?:can|could|may|might)\s+be\s+(?:a\s+)?(?:sign|symptom|indicator)\s+of\b",
+        r"\b(?:dementia|alzheimer(?:'s)?(?: disease)?|delirium|parkinson(?:'s)?(?: disease)?)\b",
+        r"\b(?:handoff|hand-off)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
+        r"\b(?:assigned|delegated)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text):
