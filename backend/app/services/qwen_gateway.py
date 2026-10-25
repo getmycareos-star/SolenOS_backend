@@ -76,13 +76,13 @@ def qwen_chat(
     # same container that hosts FastAPI. Every workflow uses the shared gateway,
     # so the limit applies consistently without changing model authority.
     try:
-        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "2048")), 8192))
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "1536")), 8192))
     except (TypeError, ValueError):
-        num_ctx = 2048
+        num_ctx = 1536
     try:
-        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "256")), 1024))
+        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "192")), 1024))
     except (TypeError, ValueError):
-        num_predict = 256
+        num_predict = 192
     bounded_options = {
         "num_ctx": num_ctx,
         "num_predict": num_predict,
