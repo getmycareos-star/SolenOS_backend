@@ -54,3 +54,24 @@ def test_all_solenos_workflows_are_accepted_by_shared_qwen_contract(workflow):
 def test_unknown_workflow_is_rejected():
     with pytest.raises(ValidationError):
         QwenAssistRequest(workflow="unregistered_workflow", text="Help me.")
+
+from app.api.collaboration import _greeting_reply_needs_revision
+
+
+@pytest.mark.parametrize("reply", ["Hello!", "Hi there!", "Good morning!"])
+def test_clear_short_greeting_passes_quality_guard(reply):
+    assert _greeting_reply_needs_revision(reply) is False
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "",
+        "Hello! How are you doing?",
+        "Hi there! How can I help you today?",
+        "Hello? What do you need?",
+    ],
+)
+def test_interview_style_or_empty_greeting_fails_quality_guard(reply):
+    assert _greeting_reply_needs_revision(reply) is True
+
