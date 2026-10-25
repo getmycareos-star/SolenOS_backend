@@ -61,9 +61,13 @@ class CompanionCreate(BaseModel):
 
 class QwenAssistRequest(BaseModel):
     workflow: Literal[
-        "daily_capture", "document", "community", "appointment", "after_appointment",
-        "handoff", "professional_summary", "open_loops", "two_week_review",
-        "decision_outcome", "medication_day", "living_care_record",
+        "daily_capture", "add_record", "document", "living_care_record", "care_history_search",
+        "care_situation_change", "delta_engine", "evidence_provenance", "uncertainty_contradictions",
+        "returning_caregiver", "appointment", "after_appointment", "handoff", "professional_summary",
+        "open_loops", "two_week_review", "decision_outcome", "medication_day",
+        "reminders_notifications", "care_coordination", "companion",
+        "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
+        "settings_security", "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -313,259 +317,10 @@ def remove_reaction(post_id: str, request: Request, db: Session = Depends(get_db
     return {"ok": True, "removed": reaction is not None}
 
 
-def _literal_matches(db: Session, observation: str) -> list[dict]:
-    terms = {term.lower() for term in re.findall(r"[a-zA-Z0-9']{3,}", observation)}
-    posts = (db.query(CommunityPost)
-        .filter(CommunityPost.visibility == "public", CommunityPost.moderation_status == "published")
-        .order_by(CommunityPost.created_at.desc()).limit(200).all())
-    scored = []
-    for post in posts:
-        words = {term.lower() for term in re.findall(r"[a-zA-Z0-9']{3,}", post.content + " " + (post.care_stage or "") + " " + (post.tags_json or ""))}
-        overlap = terms & words
-        if overlap:
-            scored.append((len(overlap), post, sorted(overlap)))
-    scored.sort(key=lambda row: row[0], reverse=True)
-    return [{
-        "post_id": post.id, "author_label": "Anonymous caregiver", "author_type": "peer_caregiver",
-        "content": post.content, "tags": json.loads(post.tags_json or "[]"),
-        "matched_terms": terms_hit, "match_type": "literal_keyword_overlap_not_clinical_advice",
-    } for _, post, terms_hit in scored[:4]]
-
-
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
-    _scope(request, db)
-    observation = str(payload.get("observation", "")).strip()
-    if not observation:
-        raise HTTPException(status_code=422, detail="observation is required")
-    matches = _literal_matches(db, observation)
-    summary = None
-    provider_status = "unavailable"
-    ai_generated = False
-    if matches:
-        try:
-            summary = await asyncio.to_thread(
-                qwen_chat,
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
-                            "published peer experiences. They are personal reports, not verified facts, clinical "
-                            "evidence, or advice. Do not infer diagnosis or cause, recommend treatment, or invent "
-                            "themes not present in the posts. State briefly that experiences differ. Use plain, "
-                            "accessible English, no unexplained foreign words, and at most three short sentences."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps({
-                            "caregiver_observation": observation,
-                            "published_peer_posts": [
-                                {"post_id": item["post_id"], "content": item["content"]}
-                                for item in matches
-                            ],
-                        }, ensure_ascii=False),
-                    },
-                ],
-            )
-            if _companion_reply_needs_revision(summary) or _contains_unrequested_saba(
-                summary,
-                observation + "\n" + "\n".join(item["content"] for item in matches),
-            ):
-                summary = None
-                provider_status = "invalid_response"
-            else:
-                provider_status = "available"
-                ai_generated = True
-        except HTTPException as exc:
-            if exc.status_code != 503:
-                raise
-            provider_status = "unavailable"
-    return {
-        "summary": summary,
-        "matches": matches,
-        "post_ids": [m["post_id"] for m in matches],
-        "provider_status": provider_status,
-        "ai_generated": ai_generated,
-        "notice": (
-            "Qwen summarized published peer experiences; these are not authoritative care facts."
-            if ai_generated else
-            "These are literal matches from published caregiver posts. No AI summary was generated."
-        ),
-        "matching_method": "literal_keyword_overlap_not_clinical_advice",
-    }
-
-
-def _ollama_url() -> tuple[str, str]:
-    base, model, _ = get_ollama_config()
-    return base, model
-
-
-def _ollama_chat(
-    base: str, model: str, messages: list[dict], options: dict | None = None
-) -> str:
-    # All SolenOS workflows use the same local/private Qwen gateway.
-    return qwen_chat(messages, options=options)
-
-
-def _is_casual_greeting(text: str) -> bool:
-    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
-    normalized = " ".join(normalized.split())
-    return normalized in {
-        "hi", "hello", "hey", "hiya", "howdy",
-        "how are you", "how are you doing", "how are you today",
-        "how's it going", "hows it going", "what's up", "whats up",
-        "good morning", "good afternoon", "good evening", "good night",
-        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
-    }
-
-
-def _greeting_reply_needs_revision(reply: str) -> bool:
-    """Greeting-only replies should mirror the user, not start a new interview."""
-    words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
-    normalized = (reply or "").casefold()
-    repeats_automatic_question = bool(re.search(r"\\bhow are you(?: doing)?\\b", normalized))
-    return not words or len(words) > 12 or repeats_automatic_question
-
-
-def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
-    """Reject the observed unexplained token only when it is not in supplied source."""
-    return bool(
-        re.search(r"(?i)\bsaba\b", reply or "")
-        and not re.search(r"(?i)\bsaba\b", source_text or "")
-    )
-
-
-def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
-    """Reject high-impact care-status claims when the supplied source does not support them.
-
-    This is a conservative guardrail, not a general semantic-entailment proof. If
-    a claim cannot be grounded by the source wording, prefer retry/unavailable to
-    presenting a fabricated care status as fact.
-    """
-    source = (source_text or "").casefold()
-    text = (reply or "").casefold()
-    patterns = (
-        r"\bpositive response\b",
-        r"\bnegative response\b",
-        r"\b(?:effective|ineffective) treatment\b",
-        r"\bappointment\s+(?:was\s+)?(?:scheduled|confirmed|cancelled|canceled|rescheduled)\b",
-        r"\b(?:diagnosed with|diagnosis of|prescribed|recommended|ordered)\b",
-        r"\b(?:symptom|symptoms|condition)\s+(?:improved|worsened|resolved)\b",
-        r"\b(?:patient|person)\s+(?:responded|improved|worsened)\b",
-        r"\b(?:dose|medication|treatment)\s+(?:was|has been|had been)\s+(?:changed|increased|decreased|stopped|started|administered|missed)\b",
-        r"\b(?:test|scan|result)\s+(?:was|came back)\s+(?:positive|negative|normal|abnormal)\b",
-        r"\b(?:can|could|may|might)\s+be\s+(?:a\s+)?(?:sign|symptom|indicator)\s+of\b",
-        r"\b(?:dementia|alzheimer(?:'s)?(?: disease)?|delirium|parkinson(?:'s)?(?: disease)?)\b",
-        r"\b(?:handoff|hand-off)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
-        r"\b(?:assigned|delegated)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
-    )
-    for pattern in patterns:
-        for match in re.finditer(pattern, text):
-            claim = match.group(0)
-            # All meaningful terms in these high-impact phrases must be present
-            # in source text; exact wording is intentionally required here.
-            terms = re.findall(r"[a-z]+", claim)
-            if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
-                return True
-    return False
-
-
-def _companion_reply_needs_revision(text: str) -> bool:
-    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
-    if not words or len(words) > 55:
-        return True
-    if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
-        return True
-    normalized = " ".join(words)
-    internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
-    return any(term in normalized for term in internal_terms)
-
-
-@router.post("/share-intake", status_code=201)
-def create_share_intake(payload: ShareIntakeCreate, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
-    title = (payload.title or "").strip()
-    text = (payload.text or "").strip()
-    shared_url = (payload.url or "").strip()
-    if not title and not text and not shared_url and not payload.files:
-        raise HTTPException(status_code=422, detail="Shared content is empty")
-
-    allowed_mime_types = {
-        "image/jpeg", "image/png", "image/webp", "image/gif", "image/heic", "image/heif",
-        "image/tiff", "image/bmp", "image/avif", "application/pdf", "text/plain", "text/csv",
-        "text/markdown", "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/rtf", "text/rtf", "message/rfc822", "application/vnd.ms-outlook",
-        "application/octet-stream",
-    }
-    files = []
-    total_bytes = 0
-    for item in payload.files:
-        mime_type = item.mimeType.lower().strip()
-        filename = os.path.basename(item.name).replace("\\r", "").replace("\\n", "").replace("\\x00", "")[:180]
-        extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        if mime_type not in allowed_mime_types:
-            raise HTTPException(status_code=415, detail=f"Unsupported shared file type: {mime_type}")
-        if mime_type == "application/octet-stream" and extension not in {"doc", "docx", "rtf", "eml", "msg"}:
-            raise HTTPException(status_code=415, detail="The shared file type could not be verified")
-        try:
-            raw = base64.b64decode(item.base64, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
-            raise HTTPException(status_code=422, detail="Shared file data is invalid") from exc
-        if not raw:
-            continue
-        total_bytes += len(raw)
-        if total_bytes > 5 * 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Shared files exceed the 5 MB total limit")
-        files.append({
-            "name": filename or "shared-file",
-            "mimeType": mime_type,
-            "base64": base64.b64encode(raw).decode("ascii"),
-        })
-
-    share_id = secrets.token_urlsafe(32)
-    row = ShareIntake(
-        id=share_id,
-        payload_json=json.dumps({"title": title, "text": text, "url": shared_url, "files": files}),
-        expires_at=now + timedelta(minutes=15),
-    )
-    db.add(row)
-    db.commit()
-    return {"id": share_id, "expires_at": row.expires_at.isoformat()}
-
-
-@router.get("/share-intake/{share_id}")
-def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
-    db.query(ShareIntake).filter(ShareIntake.expires_at <= now).delete(synchronize_session=False)
-    row = (
-        db.query(ShareIntake)
-        .filter(ShareIntake.id == share_id, ShareIntake.expires_at > now)
-        .with_for_update()
-        .first()
-    )
-    if row is None:
-        db.commit()
-        raise HTTPException(status_code=404, detail="Shared intake was not found or has expired")
-    try:
-        payload = json.loads(row.payload_json)
-    except (TypeError, ValueError) as exc:
-        db.delete(row)
-        db.commit()
-        raise HTTPException(status_code=500, detail="Shared intake could not be decoded") from exc
-    db.delete(row)
-    db.commit()
-    return {"ok": True, "id": share_id, **payload}
-
-
-@router.get("/assistant/status")
-def qwen_assistant_status():
-    # Infrastructure-only health data: no care-record context is read or returned.
-    return qwen_runtime_status()
+async def community_experience_disabled():
+    raise HTTPException(status_code=410, detail="Community Qwen assistance is disabled.")
 
 
 @router.post("/assistant/assist")
@@ -580,9 +335,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # Daily Capture, document-only or Community assistance. Each workflow gets
     # only the record context needed to perform its explicit task.
     event_workflows = {
-        "living_care_record", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review",
-        "decision_outcome", "medication_day",
+        "living_care_record", "care_history_search", "care_situation_change", "delta_engine",
+        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
+        "appointment", "after_appointment", "handoff", "professional_summary", "open_loops",
+        "two_week_review", "decision_outcome", "medication_day", "reminders_notifications",
+        "care_coordination", "sharing_export", "audit_review",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -601,8 +358,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_event_ids.append(str(event.id))
 
     appointment_workflows = {
-        "living_care_record", "appointment", "after_appointment",
-        "handoff", "professional_summary", "open_loops", "two_week_review",
+        "living_care_record", "care_history_search", "care_situation_change", "returning_caregiver",
+        "appointment", "after_appointment", "handoff", "professional_summary", "open_loops",
+        "two_week_review", "sharing_export",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -645,26 +403,37 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"context={(handoff.context or '')[:800]}"
             )
 
-    if payload.workflow == "community":
-        for match in _literal_matches(db, payload.text)[:3]:
-            context_lines.append(
-                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
-                f"{match['content'][:700]}"
-            )
-
     guidance = {
-        "daily_capture": "Organize only what the caregiver reports today. Do not infer diagnosis, cause, or unreported measurements.",
-        "document": "Explain only supplied/authorized document text; distinguish quoted source facts from interpretation and flag uncertainty.",
-        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
-        "appointment": "Prepare questions and organize recorded facts for the appointment. Never invent appointment details or recommend treatment.",
-        "after_appointment": "Organize the caregiver's report after an appointment; distinguish clinician-reported words, caregiver understanding, unanswered questions and reported next steps.",
-        "handoff": "Help prepare a clear caregiver handoff from recorded and supplied facts. Do not create, assign, send or acknowledge the handoff.",
-        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details.",
-        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in the supplied context. Never invent tasks, owners, deadlines or completion states.",
-        "two_week_review": "Review only the supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
-        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer that a decision caused an outcome.",
-        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
+        "daily_capture": "Organize only what the caregiver reports. Preserve their meaning and separate reported facts from interpretation. Do not infer diagnosis, cause or unreported measurements.",
+        "add_record": "Help structure a proposed record entry or correction. Preserve the original meaning and identify missing details. This assistance does not save or correct a record.",
+        "document": "Explain only supplied or authorized document text; distinguish source text from interpretation and flag uncertainty or unreadable details.",
         "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative; never edit it or claim a change was saved.",
+        "care_history_search": "Answer the question only from matching authorized records and supplied context. If no matching evidence is available, say that the record does not establish the answer.",
+        "care_situation_change": "Explain supported differences over an explicit timeframe, cite the available events, and separate observation from interpretation. Never infer causation or diagnose.",
+        "delta_engine": "Explain only differences supplied by the care-continuity reconciliation context. Do not compute or invent a baseline, delta, severity or cause.",
+        "evidence_provenance": "Explain which supplied source supports a statement and distinguish source text, caregiver report and interpretation. Never invent a source or verification status.",
+        "uncertainty_contradictions": "Identify explicit conflicts and missing information in the supplied context. Preserve Known, Uncertain, Missing and Needs clarification; never silently choose a side.",
+        "returning_caregiver": "Summarize changes only when a valid comparison period or prior-view reference is supplied. Highlight supported open questions and follow-ups; do not invent a prior visit.",
+        "appointment": "Prepare questions and organize recorded facts for an appointment. Never invent appointment details or recommend treatment.",
+        "after_appointment": "Organize the caregiver's report after an appointment; distinguish reported clinician words, caregiver understanding, unanswered questions and reported next steps.",
+        "handoff": "Help prepare a clear caregiver handoff from recorded and supplied facts. Do not create, assign, send or acknowledge the handoff.",
+        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details or imply professional verification.",
+        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in supplied or recorded context. Never invent tasks, owners, deadlines or completion states.",
+        "two_week_review": "Review only supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
+        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer implementation or that a decision caused an outcome.",
+        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
+        "reminders_notifications": "Explain only persisted reminder and notification details in the supplied context. Do not create, schedule, send, or claim delivery of a reminder.",
+        "care_coordination": "Prepare proposed coordination language from supplied facts. Do not assign responsibilities or claim a handoff was accepted or completed.",
+        "companion": "Answer the caregiver's immediate question conversationally using only authorized context. Be concise, admit uncertainty and do not claim to save anything.",
+        "caregiver_feedback": "Use the caregiver's correction to revise the current interpretation, acknowledge uncertainty and ask for clarification when needed. Do not claim model learning or silently alter history.",
+        "sharing_export": "Help draft a source-aware summary for the intended recipient. Do not share, export or claim that content was sent.",
+        "roles_access": "Explain only role or access status explicitly present in supplied context. Never grant, verify or bypass permissions.",
+        "account_recovery": "Explain the account or anonymous-session recovery issue from supplied information. Never request or expose passwords, bearer tokens, recovery codes or secrets.",
+        "settings_security": "Explain security and privacy settings using supplied facts. Do not claim a setting changed or advise bypassing a control.",
+        "record_lifecycle": "Explain pin, archive, restore or deletion choices using supplied context. Do not execute an action or claim a record was changed or deleted.",
+        "offline_sync": "Explain offline or synchronization status only when explicitly provided. Never claim data is saved, uploaded or synced without confirmed system status.",
+        "ai_reliability": "Explain the reported assistant availability or failure state. Never substitute a canned answer or claim inference succeeded when it failed.",
+        "audit_review": "Explain only supplied review-candidate provenance, status and attribution. Do not approve a candidate or claim a reviewer action occurred.",
     }[payload.workflow]
     prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
