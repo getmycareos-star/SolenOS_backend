@@ -965,6 +965,27 @@ def test_qwen_support_fails_closed_after_repeated_unsupported_clinical_claim(mon
         teardown()
 
 
+def test_qwen_grounding_guard_rejects_credential_requests_and_unsupported_system_state():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    assert _contains_unsupported_care_claim(
+        "Please provide the user's account details or a verification code to proceed.",
+        "The user cannot access their account. No verification or account status is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Yes, an archived note is still retained.",
+        "The user asks whether an archived note is still retained. No current record state is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "The Qwen system is unavailable. Please try again later.",
+        "A prior assistant request failed once. No current service status is supplied.",
+    )
+    assert not _contains_unsupported_care_claim(
+        "The current account status was not supplied. Use the official recovery process.",
+        "The user cannot access their account. No verification or account status is supplied.",
+    )
+
+
 def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff_assignment():
     from app.api.collaboration import _contains_unsupported_care_claim
 
