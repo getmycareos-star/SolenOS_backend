@@ -54,6 +54,15 @@ def upgrade():
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("account_id", "code_hash", name="uq_account_mfa_recovery_code"),
         )
+    if not inspector.has_table("account_security_requests"):
+        op.create_table(
+            "account_security_requests",
+            sa.Column("id", sa.String(36), primary_key=True),
+            sa.Column("email_hash", sa.String(64), nullable=False),
+            sa.Column("ip_hash", sa.String(64), nullable=False),
+            sa.Column("purpose", sa.String(32), nullable=False),
+            sa.Column("requested_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        )
     if not inspector.has_table("account_login_attempts"):
         op.create_table(
             "account_login_attempts",
@@ -70,6 +79,8 @@ def upgrade():
         ("account_mfa_recovery_codes", "ix_account_mfa_recovery_codes_account", ["account_id"]),
         ("account_login_attempts", "ix_account_login_attempts_email_time", ["email_hash", "attempted_at"]),
         ("account_login_attempts", "ix_account_login_attempts_ip_time", ["ip_hash", "attempted_at"]),
+        ("account_security_requests", "ix_account_security_requests_email_purpose_time", ["email_hash", "purpose", "requested_at"]),
+        ("account_security_requests", "ix_account_security_requests_ip_time", ["ip_hash", "requested_at"]),
     ]:
         indexes = {item["name"] for item in inspect(bind).get_indexes(table)}
         if name not in indexes:
@@ -79,7 +90,7 @@ def upgrade():
 def downgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
-    for table in ("account_login_attempts", "account_mfa_recovery_codes", "account_mfa_secrets", "account_security_tokens"):
+    for table in ("account_security_requests", "account_login_attempts", "account_mfa_recovery_codes", "account_mfa_secrets", "account_security_tokens"):
         if inspector.has_table(table):
             op.drop_table(table)
     columns = {column["name"] for column in inspect(bind).get_columns("caregiver_accounts")}
