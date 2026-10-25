@@ -72,13 +72,9 @@ class QwenCandidateReview(BaseModel):
 
 class QwenAssistRequest(BaseModel):
     workflow: Literal[
-        "daily_capture", "add_record", "document", "living_care_record", "care_history_search",
-        "care_situation_change", "delta_engine", "evidence_provenance", "uncertainty_contradictions",
-        "returning_caregiver", "appointment", "after_appointment", "handoff", "professional_summary",
-        "open_loops", "two_week_review", "decision_outcome", "medication_day",
-        "reminders_notifications", "care_coordination", "companion",
-        "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
-        "settings_security", "record_lifecycle", "offline_sync", "ai_reliability", "audit_review",
+        "daily_capture", "document", "community", "appointment", "after_appointment",
+        "handoff", "professional_summary", "open_loops", "two_week_review",
+        "decision_outcome", "medication_day", "living_care_record",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -349,8 +345,119 @@ def _literal_matches(db: Session, observation: str) -> list[dict]:
 
 @router.post("/community/experience")
 @router.post("/community/experience/summary")
-async def community_experience_disabled():
-    raise HTTPException(status_code=410, detail="Community Qwen assistance is disabled.")
+async def community_experience(payload: dict, request: Request, db: Session = Depends(get_db)):
+    _scope(request, db)
+    observation = str(payload.get("observation", "")).strip()
+    if not observation:
+        raise HTTPException(status_code=422, detail="observation is required")
+    matches = _literal_matches(db, observation)
+    summary = None
+    provider_status = "unavailable"
+    ai_generated = False
+    if matches:
+        try:
+            summary = await asyncio.to_thread(
+                qwen_chat,
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a supporting assistant for family caregivers. Summarize only the supplied "
+                            "published peer experiences. They are personal reports, not verified facts, clinical "
+                            "evidence, or advice. Do not infer diagnosis or cause, recommend treatment, or invent "
+                            "themes not present in the posts. State briefly that experiences differ. Use plain, "
+                            "accessible English, no unexplained foreign words, and at most three short sentences."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "caregiver_observation": observation,
+                            "published_peer_posts": [
+                                {"post_id": item["post_id"], "content": item["content"]}
+                                for item in matches
+                            ],
+                        }, ensure_ascii=False),
+                    },
+                ],
+            )
+            if _companion_reply_needs_revision(summary) or _contains_unrequested_saba(
+                summary,
+                observation + "\n" + "\n".join(item["content"] for item in matches),
+            ):
+                summary = None
+                provider_status = "invalid_response"
+            else:
+                provider_status = "available"
+                ai_generated = True
+        except HTTPException as exc:
+            if exc.status_code != 503:
+                raise
+            provider_status = "unavailable"
+    return {
+        "summary": summary,
+        "matches": matches,
+        "post_ids": [m["post_id"] for m in matches],
+        "provider_status": provider_status,
+        "ai_generated": ai_generated,
+        "notice": (
+            "Qwen summarized published peer experiences; these are not authoritative care facts."
+            if ai_generated else
+            "These are literal matches from published caregiver posts. No AI summary was generated."
+        ),
+        "matching_method": "literal_keyword_overlap_not_clinical_advice",
+    }
+
+
+def _ollama_url() -> tuple[str, str]:
+    base, model, _ = get_ollama_config()
+    return base, model
+
+
+def _ollama_chat(
+    base: str, model: str, messages: list[dict], options: dict | None = None
+) -> str:
+    # All SolenOS workflows use the same local/private Qwen gateway.
+    return qwen_chat(messages, options=options)
+
+
+def _is_casual_greeting(text: str) -> bool:
+    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
+    normalized = " ".join(normalized.split())
+    return normalized in {
+        "hi", "hello", "hey", "hiya", "howdy",
+        "how are you", "how are you doing", "how are you today",
+        "how's it going", "hows it going", "what's up", "whats up",
+        "good morning", "good afternoon", "good evening", "good night",
+        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
+    }
+
+
+def _greeting_reply_needs_revision(reply: str) -> bool:
+    """Greeting-only replies should mirror the user, not start a new interview."""
+    words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
+    normalized = (reply or "").casefold()
+    repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
+    introduces_automatic_question = "?" in (reply or "")
+    common_interview_opening = bool(re.search(
+        r"\b(?:how can i help|what can i help|what can i do for you|is there anything i can do)\b",
+        normalized,
+    ))
+    return (
+        not words
+        or len(words) > 12
+        or repeats_automatic_question
+        or introduces_automatic_question
+        or common_interview_opening
+    )
+
+
+def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
+    """Reject the observed unexplained token only when it is not in supplied source."""
+    return bool(
+        re.search(r"(?i)\bsaba\b", reply or "")
+        and not re.search(r"(?i)\bsaba\b", source_text or "")
+    )
 
 
 def _companion_reply_needs_revision(text: str) -> bool:
@@ -362,16 +469,6 @@ def _companion_reply_needs_revision(text: str) -> bool:
     normalized = " ".join(words)
     internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
     return any(term in normalized for term in internal_terms)
-
-
-def _greeting_reply_needs_revision(text: str) -> bool:
-    """Reject malformed or interview-style replies to a simple greeting."""
-    raw = (text or "").strip()
-    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", raw.casefold(), flags=re.UNICODE)
-    if not words or len(words) > 5 or "?" in raw:
-        return True
-    disallowed = {"how", "what", "can", "help", "assist", "need"}
-    return bool(disallowed.intersection(words))
 
 
 @router.post("/share-intake", status_code=201)
@@ -639,11 +736,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # Daily Capture, document-only or Community assistance. Each workflow gets
     # only the record context needed to perform its explicit task.
     event_workflows = {
-        "living_care_record", "care_history_search", "care_situation_change", "delta_engine",
-        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
-        "appointment", "after_appointment", "handoff", "professional_summary", "open_loops",
-        "two_week_review", "decision_outcome", "medication_day", "reminders_notifications",
-        "care_coordination", "sharing_export", "audit_review",
+        "living_care_record", "appointment", "after_appointment", "handoff",
+        "professional_summary", "open_loops", "two_week_review",
+        "decision_outcome", "medication_day",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -662,9 +757,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_event_ids.append(str(event.id))
 
     appointment_workflows = {
-        "living_care_record", "care_history_search", "care_situation_change", "returning_caregiver",
-        "appointment", "after_appointment", "handoff", "professional_summary", "open_loops",
-        "two_week_review", "sharing_export",
+        "living_care_record", "appointment", "after_appointment",
+        "handoff", "professional_summary", "open_loops", "two_week_review",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -709,11 +803,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
     # Open-loop and continuity workflows must see durable unresolved questions
     # and reminder state, not infer follow-ups from narrative alone.
-    if payload.workflow in {
-        "open_loops", "two_week_review", "handoff", "living_care_record",
-        "care_history_search", "care_situation_change", "returning_caregiver",
-        "reminders_notifications", "care_coordination", "sharing_export", "audit_review",
-    }:
+    if payload.workflow in {"open_loops", "two_week_review", "handoff", "living_care_record"}:
         questions = (
             db.query(OpenQuestion)
             .filter(OpenQuestion.person_id == person_id, OpenQuestion.status == "open")
@@ -740,11 +830,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"note={(reminder.note or '')[:300]}"
             )
 
-    if payload.workflow in {
-        "decision_outcome", "two_week_review", "living_care_record",
-        "care_history_search", "care_situation_change", "delta_engine",
-        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver", "audit_review",
-    }:
+    if payload.workflow in {"decision_outcome", "two_week_review", "living_care_record"}:
         outcomes = (
             db.query(CareActionOutcome)
             .filter(CareActionOutcome.person_id == person_id)
@@ -759,37 +845,26 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"correction={(outcome.correction_text or '')[:300]}"
             )
 
+    if payload.workflow == "community":
+        for match in _literal_matches(db, payload.text)[:3]:
+            context_lines.append(
+                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
+                f"{match['content'][:700]}"
+            )
+
     guidance = {
-        "daily_capture": "Organize only what the caregiver reports. Preserve their meaning and separate reported facts from interpretation. Do not infer diagnosis, cause or unreported measurements.",
-        "add_record": "Help structure a proposed record entry or correction. Preserve the original meaning and identify missing details. This assistance does not save or correct a record.",
-        "document": "Explain only supplied or authorized document text; distinguish source text from interpretation and flag uncertainty or unreadable details.",
-        "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative; never edit it or claim a change was saved.",
-        "care_history_search": "Answer the question only from matching authorized records and supplied context. If no matching evidence is available, say that the record does not establish the answer.",
-        "care_situation_change": "Explain supported differences over an explicit timeframe, cite the available events, and separate observation from interpretation. Never infer causation or diagnose.",
-        "delta_engine": "Explain only differences supplied by the care-continuity reconciliation context. Do not compute or invent a baseline, delta, severity or cause.",
-        "evidence_provenance": "Explain which supplied source supports a statement and distinguish source text, caregiver report and interpretation. Never invent a source or verification status.",
-        "uncertainty_contradictions": "Identify explicit conflicts and missing information in the supplied context. Preserve Known, Uncertain, Missing and Needs clarification; never silently choose a side.",
-        "returning_caregiver": "Summarize changes only when a valid comparison period or prior-view reference is supplied. Highlight supported open questions and follow-ups; do not invent a prior visit.",
-        "appointment": "Prepare questions and organize recorded facts for an appointment. Never invent appointment details or recommend treatment.",
-        "after_appointment": "Organize the caregiver's report after an appointment; distinguish reported clinician words, caregiver understanding, unanswered questions and reported next steps.",
+        "daily_capture": "Organize only what the caregiver reports today. Do not infer diagnosis, cause, or unreported measurements.",
+        "document": "Explain only supplied/authorized document text; distinguish quoted source facts from interpretation and flag uncertainty.",
+        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
+        "appointment": "Prepare questions and organize recorded facts for the appointment. Never invent appointment details or recommend treatment.",
+        "after_appointment": "Organize the caregiver's report after an appointment; distinguish clinician-reported words, caregiver understanding, unanswered questions and reported next steps.",
         "handoff": "Help prepare a clear caregiver handoff from recorded and supplied facts. Do not create, assign, send or acknowledge the handoff.",
-        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details or imply professional verification.",
-        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in supplied or recorded context. Never invent tasks, owners, deadlines or completion states.",
-        "two_week_review": "Review only supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
-        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer implementation or that a decision caused an outcome.",
+        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details.",
+        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in the supplied context. Never invent tasks, owners, deadlines or completion states.",
+        "two_week_review": "Review only the supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
+        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer that a decision caused an outcome.",
         "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
-        "reminders_notifications": "Explain only persisted reminder and notification details in the supplied context. Do not create, schedule, send, or claim delivery of a reminder.",
-        "care_coordination": "Prepare proposed coordination language from supplied facts. Do not assign responsibilities or claim a handoff was accepted or completed.",
-        "companion": "Answer the caregiver's immediate question conversationally using only authorized context. Be concise, admit uncertainty and do not claim to save anything.",
-        "caregiver_feedback": "Use the caregiver's correction to revise the current interpretation, acknowledge uncertainty and ask for clarification when needed. Do not claim model learning or silently alter history.",
-        "sharing_export": "Help draft a source-aware summary for the intended recipient. Do not share, export or claim that content was sent.",
-        "roles_access": "Explain only role or access status explicitly present in supplied context. Never grant, verify or bypass permissions.",
-        "account_recovery": "Explain the account or anonymous-session recovery issue from supplied information. Never request or expose passwords, bearer tokens, recovery codes or secrets.",
-        "settings_security": "Explain security and privacy settings using supplied facts. Do not claim a setting changed or advise bypassing a control.",
-        "record_lifecycle": "Explain pin, archive, restore or deletion choices using supplied context. Do not execute an action or claim a record was changed or deleted.",
-        "offline_sync": "Explain offline or synchronization status only when explicitly provided. Never claim data is saved, uploaded or synced without confirmed system status.",
-        "ai_reliability": "Explain the reported assistant availability or failure state. Never substitute a canned answer or claim inference succeeded when it failed.",
-        "audit_review": "Explain only supplied review-candidate provenance, status and attribution. Do not approve a candidate or claim a reviewer action occurred.",
+        "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative; never edit it or claim a change was saved.",
     }[payload.workflow]
     prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
@@ -808,24 +883,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
-    # Small local models can occasionally produce malformed phrasing on the first
-    # pass. Retry style repair twice using the same real local model; never replace
-    # model output with a canned application-generated answer or relax grounding.
-    for repair_attempt in range(2):
-        if not (_companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context)):
-            break
+    if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
+        # Ask the same local model to repair style only; never substitute a canned
+        # phrase or relax source-grounding. A second failed response is unavailable.
         reply = await asyncio.to_thread(
             qwen_chat,
             [
                 {
                     "role": "system",
                     "content": (
-                        "Rewrite the supplied draft as a concise, clear, accessible response for the selected SolenOS task. "
-                        "Use plain English. Keep it to 35 words maximum. Remove repetition, unexplained foreign words, "
-                        "unrequested transliterations and internal technical terms. Do not add facts or imply that any "
-                        "record was saved, changed, verified, or approved. Use only the caregiver request and authorized "
-                        "context. If the context has no relevant information, say that the information is not available. "
-                        "Return only the revised response."
+                        "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
+                        "Preserve only claims supported by the authorized context and the caregiver's request. "
+                        "Remove unexplained foreign words, unrequested transliterations, internal jargon and repetition. "
+                        "Do not add facts, people, appointments, tasks, owners, deadlines, diagnoses or advice. "
+                        "SolenOS and the caregiver remain authoritative; do not claim that anything was saved. "
+                        "Return only the revised response, not an explanation."
                     ),
                 },
                 {
@@ -835,14 +907,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                             "workflow": payload.workflow,
                             "caregiver_request": payload.text.strip(),
                             "authorized_context": context_lines,
-                            "draft_response_to_rewrite": reply,
-                            "repair_attempt": repair_attempt + 1,
+                            "draft_response": reply,
                         },
                         ensure_ascii=False,
                     ),
                 },
             ],
-            options={"temperature": 0.2, "num_predict": 64},
+            options={"temperature": 0, "num_predict": 96},
         )
     if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
@@ -913,41 +984,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
         if _is_casual_greeting(payload.text):
-            # Use a short, isolated greeting prompt. The general care-assistant
-            # prompt contains many competing instructions and can make the small
-            # local model produce interview-style follow-up questions.
-            # This remains a real model completion; no canned greeting is substituted.
-            system_prompt = (
-                "You are SolenOS Companion. The user sent only a greeting or pleasantry. "
-                "Reply with one natural, friendly greeting in 1–4 words. "
-                "For example, 'Hello!' or 'Hi there!'. "
-                "Do not ask any question. Do not mention care, tasks, help, services or yourself. "
-                "Do not add a follow-up or an offer. Return only the greeting."
+            system_prompt += (
+                "\nThis message is only a greeting or brief pleasantry. Generate one natural, declarative "
+                "greeting of 1–4 words. For the input 'hi', a natural answer is 'Hi there!' or 'Hello!'. "
+                "Do not use a question mark. Do not ask how the user is, how you can help, or any follow-up "
+                "question. Do not introduce care topics or add an offer of help. Return only the greeting."
             )
-        greeting_only = _is_casual_greeting(payload.text)
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(12)
+            .all()
+        )
         model_messages = [{"role": "system", "content": system_prompt}]
-        # A greeting must not be contaminated by older interview-style replies
-        # in the conversation history. It is still generated by the real model.
-        if not greeting_only:
-            prior_messages = (
-                db.query(ConversationMessage)
-                .filter_by(session_id=session.id)
-                .order_by(ConversationMessage.created_at.desc())
-                .limit(12)
-                .all()
-            )
-            model_messages.extend(
-                {"role": row.role, "content": row.content}
-                for row in reversed(prior_messages)
-                if row.role in {"user", "assistant"}
-            )
+        model_messages.extend(
+            {"role": row.role, "content": row.content}
+            for row in reversed(prior_messages)
+            if row.role in {"user", "assistant"}
+        )
         model_messages.append({"role": "user", "content": payload.text.strip()})
+        greeting_only = _is_casual_greeting(payload.text)
         reply = await asyncio.to_thread(
             _ollama_chat,
             base,
             model,
             model_messages,
-            {"temperature": 0.2, "num_predict": 24} if greeting_only else None,
+            {"temperature": 0, "num_predict": 32} if greeting_only else None,
         )
         # Apply a Qwen-generated language repair before failing closed. No canned
         # greeting or acknowledgement is ever substituted by application code.
@@ -966,9 +1029,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     {
                         "role": "system",
                         "content": (
-                            "You are replying to a user who sent a simple greeting. Produce one ordinary English greeting, such as a brief hello, in 1–5 words. "
-                            "Do not ask a question, offer help, mention care, or add any factual claim. "
-                            "Do not repeat the rejected wording. Return only the greeting."
+                            "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
+                            "For a greeting, return one declarative greeting of 1–5 words with no question mark and no follow-up question. " 
+                            "Do not ask how the user is or how you can help. Do not introduce care topics. "
+                            "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
+                            "Do not add facts or claim that anything was saved. Return only the revised reply."
                         ),
                     },
                     {
@@ -1003,9 +1068,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     {
                         "role": "system",
                         "content": (
-                            "Respond to the user's greeting with a simple, natural English greeting of 1–5 words. "
-                            "No question, no offer, no care topic, no foreign word unless the user used it. "
-                            "Do not copy the rejected draft. Return only the greeting."
+                            "Write a fresh, natural acknowledgement to the user's greeting. "
+                            "Use 1–4 words only. No question mark. Do not use the words how, what, can, help, or assist. "
+                            "Do not use 'saba' or any unrequested foreign word. Do not repeat any word three times. "
+                            "Do not mention care, tasks, or services. Do not reuse the draft. Return only the reply."
                         ),
                     },
                     {
@@ -1016,16 +1082,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         ),
                     },
                 ],
-                {"temperature": 0.2, "num_predict": 24},
+                {"temperature": 0, "num_predict": 8},
             )
 
-        # Greeting-specific style checks trigger model repair, but must not turn
-        # an otherwise safe, concise real-model reply into a hard 503 merely because
-        # the small model asks a follow-up question. Keep the substantive safety and
-        # disclosure guards strict; never substitute a canned application response.
         if (
             _companion_reply_needs_revision(reply)
             or _contains_unrequested_saba(reply, source_context)
+            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
