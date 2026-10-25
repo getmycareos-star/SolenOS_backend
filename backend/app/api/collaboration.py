@@ -21,6 +21,9 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
+from app.models.care_continuity import CareActionOutcome
+from app.models.reminder import CareReminder
+from app.models.uncertainty import OpenQuestion
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, QwenReviewCandidate
 
@@ -796,6 +799,50 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Recorded handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
                 f"scope={handoff.scope or 'not specified'}; completed={bool(handoff.is_completed)}; "
                 f"context={(handoff.context or '')[:800]}"
+            )
+
+    # Open-loop and continuity workflows must see durable unresolved questions
+    # and reminder state, not infer follow-ups from narrative alone.
+    if payload.workflow in {"open_loops", "two_week_review", "handoff", "living_care_record"}:
+        questions = (
+            db.query(OpenQuestion)
+            .filter(OpenQuestion.person_id == person_id, OpenQuestion.status == "open")
+            .order_by(OpenQuestion.asked_at.desc())
+            .limit(8)
+            .all()
+        )
+        for question in questions:
+            context_lines.append(
+                f"Recorded unresolved question [{question.id}]: {question.question}; "
+                f"priority={getattr(question.priority, 'value', question.priority)}"
+            )
+        reminders = (
+            db.query(CareReminder)
+            .filter(CareReminder.person_id == person_id, CareReminder.status == "open")
+            .order_by(CareReminder.due_at.asc())
+            .limit(8)
+            .all()
+        )
+        for reminder in reminders:
+            context_lines.append(
+                f"Persisted open reminder [{reminder.id}]: {reminder.title}; "
+                f"due={reminder.due_at.isoformat() if reminder.due_at else 'unknown'}; "
+                f"note={(reminder.note or '')[:300]}"
+            )
+
+    if payload.workflow in {"decision_outcome", "two_week_review", "living_care_record"}:
+        outcomes = (
+            db.query(CareActionOutcome)
+            .filter(CareActionOutcome.person_id == person_id)
+            .order_by(CareActionOutcome.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        for outcome in outcomes:
+            context_lines.append(
+                f"Recorded action outcome [{outcome.id}]: action_type={outcome.action_type}; "
+                f"status={outcome.outcome_status}; notes={(outcome.notes or '')[:400]}; "
+                f"correction={(outcome.correction_text or '')[:300]}"
             )
 
     if payload.workflow == "community":
