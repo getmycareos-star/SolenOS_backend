@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 
 export OLLAMA_HOST="127.0.0.1:11434"
+# Disable Ollama cloud routing explicitly; all inference must remain in this container.
+export OLLAMA_NO_CLOUD="true"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 # Keep the startup warm-up and API inference on the same runner configuration.
