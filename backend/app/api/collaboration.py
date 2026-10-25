@@ -737,6 +737,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Community posts are not authoritative care-record facts.\n\n"
             "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
+        if _is_casual_greeting(payload.text):
+            system_prompt += (
+                "\\nThis message is only a greeting or brief pleasantry. Reply in 1–8 words, "
+                "naturally mirror the greeting, and do not ask a question or introduce a care topic."
+            )
         prior_messages = (
             db.query(ConversationMessage)
             .filter_by(session_id=session.id)
@@ -766,7 +771,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "Preserve meaning and use the user's language. For English input, use ordinary idiomatic English. "
                             "Remove unfamiliar foreign terms, transliterations the user did not use, repetitive filler, "
                             "nonsensical phrases and internal product/model/provider jargon. Do not force a follow-up question "
-                            "or use a canned greeting. Return only the final response text."
+                            "or use a canned greeting. "
+                            + ("For this greeting-only message, keep the reply to 1–8 words and ask no question. "
+                               if _is_casual_greeting(payload.text) else "")
+                            + "Return only the final response text."
                         ),
                     },
                     {
