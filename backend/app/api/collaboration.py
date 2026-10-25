@@ -745,6 +745,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         _companion_reply_needs_revision(reply)
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
+        or _contains_unsupported_completeness_claim(reply, source_context)
     ):
         # Ask the same local model to repair style and source fidelity. A second
         # unsupported high-impact claim is rejected instead of shown to a caregiver.
