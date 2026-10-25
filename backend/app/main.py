@@ -31,6 +31,7 @@ from app.schemas.situation import InteractionPauseResponse, SituationInput, Situ
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
+from app.services.capture_review import persist_capture_analysis
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
@@ -639,6 +640,7 @@ async def post_situation(
     source_parts.extend(doc.extracted_text.strip() for doc in (payload.documents or []) if doc.extracted_text and doc.extracted_text.strip())
     source_text = "\n".join(source_parts).strip()
     if source_text:
+        candidates = None
         try:
             candidates = await asyncio.to_thread(
                 extract_review_candidates,
@@ -646,18 +648,28 @@ async def post_situation(
                 source_event_id=result.care_event_id,
                 source_evidence_id=result.evidence_id,
             )
-            response_payload["qwen_extraction_status"] = "available"
-            response_payload["qwen_candidates"] = candidates
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
+            extraction_status = "available"
         except Exception:
-            response_payload["qwen_extraction_status"] = "unavailable"
-            response_payload["qwen_candidates"] = None
-            response_payload["qwen_review_required"] = True
-            response_payload["qwen_written_to_lcr"] = False
+            extraction_status = "unavailable"
+        analysis = persist_capture_analysis(
+            db,
+            person_id=scoped_person_id,
+            caregiver_id=scoped_caregiver_id,
+            source_event_id=result.care_event_id,
+            source_evidence_id=result.evidence_id,
+            source_text=source_text,
+            extraction_status=extraction_status,
+            candidates=candidates if extraction_status == "available" else None,
+        )
+        response_payload["qwen_extraction_status"] = extraction_status
+        response_payload["qwen_candidates"] = candidates
+        response_payload["qwen_analysis_id"] = analysis.id
+        response_payload["qwen_review_required"] = True
+        response_payload["qwen_written_to_lcr"] = False
     else:
         response_payload["qwen_extraction_status"] = "not_applicable"
         response_payload["qwen_candidates"] = None
+        response_payload["qwen_analysis_id"] = None
         response_payload["qwen_review_required"] = False
         response_payload["qwen_written_to_lcr"] = False
     return response_payload
