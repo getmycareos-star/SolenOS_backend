@@ -158,6 +158,14 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 continue
 
         target_person_id = path_params.get("person_id") or request.query_params.get("person_id")
+        if (
+            path == "/api/v1/reminders"
+            or path.startswith("/api/v1/reminders/")
+            or path.startswith("/api/v1/capture/analyses/")
+        ):
+            # Child resources are authorized against the bearer session's person.
+            # Endpoints then return a non-disclosing 404 for foreign child IDs.
+            target_person_id = scoped_person_id
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
