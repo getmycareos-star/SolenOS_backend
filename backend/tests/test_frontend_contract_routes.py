@@ -533,7 +533,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
 
         calls = []
         monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
-        def generated_reply(base, model, messages):
+        def generated_reply(base, model, messages, options=None):
             calls.append(messages)
             return "Hi there. I'm here if you need help."
         monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
@@ -666,7 +666,7 @@ def test_companion_rejects_unrequested_saba_in_any_reply_without_saving(monkeypa
         monkeypatch.setattr(
             collaboration,
             "_ollama_chat",
-            lambda base, model, messages: "Saba, saba. I can help organize the appointment details.",
+            lambda base, model, messages, options=None: "Saba, saba. I can help organize the appointment details.",
         )
         response = client.post(
             "/api/v1/conversation/message",
