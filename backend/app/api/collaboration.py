@@ -985,8 +985,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if _is_casual_greeting(payload.text):
             system_prompt += (
-                "\nThis message is only a greeting or brief pleasantry. Reply in 1–8 words, "
-                "naturally mirror the greeting, and do not ask a question or introduce a care topic."
+                "\nThis message is only a greeting or brief pleasantry. Generate one natural, declarative "
+                "greeting of 1–5 words. Do not use a question mark. Do not ask how the user is, how you "
+                "can help, or any follow-up question. Do not introduce care topics. Return only the greeting."
             )
         prior_messages = (
             db.query(ConversationMessage)
@@ -1028,7 +1029,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "role": "system",
                         "content": (
                             "Rewrite the draft as a natural, respectful, plain-English reply to the user's actual message. "
-                            "For a greeting, use 1–4 words, mirror the greeting naturally, and do not ask a question or introduce care topics. "
+                            "For a greeting, return one declarative greeting of 1–5 words with no question mark and no follow-up question. " 
+                            "Do not ask how the user is or how you can help. Do not introduce care topics. "
                             "Remove unexplained foreign words, transliterations, repetitive filler, internal jargon and repeated questions. "
                             "Do not add facts or claim that anything was saved. Return only the revised reply."
                         ),
