@@ -158,6 +158,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
+        if path == "/api/v1/reminders" or path.startswith("/api/v1/reminders/"):
+            # Reminder create uses the session-scoped person; list and child
+            # lifecycle routes are authorized by the endpoint against that same
+            # scope. Do not require a caller-supplied person ID for child IDs,
+            # and let a foreign reminder resolve to the endpoint's non-disclosing 404.
+            target_person_id = scoped_person_id
         if (
             path.startswith("/api/v1/community")
             or path == "/api/v1/upload"
