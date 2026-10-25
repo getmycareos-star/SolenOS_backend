@@ -980,6 +980,10 @@ def test_qwen_grounding_guard_rejects_credential_requests_and_unsupported_system
         "The Qwen system is unavailable. Please try again later.",
         "A prior assistant request failed once. No current service status is supplied.",
     )
+    assert _contains_unsupported_care_claim(
+        "No reminder was delivered. Please check the delivery status of the reminder.",
+        "The caregiver asks how to check whether a reminder was delivered. No reminder record or delivery receipt is available in this request.",
+    )
     assert not _contains_unsupported_care_claim(
         "The current account status was not supplied. Use the official recovery process.",
         "The user cannot access their account. No verification or account status is supplied.",
