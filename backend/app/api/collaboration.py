@@ -470,6 +470,9 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"\b(?:handoff|hand-off)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
         r"\b(?:assigned|delegated)\s+to\s+(?:the\s+)?(?:caregiver|professional|clinician|nurse|family)\b",
         r"\b(?:no|the|a)\s+(?:reminder|notification|message|alert)\s+(?:was\s+)?(?:delivered|sent|received|read)\b",
+        r"\bno\s+(?:change|breakfast|medication|sleep|food|intake|symptom|visit|appointment)\s+"
+        r"(?:was\s+)?(?:reported|provided|recorded|observed)\b",
+        r"\b(?:professional|clinician|doctor|nurse)-reported information\b",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, text):
