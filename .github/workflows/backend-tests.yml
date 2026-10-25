@@ -148,4 +148,31 @@ jobs:
           context: .
           file: ./Dockerfile
           push: false
+          load: true
           tags: solenos-backend:qwen-ci
+      - name: Start the built image and verify the model is present
+        run: |
+          docker run -d --name solenos-qwen-ci -p 8080:8080 -e DATABASE_URL=sqlite:////tmp/solenos-ci.db solenos-backend:qwen-ci
+          for attempt in $(seq 1 60); do
+            if docker exec solenos-qwen-ci ollama list >/tmp/ollama-list.txt 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          cat /tmp/ollama-list.txt
+          grep -q 'qwen2.5:1.5b' /tmp/ollama-list.txt
+      - name: Run real Qwen inference in the built container
+        run: |
+          docker exec solenos-qwen-ci ollama run qwen2.5:1.5b 'Reply with exactly QWEN_RUNTIME_OK' | tee /tmp/qwen-output.txt
+          grep -q 'QWEN_RUNTIME_OK' /tmp/qwen-output.txt
+      - name: Verify FastAPI starts in the same container
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8080/openapi.json >/dev/null; then
+              echo "FastAPI OpenAPI endpoint is responding."
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs solenos-qwen-ci
+          exit 1
