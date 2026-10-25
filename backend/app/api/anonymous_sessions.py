@@ -128,3 +128,32 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
         "expires_at": expires_at.isoformat(),
         "expires_in_seconds": max(0, int((expires_at - now).total_seconds())),
     }
+
+@router.post("/revoke")
+def revoke_anonymous_session(request: Request, db: Session = Depends(get_db)):
+    """Revoke the current care capability; account-backed sessions log out account-wide."""
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="A valid care session is required")
+    session = (
+        db.query(AnonymousSession)
+        .filter(AnonymousSession.id == session_id, AnonymousSession.revoked_at.is_(None))
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=401, detail="Care session is invalid")
+    now = datetime.now(timezone.utc)
+    if session.account_id:
+        db.query(AuthSession).filter(
+            AuthSession.account_id == session.account_id,
+            AuthSession.revoked_at.is_(None),
+        ).update({"revoked_at": now}, synchronize_session=False)
+        db.query(AnonymousSession).filter(
+            AnonymousSession.account_id == session.account_id,
+            AnonymousSession.revoked_at.is_(None),
+        ).update({"revoked_at": now}, synchronize_session=False)
+    else:
+        session.revoked_at = now
+    db.commit()
+    return {"revoked": True}
+
