@@ -515,7 +515,7 @@ def test_community_qwen_assist_does_not_receive_private_lcr_context(monkeypatch)
         response = client.post(
             "/api/v1/assistant/assist",
             headers={"Authorization": f"Bearer {token}"},
-            json={"workflow": "community", "text": "bedtime routine"},
+            json={"workflow": "community", "text": "bedtime routine", "appointment_id": "private-appointment"},
         )
         assert response.status_code == 200, response.text
         prompt = "\n".join(message["content"] for message in captured["messages"])
