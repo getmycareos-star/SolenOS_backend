@@ -164,3 +164,26 @@ def test_account_logout_revokes_account_and_care_sessions():
         headers={"Authorization": f"Bearer {data['access_token']}"},
     )
     assert care_refresh.status_code == 401
+
+def test_anonymous_session_can_be_revoked_without_creating_a_replacement():
+    client = TestClient(app)
+    created = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Care recipient", "caregiver_name": "Caregiver"},
+    )
+    assert created.status_code == 201, created.text
+    session = created.json()
+
+    revoked = client.post(
+        "/api/v1/sessions/revoke",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+
+    refresh = client.post(
+        "/api/v1/sessions/refresh",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+    )
+    assert refresh.status_code == 401
