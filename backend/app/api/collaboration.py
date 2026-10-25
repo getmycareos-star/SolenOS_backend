@@ -464,7 +464,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             # All meaningful terms in these high-impact phrases must be present
             # in source text; exact wording is intentionally required here.
             terms = re.findall(r"[a-z]+", claim)
-            if not all(re.search(r"\\b" + re.escape(term) + r"\\b", source) for term in terms):
+            if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
                 return True
     return False
 
