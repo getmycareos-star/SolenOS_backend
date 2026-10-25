@@ -81,7 +81,13 @@ def test_create_account_sign_in_and_delete_account():
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["deleted"] is True
     assert deleted.json()["care_record_retained"] is True
+    assert deleted.json()["other_sessions_revoked"] is True
     assert client.get("/api/v1/accounts/me", headers=headers).json()["account"] is None
+    revoked_login_session = client.get(
+        f"/api/v1/evidence/{session['person']['id']}",
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+    assert revoked_login_session.status_code == 401
 
 
 def test_account_cannot_be_created_for_another_care_record():
