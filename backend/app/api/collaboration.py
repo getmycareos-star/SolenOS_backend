@@ -22,7 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
-from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake
+from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
 
 router = APIRouter(tags=["community and companion"])
@@ -973,3 +973,97 @@ def update_care_notification_preferences(
     db.commit()
     db.refresh(preference)
     return _notification_preferences(db, person_id, caregiver_id)
+
+class ConsentUpdate(BaseModel):
+    person_id: str
+    caregiver_id: str
+    action: Optional[str] = None
+    medical_disclaimer_acknowledged: Optional[bool] = None
+    privacy_model_acknowledged: Optional[bool] = None
+    multi_caregiver_acknowledged: Optional[bool] = None
+    no_advertising_acknowledged: Optional[bool] = None
+    data_improvement_consent: Optional[bool] = None
+    accepted_terms_version: Optional[str] = Field(default=None, max_length=64)
+
+
+CONSENT_TERMS_VERSION = "2026-10"
+
+
+def _consent_is_verified(record: Optional[ConsentRecord]) -> bool:
+    return bool(record and record.revoked_at is None and record.medical_disclaimer_acknowledged
+        and record.privacy_model_acknowledged and record.multi_caregiver_acknowledged
+        and record.no_advertising_acknowledged)
+
+
+def _consent_response(record: Optional[ConsentRecord]) -> dict:
+    verified = _consent_is_verified(record)
+    return {
+        "verified": verified, "required": not verified,
+        "terms_version": record.accepted_terms_version if record else CONSENT_TERMS_VERSION,
+        "profile": {"data_improvement_consent": bool(record and record.data_improvement_consent and record.revoked_at is None),
+                    "limited_mode": bool(record and record.revoked_at is not None)},
+        "consent": {
+            "medical_disclaimer_acknowledged": bool(record and record.medical_disclaimer_acknowledged),
+            "privacy_model_acknowledged": bool(record and record.privacy_model_acknowledged),
+            "multi_caregiver_acknowledged": bool(record and record.multi_caregiver_acknowledged),
+            "no_advertising_acknowledged": bool(record and record.no_advertising_acknowledged),
+            "accepted_at": record.accepted_at.isoformat() if record and record.accepted_at else None,
+            "revoked_at": record.revoked_at.isoformat() if record and record.revoked_at else None,
+        },
+    }
+
+
+@router.get("/consent")
+def get_consent(request: Request, person_id: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, caregiver_id = _scope(request, db)
+    if person_id and person_id != scoped_person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    record = db.query(ConsentRecord).filter_by(person_id=scoped_person_id, caregiver_id=caregiver_id).first()
+    return _consent_response(record)
+
+
+@router.post("/consent")
+def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    if payload.person_id != person_id or payload.caregiver_id != caregiver_id:
+        raise HTTPException(status_code=403, detail="Consent identity does not match this caregiver session")
+    record = db.query(ConsentRecord).filter_by(person_id=person_id, caregiver_id=caregiver_id).first()
+    now = datetime.now(timezone.utc)
+    if payload.action == "revoke":
+        if record is None:
+            record = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
+            db.add(record)
+        record.revoked_at = now
+        record.data_improvement_consent = False
+        db.commit()
+        db.refresh(record)
+        return {"ok": True, **_consent_response(record)}
+    if payload.action == "update_data_improvement":
+        if not _consent_is_verified(record):
+            raise HTTPException(status_code=409, detail="Accept the required privacy terms before changing improvement preferences")
+        if payload.data_improvement_consent is None:
+            raise HTTPException(status_code=422, detail="data_improvement_consent is required")
+        record.data_improvement_consent = payload.data_improvement_consent
+        record.updated_at = now
+        db.commit()
+        db.refresh(record)
+        return {"ok": True, **_consent_response(record)}
+    required = (payload.medical_disclaimer_acknowledged, payload.privacy_model_acknowledged,
+                payload.multi_caregiver_acknowledged, payload.no_advertising_acknowledged)
+    if not all(value is True for value in required):
+        raise HTTPException(status_code=422, detail="All required privacy and safety acknowledgements must be accepted")
+    if record is None:
+        record = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
+        db.add(record)
+    record.medical_disclaimer_acknowledged = True
+    record.privacy_model_acknowledged = True
+    record.multi_caregiver_acknowledged = True
+    record.no_advertising_acknowledged = True
+    record.data_improvement_consent = bool(payload.data_improvement_consent)
+    record.accepted_terms_version = payload.accepted_terms_version or CONSENT_TERMS_VERSION
+    record.accepted_at = now
+    record.revoked_at = None
+    db.commit()
+    db.refresh(record)
+    return {"ok": True, **_consent_response(record)}
+
