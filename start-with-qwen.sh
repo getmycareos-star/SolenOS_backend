@@ -50,23 +50,19 @@ ollama list | grep -Fq "$OLLAMA_MODEL" || {
 # /api/tags can list a model before its inference runner is warm. Complete a
 # real local inference before starting FastAPI, so readiness never advertises
 # a usable assistant while the first request would fail during model loading.
-warm=0
-for attempt in $(seq 1 60); do
-  if ollama run "$OLLAMA_MODEL" "Reply with the single word READY." >/tmp/qwen-warmup.log 2>&1; then
-    warm=1
-    break
-  fi
-  if ! kill -0 "$ollama_pid" 2>/dev/null; then
-    cat /tmp/ollama-runtime.log >&2 || true
-    echo "Ollama exited during Qwen warm-up." >&2
-    exit 1
-  fi
-  sleep 1
-done
-if [[ "$warm" -ne 1 ]]; then
+# Bound the inference itself: a hung local runner must not block startup forever
+# while Railway's /ready health check repeatedly receives service-unavailable.
+warmup_timeout="${QWEN_WARMUP_TIMEOUT_SECONDS:-180}"
+if ! timeout --signal=TERM --kill-after=10s "${warmup_timeout}s" \
+  ollama run "$OLLAMA_MODEL" "Reply with the single word READY." >/tmp/qwen-warmup.log 2>&1; then
   cat /tmp/qwen-warmup.log >&2 || true
   cat /tmp/ollama-runtime.log >&2 || true
-  echo "Bundled Qwen model did not complete startup inference; refusing to report readiness." >&2
+  echo "Bundled Qwen model failed or timed out during startup inference; refusing to report readiness." >&2
+  exit 1
+fi
+if ! grep -qi 'READY' /tmp/qwen-warmup.log; then
+  cat /tmp/qwen-warmup.log >&2 || true
+  echo "Bundled Qwen startup inference returned no expected READY response; refusing to report readiness." >&2
   exit 1
 fi
 
