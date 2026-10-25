@@ -40,6 +40,7 @@ class AccountRegister(BaseModel):
 class AccountLogin(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+    mfa_code: Optional[str] = Field(default=None, min_length=6, max_length=32)
 
 
 def _normalise_email(value: str) -> str:
@@ -83,7 +84,7 @@ def _issue_account_session(db: Session, account: CaregiverAccount) -> dict:
 
 
 @router.post("/register", status_code=201)
-def register_account(payload: AccountRegister, db: Session = Depends(get_db)):
+def register_account(payload: AccountRegister, request: Request, db: Session = Depends(get_db)):
     """Create an email/password caregiver account and a durable initial care record."""
     email = _normalise_email(payload.email)
     caregiver_name = payload.caregiver_name.strip()
@@ -136,9 +137,11 @@ def register_account(payload: AccountRegister, db: Session = Depends(get_db)):
         account = CaregiverAccount(email=email, password_hash=_hash_password(payload.password), person_id=person.id, caregiver_id=caregiver.id)
         db.add(account)
         db.flush()
-        result = _issue_account_session(db, account)
-        result["claimed_existing_record"] = claimed_session is not None
-        return result
+        from app.api.account_security import _issue_token, _send_email, _now
+        verification_token = _issue_token(db, account, "verify_email", request)
+        db.commit()
+        _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\\n{__import__('os').environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={verification_token}\\n\\nIf you did not request this, ignore this message.")
+        return {"registered": True, "email_verification_required": True, "message": "Check your email to verify your account before signing in.", "claimed_existing_record": claimed_session is not None}
     except HTTPException:
         db.rollback()
         raise
@@ -148,12 +151,27 @@ def register_account(payload: AccountRegister, db: Session = Depends(get_db)):
 
 
 @router.post("/login")
-def login_account(payload: AccountLogin, db: Session = Depends(get_db)):
-    """Authenticate an existing account; return a scoped server-issued bearer token."""
+def login_account(payload: AccountLogin, request: Request, db: Session = Depends(get_db)):
+    """Authenticate only verified accounts, enforcing durable throttling and MFA."""
+    from app.api.account_security import check_login_throttle, record_login_attempt, verify_mfa_login
     email = _normalise_email(payload.email)
+    ip = request.client.host if request.client else "unknown"
+    check_login_throttle(db, email, ip)
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).first()
     if account is None or not _verify_password(payload.password, account.password_hash):
+        record_login_attempt(db, email, ip, False)
+        db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect")
+    if account.email_verified_at is None:
+        record_login_attempt(db, email, ip, False)
+        db.commit()
+        raise HTTPException(status_code=403, detail="Verify your email before signing in")
+    if not verify_mfa_login(db, account, payload.mfa_code):
+        record_login_attempt(db, email, ip, False)
+        db.commit()
+        raise HTTPException(status_code=401, detail="Email, password, or second-factor code is incorrect")
+    record_login_attempt(db, email, ip, True)
+    db.commit()
     return _issue_account_session(db, account)
 
 
