@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261025_03_capture_analysis_review"
-down_revision = "20261025_01"
+down_revision = "20261025_02_accounts"
 branch_labels = None
 depends_on = None
 
