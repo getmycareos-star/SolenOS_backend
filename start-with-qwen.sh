@@ -4,6 +4,11 @@ set -Eeuo pipefail
 export OLLAMA_HOST="127.0.0.1:11434"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
+# The model shares the Railway container with FastAPI. Serialize inference and
+# keep one loaded model so parallel requests cannot multiply KV-cache memory.
+export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
+export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
+export OLLAMA_MAX_QUEUE="${OLLAMA_MAX_QUEUE:-8}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:1.5b}"
 export OLLAMA_SIDECAR_ENABLED="true"
