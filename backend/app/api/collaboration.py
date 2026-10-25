@@ -424,7 +424,9 @@ def _is_casual_greeting(text: str) -> bool:
 def _greeting_reply_needs_revision(reply: str) -> bool:
     """Greeting-only replies should mirror the user, not start a new interview."""
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
-    return not words or len(words) > 8 or "?" in (reply or "")
+    normalized = (reply or "").casefold()
+    repeats_automatic_question = bool(re.search(r"\\bhow are you(?: doing)?\\b", normalized))
+    return not words or len(words) > 12 or repeats_automatic_question
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -772,62 +774,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_messages,
             {"temperature": 0, "num_predict": 32} if greeting_only else None,
         )
-        if _is_casual_greeting(payload.text):
-            # Qwen performs a second language-quality pass; there is no canned reply fallback.
-            reply = await asyncio.to_thread(
-                _ollama_chat,
-                base,
-                model,
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Rewrite the draft into a brief, natural response to the user's exact message. "
-                            "Preserve meaning and use the user's language. For English input, use ordinary idiomatic English. "
-                            "Remove unfamiliar foreign terms, transliterations the user did not use, repetitive filler, "
-                            "nonsensical phrases and internal product/model/provider jargon. Do not force a follow-up question "
-                            "or use a canned greeting. "
-                            + ("For this greeting-only message, keep the reply to 1–8 words and ask no question. "
-                               if _is_casual_greeting(payload.text) else "")
-                            + "Return only the final response text."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": json.dumps({"user_message": payload.text.strip(), "draft_reply": reply}, ensure_ascii=False),
-                    },
-                ],
-                {"temperature": 0, "num_predict": 32},
-            )
-            if _greeting_reply_needs_revision(reply) or _contains_unrequested_saba(
-                reply, payload.text + "\n" + "\n".join(context_lines)
-            ):
-                # One additional Qwen-only repair enforces the greeting contract;
-                # it still generates language dynamically and has no canned fallback.
-                reply = await asyncio.to_thread(
-                    _ollama_chat,
-                    base,
-                    model,
-                    [
-                        {
-                            "role": "system",
-                            "content": (
-                                "Reply naturally to this greeting in the same language. "
-                                "Use 1–8 words only. Do not ask a question, start a care topic, "
-                                "repeat filler, use unexplained foreign words or invent facts. "
-                                "Return only the final greeting."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": json.dumps(
-                                {"greeting": payload.text.strip(), "draft": reply},
-                                ensure_ascii=False,
-                            ),
-                        },
-                    ],
-                    {"temperature": 0, "num_predict": 32},
-                )
         # Apply the language-quality gate to every model-generated reply, not
         # greetings alone. A failed guard must not persist a confusing answer.
         if (
