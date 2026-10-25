@@ -797,6 +797,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "content": json.dumps({"user_message": payload.text.strip(), "draft_reply": reply}, ensure_ascii=False),
                     },
                 ],
+                {"temperature": 0, "num_predict": 32},
             )
             if _greeting_reply_needs_revision(reply) or _contains_unrequested_saba(
                 reply, payload.text + "\n" + "\n".join(context_lines)
