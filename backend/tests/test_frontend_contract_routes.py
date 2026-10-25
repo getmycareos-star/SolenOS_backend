@@ -839,3 +839,89 @@ def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
     assert captured["payload"]["options"]["num_ctx"] == 1536
     assert captured["payload"]["options"]["num_predict"] == 96
     assert captured["payload"]["options"]["temperature"] == 0
+
+
+def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkeypatch):
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    auth = {"Authorization": f"Bearer {token}"}
+    other_auth = {"Authorization": f"Bearer {other_token}"}
+    due_at = "2030-01-01T12:00:00+00:00"
+    try:
+        created = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "title": "Review the appointment questions",
+                "note": "Confirm which questions still need an answer.",
+                "due_at": due_at,
+            },
+        )
+        assert created.status_code == 201, created.text
+        reminder = created.json()
+        reminder_id = reminder["id"]
+        assert reminder["status"] == "open"
+        assert reminder["delivery_mode"] == "in_app_list_only"
+        assert reminder["notification_delivery_status"] == "not_sent"
+        assert reminder["created_by_caregiver_id"] == caregiver_id
+        assert reminder["due_at"].endswith("+00:00")
+
+        listed = client.get(f"/api/v1/reminders/{person_id}", headers=auth)
+        assert listed.status_code == 200, listed.text
+        assert any(item["id"] == reminder_id for item in listed.json())
+
+        own_other_list = client.get(f"/api/v1/reminders/{other_person_id}", headers=other_auth)
+        assert own_other_list.status_code == 200, own_other_list.text
+        assert own_other_list.json() == []
+        foreign_list = client.get(f"/api/v1/reminders/{person_id}", headers=other_auth)
+        assert foreign_list.status_code == 403, foreign_list.text
+        foreign_complete = client.patch(
+            f"/api/v1/reminders/{reminder_id}/complete",
+            headers=other_auth,
+            json={},
+        )
+        assert foreign_complete.status_code == 404, foreign_complete.text
+
+        completed = client.patch(
+            f"/api/v1/reminders/{reminder_id}/complete",
+            headers=auth,
+            json={"completion_note": "Questions reviewed."},
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == "completed"
+        assert completed.json()["completed_by_caregiver_id"] == caregiver_id
+        assert completed.json()["completion_note"] == "Questions reviewed."
+        assert completed.json()["notification_delivery_status"] == "not_sent"
+
+        cannot_cancel_completed = client.patch(
+            f"/api/v1/reminders/{reminder_id}/cancel",
+            headers=auth,
+        )
+        assert cannot_cancel_completed.status_code == 409, cannot_cancel_completed.text
+
+        cancelled_create = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={"person_id": person_id, "title": "Check transport", "due_at": due_at},
+        )
+        assert cancelled_create.status_code == 201, cancelled_create.text
+        cancelled_id = cancelled_create.json()["id"]
+        cancelled = client.patch(f"/api/v1/reminders/{cancelled_id}/cancel", headers=auth)
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["status"] == "cancelled"
+        assert cancelled.json()["cancelled_by_caregiver_id"] == caregiver_id
+        cannot_complete_cancelled = client.patch(
+            f"/api/v1/reminders/{cancelled_id}/complete",
+            headers=auth,
+            json={},
+        )
+        assert cannot_complete_cancelled.status_code == 409, cannot_complete_cancelled.text
+
+        naive_due_date = client.post(
+            "/api/v1/reminders",
+            headers=auth,
+            json={"person_id": person_id, "title": "Ambiguous time", "due_at": "2030-01-01T12:00:00"},
+        )
+        assert naive_due_date.status_code == 422, naive_due_date.text
+    finally:
+        teardown()
