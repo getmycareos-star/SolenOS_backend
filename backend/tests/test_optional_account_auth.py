@@ -187,3 +187,60 @@ def test_anonymous_session_can_be_revoked_without_creating_a_replacement():
         headers={"Authorization": f"Bearer {session['access_token']}"},
     )
     assert refresh.status_code == 401
+
+def test_signup_links_existing_anonymous_care_record_without_forking_it():
+    client = TestClient(app)
+    anonymous = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Existing care record", "caregiver_name": "Existing caregiver"},
+    )
+    assert anonymous.status_code == 201, anonymous.text
+    original = anonymous.json()
+
+    signup_response = client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": "upgrade@example.com",
+            "password": "a-long-caregiver-password-2026",
+            "display_name": "Account holder",
+            "care_recipient_name": "A different name must not create another record",
+            "existing_care_session_token": original["access_token"],
+        },
+    )
+    assert signup_response.status_code == 201, signup_response.text
+    linked = signup_response.json()
+    assert linked["person"]["id"] == original["person"]["id"]
+    assert linked["person"]["name"] == "Existing care record"
+    assert linked["caregiver"]["id"] == original["caregiver"]["id"]
+    assert linked["session_id"] == original["session_id"]
+    assert linked["access_token"] == original["access_token"]
+
+    db = TestSessionLocal()
+    try:
+        account = db.query(AuthAccount).filter_by(email="upgrade@example.com").one()
+        assert account.person_id == original["person"]["id"]
+        assert db.query(AuthAccount).count() == 1
+        assert db.query(AnonymousSession).count() == 1
+    finally:
+        db.close()
+
+
+def test_signup_rejects_expired_or_invalid_existing_session_without_creating_a_record():
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/auth/signup",
+        json={
+            "email": "invalid-session@example.com",
+            "password": "a-long-caregiver-password-2026",
+            "display_name": "Account holder",
+            "care_recipient_name": "Care recipient",
+            "existing_care_session_token": "not-a-real-session-token",
+        },
+    )
+    assert response.status_code == 401, response.text
+    db = TestSessionLocal()
+    try:
+        assert db.query(AuthAccount).count() == 0
+        assert db.query(AnonymousSession).count() == 0
+    finally:
+        db.close()
