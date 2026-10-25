@@ -12,7 +12,7 @@ from app.models.professional_account import ProfessionalAccount, ProfessionalSes
 
 router = APIRouter(prefix="/professional-auth", tags=["professional accounts"])
 SESSION_TTL_DAYS = 7
-_EMAIL_RE = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 class ProfessionalRegister(BaseModel):
     email: str = Field(min_length=3, max_length=254)
