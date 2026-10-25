@@ -157,8 +157,18 @@ def _revoke_sessions(db: Session, account: CaregiverAccount):
     ).update({"revoked_at": _now()}, synchronize_session=False)
 
 
+
+def _lock_rate_limit_keys(db: Session, keys: list[str]):
+    # Serialize concurrent checks for the same hashed account/IP keys on PostgreSQL.
+    # Locks are transaction-scoped and require no external cache service.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        for key in sorted(set(keys)):
+            db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"), {"lock_key": key})
+
+
 def check_login_throttle(db: Session, email: str, ip: str):
     ehash, ihash = _email_hash(email), _ip_hash(ip)
+    _lock_rate_limit_keys(db, [f"login:email:{ehash}", f"login:ip:{ihash}"])
     since = _now() - LOGIN_WINDOW
     count = db.execute(text("""SELECT COUNT(*) FROM account_login_attempts
         WHERE attempted_at >= :since AND succeeded = false AND (email_hash=:email OR ip_hash=:ip)"""),
@@ -174,6 +184,7 @@ def check_login_throttle(db: Session, email: str, ip: str):
 def check_security_action_throttle(db: Session, email: str, ip: str, purpose: str):
     """Persist abuse counters even for unknown email addresses to avoid enumeration."""
     ehash, ihash = _email_hash(email), _ip_hash(ip)
+    _lock_rate_limit_keys(db, [f"security:{purpose}:email:{ehash}", f"security:ip:{ihash}"])
     since = _now() - timedelta(minutes=15)
     email_count = db.execute(text("""SELECT COUNT(*) FROM account_security_requests
         WHERE email_hash=:email AND purpose=:purpose AND requested_at >= :since"""),
