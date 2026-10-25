@@ -4,7 +4,7 @@
 
 Qwen is an optional language-assistance layer, not the source of truth, authorization engine, care-continuity engine, reminder scheduler, document store, or professional decision-maker. The backend remains authoritative for identity, permissions, retrieved context, persistence, and review attribution. Assistance must not write to the Living Care Record (LCR); responses must preserve `written_to_lcr: false`.
 
-## Workflow contract (31)
+## Workflow contract (30)
 
 | Workflow ID | Scope | Required boundary |
 |---|---|---|
@@ -42,6 +42,6 @@ Qwen is an optional language-assistance layer, not the source of truth, authoriz
 
 ## Verification boundaries
 
-The contract test verifies that all 31 workflow identifiers are accepted by the Pydantic request schema and an unknown identifier is rejected. It does not prove model availability, complete workflow-specific retrieval, frontend connectivity, or production health.
+The contract test verifies that all 30 enabled workflow identifiers are accepted by the Pydantic request schema and an unknown identifier is rejected. It does not prove model availability, complete workflow-specific retrieval, frontend connectivity, or production health.
 
 The backend integration workflow additionally exercises each identifier against its configured Qwen runtime. Release still requires authenticated production checks: assistant status reports the real configured local runtime as available; every workflow returns model-generated output with `provider_status=available` and `written_to_lcr=false`; and an explicit review decision is required for persisted candidates. If inference is unavailable, return an explicit error rather than canned output.
