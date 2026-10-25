@@ -1,14 +1,16 @@
 import hashlib
+import os
 import hmac
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.professional_account import ProfessionalAccount, ProfessionalSession
+from app.models.collaboration import CommunityPost
 
 router = APIRouter(prefix="/professional-auth", tags=["professional accounts"])
 SESSION_TTL_DAYS = 7
@@ -27,6 +29,12 @@ class ProfessionalRegister(BaseModel):
 class ProfessionalLogin(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+
+
+class ProfessionalContribution(BaseModel):
+    title: str = Field(min_length=5, max_length=200)
+    body: str = Field(min_length=20, max_length=5000)
+    contribution_type: str = Field(default="knowledge", pattern="^(knowledge|service)$")
 
 def _email(value: str) -> str:
     value = value.strip().lower()
@@ -120,6 +128,73 @@ def me(request: Request, db: Session = Depends(get_db)):
     _, account = _current(request, db)
     return {"authenticated": True, "session_type": "professional", "professional": _public_profile(account)}
 
+@router.get("/contributions")
+def list_contributions(request: Request, db: Session = Depends(get_db)):
+    _, account = _current(request, db)
+    posts = db.query(CommunityPost).filter(
+        CommunityPost.professional_id == account.id
+    ).order_by(CommunityPost.created_at.desc()).limit(100).all()
+    return {"contributions": [{
+        "id": post.id, "title": post.title, "body": post.content,
+        "contribution_type": post.tags_json,
+        "status": post.moderation_status,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+    } for post in posts]}
+
+
+@router.post("/contributions", status_code=201)
+def create_contribution(payload: ProfessionalContribution, request: Request, db: Session = Depends(get_db)):
+    _, account = _current(request, db)
+    if account.status != "verified":
+        raise HTTPException(status_code=403, detail="Professional publishing is available only after SolenOS verifies your profile.")
+    title, body = payload.title.strip(), payload.body.strip()
+    if len(title) < 5 or len(body) < 20:
+        raise HTTPException(status_code=422, detail="Add a clear title and at least 20 characters of useful detail.")
+    post = CommunityPost(
+        caregiver_id=None,
+        professional_id=account.id,
+        title=title,
+        author_type="professional",
+        author_label=account.full_name + " · " + account.professional_title,
+        post_type="experience",
+        content=body,
+        care_stage="unspecified",
+        tags_json=__import__("json").dumps(["professional", payload.contribution_type]),
+        visibility="public",
+        moderation_status="published",
+    )
+    db.add(post)
+    db.commit()
+    db.refresh(post)
+    return {"id": post.id, "title": post.title, "body": post.content, "status": post.moderation_status,
+            "author_type": post.author_type, "author_label": post.author_label,
+            "created_at": post.created_at.isoformat() if post.created_at else None}
+
+
+@router.post("/review/{professional_id}")
+def review_professional(
+    professional_id: str,
+    payload: dict,
+    x_solenos_team_key: str = Header(default=""),
+    db: Session = Depends(get_db),
+):
+    expected = os.getenv("SOLENOS_TEAM_REVIEW_TOKEN", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Professional review is not configured on this deployment.")
+    if not x_solenos_team_key or not hmac.compare_digest(x_solenos_team_key, expected):
+        raise HTTPException(status_code=403, detail="SolenOS team authorization is required.")
+    status = payload.get("status")
+    if status not in {"pending_review", "verified", "rejected", "suspended"}:
+        raise HTTPException(status_code=422, detail="Unsupported professional review status.")
+    account = db.query(ProfessionalAccount).filter(ProfessionalAccount.id == professional_id).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Professional account not found.")
+    account.status = status
+    db.commit()
+    db.refresh(account)
+    return {"professional": _public_profile(account)}
+
+
 @router.post("/logout")
 def logout(request: Request, db: Session = Depends(get_db)):
     session, _ = _current(request, db)
@@ -130,6 +205,7 @@ def logout(request: Request, db: Session = Depends(get_db)):
 @router.delete("/account")
 def delete_account(request: Request, db: Session = Depends(get_db)):
     _, account = _current(request, db)
+    db.query(CommunityPost).filter(CommunityPost.professional_id == account.id).delete(synchronize_session=False)
     db.query(ProfessionalSession).filter(ProfessionalSession.professional_id == account.id).delete(synchronize_session=False)
     db.delete(account)
     db.commit()
