@@ -625,7 +625,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
-        "Keep the response to 55 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
@@ -634,6 +634,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     reply = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
+        options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
     if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
@@ -645,7 +646,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 {
                     "role": "system",
                     "content": (
-                        "Revise the draft into a clear, natural, accessible response of 55 words or fewer. "
+                        "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
                         "Preserve only claims supported by the authorized context and the caregiver's request. "
                         "Remove unexplained foreign words, unrequested transliterations, internal jargon and repetition. "
                         "Do not add facts, people, appointments, tasks, owners, deadlines, diagnoses or advice. "
@@ -666,6 +667,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     ),
                 },
             ],
+            options={"temperature": 0, "num_predict": 96},
         )
     if _companion_reply_needs_revision(reply) or _contains_unrequested_saba(reply, source_context):
         raise HTTPException(status_code=503, detail="Qwen could not produce a clear, accessible response. Nothing was written to the care record; please retry.")
