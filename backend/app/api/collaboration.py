@@ -588,9 +588,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # Daily Capture, document-only or Community assistance. Each workflow gets
     # only the record context needed to perform its explicit task.
     event_workflows = {
-        "living_care_record", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review",
-        "decision_outcome", "medication_day",
+        "living_care_record", "care_history_search", "care_situation_change",
+        "delta_engine", "evidence_provenance", "uncertainty_contradictions",
+        "returning_caregiver", "appointment", "after_appointment", "handoff",
+        "professional_summary", "open_loops", "two_week_review", "decision_outcome",
+        "medication_day", "care_coordination", "sharing_export", "audit_review",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -609,8 +611,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_event_ids.append(str(event.id))
 
     appointment_workflows = {
-        "living_care_record", "appointment", "after_appointment",
-        "handoff", "professional_summary", "open_loops", "two_week_review",
+        "living_care_record", "care_history_search", "care_situation_change",
+        "returning_caregiver", "appointment", "after_appointment", "handoff",
+        "professional_summary", "open_loops", "two_week_review", "sharing_export",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -653,28 +656,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"context={(handoff.context or '')[:800]}"
             )
 
-    if payload.workflow == "community":
-        for match in _literal_matches(db, payload.text)[:3]:
-            context_lines.append(
-                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
-                f"{match['content'][:700]}"
-            )
-
-    guidance = {
-        "daily_capture": "Organize only what the caregiver reports today. Do not infer diagnosis, cause, or unreported measurements.",
-        "document": "Explain only supplied/authorized document text; distinguish quoted source facts from interpretation and flag uncertainty.",
-        "community": "Support reflection using published peer experiences only as personal reports, never verified facts or clinical advice. Do not post on the user's behalf.",
-        "appointment": "Prepare questions and organize recorded facts for the appointment. Never invent appointment details or recommend treatment.",
-        "after_appointment": "Organize the caregiver's report after an appointment; distinguish clinician-reported words, caregiver understanding, unanswered questions and reported next steps.",
-        "handoff": "Help prepare a clear caregiver handoff from recorded and supplied facts. Do not create, assign, send or acknowledge the handoff.",
-        "professional_summary": "Organize a professional-facing summary from authorized recorded facts and supplied information. Preserve uncertainty and source attribution; never invent missing details.",
-        "open_loops": "Identify only explicitly unresolved questions or follow-ups visible in the supplied context. Never invent tasks, owners, deadlines or completion states.",
-        "two_week_review": "Review only the supplied information and recorded events from the last fourteen days. Separate changes, stable facts, unknowns and questions; never claim causation.",
-        "decision_outcome": "Organize a caregiver-reported decision and its reported outcome separately. Do not infer that a decision caused an outcome.",
-        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing medication or dose; refer medication decisions to a qualified professional.",
-        "living_care_record": "Explain only authorized recorded context. The Living Care Record remains authoritative; never edit it or claim a change was saved.",
-    }[payload.workflow]
-    prompt = (
+    guidance = {\n        "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",\n        "add_record": "Help structure a proposed care-record entry or correction from supplied words. Identify missing date, source or detail as unknown; never claim anything was saved.",\n        "document": "Explain only supplied or authorized document text. Separate source wording from interpretation, preserve dates and names, and flag missing or unreadable information.",\n        "living_care_record": "Summarize only authorized recorded context. Preserve provenance and uncertainty. The LCR remains authoritative; never edit it or claim a change was saved.",\n        "care_history_search": "Summarize only relevant authorized recorded history. Distinguish no matching record from proof that an event never happened.",\n        "care_situation_change": "Compare only explicitly supplied current and prior observations. State what changed, what appears unchanged, and what is unknown without asserting cause.",\n        "delta_engine": "Prepare a review of potential additions, changes, contradictions or missing details against supplied evidence. This is a review candidate, not a reconciled fact or write operation.",\n        "evidence_provenance": "Identify the source and status of each supplied claim. Distinguish caregiver report, document text, professional-reported information and inference; never upgrade a report into verified fact.",\n        "uncertainty_contradictions": "Surface conflicts, ambiguous dates, missing sources and uncertainty. Do not resolve conflicts by guessing; ask a focused clarification.",\n        "returning_caregiver": "Orient a returning caregiver using only supplied recent and relevant context. Prioritize changes, open questions and unknowns; do not invent a timeline.",\n        "appointment": "Prepare questions and organize recorded facts. Never invent appointment details, imply a request is confirmed, or recommend treatment.",\n        "after_appointment": "Organize the supplied after-appointment report. Separate clinician-reported words, caregiver understanding, unanswered questions and reported next steps. If notes are absent, do not invent advice or outcomes.",\n        "handoff": "Prepare a concise handoff from recorded and supplied facts. Mark unknowns and pending items. Do not create, assign, send or acknowledge a handoff or invent a recipient.",\n        "professional_summary": "Organize a professional-facing summary from authorized recorded facts. Preserve dates, source attribution and uncertainty; never invent details or clinical conclusions.",\n        "open_loops": "Identify only explicitly unresolved questions and follow-ups visible in context. Do not invent tasks, owners, deadlines, assignments or completion states.",\n        "two_week_review": "Review only supplied information and recorded events from the last fourteen days. Separate reported changes, stable facts, unresolved questions and unknowns. Never claim causation.",\n        "decision_outcome": "Separate the caregiver-reported decision from its reported outcome, including timing and source when available. Do not infer that a decision caused an outcome.",\n        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing a medication or dose; refer decisions to a qualified professional.",\n        "reminders_notifications": "Help interpret supplied reminder and notification information and identify explicitly pending items. Do not create, complete, reschedule or claim delivery of a reminder.",\n        "care_coordination": "Organize supplied care responsibilities, availability and unresolved coordination points. Do not assign people, infer consent or claim a handoff was accepted.",\n        "companion": "Respond to the caregiver's immediate request using authorized context when provided. Be concise and practical without pretending to have personal experiences or professional authority.",\n        "caregiver_feedback": "Help phrase feedback or a correction and identify the claim needing review. Do not overwrite an existing fact or claim a correction has been saved.",\n        "sharing_export": "Prepare a draft summary from authorized supplied facts for caregiver review. Include relevant information, preserve uncertainty and do not claim anything was exported or shared.",\n        "roles_access": "Explain roles and access only from authoritative supplied information. Never infer a person's role, grant access or claim permission changed.",\n        "account_recovery": "Explain the next safe recovery step using supplied system state. Never request passwords, authentication codes or recovery secrets, and do not claim recovery succeeded.",\n        "settings_security": "Help interpret supplied security and privacy settings. Do not claim a setting is enabled, disabled or saved unless authoritative state is supplied.",\n        "record_lifecycle": "Explain pin, archive, restore or delete actions and their stated effects. Do not perform actions, claim a change was saved or imply deletion is reversible unless documented.",\n        "offline_sync": "Distinguish locally pending changes from server-confirmed changes using supplied sync status. Never claim data synced or was backed up without confirmation.",\n        "ai_reliability": "Explain the supplied Qwen availability, retry or error state. Do not fabricate successful inference, substitute a canned response or imply a failed request completed.",\n        "audit_review": "Summarize supplied review candidates and audit details with source and status preserved. Distinguish proposed, accepted, rejected and persisted states; do not claim a candidate was accepted or written.",\n    }[payload.workflow]\n    prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
