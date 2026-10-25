@@ -864,7 +864,7 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         assert reminder["delivery_mode"] == "in_app_list_only"
         assert reminder["notification_delivery_status"] == "not_sent"
         assert reminder["created_by_caregiver_id"] == caregiver_id
-        assert reminder["due_at"].endswith("+00:00")
+        assert reminder["due_at"].endswith(("Z", "+00:00")), reminder["due_at"]
 
         listed = client.get(f"/api/v1/reminders/{person_id}", headers=auth)
         assert listed.status_code == 200, listed.text
