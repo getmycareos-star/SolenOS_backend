@@ -26,6 +26,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
+from app.api.professional_auth import router as professional_auth_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
@@ -53,6 +54,7 @@ app.add_middleware(
 )
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
+app.include_router(professional_auth_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
@@ -86,6 +88,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path in {"/api/v1/sessions/anonymous", "/api/v1/sessions/register", "/api/v1/sessions/login"} and method == "POST":
+        return await call_next(request)
+    # These endpoints validate a separate professional-only bearer session internally.
+    if path.startswith("/api/v1/professional-auth/"):
         return await call_next(request)
     # The share receiver stores a short-lived, random one-time capability, not
     # a care record. Only these two routes bypass caregiver bearer auth.
