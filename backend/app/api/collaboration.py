@@ -448,6 +448,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     source = (source_text or "").casefold()
     text = (reply or "").casefold()
     patterns = (
+        r"\b(?:i['’]ve found|i have found|i tried|in my experience|what worked for me|this helped me|these methods have|made my day)\b",
         r"\bpositive response\b",
         r"\bnegative response\b",
         r"\b(?:effective|ineffective) treatment\b",
