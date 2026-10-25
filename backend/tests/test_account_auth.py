@@ -122,3 +122,15 @@ def test_account_token_cannot_access_another_care_record():
         headers={"Authorization": f"Bearer {other['access_token']}"},
     )
     assert response.status_code == 403, response.text
+
+
+def test_account_session_can_be_revoked_server_side():
+    client = TestClient(app)
+    created = register(client)
+    assert created.status_code == 201, created.text
+    token = created.json()["access_token"]
+    revoked = client.post("/api/v1/sessions/revoke", headers={"Authorization": f"Bearer {token}"}, json={})
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["revoked"] is True
+    current = client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {token}"})
+    assert current.status_code == 401, current.text
