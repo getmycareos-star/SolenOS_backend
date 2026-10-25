@@ -838,6 +838,7 @@ def test_qwen_gateway_bounds_context_and_keeps_model_loaded(monkeypatch):
     assert captured["payload"]["keep_alive"] == "30m"
     assert captured["payload"]["options"]["num_ctx"] == 1024
     assert captured["payload"]["options"]["num_predict"] == 96
+    assert captured["payload"]["options"]["num_thread"] == 2
     assert captured["payload"]["options"]["temperature"] == 0
 
 
