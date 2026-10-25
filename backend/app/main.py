@@ -93,6 +93,9 @@ PUBLIC_V1_ENDPOINTS = {
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
     ("/api/v1/accounts/login", "POST"),
+    # The assistant validates bearer identity inside its handler after checking the
+    # disabled Community workflow, so other workflows remain protected.
+    ("/api/v1/assistant/assist", "POST"),
 }
 
 
@@ -137,6 +140,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             )
 
     if not path.startswith("/api/v1/") and path != "/api/situation":
+        return await call_next(request)
+    # Suspended Community routes are deliberately not registered. Let FastAPI
+    # return its normal 404 rather than masking the disabled feature as 401.
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and any(
+        segment == "community"
+        for candidate in (path.lower(), str(request.url.path or "").lower())
+        for segment in candidate.split("/")
+        if segment
+    ):
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
