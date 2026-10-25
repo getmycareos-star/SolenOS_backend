@@ -93,9 +93,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
     # Community is suspended at the API boundary, not merely hidden in the UI.
     # Preserve the route implementation and stored records for a future re-enable.
-    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and (
-        path == "/api/v1/community" or path.startswith("/api/v1/community/")
-    ):
+    path_segments = {segment for segment in path.lower().split("/") if segment}
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and "community" in path_segments:
         return JSONResponse(
             status_code=404,
             content={"detail": "Community is currently unavailable"},
@@ -103,7 +102,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
     # The general assistant endpoint supports several care workflows. Reject the
     # Community workflow specifically, even when called directly without the UI.
-    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and path == "/api/v1/assistant/assist" and method == "POST":
+    if not (COMMUNITY_ENABLED and PROFESSIONAL_COMMUNITY_ENABLED) and path.lower().endswith("/assistant/assist") and method == "POST":
         try:
             requested_workflow = (await request.json()).get("workflow")
         except Exception:
