@@ -25,21 +25,9 @@ COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
 RUN python -m pip install --upgrade pip && python -m pip install .
 
-# Bundle the smaller open-weight model into the existing Railway backend image.
-# The 1.5B model was present but production CPU inference repeatedly timed out.
-# No Dell process, external inference API, API key or separate service is used.
-RUN set -eux; \
-    ollama serve >/tmp/ollama-build.log 2>&1 & server_pid=$!; \
-    trap 'kill "$server_pid" 2>/dev/null || true' EXIT; \
-    ready=0; \
-    for attempt in $(seq 1 90); do \
-      if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then ready=1; break; fi; \
-      sleep 2; \
-    done; \
-    if [ "$ready" -ne 1 ]; then cat /tmp/ollama-build.log >&2; exit 1; fi; \
-    ollama pull qwen2.5:0.5b; \
-    ollama list | grep -q 'qwen2.5:0.5b'; \
-    kill "$server_pid" 2>/dev/null || true
+# Keep Ollama in the image, but download the model at runtime via start-with-qwen.sh.
+# Exporting the model layer during the image build stalled production deployment.
+RUN ollama --version
 
 COPY start-with-qwen.sh /app/start-with-qwen.sh
 EXPOSE 8080
