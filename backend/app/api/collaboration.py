@@ -617,13 +617,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"context={(handoff.context or '')[:800]}"
             )
 
-    if payload.workflow == "community":
-        for match in _literal_matches(db, payload.text)[:3]:
-            context_lines.append(
-                f"Published peer experience [{match['post_id']}] (not authoritative care fact): "
-                f"{match['content'][:700]}"
-            )
-
     guidance = {
         "daily_capture": "Organize only what the caregiver reports. Preserve their meaning and separate reported facts from interpretation. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed record entry or correction. Preserve the original meaning and identify missing details. This assistance does not save or correct a record.",
