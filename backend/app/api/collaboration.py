@@ -574,14 +574,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(12)
             .all()
         )
-        model_messages = [{"role": "system", "content": system_prompt}]
-        model_messages.extend(
-            {"role": row.role, "content": row.content}
-            for row in reversed(prior_messages)
-            if row.role in {"user", "assistant"}
-        )
-        model_messages.append({"role": "user", "content": payload.text.strip()})
         greeting_only = _is_casual_greeting(payload.text)
+        model_messages = [{"role": "system", "content": system_prompt}]
+        # A greeting is a fresh conversational turn: prior interview-style
+        # exchanges should not bias the local model into asking another question.
+        if not greeting_only:
+            model_messages.extend(
+                {"role": row.role, "content": row.content}
+                for row in reversed(prior_messages)
+                if row.role in {"user", "assistant"}
+            )
+        model_messages.append({"role": "user", "content": payload.text.strip()})
         reply = await asyncio.to_thread(
             _ollama_chat,
             base,
