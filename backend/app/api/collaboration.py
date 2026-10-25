@@ -1018,11 +1018,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Authorized care-record context (may be empty):\n" + ("\n".join(context_lines) if context_lines else "No care events or appointments are recorded.")
         )
         if _is_casual_greeting(payload.text):
-            system_prompt += (
-                "\nThis message is only a greeting or brief pleasantry. Generate one natural, declarative "
-                "greeting of 1–4 words. For the input 'hi', a natural answer is 'Hi there!' or 'Hello!'. "
-                "Do not use a question mark. Do not ask how the user is, how you can help, or any follow-up "
-                "question. Do not introduce care topics or add an offer of help. Return only the greeting."
+            # Use a short, isolated greeting prompt. The general care-assistant
+            # prompt contains many competing instructions and can make the small
+            # local model produce interview-style follow-up questions.
+            # This remains a real model completion; no canned greeting is substituted.
+            system_prompt = (
+                "You are SolenOS Companion. The user sent only a greeting or pleasantry. "
+                "Reply with one natural, friendly greeting in 1–4 words. "
+                "For example, 'Hello!' or 'Hi there!'. "
+                "Do not ask any question. Do not mention care, tasks, help, services or yourself. "
+                "Do not add a follow-up or an offer. Return only the greeting."
             )
         prior_messages = (
             db.query(ConversationMessage)
@@ -1044,7 +1049,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             base,
             model,
             model_messages,
-            {"temperature": 0, "num_predict": 32} if greeting_only else None,
+            {"temperature": 0, "num_predict": 8} if greeting_only else None,
         )
         # Apply a Qwen-generated language repair before failing closed. No canned
         # greeting or acknowledgement is ever substituted by application code.
