@@ -1,3 +1,4 @@
+import copy
 import hashlib
 from datetime import datetime, timezone
 from typing import Any
@@ -51,7 +52,8 @@ def review_capture_candidate(
         raise HTTPException(status_code=404, detail="Capture analysis not found")
     if analysis.extraction_status != "available" or not isinstance(analysis.candidates, dict):
         raise HTTPException(status_code=409, detail="No reviewable extraction candidates are available")
-    observations = analysis.candidates.get("observations")
+    candidates_payload = copy.deepcopy(analysis.candidates)
+    observations = candidates_payload.get("observations")
     if not isinstance(observations, list) or payload.candidate_index >= len(observations):
         raise HTTPException(status_code=404, detail="Candidate not found")
     candidate = observations[payload.candidate_index]
@@ -88,7 +90,7 @@ def review_capture_candidate(
         "source_event_id": analysis.source_event_id,
         "source_evidence_id": analysis.source_evidence_id,
     })
-    analysis.candidates = {**analysis.candidates, "observations": observations}
+    analysis.candidates = candidates_payload
     analysis.review_history = history
     db.add(analysis)
     db.commit()
