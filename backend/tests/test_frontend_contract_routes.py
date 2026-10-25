@@ -1003,6 +1003,41 @@ def test_qwen_grounding_guard_rejects_unanchored_demographics_and_named_appointm
     )
 
 
+def test_qwen_assist_fails_closed_on_fabricated_demographics_without_source_notes(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        generated = []
+        hallucinated = "The patient is a 65-year-old male smoker with a history of hypertension and diabetes."
+
+        def qwen_response(messages, **kwargs):
+            generated.append(messages)
+            return hallucinated
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={
+                "workflow": "care_situation_change",
+                "text": "Help organize only the information explicitly provided. No source notes or care records were supplied.",
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert len(generated) == 2, "Unsupported specifics should get one repair attempt, then fail closed."
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert after.json() == before.json(), "Failed Qwen assistance must not write to the Living Care Record."
+    finally:
+        teardown()
+
+
 def test_qwen_grounding_guard_rejects_invented_first_person_community_experience():
     from app.api.collaboration import _contains_unsupported_care_claim
 
