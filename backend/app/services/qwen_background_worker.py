@@ -41,7 +41,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
     the hints prevent the 0.5B classifier from confusing corrections, summaries,
     access-state questions, and other high-impact workflows.
     """
-    text = f"{task_text}\n{context_text}".casefold()
+    text = (task_text or "").casefold()
     rules = (
         ("after_appointment", r"after[- ]appointment|after the appointment|after today.s appointment|clinician notes"),
         ("two_week_review", r"last fourteen days|last 14 days|past 14 days|two[- ]week review|last two weeks"),
@@ -70,8 +70,9 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("medication_day", r"medication was taken|medicine was taken|medication-day|organize this medication note"),
         ("care_history_search", r"search the available care history|search.*history|find.*in.*history|history search"),
         ("living_care_record", r"summarize.*care record|living care record summary|available care record"),
-        ("document", r"document excerpt|exact sentence from a document|\bdocument\b"),
+        ("caregiver_feedback", r"wrong date|earlier entry|caregiver feedback|report that an entry is wrong"),
         ("add_record", r"add a record|add record|proposed record entry|draft the correction"),
+        ("document", r"document excerpt|exact sentence from a document|\bdocument\b"),
         ("daily_capture", r"today.s caregiver observation|daily capture|organize today.s observation|caregiver note"),
     )
     for workflow, pattern in rules:
