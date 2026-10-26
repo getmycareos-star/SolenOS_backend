@@ -36,6 +36,26 @@ def test_enabled_workflow_list_has_30_unique_entries_and_no_community():
     assert len(set(worker.ENABLED_WORKFLOWS)) == 30
     assert "community" not in worker.ENABLED_WORKFLOWS
 
+def test_background_classifier_requests_constrained_json_schema(monkeypatch):
+    seen = {}
+
+    def classify(*args, **kwargs):
+        seen.update(kwargs)
+        return json.dumps({"workflow": "daily_capture"})
+
+    monkeypatch.setattr(worker, "qwen_chat", classify)
+    assert asyncio.run(worker._classify_task("Record today's observation", "")) == "daily_capture"
+    schema = seen["response_format"]
+    assert schema["type"] == "object"
+    assert schema["properties"]["workflow"]["enum"] == list(worker.ENABLED_WORKFLOWS)
+    assert schema["additionalProperties"] is False
+
+
+def test_background_classifier_rejects_non_object_json(monkeypatch):
+    monkeypatch.setattr(worker, "qwen_chat", lambda *args, **kwargs: json.dumps(["daily_capture"]))
+    with pytest.raises(ValueError, match="workflow_classification_invalid"):
+        asyncio.run(worker._classify_task("Help with care notes", ""))
+
 
 from datetime import datetime, timedelta, timezone
 
