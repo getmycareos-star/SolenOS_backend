@@ -457,3 +457,31 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         assert "[redacted date]" in staged[0].sample_text
     finally:
         db.close()
+
+    # Opting out purges staged improvement data while retaining personal memory.
+    disabled = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": False,
+        },
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["profile"]["data_improvement_consent"] is False
+    blocked = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert blocked.status_code == 403, blocked.text
+
+    from app.models.memory import ReasoningMemory
+    db = TestSessionLocal()
+    try:
+        assert db.query(ImprovementTrainingExample).filter_by(
+            person_id=created["person"]["id"], caregiver_id=created["caregiver"]["id"]
+        ).count() == 0
+        assert db.query(ReasoningMemory).filter_by(
+            person_id=created["person"]["id"], memory_type="feedback"
+        ).count() == 1
+    finally:
+        db.close()
