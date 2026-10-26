@@ -111,7 +111,7 @@ def main() -> int:
         from transformers import (
             AutoModelForCausalLM,
             AutoTokenizer,
-            DataCollatorForLanguageModeling,
+            DataCollatorForSeq2Seq,
             Trainer,
             TrainingArguments,
         )
@@ -134,26 +134,36 @@ def main() -> int:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    def render(row: dict[str, Any]) -> dict[str, str]:
-        text = tokenizer.apply_chat_template(
+    def encode(row: dict[str, Any]) -> dict[str, Any]:
+        # Train/evaluate only on the assistant completion, not on reproducing
+        # the caregiver's prompt. Prefix tokenization gives the prompt boundary.
+        prompt = tokenizer.apply_chat_template(
+            row["messages"][:-1], tokenize=False, add_generation_prompt=True
+        )
+        full = tokenizer.apply_chat_template(
             row["messages"], tokenize=False, add_generation_prompt=False
         )
-        return {"text": text}
+        prompt_ids = tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        encoded = tokenizer(full, truncation=True, max_length=2048, add_special_tokens=False)
+        input_ids = encoded["input_ids"]
+        labels = list(input_ids)
+        prompt_length = min(len(prompt_ids), len(labels))
+        labels[:prompt_length] = [-100] * prompt_length
+        if all(token == -100 for token in labels):
+            raise ValueError(f"Example {row['example_id']} has no assistant tokens after truncation")
+        encoded["labels"] = labels
+        return encoded
 
-    train_ds = Dataset.from_list([render(row) for row in train_rows])
-    eval_ds = Dataset.from_list([render(row) for row in eval_rows])
-
-    def tokenize(batch: dict[str, list[str]]) -> dict[str, Any]:
-        return tokenizer(batch["text"], truncation=True, max_length=2048)
-
-    train_ds = train_ds.map(tokenize, batched=True, remove_columns=["text"])
-    eval_ds = eval_ds.map(tokenize, batched=True, remove_columns=["text"])
+    train_ds = Dataset.from_list([encode(row) for row in train_rows])
+    eval_ds = Dataset.from_list([encode(row) for row in eval_rows])
 
     base_model = AutoModelForCausalLM.from_pretrained(
         args.model, torch_dtype=torch.float16, trust_remote_code=False
     )
     base_model.config.use_cache = False
-    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer, model=None, padding=True, label_pad_token_id=-100
+    )
     baseline_args = TrainingArguments(
         output_dir=str(args.output / "baseline-eval"),
         per_device_eval_batch_size=1,
