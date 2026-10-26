@@ -360,6 +360,22 @@ def test_recovery_key_resets_password_once_and_revokes_old_sessions():
     }).status_code == 200
 
 
+def test_forgotten_password_can_be_reset_from_active_device_session():
+    client = TestClient(app)
+    account = register(client, email="device-reset@example.com", password="initial-long-password").json()
+    changed = client.post("/api/v1/account-security/password/reset-on-device", headers={
+        "Authorization": f"Bearer {account['access_token']}",
+    }, json={"new_password": "replacement-long-password"})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["device_session_used_as_recovery_proof"] is True
+    assert client.get("/api/v1/sessions/me", headers={
+        "Authorization": f"Bearer {account['access_token']}",
+    }).status_code == 401
+    assert client.post("/api/v1/sessions/login", json={
+        "email": "device-reset@example.com", "password": "replacement-long-password",
+    }).status_code == 200
+
+
 def test_signed_in_password_change_revokes_current_session():
     client = TestClient(app)
     account = register(client, email="change@example.com", password="initial-long-password").json()
