@@ -55,6 +55,7 @@ def upgrade():
 
 
 def downgrade():
-    bind = op.get_bind()
-    if inspect(bind).has_table("caregiver_accounts"):
-        op.drop_table("caregiver_accounts")
+    # caregiver_accounts is shared with the mainline account migration and may
+    # contain real user credentials. Never drop the table or shared indexes in
+    # a rollback; a forward corrective migration is safer than data loss.
+    pass
