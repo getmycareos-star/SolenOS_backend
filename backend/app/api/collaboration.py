@@ -24,6 +24,7 @@ from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
+from app.models.qwen_background_job import QwenBackgroundJob
 
 router = APIRouter(tags=["community and companion"])
 
@@ -57,6 +58,13 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+
+
+class QwenBackgroundJobCreate(BaseModel):
+    task_text: str = Field(min_length=1, max_length=1800)
+    context_text: str = Field(default="", max_length=3000)
+    evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
 class QwenAssistRequest(BaseModel):
@@ -574,6 +582,68 @@ def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
 def qwen_assistant_status():
     # Infrastructure-only health data: no care-record context is read or returned.
     return qwen_runtime_status()
+
+
+@router.post("/assistant/jobs", status_code=202)
+async def create_qwen_background_job(
+    payload: QwenBackgroundJobCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Queue a caregiver request; workflow routing is internal, never user-selected."""
+    person_id, caregiver_id = _scope(request, db)
+    if payload.evidence_ids:
+        rows = db.query(EvidenceModel.id).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+            EvidenceModel.id.in_(payload.evidence_ids),
+        ).all()
+        if len({str(row[0]) for row in rows}) != len(set(payload.evidence_ids)):
+            raise HTTPException(status_code=403, detail="One or more evidence items are outside this care-record session")
+    job = QwenBackgroundJob(
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        task_text=payload.task_text.strip(),
+        context_text=payload.context_text.strip(),
+        evidence_ids_json=json.dumps(list(dict.fromkeys(payload.evidence_ids))),
+        appointment_id=payload.appointment_id,
+        status="queued",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return {"job_id": job.id, "status": job.status, "status_url": f"/api/v1/assistant/jobs/{job.id}"}
+
+
+@router.get("/assistant/jobs/{job_id}")
+async def get_qwen_background_job(
+    job_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return only the requesting caregiver's job status and completed suggestion."""
+    person_id, caregiver_id = _scope(request, db)
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.id == job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+    ).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Background request not found")
+    return {
+        "job_id": job.id,
+        "status": job.status,
+        "workflow": job.workflow,
+        "reply": job.result_text if job.status == "completed" else None,
+        "error": "We couldn’t complete that request. Please try again." if job.status == "failed" else None,
+        "source_event_ids": json.loads(job.source_event_ids_json or "[]") if job.status == "completed" else [],
+        "source_evidence_ids": json.loads(job.source_evidence_ids_json or "[]") if job.status == "completed" else [],
+        "review_required": job.status == "completed",
+        "written_to_lcr": False,
+        "persistence": "read_only_assistance",
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
 
 
 @router.post("/assistant/assist")
