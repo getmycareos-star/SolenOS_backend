@@ -29,7 +29,7 @@ RUN python -m pip install --upgrade pip && python -m pip install .
 # Exporting the model layer during the image build stalled production deployment.
 RUN ollama --version
 
-COPY start-with-qwen.sh /app/start-with-qwen.sh
+COPY backend/start-with-qwen.sh /app/start-with-qwen.sh
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["/bin/bash", "/app/start-with-qwen.sh"]
