@@ -41,17 +41,27 @@ async def _classify_task(task_text: str, context_text: str) -> str:
         "Return only a JSON object with one key workflow and a value copied exactly from this list: "
         + choices
     )
+    # Ollama supports constrained JSON output. Use a schema so the model cannot
+    # choose a disabled workflow or return free-form prose for this routing step.
+    schema = {
+        "type": "object",
+        "properties": {"workflow": {"type": "string", "enum": list(ENABLED_WORKFLOWS)}},
+        "required": ["workflow"],
+        "additionalProperties": False,
+    }
     raw = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt},
          {"role": "user", "content": json.dumps({"request": task_text[:1800], "screen_context": context_text[:3000]})}],
+        response_format=schema,
         options={"temperature": 0, "num_predict": 48},
     )
     try:
-        value = json.loads(raw.strip()).get("workflow")
-    except (json.JSONDecodeError, AttributeError):
+        parsed = json.loads(raw.strip())
+        value = parsed.get("workflow") if isinstance(parsed, dict) else None
+    except (json.JSONDecodeError, AttributeError, TypeError):
         value = None
-    if value not in ENABLED_WORKFLOWS:
+    if not isinstance(value, str) or value not in ENABLED_WORKFLOWS:
         # Do not guess or silently choose a workflow if model routing is malformed.
         raise ValueError("workflow_classification_invalid")
     return value
