@@ -200,3 +200,24 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     assert job.completed_at is not None
     assert job.locked_at is None
     db.close()
+
+
+@pytest.mark.parametrize(("expected", "task"), [
+    ("care_situation_change", "What has changed between the current and previous care situation?"),
+    ("decision_outcome", "What was decided and what happened afterward?"),
+    ("medication_day", "Help organize today's medication log and related observations."),
+    ("care_coordination", "Who is responsible for each care task? Help coordinate responsibilities between caregivers."),
+    ("companion", "I'm overwhelmed by caregiving. Help me think through this."),
+    ("caregiver_feedback", "Help me give feedback on a care record and phrase a correction."),
+    ("roles_access", "Which caregivers can access this record?"),
+    ("account_recovery", "I can't access my account because I forgot my password."),
+    ("settings_security", "Help me manage privacy controls and account security options."),
+    ("record_lifecycle", "How do I restore an archived record?"),
+    ("ai_reliability", "Qwen is not responding. Check model availability and retry state."),
+    ("audit_review", "Review the audit log and summarize recorded actions."),
+])
+def test_twelve_previously_misrouted_workflows_have_specific_intent_routes(expected, task, monkeypatch):
+    def should_not_call_model(*args, **kwargs):
+        raise AssertionError("Specific workflow intent should route without relying on small-model guessing")
+    monkeypatch.setattr(worker, "qwen_chat", should_not_call_model)
+    assert asyncio.run(worker._classify_task(task, "")) == expected
