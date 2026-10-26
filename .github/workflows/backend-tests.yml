@@ -200,10 +200,31 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
-          echo "QWEN_E2E: runtime status"
-          status=$(curl --fail --silent --show-error -H "$auth_header" \
-            http://127.0.0.1:8080/api/v1/assistant/status)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:0.5b"' "$status"
+          echo "QWEN_E2E: wait for bundled model readiness"
+          qwen_status_ready=0
+          for attempt in $(seq 1 90); do
+            status=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 10 -H "$auth_header" \
+              http://127.0.0.1:8080/api/v1/assistant/status || true)
+            if [ "$status" = "200" ] && python - <<'PY'
+          import json
+          with open("/tmp/qwen-status.json", encoding="utf-8") as stream:
+              data = json.load(stream)
+          assert data.get("available") is True, data
+          assert data.get("provider") == "local_ollama", data
+          assert data.get("inference_api") == "ollama_native_http", data
+          assert data.get("hosted_inference_api") is False, data
+          assert data.get("model") == "qwen2.5:0.5b", data
+          PY
+            then qwen_status_ready=1; break; fi
+            echo "Bundled Qwen is still initializing (HTTP $status); retrying."
+            sleep 2
+          done
+          if [ "$qwen_status_ready" -ne 1 ]; then
+            cat /tmp/qwen-status.json >&2 || true
+            docker logs solenos-qwen-e2e >&2 || true
+            echo "Bundled Qwen did not become available within 180 seconds." >&2
+            exit 1
+          fi
 
           echo "QWEN_E2E: Companion greeting"
           greeting=$(curl --fail --silent --show-error \
