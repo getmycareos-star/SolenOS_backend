@@ -1,7 +1,7 @@
 """Reconcile missing care-domain ORM tables on Railway without duplicating tables.
 
 Revision ID: 20261027_01_care_domain_reconcile
-Revises: 20261026_03_identity_security
+Revises: 20261026_04_deep_care_continuity
 
 Creates only tables absent from the current database, from the registered ORM
 metadata. Existing rows and existing table definitions are not rewritten.
@@ -15,7 +15,7 @@ from sqlalchemy import inspect
 from app.core.database import Base
 
 revision = "20261027_01_care_domain_reconcile"
-down_revision = "20261026_03_identity_security"
+down_revision = "20261026_04_deep_care_continuity"
 branch_labels = None
 depends_on = None
 
