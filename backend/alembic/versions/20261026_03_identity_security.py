@@ -51,6 +51,31 @@ def upgrade():
         sa.Column("created_at", dt, nullable=False, server_default=NOW),
         sa.Column("updated_at", dt, nullable=True),
     ], [("ix_cpr_caregiver_id", ["caregiver_id"], False), ("ix_cpr_person_id", ["person_id"], False)])
+    _create(bind, "caregiver_profiles", [
+        sa.Column("caregiver_id", s(36), _fk("fk_cp_caregiver", "caregivers.id"), nullable=False, unique=True),
+        sa.Column("display_name", s(120), nullable=True),
+        sa.Column("preferences", json, nullable=True),
+        sa.Column("created_at", dt, nullable=False, server_default=NOW),
+        sa.Column("updated_at", dt, nullable=True),
+    ])
+    _create(bind, "caregiver_roles", [
+        sa.Column("caregiver_id", s(36), _fk("fk_cr_caregiver", "caregivers.id"), nullable=False),
+        sa.Column("person_id", s(36), _fk("fk_cr_person", "persons.id"), nullable=False),
+        sa.Column("role", s(40), nullable=False, server_default="caregiver"),
+        sa.Column("status", s(24), nullable=False, server_default="active"),
+        sa.Column("granted_by_caregiver_id", s(36), _fk("fk_cr_grantor", "caregivers.id", "SET NULL"), nullable=True),
+        sa.Column("created_at", dt, nullable=False, server_default=NOW),
+        sa.Column("revoked_at", dt, nullable=True),
+    ], [("ix_cr_caregiver_id", ["caregiver_id"], False), ("ix_cr_person_id", ["person_id"], False)])
+    _create(bind, "caregiver_responsibilities", [
+        sa.Column("caregiver_id", s(36), _fk("fk_cre_caregiver", "caregivers.id"), nullable=False),
+        sa.Column("person_id", s(36), _fk("fk_cre_person", "persons.id"), nullable=False),
+        sa.Column("responsibility", s(100), nullable=False),
+        sa.Column("description", txt, nullable=True),
+        sa.Column("status", s(24), nullable=False, server_default="active"),
+        sa.Column("created_at", dt, nullable=False, server_default=NOW),
+        sa.Column("updated_at", dt, nullable=True),
+    ], [("ix_cre_caregiver_id", ["caregiver_id"], False), ("ix_cre_person_id", ["person_id"], False)])
     _create(bind, "caregiver_account_links", [
         sa.Column("account_id", s(36), _fk("fk_cal_account", "caregiver_accounts.id"), nullable=False),
         sa.Column("caregiver_id", s(36), _fk("fk_cal_caregiver", "caregivers.id"), nullable=False),
