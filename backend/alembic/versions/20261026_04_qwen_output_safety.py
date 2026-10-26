@@ -5,7 +5,8 @@ Revises: 20261026_03_identity_security
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select, update
+import uuid
 
 from app.core.database import Base
 
@@ -57,6 +58,72 @@ def upgrade():
     ]
     if qwen_tables:
         Base.metadata.create_all(bind=bind, tables=qwen_tables, checkfirst=True)
+
+    # Move legacy completed outputs into the dedicated output table before
+    # clearing the old job column. The output text and source references survive.
+    inspector = inspect(bind)
+    required_tables = {"qwen_background_jobs", "qwen_model_outputs", "qwen_safety_evaluations", "qwen_job_events"}
+    if required_tables.issubset(set(inspector.get_table_names())):
+        job_table = Base.metadata.tables["qwen_background_jobs"]
+        output_table = Base.metadata.tables["qwen_model_outputs"]
+        safety_table = Base.metadata.tables["qwen_safety_evaluations"]
+        event_table = Base.metadata.tables["qwen_job_events"]
+        job_columns = {column["name"] for column in inspector.get_columns("qwen_background_jobs")}
+        if {"id", "person_id", "caregiver_id", "status", "result_text", "workflow"}.issubset(job_columns):
+            legacy_rows = bind.execute(
+                select(job_table).where(
+                    job_table.c.status == "completed",
+                    job_table.c.result_text.is_not(None),
+                )
+            ).mappings().all()
+            for job in legacy_rows:
+                output = bind.execute(
+                    select(output_table.c.id).where(output_table.c.job_id == job["id"])
+                ).first()
+                if output is None:
+                    output_id = str(uuid.uuid4())
+                    bind.execute(output_table.insert().values(
+                        id=output_id,
+                        job_id=job["id"],
+                        person_id=job["person_id"],
+                        caregiver_id=job["caregiver_id"],
+                        workflow=job["workflow"] or "unknown",
+                        model_name=None,
+                        model_version=None,
+                        output_text=job["result_text"],
+                        output_metadata={"legacy_backfill": True, "written_to_lcr": False},
+                        source_event_ids_json=job.get("source_event_ids_json") or "[]",
+                        source_evidence_ids_json=job.get("source_evidence_ids_json") or "[]",
+                        review_status="pending_review",
+                        review_required=True,
+                        written_to_lcr=False,
+                    ))
+                    bind.execute(safety_table.insert().values(
+                        id=str(uuid.uuid4()),
+                        output_id=output_id,
+                        job_id=job["id"],
+                        person_id=job["person_id"],
+                        caregiver_id=job["caregiver_id"],
+                        risk_class="unassessed",
+                        decision="review_required",
+                        human_review_required=True,
+                        violations_json=[],
+                        policy_references_json=[],
+                    ))
+                    bind.execute(event_table.insert().values(
+                        id=str(uuid.uuid4()),
+                        job_id=job["id"],
+                        person_id=job["person_id"],
+                        caregiver_id=job["caregiver_id"],
+                        event_type="legacy_output_backfilled",
+                        from_status="completed",
+                        to_status="completed",
+                        metadata_json={"output_id": output_id, "written_to_lcr": False},
+                    ))
+                # Only clear the legacy copy after a dedicated output exists.
+                bind.execute(
+                    update(job_table).where(job_table.c.id == job["id"]).values(result_text=None)
+                )
 
 
 def downgrade():
