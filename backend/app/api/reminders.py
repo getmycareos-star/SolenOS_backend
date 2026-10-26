@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.reminder import CareReminder
+from app.services.qwen_event_triggers import enqueue_qwen_event_analysis
 from app.schemas.reminder import CareReminderComplete, CareReminderCreate, CareReminderRead
 
 router = APIRouter(tags=["care reminders"])
@@ -55,6 +56,16 @@ def create_reminder(payload: CareReminderCreate, request: Request, db: Session =
         status="open",
     )
     db.add(reminder)
+    db.flush()
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_type="reminder",
+        source_id=reminder.id,
+        summary=f"Reminder created: {reminder.title}; due_at={reminder.due_at}; status={reminder.status}. {reminder.note or ''}",
+        context_text="A caregiver-created reminder was persisted. Check for related care context and unresolved questions only; do not claim a notification was delivered or alter the reminder.",
+    )
     db.commit()
     db.refresh(reminder)
     return reminder
@@ -102,6 +113,16 @@ def complete_reminder(
         reminder.completed_by_caregiver_id = caregiver_id
     if payload.completion_note is not None:
         reminder.completion_note = payload.completion_note.strip() or None
+    db.flush()
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_type="reminder",
+        source_id=f"{reminder.id}:completed",
+        summary=f"Reminder completion reported: {reminder.title}; completed_at={reminder.completed_at}; note={reminder.completion_note or ''}",
+        context_text="A caregiver marked a reminder completed. Treat this as a caregiver-reported status, not proof that an external action or notification occurred.",
+    )
     db.commit()
     db.refresh(reminder)
     return reminder
