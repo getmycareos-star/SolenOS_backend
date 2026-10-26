@@ -1,7 +1,7 @@
 """Reconcile missing care-domain ORM tables on Railway without duplicating tables.
 
-Revision ID: 20261027_01_care_domain_reconcile
-Revises: 20261026_03_identity_security
+Revision ID: 20261027_01_care_reconcile
+Revises: 20261026_04_deep_care_continuity
 
 Creates only tables absent from the current database, from the registered ORM
 metadata. Existing rows and existing table definitions are not rewritten.
@@ -14,8 +14,8 @@ from sqlalchemy import inspect
 
 from app.core.database import Base
 
-revision = "20261027_01_care_domain_reconcile"
-down_revision = "20261026_03_identity_security"
+revision = "20261027_01_care_reconcile"
+down_revision = "20261026_04_deep_care_continuity"
 branch_labels = None
 depends_on = None
 
@@ -78,8 +78,12 @@ def upgrade():
     for table in Base.metadata.sorted_tables:
         if table.name not in existing_tables:
             continue
+        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
         for index in table.indexes:
-            index.create(bind=bind, checkfirst=True)
+            # Legacy tables may intentionally have a reduced schema. Never try
+            # to create an index that references a column absent from that table.
+            if set(index.columns.keys()).issubset(actual_columns):
+                index.create(bind=bind, checkfirst=True)
 
 
 def downgrade():
