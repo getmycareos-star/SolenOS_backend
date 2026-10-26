@@ -10,9 +10,13 @@ class QwenBackgroundJob(Base):
     __tablename__ = "qwen_background_jobs"
     __table_args__ = (
         Index("ix_qwen_background_jobs_claim", "status", "available_at", "created_at"),
+        Index("uq_qwen_background_jobs_trigger_key", "trigger_key", unique=True),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    trigger_key = Column(String(240), nullable=True)
+    trigger_source_type = Column(String(48), nullable=True)
+    trigger_source_id = Column(String(128), nullable=True)
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
     status = Column(String(24), nullable=False, default="queued", server_default="queued", index=True)
