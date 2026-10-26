@@ -1,0 +1,8 @@
+# Optional dependencies for the isolated Qwen LoRA training pipeline.
+# Install only on a dedicated CUDA training machine, never in the Railway API image.
+-r pyproject.toml
+torch>=2.4.0
+transformers>=4.46.0,<5.0.0
+datasets>=3.0.0
+peft>=0.13.0
+accelerate>=1.0.0
