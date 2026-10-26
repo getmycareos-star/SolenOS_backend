@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -11,7 +11,7 @@ from app.models.caregiver_account import CaregiverAccount
 from app.models.identity_security import (
     AccountRecoveryEvent, AccountRecoveryRequest, AccountSecurityEvent,
     CaregiverDevice, DeviceEnrollmentEvent, DeviceRevocation, DeviceTrustRecord,
-    IdentityAuditEvent,
+    IdentityAuditEvent, LoginAttemptLimit,
 )
 
 router = APIRouter(prefix="/identity", tags=["identity security"])
@@ -133,6 +133,24 @@ def request_account_recovery(payload: RecoveryRequestInput, request: Request, db
         raise HTTPException(status_code=422, detail="Enter a valid email address.")
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first()
     ip = request.client.host if request.client else "unknown"
+    rate_key = _hash("recovery:" + ip)
+    now = datetime.now(timezone.utc)
+    limit = db.query(LoginAttemptLimit).filter(LoginAttemptLimit.key_hash == rate_key).first()
+    if limit and limit.blocked_until and limit.blocked_until > now:
+        raise HTTPException(status_code=429, detail="Too many recovery requests. Try again later.")
+    if limit is None:
+        limit = LoginAttemptLimit(key_hash=rate_key, attempts=0, window_started_at=now, updated_at=now)
+        db.add(limit)
+    if not limit.window_started_at or (now - limit.window_started_at).total_seconds() > 3600:
+        limit.window_started_at = now
+        limit.attempts = 0
+        limit.blocked_until = None
+    limit.attempts = int(limit.attempts or 0) + 1
+    limit.updated_at = now
+    if limit.attempts > 5:
+        limit.blocked_until = now + timedelta(hours=1)
+        db.commit()
+        raise HTTPException(status_code=429, detail="Too many recovery requests. Try again later.")
     request_context_hash = _hash(ip + ":" + request.headers.get("user-agent", "")[:256])
     record = AccountRecoveryRequest(
         account_id=account.id if account else None,
