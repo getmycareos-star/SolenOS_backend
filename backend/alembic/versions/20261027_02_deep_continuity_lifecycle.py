@@ -1,6 +1,6 @@
 """Add explicit follow-up, review, provenance, timeline and change-assessment records.
 
-Revision ID: 20261027_02_deep_continuity_lifecycle
+Revision ID: 20261027_02_continuity_lifecycle
 Revises: 20261027_01_care_domain_reconcile
 
 These are added only where the existing models do not express the lifecycle
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261027_02_deep_continuity_lifecycle"
+revision = "20261027_02_continuity_lifecycle"
 down_revision = "20261027_01_care_domain_reconcile"
 branch_labels = None
 depends_on = None
