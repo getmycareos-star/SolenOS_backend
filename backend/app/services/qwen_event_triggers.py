@@ -36,14 +36,14 @@ def _has_meaningful_content(source_type: str, raw_summary: str) -> bool:
     except (json.JSONDecodeError, TypeError):
         parsed = None
     if isinstance(parsed, dict):
-        ignored = {"person_id", "caregiver_id", "created_by_caregiver_id", "id", "created_at", "updated_at"}
+        ignored = {"person_id", "caregiver_id", "created_by_caregiver_id", "id", "created_at", "updated_at", "observed_at", "recorded_at", "timestamp"}
         def meaningful(item):
             if item is None:
                 return False
             if isinstance(item, bool):
                 return True
             if isinstance(item, (int, float)):
-                return item != 0
+                return True
             if isinstance(item, str):
                 text = " ".join(item.split()).lower()
                 return bool(text) and text not in {"unknown", "not provided", "n/a", "none", "null", "not available"}
