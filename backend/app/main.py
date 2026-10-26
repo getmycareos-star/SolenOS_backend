@@ -499,15 +499,27 @@ def update_situation_display_name(
 
 
 def _is_casual_conversation_only(text: str) -> bool:
+    """Classify interaction-only input; this selects routing, never response wording."""
     normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
     normalized = " ".join(normalized.split())
-    return normalized in {
-        "hi", "hello", "hey", "hiya", "howdy",
+    if normalized in {
+        "hi", "hello", "hey", "hiya", "howdy", "yo", "sup",
         "how are you", "how are you doing", "how are you today",
         "how's it going", "hows it going", "what's up", "whats up",
         "good morning", "good afternoon", "good evening", "good night",
-        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
-    }
+        "thanks", "thank you", "thank you so much", "i appreciate your help",
+        "appreciate it", "bye", "goodbye", "see you",
+        "this is useless", "this thing is useless", "you are stupid", "you're stupid",
+        "you are useless", "you're useless", "you suck", "you don't understand anything",
+        "you never get anything right", "you got this wrong", "that is wrong",
+        "that's wrong", "fuck you", "f*ck you", "idiot", "stupid", "useless",
+    }:
+        return True
+    return bool(re.search(
+        r"\b(?:you(?:'re| are) (?:stupid|useless|idiotic|wrong)|you suck|"
+        r"you don'?t understand|you never get anything right|fuck you|f\*ck you)\b",
+        normalized,
+    ))
 
 
 class LcrOrientationInput(BaseModel):
