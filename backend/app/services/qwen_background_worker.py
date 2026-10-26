@@ -29,7 +29,7 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review", "care_transition", "incident_follow_through",
+    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness",
 )
 
 
@@ -70,6 +70,7 @@ ROUTE_PHRASES = {
     "audit_review": ("audit and review candidates", "audit trail", "audit review", "audit entries", "review the audit trail", "show audit history", "inspect audit records", "review recorded actions", "audit log entries", "review the audit log"),
     "care_transition": ("care transition", "hospital discharge", "discharge from hospital", "discharge summary", "transition from hospital to home", "moving from hospital to home", "rehabilitation to home", "transition of care", "discharge reconciliation", "after discharge", "leaving hospital", "handoff after discharge", "transition documents"),
     "incident_follow_through": ("incident follow-through", "incident follow through", "follow up after a fall", "follow-up after a fall", "what happened after the fall", "follow up on the wandering episode", "follow-up on the wandering episode", "track the outcome of an incident", "unresolved incident follow-up", "missed visit follow-up", "follow up after an incident", "follow-up after an incident", "incident outcome"),
+    "emergency_readiness": ("emergency readiness", "emergency preparedness", "care emergency plan", "what to prepare for an emergency", "emergency contact information", "emergency information in the care record", "review the emergency plan", "emergency handoff information", "what information is missing for an emergency"),
 }
 
 
