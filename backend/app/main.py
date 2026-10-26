@@ -674,7 +674,7 @@ async def generate_lcr_orientation(
         })
 
     recipient_name = (getattr(person, "name", None) or "").strip()
-    authorized_context = "\\n".join(context_lines) if context_lines else (
+    authorized_context = "\n".join(context_lines) if context_lines else (
         "No care events, source evidence, or appointments are currently recorded."
     )
     system_prompt = (
