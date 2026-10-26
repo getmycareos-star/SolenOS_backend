@@ -20,9 +20,9 @@ def test_community_api_routes_are_not_registered(method, path, payload):
         json={"name": "Care recipient", "caregiver_name": "Anonymous caregiver"},
     )
     assert session.status_code == 201, session.text
-    response = getattr(client, method)(
-        path,
-        json=payload if payload is not None else None,
-        headers={"Authorization": f"Bearer {session.json()['access_token']}"},
-    )
+    headers = {"Authorization": f"Bearer {session.json()['access_token']}"}
+    if payload is None:
+        response = getattr(client, method)(path, headers=headers)
+    else:
+        response = getattr(client, method)(path, json=payload, headers=headers)
     assert response.status_code == 404, response.text
