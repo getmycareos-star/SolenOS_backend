@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_account import CaregiverAccount
+from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
 PASSWORD_ITERATIONS = 600_000
@@ -124,11 +125,34 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
 
 
 @router.post("/login")
-def login(payload: AccountLogin, db: Session = Depends(get_db)):
+def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)):
     email = _email(payload.email)
+    ip = request.client.host if request.client else "unknown"
+    key_hash = hashlib.sha256(("login:" + ip + ":" + email).encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    limit = db.query(LoginAttemptLimit).filter(LoginAttemptLimit.key_hash == key_hash).first()
+    if limit and limit.blocked_until and limit.blocked_until > now:
+        raise HTTPException(status_code=429, detail="Too many sign-in attempts. Try again later.")
+    if limit is None:
+        limit = LoginAttemptLimit(key_hash=key_hash, attempts=0, window_started_at=now, updated_at=now)
+        db.add(limit)
+    if not limit.window_started_at or (now - limit.window_started_at).total_seconds() > 900:
+        limit.window_started_at = now
+        limit.attempts = 0
+        limit.blocked_until = None
     account = db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first()
     if not account or not _verify_password(payload.password, account.password_hash):
+        limit.attempts = int(limit.attempts or 0) + 1
+        limit.updated_at = now
+        if limit.attempts >= 8:
+            limit.blocked_until = now.replace(microsecond=0) + timedelta(minutes=15)
+        db.add(AccountSecurityEvent(account_id=account.id if account else None, caregiver_id=account.caregiver_id if account else None, event_type="login_failed"))
+        db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    limit.attempts = 0
+    limit.blocked_until = None
+    limit.updated_at = now
+    db.add(AccountSecurityEvent(account_id=account.id, caregiver_id=account.caregiver_id, event_type="login_succeeded"))
     raw_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
     session = AnonymousSession(
