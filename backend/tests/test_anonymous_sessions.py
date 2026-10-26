@@ -412,7 +412,7 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         "person_id": created["person"]["id"],
         "caregiver_id": created["caregiver"]["id"],
         "category": "help_improve",
-        "detail": "Deliberately submitted feedback for the opt-in route.",
+        "detail": "Deliberately submitted feedback for the opt-in route. Contact caregiver@example.com on 2026-05-31."
     }
 
     no_session = client.post("/api/v1/feedback", params=query)
@@ -442,3 +442,18 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
     assert recorded.json()["source_type"] == "feedback"
+
+    from app.models.improvement_training_example import ImprovementTrainingExample
+    db = TestSessionLocal()
+    try:
+        staged = db.query(ImprovementTrainingExample).filter_by(
+            person_id=created["person"]["id"], caregiver_id=created["caregiver"]["id"]
+        ).all()
+        assert len(staged) == 1
+        assert staged[0].status == "pending_review"
+        assert "caregiver@example.com" not in staged[0].sample_text
+        assert "2026-05-31" not in staged[0].sample_text
+        assert "[redacted email]" in staged[0].sample_text
+        assert "[redacted date]" in staged[0].sample_text
+    finally:
+        db.close()
