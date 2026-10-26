@@ -1,6 +1,6 @@
 import hashlib
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, Integer, JSON, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, Integer, JSON, UniqueConstraint, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -8,6 +8,7 @@ from app.core.database import Base
 
 class CaregiverDevice(Base):
     __tablename__ = "caregiver_devices"
+    __table_args__ = (UniqueConstraint("caregiver_id", "installation_key_hash", name="uq_caregiver_device_installation"),)
     __table_args__ = (UniqueConstraint("caregiver_id", "installation_key_hash", name="uq_caregiver_device_installation"),)
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     account_id = Column(String(36), ForeignKey("caregiver_accounts.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -22,6 +23,7 @@ class CaregiverDevice(Base):
 
 class DeviceTrustRecord(Base):
     __tablename__ = "device_trust_records"
+    __table_args__ = (UniqueConstraint("device_id", name="uq_device_trust_record_device"),)
     __table_args__ = (UniqueConstraint("device_id", name="uq_device_trust_record_device"),)
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     device_id = Column(String(36), ForeignKey("caregiver_devices.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -89,6 +91,16 @@ class IdentityAuditEvent(Base):
     action = Column(String(60), nullable=False)
     details = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class LoginAttemptLimit(Base):
+    __tablename__ = "login_attempt_limits"
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    key_hash = Column(String(64), nullable=False, unique=True)
+    window_started_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    blocked_until = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class LoginAttemptLimit(Base):
