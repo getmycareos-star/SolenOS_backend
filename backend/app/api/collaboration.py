@@ -489,6 +489,18 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     return False
 
 
+def _companion_message_needs_revision(text: str) -> bool:
+    """Allow detail when warranted while rejecting empty, runaway, or internal output."""
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
+    if not words or len(words) > 220:
+        return True
+    if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
+        return True
+    normalized = " ".join(words)
+    internal_terms = ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")
+    return any(term in normalized for term in internal_terms)
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
@@ -1076,7 +1088,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if (
             not isinstance(reply, str)
             or not reply.strip()
-            or _companion_reply_needs_revision(reply)
+            or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
             or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
         ):
