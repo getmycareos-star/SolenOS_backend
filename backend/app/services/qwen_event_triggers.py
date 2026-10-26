@@ -25,6 +25,40 @@ MAX_TRIGGERED_JOBS_PER_HOUR = 10
 MIN_MEANINGFUL_TEXT_LENGTH = 18
 
 
+def _has_meaningful_content(source_type: str, raw_summary: str) -> bool:
+    value = str(raw_summary or "").strip()
+    if len(value) < MIN_MEANINGFUL_TEXT_LENGTH:
+        return False
+    # Structured captures must contain at least one non-empty user-supplied
+    # value; keys and empty arrays alone are not a reason to wake the worker.
+    try:
+        parsed = json.loads(value)
+    except (json.JSONDecodeError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        ignored = {"person_id", "caregiver_id", "created_by_caregiver_id", "id", "created_at", "updated_at"}
+        def meaningful(item):
+            if item is None:
+                return False
+            if isinstance(item, bool):
+                return True
+            if isinstance(item, (int, float)):
+                return item != 0
+            if isinstance(item, str):
+                text = " ".join(item.split()).lower()
+                return bool(text) and text not in {"unknown", "not provided", "n/a", "none", "null", "not available"}
+            if isinstance(item, dict):
+                return any(meaningful(v) for k, v in item.items() if k not in ignored)
+            if isinstance(item, (list, tuple)):
+                return any(meaningful(v) for v in item)
+            return False
+        return any(meaningful(v) for k, v in parsed.items() if k not in ignored)
+    lowered = value.lower()
+    if lowered in {"unknown", "not provided", "n/a", "none", "null", "no observation supplied"}:
+        return False
+    return True
+
+
 def enqueue_qwen_event_analysis(
     db,
     *,
@@ -43,9 +77,10 @@ def enqueue_qwen_event_analysis(
     if not person_id or not caregiver_id or not source_id:
         return False
 
-    clean_summary = " ".join(str(summary or "").split())[:1600]
-    if len(clean_summary) < MIN_MEANINGFUL_TEXT_LENGTH:
+    raw_summary = str(summary or "").strip()
+    if not _has_meaningful_content(source_type, raw_summary):
         return False
+    clean_summary = " ".join(raw_summary.split())[:1600]
     if source_type == "evidence_text" and len(clean_summary) < 40:
         return False
 
