@@ -1,0 +1,167 @@
+"""Authenticated, person-scoped API for deep care-continuity records.
+
+The API deliberately reuses existing evidence, events, changes, situations,
+temporal and uncertainty tables. It does not create duplicate open-loop or
+evidence stores. New records are always scoped from the bearer session, never
+from a caller-supplied person_id.
+"""
+from datetime import datetime, date
+from typing import Any
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import MetaData, Table, select, insert, desc
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.api.care_delta import _scoped_identity
+
+router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
+
+RESOURCES = {
+    "facts": "care_facts",
+    "fact-evidence": "care_fact_evidence",
+    "relationships": "care_record_relationships",
+    "delta-items": "care_delta_items",
+    "integrity-findings": "care_integrity_findings",
+    "integrity-resolutions": "care_integrity_resolutions",
+    "decisions": "care_decisions",
+    "decision-outcomes": "decision_outcomes",
+    "reconciliations": "care_reconciliation_records",
+}
+
+WRITABLE = {
+    "facts": {"subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status",
+              "effective_at", "superseded_by_fact_id", "review_notes"},
+    "fact-evidence": {"fact_id", "evidence_id", "evidence_role", "source_span"},
+    "relationships": {"source_type", "source_id", "relationship_type", "target_type", "target_id", "provenance"},
+    "delta-items": {"delta_run_id", "item_type", "target_type", "target_id", "before_state",
+                    "after_state", "evidence_ids", "reconciliation_status", "review_notes"},
+    "integrity-findings": {"finding_type", "severity", "status", "target_type", "target_id",
+                           "description", "evidence_ids", "detected_by"},
+    "integrity-resolutions": {"finding_id", "resolution_status", "resolution_notes", "evidence_ids"},
+    "decisions": {"title", "decision_text", "decision_status", "decided_at", "context", "evidence_ids"},
+    "decision-outcomes": {"decision_id", "outcome_status", "observed_at", "description",
+                          "evidence_ids", "is_intended_outcome"},
+    "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
+                        "evidence_ids", "decision_notes"},
+}
+
+def _table(db: Session, name: str) -> Table:
+    try:
+        return Table(name, MetaData(), autoload_with=db.get_bind())
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
+
+def _jsonable(value: Any):
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(v) for v in value]
+    return value
+
+def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
+    # Validate cross-table links against the same care recipient to prevent
+    # accidentally attaching another person's source material.
+    checks = {
+        "fact-evidence": [("care_facts", "fact_id"), ("evidence", "evidence_id")],
+        "delta-items": [("care_delta_runs", "delta_run_id")],
+        "integrity-resolutions": [("care_integrity_findings", "finding_id")],
+        "decision-outcomes": [("care_decisions", "decision_id")],
+    }
+    for table_name, field in checks.get(resource, []):
+        value = payload.get(field)
+        if not value:
+            raise HTTPException(status_code=422, detail=f"{field} is required")
+        table = _table(db, table_name)
+        row = db.execute(select(table.c.id).where(table.c.id == value, table.c.person_id == person_id)).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
+
+@router.get("/summary")
+def continuity_summary(request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    result = {"person_id": person_id, "sources": "existing evidence/events/changes/situations are reused",
+              "resources": {}}
+    for resource, table_name in RESOURCES.items():
+        table = _table(db, table_name)
+        result["resources"][resource] = db.execute(
+            select(table.c.id).where(table.c.person_id == person_id)
+        ).fetchall().__len__()
+    # Open questions and information gaps are the existing equivalents of open loops.
+    for key, table_name in (("open_questions", "open_questions"), ("information_gaps", "information_gaps"),
+                            ("changes", "changes"), ("situations", "situations"),
+                            ("events", "care_events"), ("evidence", "evidence"),
+                            ("temporal_contradictions", "temporal_contradictions"),
+                            ("uncertainty_assessments", "uncertainty_assessments"),
+                            ("significance_assessments", "significance_assessments"),
+                            ("delta_runs", "care_delta_runs")):
+        table = _table(db, table_name)
+        result["resources"][key] = db.execute(
+            select(table.c.id).where(table.c.person_id == person_id)
+        ).fetchall().__len__()
+    return result
+
+@router.get("/{resource}")
+def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    if resource not in RESOURCES:
+        raise HTTPException(status_code=404, detail="Unknown care-continuity resource")
+    person_id, _ = _scoped_identity(request, db)
+    table = _table(db, RESOURCES[resource])
+    query = select(table).where(table.c.person_id == person_id)
+    if "created_at" in table.c:
+        query = query.order_by(desc(table.c.created_at))
+    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+@router.post("/{resource}", status_code=201)
+def create_resource(resource: str, payload: dict, request: Request, db: Session = Depends(get_db)):
+    if resource not in WRITABLE:
+        raise HTTPException(status_code=404, detail="Unknown or read-only care-continuity resource")
+    person_id, caregiver_id = _scoped_identity(request, db)
+    allowed = WRITABLE[resource]
+    data = {key: value for key, value in payload.items() if key in allowed}
+    if not data:
+        raise HTTPException(status_code=422, detail="No supported care-continuity fields supplied")
+    required = {
+        "facts": ("subject_type", "fact_type", "fact_value"),
+        "fact-evidence": ("fact_id", "evidence_id"),
+        "relationships": ("source_type", "source_id", "relationship_type", "target_type", "target_id"),
+        "delta-items": ("delta_run_id", "item_type"),
+        "integrity-findings": ("finding_type", "description"),
+        "integrity-resolutions": ("finding_id", "resolution_status"),
+        "decisions": ("title", "decision_text"),
+        "decision-outcomes": ("decision_id", "outcome_status"),
+        "reconciliations": ("target_type", "target_id", "reconciliation_status"),
+    }[resource]
+    missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
+    if missing:
+        raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    _validate_links(db, person_id, resource, data)
+    table = _table(db, RESOURCES[resource])
+    data["person_id"] = person_id
+    if "created_by_caregiver_id" in table.c:
+        data["created_by_caregiver_id"] = caregiver_id
+    if "reviewed_by_caregiver_id" in table.c and resource == "delta-items" and data.get("reconciliation_status") != "pending_review":
+        data["reviewed_by_caregiver_id"] = caregiver_id
+        data["reviewed_at"] = datetime.now().astimezone()
+    if "resolved_by_caregiver_id" in table.c and resource == "integrity-resolutions":
+        data["resolved_by_caregiver_id"] = caregiver_id
+    if "reviewed_by_caregiver_id" in table.c and resource == "reconciliations":
+        data["reviewed_by_caregiver_id"] = caregiver_id
+        data["reviewed_at"] = datetime.now().astimezone()
+    if "evidence_ids" in data and isinstance(data["evidence_ids"], str):
+        raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
+    try:
+        result = db.execute(insert(table).values(**data).returning(table))
+        row = result.mappings().one()
+        db.commit()
+        return _jsonable(dict(row))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail="Care-continuity record could not be saved; check linked IDs and field types") from exc
