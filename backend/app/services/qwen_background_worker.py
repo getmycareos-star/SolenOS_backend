@@ -29,7 +29,7 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review", "care_transition",
+    "audit_review", "care_transition", "incident_follow_through",
 )
 
 
@@ -69,6 +69,7 @@ ROUTE_PHRASES = {
     "ai_reliability": ("qwen availability or retry state", "qwen availability", "qwen reliability", "model availability and retry", "is qwen available", "qwen is not responding", "assistant availability", "why did the ai request fail", "retry an ai request", "check model status", "assistant reliability status"),
     "audit_review": ("audit and review candidates", "audit trail", "audit review", "audit entries", "review the audit trail", "show audit history", "inspect audit records", "review recorded actions", "audit log entries", "review the audit log"),
     "care_transition": ("care transition", "hospital discharge", "discharge from hospital", "discharge summary", "transition from hospital to home", "moving from hospital to home", "rehabilitation to home", "transition of care", "discharge reconciliation", "after discharge", "leaving hospital", "handoff after discharge", "transition documents"),
+    "incident_follow_through": ("incident follow-through", "incident follow through", "follow up after a fall", "follow-up after a fall", "what happened after the fall", "follow up on the wandering episode", "follow-up on the wandering episode", "track the outcome of an incident", "unresolved incident follow-up", "missed visit follow-up", "follow up after an incident", "follow-up after an incident", "incident outcome"),
 }
 
 
