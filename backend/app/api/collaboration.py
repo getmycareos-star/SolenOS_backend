@@ -891,9 +891,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
-        r"\\b(?:not breathing|cannot breathe|can't breathe|unconscious|unresponsive|"
+        r"\b(?:not breathing|cannot breathe|can't breathe|unconscious|unresponsive|"
         r"severe bleeding|chest pain with difficulty breathing|stroke symptoms|"
-        r"overdose|suicidal|trying to kill myself|immediate danger)\\b",
+        r"overdose|suicidal|trying to kill myself|immediate danger)\b",
         re.IGNORECASE,
     )
     emergency = bool(emergency_pattern.search(user_text))
