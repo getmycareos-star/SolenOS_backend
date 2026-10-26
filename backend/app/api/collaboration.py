@@ -887,6 +887,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     emergency = bool(emergency_pattern.search(user_text))
     evidence_ids: list[str] = []
     source_context: list[str] = []
+    event_context: list[str] = []
+    appointment_context: list[str] = []
+    evidence_context: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
     source_appointment_ids: list[str] = []
@@ -913,7 +916,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         for event in recent_events:
             source_event_ids.append(str(event.id))
-            source_context.append(
+            event_context.append(
                 "LCR event evidence: "
                 + json.dumps({
                     "event_id": str(event.id),
@@ -928,6 +931,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "confidence": event.confidence,
                 }, ensure_ascii=False)
             )
+        source_context.extend(event_context)
 
         appointments = (
             db.query(Appointment)
@@ -938,7 +942,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
-            source_context.append(
+            appointment_context.append(
                 "LCR appointment evidence: "
                 + json.dumps({
                     "appointment_id": str(appointment.id),
@@ -947,6 +951,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
                 }, ensure_ascii=False)
             )
+        source_context.extend(appointment_context)
 
         # Include evidence referenced by retrieved events plus recent caregiver
         # uploads. Evidence remains attributed to its source/status and is never
@@ -985,7 +990,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             evidence_rows.extend(row for row in recent_evidence if str(row.id) not in existing_ids)
         for evidence in evidence_rows[:12]:
             source_evidence_ids.append(str(evidence.id))
-            source_context.append(
+            evidence_context.append(
                 "Caregiver-provided evidence: "
                 + json.dumps({
                     "evidence_id": str(evidence.id),
@@ -998,6 +1003,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "confidence": evidence.confidence,
                 }, ensure_ascii=False)
             )
+        source_context.extend(evidence_context)
 
         # Prior conversation is conversational context only; it is not care
         # evidence and must never be promoted to the LCR by this endpoint.
@@ -1011,7 +1017,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         context_payload = {
             "care_recipient_name": person.name,
             "caregiver_relationship": caregiver.relationship,
-            "lcr_events": source_context[:20],
+            "lcr_events": event_context,
+            "appointments": appointment_context,
+            "caregiver_provided_evidence": evidence_context,
             "conversation_is_not_care_evidence": True,
             "missing_information_rule": "If the authorized record does not contain the answer, say it is not recorded or ask a focused question.",
         }
