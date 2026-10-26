@@ -1,13 +1,13 @@
 """Stage consented improvement feedback for review.
 
-Revision ID: 20261026_02_improvement_training_examples
+Revision ID: 20261026_02_improve_examples
 Revises: 20261026_01_qwen_background_jobs
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261026_02_improvement_training_examples"
+revision = "20261026_02_improve_examples"
 down_revision = "20261026_01_qwen_background_jobs"
 branch_labels = None
 depends_on = None
