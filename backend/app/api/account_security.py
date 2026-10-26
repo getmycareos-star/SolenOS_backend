@@ -225,6 +225,17 @@ class PasswordResetConfirm(TokenConfirm):
     new_password: str = Field(min_length=10, max_length=128)
 
 
+class RecoveryKeyConfirm(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+    recovery_code: str = Field(min_length=12, max_length=100)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
+class PasswordChange(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=10, max_length=128)
+
+
 class MfaConfirm(BaseModel):
     code: str = Field(min_length=6, max_length=12)
 
@@ -307,23 +318,53 @@ def request_account_recovery(payload: TokenRequest, request: Request, db: Sessio
 
 
 @router.post("/recovery/confirm")
-def confirm_account_recovery(payload: PasswordResetConfirm, db: Session = Depends(get_db)):
-    # Recovery uses control of the previously verified mailbox as the identity check.
+def confirm_account_recovery(payload: RecoveryKeyConfirm, request: Request, db: Session = Depends(get_db)):
+    """Reset a password using the one-time recovery key issued at signup; no email service required."""
     from app.api.anonymous_sessions import _hash_password
-    account = _consume_token(db, payload.token, "account_recovery")
-    if account is None:
+    email = payload.email.strip().lower()
+    ip = request.client.host if request.client else "unknown"
+    check_security_action_throttle(db, email, ip, "account_recovery")
+    account = db.query(CaregiverAccount).filter(CaregiverAccount.email == email).with_for_update().first()
+    candidate_hash = _token_hash(payload.recovery_code.strip())
+    row = None
+    if account is not None:
+        lock_clause = " FOR UPDATE" if db.bind is not None and db.bind.dialect.name == "postgresql" else ""
+        row = db.execute(text(
+            "SELECT id FROM account_recovery_codes WHERE account_id=:account AND code_hash=:hash AND used_at IS NULL" + lock_clause
+        ), {"account": account.id, "hash": candidate_hash}).mappings().first()
+    if account is None or row is None:
         db.rollback()
-        raise HTTPException(status_code=400, detail="Token is invalid, expired, or already used")
+        raise HTTPException(status_code=400, detail="Email or recovery key is incorrect, or the key has already been used")
+    consumed = db.execute(text(
+        "UPDATE account_recovery_codes SET used_at=:now WHERE id=:id AND used_at IS NULL"
+    ), {"now": _now(), "id": row["id"]})
+    if consumed.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Recovery key has already been used")
     account.password_hash = _hash_password(payload.new_password)
+    account.email_verified_at = _now()
     account.updated_at = _now()
     _revoke_sessions(db, account)
-    # Recovery invalidates MFA and all outstanding security tokens.
     db.execute(text("UPDATE account_mfa_secrets SET confirmed_at=NULL WHERE account_id=:id"), {"id": account.id})
     account.mfa_enabled = False
     db.execute(text("UPDATE account_mfa_recovery_codes SET used_at=:now WHERE account_id=:id AND used_at IS NULL"), {"now": _now(), "id": account.id})
     db.execute(text("UPDATE account_security_tokens SET consumed_at=:now WHERE account_id=:id AND consumed_at IS NULL"), {"now": _now(), "id": account.id})
     db.commit()
-    return {"recovered": True, "sessions_revoked": True, "mfa_reset": True}
+    return {"recovered": True, "sessions_revoked": True, "mfa_reset": True, "recovery_key_consumed": True}
+
+
+@router.post("/password/change")
+def change_password(payload: PasswordChange, request: Request, db: Session = Depends(get_db)):
+    """Allow a signed-in user to change their password without SMTP, then revoke sessions."""
+    from app.api.anonymous_sessions import _hash_password, _verify_password
+    account = _account_from_bearer(request, db)
+    if not _verify_password(payload.current_password, account.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    account.password_hash = _hash_password(payload.new_password)
+    account.updated_at = _now()
+    _revoke_sessions(db, account)
+    db.commit()
+    return {"password_changed": True, "sessions_revoked": True, "sign_in_required": True}
 
 
 @router.get("/mfa/status")
@@ -336,8 +377,6 @@ def mfa_status(request: Request, db: Session = Depends(get_db)):
 def enroll_mfa(request: Request, db: Session = Depends(get_db)):
     from app.api.anonymous_sessions import _verify_password
     account = _account_from_bearer(request, db)
-    if getattr(account, "email_verified_at", None) is None:
-        raise HTTPException(status_code=403, detail="Verify your email before enabling MFA")
     if account.mfa_enabled:
         raise HTTPException(status_code=409, detail="MFA is already enabled; disable it before enrolling a replacement authenticator")
     secret = secrets.token_bytes(20)
