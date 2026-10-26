@@ -136,7 +136,10 @@ def request_account_recovery(payload: RecoveryRequestInput, request: Request, db
     rate_key = _hash("recovery:" + ip)
     now = datetime.now(timezone.utc)
     limit = db.query(LoginAttemptLimit).filter(LoginAttemptLimit.key_hash == rate_key).first()
-    if limit and limit.blocked_until and limit.blocked_until > now:
+    blocked_until = limit.blocked_until if limit else None
+    if blocked_until and blocked_until.tzinfo is None:
+        blocked_until = blocked_until.replace(tzinfo=timezone.utc)
+    if blocked_until and blocked_until > now:
         raise HTTPException(status_code=429, detail="Too many recovery requests. Try again later.")
     if limit is None:
         limit = LoginAttemptLimit(key_hash=rate_key, attempts=0, window_started_at=now, updated_at=now)
