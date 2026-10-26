@@ -220,7 +220,7 @@ jobs:
           python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["authority"] == "solenos_care_record_and_caregiver"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"' "$assist"
 
           # Exercise every supported read-only workflow against the actual model.
-          for workflow in daily_capture document community appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
+          for workflow in daily_capture document appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day living_care_record; do
             echo "QWEN_E2E: workflow=$workflow"
             workflow_response=$(curl --fail --silent --show-error \
               -H "$auth_header" -H "Content-Type: application/json" \
@@ -229,18 +229,27 @@ jobs:
             python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow"
           done
 
-          # Verify a real Qwen summary is grounded in a real, published CI-only community post.
-          echo "QWEN_E2E: Community post and Qwen summary"
-          post=$(curl --fail --silent --show-error \
+          # Community is intentionally disabled: verify rejection, not successful inference.
+          echo "QWEN_E2E: Community workflow must remain disabled"
+          community_status=$(curl --silent --show-error -o /tmp/community-workflow.json -w '%{http_code}' \
             -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"post_type":"experience","content":"A quiet routine helped us prepare for bedtime.","care_stage":"unspecified","tags":["routine"]}' \
-            http://127.0.0.1:8080/api/v1/community)
-          post_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "$post")
-          community_summary=$(curl --fail --silent --show-error \
-            -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"observation":"bedtime routine"}' \
-            http://127.0.0.1:8080/api/v1/community/experience/summary)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert sys.argv[2] in d["post_ids"]; assert isinstance(d["summary"],str) and d["summary"].strip()' "$community_summary" "$post_id"
+            -d '{"workflow":"community","text":"Summarize peer experiences"}' \
+            http://127.0.0.1:8080/api/v1/assistant/assist)
+          test "$community_status" = "404"
+          python -c 'import json; d=json.load(open("/tmp/community-workflow.json")); assert d["detail"] == "Community is currently unavailable", d'
+
+          for endpoint in \
+            "GET /api/v1/community" \
+            "POST /api/v1/community" \
+            "POST /api/v1/community/post-id/reactions" \
+            "POST /api/v1/community/experience/summary"; do
+            method="${endpoint%% *}"
+            route="${endpoint#* }"
+            status=$(curl --silent --show-error -o /tmp/community-endpoint.json -w '%{http_code}' \
+              -X "$method" -H "$auth_header" -H "Content-Type: application/json" \
+              -d '{}' "http://127.0.0.1:8080$route")
+            test "$status" = "404"
+          done
 
           # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
           echo "QWEN_E2E: authorized document evidence"
