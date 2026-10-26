@@ -24,10 +24,12 @@ def redact_improvement_text(text: str) -> str:
     """Remove common direct identifiers before staging; this is not a guarantee of anonymity."""
     value = (text or "").strip()[:12000]
     value = _EMAIL.sub("[redacted email]", value)
-    value = _PHONE.sub("[redacted phone]", value)
     value = _URL.sub("[redacted link]", value)
+    # Redact date formats before phone-like digit sequences so dates do not
+    # get mislabeled as phone numbers.
     value = _ISO_DATE.sub("[redacted date]", value)
     value = _SLASH_DATE.sub("[redacted date]", value)
+    value = _PHONE.sub("[redacted phone]", value)
     return _WHITESPACE.sub(" ", value).strip()
 
 
