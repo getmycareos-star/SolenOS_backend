@@ -15,6 +15,22 @@ def test_background_classifier_accepts_only_enabled_workflows(monkeypatch):
     assert asyncio.run(worker._classify_task("I want to record today's observation", "")) == "daily_capture"
 
 
+def test_background_classifier_requests_structured_enum_output(monkeypatch):
+    captured = {}
+
+    def fake_qwen_chat(*args, **kwargs):
+        captured.update(kwargs)
+        return json.dumps({"workflow": "care_history_search"})
+
+    monkeypatch.setattr(worker, "qwen_chat", fake_qwen_chat)
+    result = asyncio.run(worker._classify_task("Find the last recorded care update", ""))
+    assert result == "care_history_search"
+    schema = captured["response_format"]
+    assert schema["properties"]["workflow"]["enum"] == list(worker.ENABLED_WORKFLOWS)
+    assert schema["required"] == ["workflow"]
+    assert schema["additionalProperties"] is False
+
+
 def test_background_classifier_rejects_community(monkeypatch):
     monkeypatch.setattr(
         worker,
