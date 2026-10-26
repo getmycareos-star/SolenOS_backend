@@ -35,6 +35,7 @@ from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
+from app.models import ai_output_governance  # register AI output governance tables
 from app.services.qwen_background_worker import qwen_worker_loop
 
 settings = get_settings()
