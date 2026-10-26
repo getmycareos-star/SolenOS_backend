@@ -360,7 +360,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         caregiver_id=caregiver_id,
         source_type="daily_capture",
         source_id=event.id,
-        summary=f"{title}. {source_text}",
+        summary=source_text,
         context_text="A daily capture has been persisted. A quick extraction may already exist; this background pass should focus on reconciliation, missing context and open questions. Do not duplicate candidate facts or write to the LCR.",
     )
     db.commit()
