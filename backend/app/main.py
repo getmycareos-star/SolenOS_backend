@@ -28,6 +28,7 @@ from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
+from app.api.identity_security import router as identity_security_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
 from pydantic import BaseModel
 from app.services.situation import process_situation_input
@@ -75,6 +76,7 @@ app.add_middleware(
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
+app.include_router(identity_security_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
 app.include_router(uncertainty_router, prefix="/api/v1")
 app.include_router(change_router, prefix="/api/v1")
@@ -104,6 +106,7 @@ PUBLIC_V1_ENDPOINTS = {
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
     ("/api/v1/accounts/login", "POST"),
+    ("/api/v1/identity/recovery-requests", "POST"),
 }
 
 
@@ -188,7 +191,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # Community is shared between caregivers, but each request still requires a
         # valid session. Bind its authorization check to that session rather than
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
-        if path.startswith("/api/v1/accounts") or path == "/api/v1/sessions/revoke":
+        if path.startswith("/api/v1/accounts") or path.startswith("/api/v1/identity") or path == "/api/v1/sessions/revoke":
             target_person_id = scoped_person_id
         if (
             path.startswith("/api/v1/community")
