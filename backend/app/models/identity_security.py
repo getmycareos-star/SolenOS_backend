@@ -1,6 +1,6 @@
 import hashlib
 import uuid
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, Integer
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, Integer, JSON
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -35,7 +35,7 @@ class DeviceEnrollmentEvent(Base):
     device_id = Column(String(36), ForeignKey("caregiver_devices.id", ondelete="SET NULL"), nullable=True)
     caregiver_id = Column(String(36), ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False, index=True)
     event_type = Column(String(40), nullable=False)
-    details = Column(Text, nullable=True)
+    details = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
