@@ -107,52 +107,32 @@ def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
 
 
 def test_community_post_feed_reaction_persist_and_session_attribution(monkeypatch):
+    # Community is intentionally disabled. A valid session must not expose feed,
+    # post creation, or reaction endpoints; the feature's implementation remains
+    # in source but is not registered on the active API.
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
-        forged = client.post("/api/v1/community", headers=auth, json={
-            "caregiver_id": "caller-controlled-value",
-            "author_type": "solenos_verified",
-            "author_label": "Forged verified identity",
-            "post_type": "experience",
-            "content": "A forged identity must not be accepted.",
-        })
-        assert forged.status_code == 403, forged.text
+        routes = [
+            ("get", "/api/v1/community", None),
+            ("post", "/api/v1/community", {"post_type": "experience", "content": "must not publish"}),
+            ("post", "/api/v1/community/example-post/reactions", {"reaction_type": "support"}),
+            ("get", "/api/v1/community/experience/summary", None),
+        ]
+        for method, path, payload in routes:
+            if payload is None:
+                response = getattr(client, method)(path, headers=auth)
+            else:
+                response = getattr(client, method)(path, headers=auth, json=payload)
+            assert response.status_code == 404, f"{method.upper()} {path}: {response.text}"
 
-        created = client.post("/api/v1/community", headers=auth, json={
-            "post_type": "experience",
-            "content": "A quiet routine helped us prepare for bedtime.",
-            "tags": ["routine", "sleep"],
-        })
-        assert created.status_code == 201, created.text
-        post = created.json()
-        assert post["author_type"] == "peer_caregiver"
-        assert post["author_label"] == "Anonymous caregiver"
-
-        feed = client.get("/api/v1/community", headers=auth)
-        assert feed.status_code == 200
-        assert any(row["id"] == post["id"] for row in feed.json()["posts"])
-
-        reaction = client.post(
-            f"/api/v1/community/{post['id']}/reactions",
-            headers=auth,
-            json={"reaction_type": "support"},
-        )
-        assert reaction.status_code == 200, reaction.text
-        assert reaction.json()["reaction_counts"]["support"] == 1
-
-        other_reaction = client.post(
-            f"/api/v1/community/{post['id']}/reactions",
-            headers={"Authorization": f"Bearer {other_token}"},
-            json={"reaction_type": "like"},
-        )
-        assert other_reaction.status_code == 200, other_reaction.text
         db = TestingSessionLocal()
-        assert db.query(CommunityPost).filter_by(id=post["id"]).count() == 1
-        db.close()
+        try:
+            assert db.query(CommunityPost).count() == 0
+        finally:
+            db.close()
     finally:
         teardown()
-
 
 def test_companion_emergency_response_is_scoped_and_persisted_without_model(monkeypatch):
     client, token, person_id, _, other_token, other_person_id = setup_client(monkeypatch)
