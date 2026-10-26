@@ -7,6 +7,7 @@ import json
 import hashlib
 from app.core.database import get_db
 from app.services.qwen_gateway import extract_review_candidates
+from app.services.qwen_event_triggers import enqueue_qwen_event_analysis
 from app.services.capture_review import persist_capture_analysis
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConsentRecord
@@ -276,12 +277,25 @@ def list_caregivers(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/evidence", response_model=EvidenceSchema)
-def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
+def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, evidence.person_id, evidence.uploaded_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, evidence.person_id, evidence.uploaded_by_caregiver_id
     )
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
+    db.flush()
+    source_text = str(getattr(db_evidence, "source_text", "") or "")
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=db_evidence.person_id,
+        caregiver_id=evidence.uploaded_by_caregiver_id,
+        source_type="evidence_text",
+        source_id=db_evidence.id,
+        summary=source_text,
+        context_text=f"New evidence source type={getattr(db_evidence, 'source_type', None)}; evidence type={db_evidence.type}; status={getattr(db_evidence, 'evidence_status', None)}",
+        evidence_ids=[db_evidence.id],
+    )
     db.commit()
     db.refresh(db_evidence)
     _log_and_learn(
@@ -397,12 +411,24 @@ def create_daily_care_entry(payload: dict, request: Request, db: Session = Depen
 
 
 @router.post("/events", response_model=CareEventSchema)
-def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
+def create_event(event: CareEventCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, event.person_id, event.created_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, event.person_id, event.created_by_caregiver_id
     )
     db_event = CareEventModel(**event.model_dump())
     db.add(db_event)
+    db.flush()
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=db_event.person_id,
+        caregiver_id=event.created_by_caregiver_id,
+        source_type="care_event",
+        source_id=db_event.id,
+        summary=f"{db_event.event_type}: {db_event.title}. {db_event.description or ''}",
+        context_text=f"Persisted event type={db_event.event_type}; status={db_event.status}; occurred_at={db_event.occurred_at}; provenance={getattr(db_event, 'time_provenance', None)}",
+        evidence_ids=list(getattr(event, "evidence_ids", []) or []),
+    )
     db.commit()
     db.refresh(db_event)
     _log_and_learn(
@@ -478,10 +504,21 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/corrections", response_model=CorrectionSchema)
-def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db)):
+def create_correction(correction: CorrectionCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, correction.person_id, correction.caregiver_id)
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
+    db.flush()
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=db_correction.person_id,
+        caregiver_id=correction.caregiver_id,
+        source_type="correction",
+        source_id=db_correction.id,
+        summary=f"Caregiver correction for {correction.target_type}: original={correction.original_text}; corrected={correction.corrected_text}",
+        context_text="A caregiver explicitly corrected prior information. Compare only these supplied versions; do not assume the correction has been independently verified.",
+    )
     db.commit()
     db.refresh(db_correction)
 
@@ -511,9 +548,21 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/observations", response_model=ObservationSchema)
-def create_observation(observation: ObservationCreate, db: Session = Depends(get_db)):
+def create_observation(observation: ObservationCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, observation.person_id, observation.caregiver_id)
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
+    db.flush()
+    obs_summary = json.dumps(observation.model_dump(mode="json"), ensure_ascii=False, default=str)
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=db_obs.person_id,
+        caregiver_id=observation.caregiver_id,
+        source_type="observation",
+        source_id=db_obs.id,
+        summary=obs_summary,
+        context_text="New persisted observation. Preserve measurement units and timestamps exactly; do not infer cause or diagnosis.",
+    )
     db.commit()
     db.refresh(db_obs)
     _log_and_learn(
@@ -708,12 +757,24 @@ def list_care_windows(person_id: str, status: Optional[str] = None, db: Session 
 
 
 @router.post("/appointments", response_model=AppointmentSchema)
-def create_appointment(appointment: AppointmentCreate, db: Session = Depends(get_db)):
+def create_appointment(appointment: AppointmentCreate, request: Request, db: Session = Depends(get_db)):
+    _require_session_scope(request, db, appointment.person_id, appointment.created_by_caregiver_id)
     _require_person_and_linked_caregiver(
         db, appointment.person_id, appointment.created_by_caregiver_id
     )
     db_appt = AppointmentModel(**appointment.model_dump())
     db.add(db_appt)
+    db.flush()
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=db_appt.person_id,
+        caregiver_id=appointment.created_by_caregiver_id,
+        source_type="appointment",
+        source_id=db_appt.id,
+        summary=f"Appointment title={appointment.title}; scheduled_at={db_appt.scheduled_at}; status={db_appt.status}",
+        context_text="Prepare grounded appointment context and questions from existing authorized care information only. Do not claim the appointment is confirmed unless its saved status says so.",
+        appointment_id=db_appt.id,
+    )
     db.commit()
     db.refresh(db_appt)
     _log_and_learn(
