@@ -516,7 +516,7 @@ def _is_casual_conversation_only(text: str) -> bool:
     }:
         return True
     return bool(re.search(
-        r"\b(?:you(?:'re| are) (?:stupid|useless|idiotic|wrong)|you suck|"
+        r"\b(?:you(?:'re| are) (?:stupid|dumb|fool|useless|idiotic|incompetent|pathetic|wrong)|you suck|"
         r"you don'?t understand|you never get anything right|fuck you|f\*ck you)\b",
         normalized,
     ))
