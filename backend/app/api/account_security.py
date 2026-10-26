@@ -236,6 +236,10 @@ class PasswordChange(BaseModel):
     new_password: str = Field(min_length=10, max_length=128)
 
 
+class DevicePasswordReset(BaseModel):
+    new_password: str = Field(min_length=10, max_length=128)
+
+
 class MfaConfirm(BaseModel):
     code: str = Field(min_length=6, max_length=12)
 
@@ -365,6 +369,19 @@ def change_password(payload: PasswordChange, request: Request, db: Session = Dep
     _revoke_sessions(db, account)
     db.commit()
     return {"password_changed": True, "sessions_revoked": True, "sign_in_required": True}
+
+
+@router.post("/password/reset-on-device")
+def reset_password_on_authenticated_device(payload: DevicePasswordReset, request: Request, db: Session = Depends(get_db)):
+    """Use an already-authenticated device session as recovery proof when the password is forgotten."""
+    from app.api.anonymous_sessions import _hash_password
+    account = _account_from_bearer(request, db)
+    account.password_hash = _hash_password(payload.new_password)
+    account.updated_at = _now()
+    _revoke_sessions(db, account)
+    db.commit()
+    return {"password_changed": True, "device_session_used_as_recovery_proof": True,
+            "sessions_revoked": True, "sign_in_required": True}
 
 
 @router.get("/mfa/status")
