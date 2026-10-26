@@ -120,7 +120,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261025_04_caregiver_consents":
+              if revision != "20261026_01_qwen_background_jobs":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -200,10 +200,34 @@ jobs:
           caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$session")
           auth_header="Authorization: Bearer $token"
 
-          echo "QWEN_E2E: runtime status"
-          status=$(curl --fail --silent --show-error -H "$auth_header" \
-            http://127.0.0.1:8080/api/v1/assistant/status)
-          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["available"] is True; assert d["provider"] == "local_ollama"; assert d["inference_api"] == "ollama_native_http"; assert d["hosted_inference_api"] is False; assert d["model"] == "qwen2.5:0.5b"' "$status"
+          echo "QWEN_E2E: wait for bundled model to finish downloading and become available"
+          model_ready=0
+          for attempt in $(seq 1 90); do
+            status_code=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 -H "$auth_header" \
+              http://127.0.0.1:8080/api/v1/assistant/status || true)
+            if [ "$status_code" = "200" ] && python - <<'PY'
+          import json
+          try:
+              d = json.load(open("/tmp/qwen-status.json"))
+              assert d.get("available") is True
+              assert d.get("provider") == "local_ollama"
+              assert d.get("inference_api") == "ollama_native_http"
+              assert d.get("hosted_inference_api") is False
+              assert d.get("model") == "qwen2.5:0.5b"
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              model_ready=1
+              break
+            fi
+            sleep 10
+          done
+          if [ "$model_ready" -ne 1 ]; then
+            cat /tmp/qwen-status.json >&2 || true
+            echo "Bundled Qwen model did not become available within 15 minutes." >&2
+            exit 1
+          fi
 
           echo "QWEN_E2E: Companion greeting"
           greeting=$(curl --fail --silent --show-error \
