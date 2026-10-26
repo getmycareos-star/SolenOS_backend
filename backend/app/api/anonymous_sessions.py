@@ -86,8 +86,8 @@ def _issue_account_session(db: Session, account: CaregiverAccount) -> dict:
 @router.post("/register", status_code=201)
 def register_account(payload: AccountRegister, request: Request, db: Session = Depends(get_db)):
     """Create an email/password caregiver account and a durable initial care record."""
-    from app.api.account_security import ensure_mail_configured
-    ensure_mail_configured()
+    # Email/password signup does not depend on SMTP. A one-time recovery key
+    # is returned once; only its hash is persisted server-side.
     email = _normalise_email(payload.email)
     caregiver_name = payload.caregiver_name.strip()
     recipient_name = payload.care_recipient_name.strip()
@@ -139,11 +139,25 @@ def register_account(payload: AccountRegister, request: Request, db: Session = D
         account = CaregiverAccount(email=email, password_hash=_hash_password(payload.password), person_id=person.id, caregiver_id=caregiver.id)
         db.add(account)
         db.flush()
-        from app.api.account_security import _issue_token, _send_email, _now
-        verification_token = _issue_token(db, account, "verify_email", request)
+        from app.api.account_security import _now
+        recovery_code = "SOLENOS-" + secrets.token_urlsafe(18)
+        account.email_verified_at = _now()
+        db.flush()
+        db.execute(
+            "INSERT INTO account_recovery_codes (id, account_id, code_hash, created_at) "
+            "VALUES (:id, :account, :hash, :now)",
+            {"id": secrets.token_hex(16), "account": account.id,
+             "hash": hashlib.sha256(recovery_code.encode("utf-8")).hexdigest(),
+             "now": _now()},
+        )
         db.commit()
-        _send_email(email, "Verify your SolenOS account", f"Verify your email within 24 hours using this link:\\n{__import__('os').environ['APP_PUBLIC_URL'].rstrip('/')}/verify-email?token={verification_token}\\n\\nIf you did not request this, ignore this message.")
-        return {"registered": True, "email_verification_required": True, "message": "Check your email to verify your account before signing in.", "account": {"id": account.id, "email": account.email}, "person": {"id": person.id, "name": person.name, "date_of_birth": person.date_of_birth.isoformat() if person.date_of_birth else None}, "caregiver": {"id": caregiver.id, "name": caregiver.name, "relationship": caregiver.relationship}, "claimed_existing_record": claimed_session is not None}
+        return {"registered": True, "email_verification_required": False,
+                "recovery_code": recovery_code,
+                "message": "Account created. Save your recovery key somewhere safe; it is shown only once.",
+                "account": {"id": account.id, "email": account.email},
+                "person": {"id": person.id, "name": person.name, "date_of_birth": person.date_of_birth.isoformat() if person.date_of_birth else None},
+                "caregiver": {"id": caregiver.id, "name": caregiver.name, "relationship": caregiver.relationship},
+                "claimed_existing_record": claimed_session is not None}
     except HTTPException:
         db.rollback()
         raise
@@ -164,10 +178,6 @@ def login_account(payload: AccountLogin, request: Request, db: Session = Depends
         record_login_attempt(db, email, ip, False)
         db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect")
-    if account.email_verified_at is None:
-        record_login_attempt(db, email, ip, False)
-        db.commit()
-        raise HTTPException(status_code=403, detail="Verify your email before signing in")
     if not verify_mfa_login(db, account, payload.mfa_code):
         record_login_attempt(db, email, ip, False)
         db.commit()
