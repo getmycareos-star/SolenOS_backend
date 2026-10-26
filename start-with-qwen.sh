@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Keep the bundled same-container Ollama runtime and gateway configuration aligned.
+# Railway can override these explicitly, but the bundled sidecar must work by default.
+export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
+export OLLAMA_SIDECAR_ENABLED="${OLLAMA_SIDECAR_ENABLED:-true}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
+
 # Run the bundled Ollama service and FastAPI in the same Railway container.
 ollama serve >/tmp/ollama-runtime.log 2>&1 &
 OLLAMA_PID=$!
