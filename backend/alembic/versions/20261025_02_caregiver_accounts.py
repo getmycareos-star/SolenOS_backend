@@ -29,6 +29,22 @@ def upgrade():
             sa.UniqueConstraint("person_id", name="uq_caregiver_accounts_person"),
             sa.UniqueConstraint("caregiver_id", name="uq_caregiver_accounts_caregiver"),
         )
+    # The current mainline account migration may already have created
+    # caregiver_accounts using email_normalized. Reconcile that schema rather
+    # than silently assuming this branch's original table definition.
+    inspector = inspect(bind)
+    columns = {item["name"] for item in inspector.get_columns("caregiver_accounts")}
+    if "email" not in columns:
+        op.add_column("caregiver_accounts", sa.Column("email", sa.String(length=254), nullable=True))
+        if "email_normalized" in columns:
+            bind.execute(sa.text(
+                "UPDATE caregiver_accounts SET email = email_normalized WHERE email IS NULL"
+            ))
+        if bind.dialect.name == "postgresql":
+            op.alter_column("caregiver_accounts", "email", existing_type=sa.String(length=254), nullable=False)
+    if "updated_at" not in columns:
+        op.add_column("caregiver_accounts", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
+
     indexes = {item["name"] for item in inspect(bind).get_indexes("caregiver_accounts")}
     if "ix_caregiver_accounts_email" not in indexes:
         op.create_index("ix_caregiver_accounts_email", "caregiver_accounts", ["email"], unique=True)
