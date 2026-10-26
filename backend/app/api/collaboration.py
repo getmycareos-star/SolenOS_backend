@@ -1102,42 +1102,48 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
-            # Ask the model to revise its own overlong greeting. This is another
-            # inference pass, not a stored answer or hardcoded fallback.
-            retry_messages = [
-                *model_messages,
-                {"role": "assistant", "content": str(reply or "")},
-                {
-                    "role": "user",
-                    "content": (
-                        "Revise your previous response for the current greeting. "
-                        "Return only a natural reply of at most 8 words. Do not ask a question, "
-                        "mention caregiving, introduce a topic, or describe your capabilities. "
-                        "Use fresh wording appropriate to the current message."
-                    ),
-                },
-            ]
-            try:
-                reply = await asyncio.to_thread(
-                    _ollama_chat,
-                    base,
-                    model,
-                    retry_messages,
-                    {"temperature": 0.25, "num_predict": 24},
+            # Let Qwen revise its own output more than once when a small model
+            # misses the brevity constraint. Every candidate remains model-
+            # generated; if none passes validation, fail closed rather than
+            # substituting a canned greeting.
+            for revision_attempt in range(3):
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Revise your previous response for the current greeting. "
+                            "Return only one natural sentence of at most 8 words. "
+                            "Do not ask a question, mention caregiving, introduce a topic, "
+                            "or describe your capabilities. Respond directly to the user's "
+                            "actual greeting. Do not explain these instructions."
+                        ),
+                    },
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": 16},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _greeting_reply_needs_revision(reply)
                 )
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
-                ) from exc
-            invalid_reply = (
-                not isinstance(reply, str)
-                or not reply.strip()
-                or _companion_message_needs_revision(reply)
-                or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
-                or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
-                or _greeting_reply_needs_revision(reply)
-            )
+                if not invalid_reply:
+                    break
         if invalid_reply:
             raise HTTPException(
                 status_code=503,
