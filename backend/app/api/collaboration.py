@@ -442,7 +442,8 @@ def _greeting_reply_needs_revision(reply: str) -> bool:
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
-    return not words or len(words) > 12 or repeats_automatic_question
+    asks_a_question = "?" in (reply or "")
+    return not words or len(words) > 12 or repeats_automatic_question or asks_a_question
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
