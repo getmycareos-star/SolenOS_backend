@@ -33,7 +33,73 @@ ENABLED_WORKFLOWS = (
 )
 
 
+# High-confidence local routing rules take precedence over the small model's
+# classification. This avoids sending an obvious medication/appointment/security
+# request to the wrong contract. Ambiguous requests still use constrained Qwen
+# classification and fail closed if the returned workflow is invalid.
+ROUTE_PHRASES = {
+    "daily_capture": ("today's caregiver-reported observation", "daily capture", "record today's observation"),
+    "add_record": ("care record correction", "add a record", "add record", "draft a care record correction", "proposed care-record entry"),
+    "document": ("document text", "uploaded document", "document or extracted text", "explain the document"),
+    "living_care_record": ("living care record", "current lcr"),
+    "care_history_search": ("search care history", "care history", "earlier fall", "previous fall", "historical information"),
+    "care_situation_change": ("compare current and prior care situation", "compare current and prior observation", "care situation change"),
+    "delta_engine": ("delta engine", "reconcile changes", "possible changes or contradictions against existing care evidence", "review candidates against evidence"),
+    "evidence_provenance": ("evidence provenance", "source and provenance", "provenance of the claim", "identify the source of the claim"),
+    "uncertainty_contradictions": ("uncertainty or contradictions", "uncertainty and contradictions", "conflicting information", "ambiguous information"),
+    "returning_caregiver": ("returning caregiver", "returning-caregiver", "orient me as a returning"),
+    "after_appointment": ("after-appointment", "after appointment", "post-appointment", "after-appointment notes", "clinician notes"),
+    "appointment": ("prepare appointment questions", "appointment questions", "available appointment details", "appointment details and unanswered questions"),
+    "handoff": ("care handoff", "draft a handoff", "care handoff"),
+    "professional_summary": ("professional-facing care summary", "professional summary", "summary for a clinician"),
+    "open_loops": ("open loops", "open follow-ups", "unresolved questions and follow-ups", "pending follow-ups"),
+    "two_week_review": ("two-week review", "two week review", "past fourteen days", "last fourteen days", "last 14 days"),
+    "decision_outcome": ("decision and outcome", "decision from its outcome", "care decision and its outcome", "decision/outcome"),
+    "medication_day": ("medication-day observations", "medication day", "medication observations"),
+    "reminders_notifications": ("reminders and notifications", "review my reminders", "reminder status", "notification status"),
+    "care_coordination": ("care responsibilities and coordination", "care coordination", "coordinate care responsibilities", "coordination and delegation"),
+    "companion": ("i feel overwhelmed", "help me work out the next practical step", "i need someone to talk to"),
+    "caregiver_feedback": ("phrase a correction to a care record", "caregiver feedback", "feedback or a correction", "help me phrase feedback"),
+    "sharing_export": ("shareable care summary", "sharing and export", "prepare a shareable", "export a care summary"),
+    "roles_access": ("who has access to this care record", "roles and access", "role or permission state", "permissions for this care record"),
+    "account_recovery": ("account recovery", "recover my account", "safe account recovery steps", "reset my password"),
+    "settings_security": ("privacy and security settings", "security settings", "settings security", "privacy settings"),
+    "record_lifecycle": ("archiving or restoring a care record", "archive or restore", "pin, archive, restore", "record lifecycle"),
+    "offline_sync": ("offline changes have synced", "offline and sync", "offline sync", "synchronization status"),
+    "ai_reliability": ("qwen availability or retry state", "qwen availability", "qwen reliability", "model availability and retry"),
+    "audit_review": ("audit and review candidates", "audit trail", "audit review", "audit entries"),
+}
+
+
+def _route_from_text(task_text: str, context_text: str = "") -> str | None:
+    combined = f"{task_text}\\n{context_text}".casefold().replace("–", "-").replace("—", "-")
+    matches: list[tuple[int, str]] = []
+    for workflow, phrases in ROUTE_PHRASES.items():
+        for phrase in phrases:
+            if phrase in combined:
+                matches.append((len(phrase), workflow))
+    if not matches:
+        return None
+    longest = max(length for length, _ in matches)
+    winners = {workflow for length, workflow in matches if length == longest}
+    return next(iter(winners)) if len(winners) == 1 else None
+
+
+def _requests_disabled_community(task_text: str) -> bool:
+    lowered = task_text.casefold()
+    return any(phrase in lowered for phrase in (
+        "community", "peer stories", "caregiver stories",
+        "other caregivers' experiences", "other caregivers’ experiences",
+    ))
+
+
 async def _classify_task(task_text: str, context_text: str) -> str:
+    if _requests_disabled_community(task_text):
+        raise ValueError("community_disabled")
+    routed = _route_from_text(task_text, context_text)
+    if routed is not None:
+        return routed
+
     choices = ", ".join(ENABLED_WORKFLOWS)
     prompt = (
         "Classify the caregiver's request into exactly one enabled SolenOS workflow ID. "
@@ -137,7 +203,9 @@ async def process_one_qwen_job() -> bool:
                     current.error_code = exc.detail[:48] if isinstance(exc, HTTPException) else (
                         str(exc)[:48] if isinstance(exc, ValueError) else "qwen_processing_failed"
                     )
-                    if current.attempt_count < 3:
+                    if isinstance(exc, ValueError) and str(exc) == "community_disabled":
+                        current.status = "failed"
+                    elif current.attempt_count < 3:
                         current.status = "queued"
                         current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
                     else:
