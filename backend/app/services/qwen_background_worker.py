@@ -57,7 +57,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("reminders_notifications", r"\\breminder\\b|\\bnotification delivery\\b|reminder.*delivered"),
         ("care_coordination", r"care coordination|caregiver.*available|roles or assignments|responsibilities.*care"),
         ("companion", r"feel overwhelmed|respond supportively|need emotional support|talk to someone"),
-        ("caregiver_feedback", r"wrong date|earlier entry|correct an existing care entry|caregiver feedback"),
+        ("caregiver_feedback", r"wrong date|earlier entry|caregiver feedback|report that an entry is wrong"),
         ("sharing_export", r"shareable summary|\\bexport\\b|do not say it has been sent"),
         ("roles_access", r"professional access|role or permission|who can access|access permissions"),
         ("account_recovery", r"cannot sign in|can.t sign in|account recovery|recover my account|reset my password"),
