@@ -169,7 +169,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
         assert response.json()["ai_generated"] is True
         assert len(calls) == 2
         assert "Revise your previous response" in calls[1][0][-1]["content"]
-        assert calls[1][1]["num_predict"] == 24
+        assert calls[1][1]["num_predict"] == 16
     finally:
         teardown()
 
