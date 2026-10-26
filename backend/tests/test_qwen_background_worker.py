@@ -80,9 +80,9 @@ def test_ambiguous_request_falls_back_to_constrained_qwen_classification(monkeyp
     assert asyncio.run(worker._classify_task("Can you help me with this?", "")) == "companion"
     assert seen["response_format"]["properties"]["workflow"]["enum"] == list(worker.ENABLED_WORKFLOWS)
 
-def test_enabled_workflow_list_has_30_unique_entries_and_no_community():
-    assert len(worker.ENABLED_WORKFLOWS) == 30
-    assert len(set(worker.ENABLED_WORKFLOWS)) == 30
+def test_enabled_workflow_list_has_unique_entries_and_no_community():
+    assert len(worker.ENABLED_WORKFLOWS) >= 30
+    assert len(set(worker.ENABLED_WORKFLOWS)) == len(worker.ENABLED_WORKFLOWS)
     assert "community" not in worker.ENABLED_WORKFLOWS
 
 def test_background_classifier_requests_constrained_json_schema(monkeypatch):

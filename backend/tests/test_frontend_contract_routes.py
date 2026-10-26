@@ -153,6 +153,8 @@ def test_companion_emergency_response_is_scoped_and_persisted_without_model(monk
         assert data["guard_verdict"] == "blocked"
         assert "urgent medical help" in data["reply"].lower()
         assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "conversation_only"
         assert len(data["messages"]) == 2
 
         history = client.get(f"/api/v1/conversation/{data['session_id']}", headers=auth)
