@@ -7,6 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -143,13 +144,12 @@ def register_account(payload: AccountRegister, request: Request, db: Session = D
         recovery_code = "SOLENOS-" + secrets.token_urlsafe(18)
         account.email_verified_at = _now()
         db.flush()
-        db.execute(
+        db.execute(text(
             "INSERT INTO account_recovery_codes (id, account_id, code_hash, created_at) "
-            "VALUES (:id, :account, :hash, :now)",
-            {"id": secrets.token_hex(16), "account": account.id,
-             "hash": hashlib.sha256(recovery_code.encode("utf-8")).hexdigest(),
-             "now": _now()},
-        )
+            "VALUES (:id, :account, :hash, :now)"
+        ), {"id": secrets.token_hex(16), "account": account.id,
+            "hash": hashlib.sha256(recovery_code.encode("utf-8")).hexdigest(),
+            "now": _now()})
         db.commit()
         return {"registered": True, "email_verification_required": False,
                 "recovery_code": recovery_code,
