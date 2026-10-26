@@ -481,6 +481,30 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     return False
 
 
+def _contains_unsupported_completeness_claim(reply: str, source_text: str) -> bool:
+    """Reject claims that all information is present when the source does not say so.
+
+    This matters especially when the caregiver supplies no records or notes: a
+    successful HTTP response must not be mistaken for a complete care review.
+    """
+    text = " ".join((reply or "").casefold().split())
+    source = " ".join((source_text or "").casefold().split())
+    patterns = (
+        r"\bno information is missing\b",
+        r"\bnothing (?:else )?is missing\b",
+        r"\ball (?:the )?(?:necessary )?(?:information|details) (?:is|are) (?:present|available|complete)\b",
+        r"\beverything (?:is|looks) complete\b",
+        r"\bno further information is needed\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            # An exact source phrase can be restated; otherwise this is an
+            # unsupported completeness claim, not a safe inference.
+            if match.group(0) not in source:
+                return True
+    return False
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
@@ -721,6 +745,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         _companion_reply_needs_revision(reply)
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
+        or _contains_unsupported_completeness_claim(reply, source_context)
     ):
         # Ask the same local model to repair style and source fidelity. A second
         # unsupported high-impact claim is rejected instead of shown to a caregiver.
@@ -759,6 +784,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         _companion_reply_needs_revision(reply)
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
+        or _contains_unsupported_completeness_claim(reply, source_context)
     ):
         raise HTTPException(
             status_code=503,
