@@ -29,7 +29,7 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review",
+    "audit_review", "care_transition",
 )
 
 
@@ -68,6 +68,7 @@ ROUTE_PHRASES = {
     "offline_sync": ("offline changes have synced", "offline and sync", "offline sync", "synchronization status"),
     "ai_reliability": ("qwen availability or retry state", "qwen availability", "qwen reliability", "model availability and retry", "is qwen available", "qwen is not responding", "assistant availability", "why did the ai request fail", "retry an ai request", "check model status", "assistant reliability status"),
     "audit_review": ("audit and review candidates", "audit trail", "audit review", "audit entries", "review the audit trail", "show audit history", "inspect audit records", "review recorded actions", "audit log entries", "review the audit log"),
+    "care_transition": ("care transition", "hospital discharge", "discharge from hospital", "discharge summary", "transition from hospital to home", "moving from hospital to home", "rehabilitation to home", "transition of care", "discharge reconciliation", "after discharge", "leaving hospital", "handoff after discharge", "transition documents"),
 }
 
 
