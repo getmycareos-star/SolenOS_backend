@@ -41,21 +41,13 @@ def upgrade():
     if missing_safety:
         Base.metadata.create_all(bind=bind, tables=missing_safety, checkfirst=True)
 
-    # Structured dimensions are policy/assessment metadata, not care facts.
-    if not inspect(bind).has_table("assessment_dimensions"):
-        op.create_table(
-            "assessment_dimensions",
-            sa.Column("id", sa.String(36), primary_key=True, nullable=False),
-            sa.Column("dimension_key", sa.String(80), nullable=False, unique=True),
-            sa.Column("display_name", sa.String(160), nullable=False),
-            sa.Column("description", sa.Text(), nullable=True),
-            sa.Column("applies_to", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
-            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-            sa.Column("version", sa.String(40), nullable=False, server_default="1"),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+    # Structured assessment dimensions use their canonical ORM definition.
+    if "assessment_dimensions" in Base.metadata.tables and not inspect(bind).has_table("assessment_dimensions"):
+        Base.metadata.create_all(
+            bind=bind,
+            tables=[Base.metadata.tables["assessment_dimensions"]],
+            checkfirst=True,
         )
-        op.create_index("ix_assessment_dimensions_active", "assessment_dimensions", ["is_active"])
 
     # Generated output, job history, and safety review remain separate from LCR.
     qwen_tables = [
