@@ -26,6 +26,16 @@ For the Railway setup, follow [railway-qwen-deployment.md](railway-qwen-deployme
 
 The backend treats loopback and public model URLs as not configured in every environment; only a Railway private service URL is accepted. This prevents an incorrect localhost value from being treated as a valid remote model connection. This repository does not itself create Railway services, configure Railway variables, attach volumes, or deploy services.
 
+## How the three parts of SolenOS fit together
+
+The product has three complementary parts with distinct responsibilities:
+
+- **Living Care Record (LCR) — the continuity foundation.** The LCR is the organized, longitudinal history of recorded care information. Backend record APIs and persistence remain authoritative for saved events, evidence, appointments, and related care facts. The backend must enforce record-scoped authorization and preserve source and review status.
+- **Daily Care — capture and correction.** Daily capture and add-record flows accept caregiver-reported observations and proposed corrections. Extracted or proposed information must retain its source and review state; an unsaved draft is not a saved record, and a candidate is not automatically an authoritative fact.
+- **AI Companion — support and preparation.** Companion helps respond to a caregiver's request and can use relevant, authorized care context. Its generated conversation and suggestions remain separate from authoritative LCR data unless a supported, explicit caregiver-reviewed record flow saves information.
+
+The user-facing mental model is: **Capture it in Daily Care. Understand it in the Living Care Record. Work through it with AI Companion.** These are not three competing sources of truth. The LCR is the record; Daily Care is a capture/update path; Companion is a support layer.
+
 ## Runtime behavior and safety
 
 - Emergency-like language bypasses model inference and uses the existing emergency safety response.
