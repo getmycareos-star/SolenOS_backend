@@ -412,7 +412,7 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         "person_id": created["person"]["id"],
         "caregiver_id": created["caregiver"]["id"],
         "category": "help_improve",
-        "detail": "Deliberately submitted feedback for the opt-in route.",
+        "detail": "Deliberately submitted feedback for the opt-in route. Contact caregiver@example.com on 2026-05-31."
     }
 
     no_session = client.post("/api/v1/feedback", params=query)
@@ -442,3 +442,46 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
     assert recorded.json()["source_type"] == "feedback"
+
+    from app.models.improvement_training_example import ImprovementTrainingExample
+    db = TestSessionLocal()
+    try:
+        staged = db.query(ImprovementTrainingExample).filter_by(
+            person_id=created["person"]["id"], caregiver_id=created["caregiver"]["id"]
+        ).all()
+        assert len(staged) == 1
+        assert staged[0].status == "pending_review"
+        assert "caregiver@example.com" not in staged[0].sample_text
+        assert "2026-05-31" not in staged[0].sample_text
+        assert "[redacted email]" in staged[0].sample_text
+        assert "[redacted date]" in staged[0].sample_text
+    finally:
+        db.close()
+
+    # Opting out purges staged improvement data while retaining personal memory.
+    disabled = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": False,
+        },
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["profile"]["data_improvement_consent"] is False
+    blocked = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert blocked.status_code == 403, blocked.text
+
+    from app.models.memory import ReasoningMemory
+    db = TestSessionLocal()
+    try:
+        assert db.query(ImprovementTrainingExample).filter_by(
+            person_id=created["person"]["id"], caregiver_id=created["caregiver"]["id"]
+        ).count() == 0
+        assert db.query(ReasoningMemory).filter_by(
+            person_id=created["person"]["id"], memory_type="feedback"
+        ).count() == 1
+    finally:
+        db.close()

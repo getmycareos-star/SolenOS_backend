@@ -126,6 +126,7 @@ def database_schema_differences(bind=None):
 # must run reviewed Alembic migrations before ASGI startup; create_all() cannot
 # alter existing PostgreSQL tables and must not silently mutate production schema.
 import app.models.qwen_background_job  # register Qwen jobs before local create_all
+import app.models.improvement_training_example  # register consent-gated improvement examples
 
 
 if not RAILWAY_RUNTIME:

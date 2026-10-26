@@ -25,6 +25,7 @@ from app.services.qwen_gateway import extract_review_candidates, get_ollama_conf
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.improvement_training_example import ImprovementTrainingExample
 
 router = APIRouter(tags=["community and companion"])
 
@@ -1392,6 +1393,10 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
             db.add(record)
         record.revoked_at = now
         record.data_improvement_consent = False
+        # No staged improvement examples may remain after consent is revoked.
+        db.query(ImprovementTrainingExample).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id
+        ).delete(synchronize_session=False)
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
@@ -1402,6 +1407,11 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
             raise HTTPException(status_code=422, detail="data_improvement_consent is required")
         record.data_improvement_consent = payload.data_improvement_consent
         record.updated_at = now
+        if payload.data_improvement_consent is False:
+            # Remove queued/review-stage contributions; personal care memory is untouched.
+            db.query(ImprovementTrainingExample).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id
+            ).delete(synchronize_session=False)
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}

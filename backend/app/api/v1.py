@@ -89,6 +89,7 @@ from app.schemas.temporal import (
     SubjectTemporalView,
 )
 from app.services.learning import LearningEngine, SavePipelineEvent
+from app.services.improvement_learning import stage_consented_feedback
 from app.services.time_intelligence import (
     parse_natural_language_time,
     calculate_care_windows,
@@ -618,6 +619,16 @@ def record_feedback(
     engine = LearningEngine(db)
     engine.record_feedback(session.person_id, category, detail, session.caregiver_id)
     engine.after_save(session.person_id)
+    # Only explicitly submitted feedback is staged for product-improvement review.
+    # Personal learning memory above remains user-scoped regardless of this opt-in.
+    stage_consented_feedback(
+        db,
+        person_id=session.person_id,
+        caregiver_id=session.caregiver_id,
+        category=category,
+        detail=detail,
+        consent=consent,
+    )
     event = LearningEventModel(
         person_id=session.person_id,
         event_type="feedback",
