@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 
 from app.core.database import SessionLocal
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.services.qwen_gateway import qwen_chat
 
 logger = logging.getLogger(__name__)
@@ -195,7 +195,7 @@ async def process_one_qwen_job() -> bool:
         result = await qwen_support_assist(payload, fake_request, db)
         output = QwenModelOutput(
             job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id,
-            workflow=result["workflow"], model_name="qwen", output_text=result["reply"],
+            workflow=result["workflow"], model_name=None, output_text=result["reply"],
             output_metadata={"persistence": "read_only_assistance", "written_to_lcr": False},
             source_event_ids_json=json.dumps(result.get("source_event_ids", [])),
             source_evidence_ids_json=json.dumps(result.get("source_evidence_ids", [])),
@@ -203,6 +203,12 @@ async def process_one_qwen_job() -> bool:
         )
         db.add(output)
         db.flush()
+        db.add(QwenSafetyEvaluation(
+            output_id=output.id, job_id=job.id, person_id=job.person_id,
+            caregiver_id=job.caregiver_id, risk_class="unassessed",
+            decision="review_required", human_review_required=True,
+            violations_json=[], policy_references_json=[],
+        ))
         job.result_text = None
         job.workflow = result["workflow"]
         job.source_event_ids_json = json.dumps(result.get("source_event_ids", []))
