@@ -253,6 +253,35 @@ jobs:
             python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow"
           done
 
+          # Exercise durable background enqueue, automatic workflow classification, polling, and read-only behavior.
+          echo "QWEN_E2E: durable background job"
+          events_before=$(curl --fail --silent --show-error -H "$auth_header" "http://127.0.0.1:8080/api/v1/events/$person_id")
+          queued=$(curl --fail --silent --show-error -H "$auth_header" -H "Content-Type: application/json" \
+            -d '{"task_text":"Help me prepare for the next doctor appointment and organize questions that are still unanswered.","context_text":"The appointment date has not been supplied."}' \
+            http://127.0.0.1:8080/api/v1/assistant/jobs)
+          job_id=$(python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "queued"; print(d["job_id"])' "$queued")
+          completed=0
+          for attempt in $(seq 1 180); do
+            job=$(curl --fail --silent --show-error -H "$auth_header" "http://127.0.0.1:8080/api/v1/assistant/jobs/$job_id")
+            job_status=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["status"])' "$job")
+            if [ "$job_status" = "completed" ]; then
+              python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == "appointment", d; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$job"
+              completed=1
+              break
+            fi
+            if [ "$job_status" = "failed" ]; then
+              echo "Background Qwen job failed: $job" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          if [ "$completed" -ne 1 ]; then
+            echo "Background Qwen job did not complete within six minutes: $job" >&2
+            exit 1
+          fi
+          events_after=$(curl --fail --silent --show-error -H "$auth_header" "http://127.0.0.1:8080/api/v1/events/$person_id")
+          python -c 'import json,sys; assert json.loads(sys.argv[1]) == json.loads(sys.argv[2]), "Background Qwen unexpectedly changed the Living Care Record"' "$events_before" "$events_after"
+
           # Community is intentionally disabled: do not call its API or run Qwen for Community.\n\n          # Upload an isolated document and confirm Qwen receives only the authorized evidence ID.
           echo "QWEN_E2E: authorized document evidence"
           printf 'CI-only document: follow-up date is not stated.\\n' > /tmp/solenos-qwen-document.txt
