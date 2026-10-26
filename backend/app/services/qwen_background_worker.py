@@ -29,7 +29,7 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context",
+    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support",
 )
 
 
@@ -74,6 +74,7 @@ ROUTE_PHRASES = {
     "care_instruction_change_tracker": ("care instruction change tracker", "care instruction change", "change in care instructions", "updated care instructions", "compare old and new care instructions", "compare previous and current care instructions", "conflicting care instructions", "instruction effective date", "track a care instruction change", "review changed care instructions", "new care instructions"),
     "critical_information_completeness": ("critical information completeness", "check critical care information is complete", "missing critical care information", "care record completeness", "check emergency information completeness", "what critical information is missing", "review missing care information", "critical information checklist", "check the care record for missing essentials", "care information completeness review"),
     "personal_preferences_distress_context": ("personal preferences and distress context", "personal preferences", "distress context", "known distress triggers", "what helps when they are distressed", "what may cause distress", "care preferences", "preferred calming approaches", "known triggers and preferences", "documented comfort preferences", "review personal care preferences"),
+    "caregiver_strain_support": ("caregiver strain and support", "caregiver strain", "caregiver stress", "caregiver support needs", "caregiver is overwhelmed", "caregiver burnout", "support for the caregiver", "caregiver respite needs", "caregiver workload concerns", "review caregiver support", "caregiving strain"),
     "emergency_readiness": ("emergency readiness", "emergency preparedness", "emergency plan", "documented emergency plan", "review the documented emergency plan", "care emergency plan", "what to prepare for an emergency", "emergency contact information", "emergency information in the care record", "review the emergency plan", "emergency handoff information", "what information is missing for an emergency"),
 }
 
