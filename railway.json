@@ -6,7 +6,7 @@
   },
   "deploy": {
     "preDeployCommand": [
-      "python -m alembic upgrade head"
+      "alembic upgrade head"
     ],
     "startCommand": "/bin/bash /app/start-with-qwen.sh",
     "healthcheckPath": "/ready",
