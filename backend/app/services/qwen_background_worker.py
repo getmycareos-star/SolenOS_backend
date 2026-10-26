@@ -29,7 +29,7 @@ ENABLED_WORKFLOWS = (
     "reminders_notifications", "care_coordination", "companion",
     "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
     "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
+    "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
 )
 
 
@@ -71,6 +71,7 @@ ROUTE_PHRASES = {
     "care_transition": ("care transition", "hospital discharge", "discharge from hospital", "discharge summary", "transition from hospital to home", "moving from hospital to home", "rehabilitation to home", "transition of care", "discharge reconciliation", "after discharge", "leaving hospital", "handoff after discharge", "transition documents"),
     "incident_follow_through": ("incident follow-through", "incident follow through", "follow up after a fall", "follow-up after a fall", "what happened after the fall", "follow up on the wandering episode", "follow-up on the wandering episode", "track the outcome of an incident", "unresolved incident follow-up", "missed visit follow-up", "follow up after an incident", "follow-up after an incident", "incident outcome"),
     "care_coverage_gap": ("care coverage gap", "coverage gap", "gap in care coverage", "caregiver coverage gap", "who is covering care", "uncovered care period", "coverage for the care visit", "missing caregiver coverage", "care schedule coverage", "check for care coverage gaps"),
+    "care_instruction_change_tracker": ("care instruction change tracker", "care instruction change", "change in care instructions", "updated care instructions", "compare old and new care instructions", "compare previous and current care instructions", "conflicting care instructions", "instruction effective date", "track a care instruction change", "review changed care instructions", "new care instructions"),
     "emergency_readiness": ("emergency readiness", "emergency preparedness", "emergency plan", "documented emergency plan", "review the documented emergency plan", "care emergency plan", "what to prepare for an emergency", "emergency contact information", "emergency information in the care record", "review the emergency plan", "emergency handoff information", "what information is missing for an emergency"),
 }
 

@@ -78,7 +78,7 @@ class QwenAssistRequest(BaseModel):
         "reminders_notifications", "care_coordination", "companion",
         "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
         "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-        "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
+        "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -675,7 +675,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
-        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
+        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -696,7 +696,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     appointment_workflows = {
         "living_care_record", "care_history_search", "care_situation_change",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
+        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -785,6 +785,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "care_transition": "Reconcile authorized discharge or care-transition documents against the supplied Living Care Record context. Separate newly documented items, conflicts, missing details, follow-up commitments, and unresolved questions. Cite supplied source IDs where available. Flag medication discrepancies for qualified human confirmation without recommending a medication change or deciding which source is correct. Draft a transition checklist and receiving-caregiver handoff only; do not create reminders, assign people, infer completion, or write proposed items to the Living Care Record.",
         "incident_follow_through": "Review an explicitly documented incident and its recorded response. Separate the reported event and source, documented response, explicitly stated follow-up commitments, recorded outcomes, unresolved follow-up, and missing information. Use only supplied authorized context and cite source IDs where available. Do not infer cause, severity, current safety, completion, an owner, or a deadline. Time passing is not evidence of completion. If urgent danger is described, direct the caregiver to real-world emergency help. Do not create reminders, assign people, contact anyone, or write to the Living Care Record.",
         "care_coverage_gap": "Review authorized records for explicitly documented care coverage and handoff gaps. Separate confirmed coverage arrangements, explicitly unstaffed or unanswered periods, declined/unavailable coverage, and unknown or conflicting schedule details. Cite source IDs where available. Do not infer caregiver availability from silence, assign responsibility, invent schedules or contacts, decide that a person will be unattended, create tasks/reminders, contact anyone, or write to the Living Care Record. Mark information not recorded as unknown and present only evidence-grounded gaps for caregiver review.",
+        "care_instruction_change_tracker": "Compare only explicitly documented earlier and newer care instructions in the authorized supplied context. Separate each source and its author/authority when recorded, exact instruction change, documented effective date, superseded or still-active wording only when the source explicitly says so, conflicts, and unresolved confirmation. Cite source IDs where available. Never infer who has authority, decide which conflicting instruction wins, invent an effective date, treat recency alone as proof of validity, or recommend a medication change. For medication-related discrepancies, request qualified human confirmation. Do not create tasks/reminders, contact anyone, or write to the Living Care Record; present a read-only change review and label missing details as unknown.",
         "emergency_readiness": "Review emergency-readiness information already documented in the authorized care context. Separate verified recorded facts from missing, stale, conflicting, or unverified information. Summarize documented emergency contacts, care-relevant communication needs, mobility or access considerations, documented clinician-provided emergency instructions, and relevant current medications only when present in supplied records. Cite source IDs where available and label absent information as not recorded. Never invent phone numbers, addresses, diagnoses, medication details, instructions, or a safety rating; do not decide whether the person is safe, replace official emergency guidance, contact anyone, create tasks/reminders, or write to the Living Care Record. If immediate danger is described, direct the caregiver to local emergency services.",
     }[payload.workflow]
     prompt = (
