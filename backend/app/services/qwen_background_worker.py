@@ -51,7 +51,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("evidence_provenance", r"provenance|source and certainty|label the source|source of this claim"),
         ("returning_caregiver", r"returning caregiver|returning to caregiving|returning after"),
         ("professional_summary", r"professional-facing summary|professional summary"),
-        ("appointment", r"prepare questions for.*appointment|appointment preparation"),
+        ("appointment", r"prepare questions for.*appointment|prepare.*appointment|appointment preparation|appointment questions"),
         ("handoff", r"\bhandoff\b|hand-off"),
         ("open_loops", r"unresolved question|open loop|follow-up|need to confirm"),
         ("decision_outcome", r"decision and outcome|decision from its outcome|decision.*outcome"),
@@ -64,7 +64,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("account_recovery", r"cannot sign in|can.t sign in|account recovery|recover my account|reset my password"),
         ("settings_security", r"multi-factor|two-factor|\bmfa\b|security settings|privacy settings"),
         ("record_lifecycle", r"\barchiv(?:e|ed|ing)\b|restore the record|delete the record|pin the record"),
-        ("offline_sync", r"\bsync(?:ed|hronized| status)?\b|offline changes"),
+        ("offline_sync", r"\bsync(?:ed|hronized| status)?\b|synchronization|offline changes"),
         ("ai_reliability", r"assistant request returned an error|inference failed|qwen availability|request failed"),
         ("audit_review", r"audit trail|audit records|review candidate status|audit review"),
         ("medication_day", r"medication was taken|medicine was taken|medication-day|organize this medication note"),
@@ -72,7 +72,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("living_care_record", r"summarize.*care record|living care record summary|available care record"),
         ("add_record", r"add a record|add record|proposed record entry|draft the correction"),
         ("document", r"document excerpt|exact sentence from a document|\bdocument\b"),
-        ("daily_capture", r"today.s caregiver observation|daily capture|organize today.s observation|caregiver note"),
+        ("daily_capture", r"caregiver observation|daily capture|organize today.s observation|caregiver note"),
     )
     for workflow, pattern in rules:
         if re.search(pattern, text):
