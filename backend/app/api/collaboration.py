@@ -78,7 +78,7 @@ class QwenAssistRequest(BaseModel):
         "reminders_notifications", "care_coordination", "companion",
         "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
         "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-        "audit_review", "care_transition",
+        "audit_review", "care_transition", "incident_follow_through",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -675,7 +675,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
-        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition",
+        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -696,7 +696,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     appointment_workflows = {
         "living_care_record", "care_history_search", "care_situation_change",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition",
+        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
@@ -783,6 +783,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "ai_reliability": "Explain the supplied Qwen availability, retry or error state. Do not fabricate successful inference, substitute a canned response or imply a failed request completed.",
         "audit_review": "Summarize supplied review candidates and audit details with source and status preserved. Distinguish proposed, accepted, rejected and persisted states; do not claim a candidate was accepted or written.",
         "care_transition": "Reconcile authorized discharge or care-transition documents against the supplied Living Care Record context. Separate newly documented items, conflicts, missing details, follow-up commitments, and unresolved questions. Cite supplied source IDs where available. Flag medication discrepancies for qualified human confirmation without recommending a medication change or deciding which source is correct. Draft a transition checklist and receiving-caregiver handoff only; do not create reminders, assign people, infer completion, or write proposed items to the Living Care Record.",
+        "incident_follow_through": "Review an explicitly documented incident and its recorded response. Separate the reported event and source, documented response, explicitly stated follow-up commitments, recorded outcomes, unresolved follow-up, and missing information. Use only supplied authorized context and cite source IDs where available. Do not infer cause, severity, current safety, completion, an owner, or a deadline. Time passing is not evidence of completion. If urgent danger is described, direct the caregiver to real-world emergency help. Do not create reminders, assign people, contact anyone, or write to the Living Care Record.",
     }[payload.workflow]
     prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
