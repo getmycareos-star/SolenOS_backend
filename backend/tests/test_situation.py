@@ -341,4 +341,5 @@ def test_lcr_interaction_only_classifier_includes_insults_without_response_templ
     assert main_module._is_casual_conversation_only("Hi")
     assert main_module._is_casual_conversation_only("This thing is useless.")
     assert main_module._is_casual_conversation_only("You never get anything right")
+    assert main_module._is_casual_conversation_only("You are dumb")
     assert not main_module._is_casual_conversation_only("Mom fell last night")
