@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -45,7 +44,7 @@ async def _classify_task(task_text: str, context_text: str) -> str:
     raw = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt},
-         {"role": "user", "content": json.dumps({"request": task_text[:1800], "screen_context": context_text[:3000})}],
+         {"role": "user", "content": json.dumps({"request": task_text[:1800], "screen_context": context_text[:3000]})}],
         options={"temperature": 0, "num_predict": 48},
     )
     try:
