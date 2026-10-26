@@ -1069,6 +1069,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "authorized_record_context": context_payload,
             }, ensure_ascii=False),
         })
+        greeting_only = _is_casual_greeting(user_text)
+        if greeting_only:
+            model_messages[0]["content"] += (
+                "\\nThe current message is only a greeting or brief pleasantry. "
+                "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
+                "Generate the wording for this exact message; do not reuse a stored response."
+            )
         base, model = _ollama_url()
         try:
             reply = await asyncio.to_thread(
@@ -1076,7 +1083,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 base,
                 model,
                 model_messages,
-                {"temperature": 0.25, "num_predict": 192},
+                {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
         except HTTPException:
             raise
@@ -1091,6 +1098,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
             or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+            or (greeting_only and _greeting_reply_needs_revision(reply))
         ):
             raise HTTPException(
                 status_code=503,
