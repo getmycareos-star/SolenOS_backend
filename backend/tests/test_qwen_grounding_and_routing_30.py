@@ -96,3 +96,14 @@ def test_allows_status_when_authoritative_context_explicitly_confirms_it():
         "What is the account security status?",
         ["Authoritative account setting: Multi-factor authentication is enabled."],
     ) is False
+
+def test_rejects_invented_future_uncertainty_from_past_observation():
+    source = "She slept poorly last night."
+    reply = "She slept poorly last night. She is unsure if she will be able to sleep tonight."
+    assert _contains_unsupported_operational_claim(reply, source, []) is True
+
+
+def test_rejects_changed_source_attribution():
+    source = "Caregiver observed she seemed tired this morning."
+    reply = "She reported feeling tired this morning."
+    assert _contains_unsupported_operational_claim(reply, source, []) is True
