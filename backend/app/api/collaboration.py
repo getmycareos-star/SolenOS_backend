@@ -1072,7 +1072,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         greeting_only = _is_casual_greeting(user_text)
         if greeting_only:
             model_messages[0]["content"] += (
-                "\\nThe current message is only a greeting or brief pleasantry. "
+                "\nThe current message is only a greeting or brief pleasantry. "
                 "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
                 "Generate the wording for this exact message; do not reuse a stored response."
             )
