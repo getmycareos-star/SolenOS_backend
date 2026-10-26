@@ -442,3 +442,53 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     assert recorded.status_code == 200, recorded.text
     assert recorded.json()["event_type"] == "feedback"
     assert recorded.json()["source_type"] == "feedback"
+
+    # Verify opt-in creates durable user-scoped learning records, not only a UI state.
+    from app.models.memory import LearningEvent, ReasoningMemory
+
+    db = TestSessionLocal()
+    try:
+        memories_before_opt_out = (
+            db.query(ReasoningMemory)
+            .filter_by(person_id=created["person"]["id"], memory_type="feedback")
+            .all()
+        )
+        events_before_opt_out = (
+            db.query(LearningEvent)
+            .filter_by(person_id=created["person"]["id"], event_type="feedback")
+            .all()
+        )
+        assert len(memories_before_opt_out) == 1
+        assert "Deliberately submitted feedback" in str(memories_before_opt_out[0].value)
+        assert len(events_before_opt_out) == 1
+    finally:
+        db.close()
+
+    # Opting out blocks future optional contributions but retains existing
+    # personal learning memory and care continuity.
+    disabled = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": created["person"]["id"],
+            "caregiver_id": created["caregiver"]["id"],
+            "action": "update_data_improvement",
+            "data_improvement_consent": False,
+        },
+    )
+    assert disabled.status_code == 200, disabled.text
+    assert disabled.json()["profile"]["data_improvement_consent"] is False
+
+    blocked_after_opt_out = client.post("/api/v1/feedback", params=query, headers=headers)
+    assert blocked_after_opt_out.status_code == 403, blocked_after_opt_out.text
+
+    db = TestSessionLocal()
+    try:
+        retained_memory_count = (
+            db.query(ReasoningMemory)
+            .filter_by(person_id=created["person"]["id"], memory_type="feedback")
+            .count()
+        )
+        assert retained_memory_count == 1
+    finally:
+        db.close()
