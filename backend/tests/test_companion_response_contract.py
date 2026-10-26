@@ -147,7 +147,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
     client = setup_client(monkeypatch)
     outputs = iter([
         "Hi, I'm SolenOS AI Companion. I'm here to provide support and help with caregiving tasks. Is there anything specific you'd like to discuss or ask about?",
-        "Hi! What would you like to talk about?",
+        "Hello, ready to help.",
     ])
     calls = []
 
@@ -165,7 +165,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
             json={"person_id": person_id, "text": "hi"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["reply"] == "Hi! What would you like to talk about?"
+        assert response.json()["reply"] == "Hello, ready to help."
         assert response.json()["ai_generated"] is True
         assert len(calls) == 2
         assert "Revise your previous response" in calls[1][0][-1]["content"]
