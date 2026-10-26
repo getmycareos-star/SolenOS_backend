@@ -52,4 +52,6 @@ Community is intentionally excluded from Qwen workflow selection and inference. 
 
 ## Background processing boundary
 
-The current shared assistant endpoint runs synchronously for a caregiver request. This matrix does **not** claim that a durable asynchronous job queue or autonomous background analysis across all workflows exists. Any future background worker must use the same record-scoped authorization, source provenance, idempotency, review-before-write and fail-closed rules; it must not silently write LCR facts.
+The backend now has a proposed database-backed Qwen job queue: caregiver requests are persisted, a worker classifies each request into exactly one of the 30 enabled workflow IDs, runs the existing record-scoped read-only assistant, and persists queued/processing/completed/failed status plus the returned suggestion and source IDs. The caregiver never chooses a workflow. Classification must fail closed if it returns an unknown ID or Community.
+
+This is **request-driven background processing**, not yet an autonomous scanner that independently schedules work whenever any care event, reminder, appointment, document or account state changes. Those event producers must be connected incrementally with idempotency keys and workflow-specific eligibility rules before claiming continuous autonomous coverage. The worker never silently writes LCR facts; returned suggestions require caregiver review. Production readiness still requires migration, CI, live queue execution, retry/restart tests and authorization-isolation verification.

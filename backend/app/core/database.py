@@ -125,6 +125,9 @@ def database_schema_differences(bind=None):
 # Local development keeps its low-friction SQLite bootstrap. Railway production
 # must run reviewed Alembic migrations before ASGI startup; create_all() cannot
 # alter existing PostgreSQL tables and must not silently mutate production schema.
+import app.models.qwen_background_job  # register Qwen jobs before local create_all
+
+
 if not RAILWAY_RUNTIME:
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()
