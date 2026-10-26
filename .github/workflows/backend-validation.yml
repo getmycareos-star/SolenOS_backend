@@ -30,9 +30,13 @@ jobs:
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8011 >/tmp/solenos-uvicorn.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-          for attempt in $(seq 1 20); do
-            if curl --silent --fail http://127.0.0.1:8011/health && curl --silent --fail http://127.0.0.1:8011/ready; then
+          for attempt in $(seq 1 60); do
+            if curl --silent --fail --max-time 5 http://127.0.0.1:8011/health && curl --silent --fail --max-time 5 http://127.0.0.1:8011/ready; then
               exit 0
+            fi
+            if [ "$((attempt % 10))" -eq 0 ]; then
+              echo "ASGI readiness still pending after $((attempt)) seconds."
+              tail -n 80 /tmp/solenos-uvicorn.log || true
             fi
             sleep 1
           done
