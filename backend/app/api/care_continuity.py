@@ -28,6 +28,11 @@ RESOURCES = {
     "decisions": "care_decisions",
     "decision-outcomes": "decision_outcomes",
     "reconciliations": "care_reconciliation_records",
+    "follow-up-links": "care_follow_up_links",
+    "review-decisions": "care_review_decisions",
+    "provenance": "care_provenance_records",
+    "timeline": "care_timeline_entries",
+    "change-assessments": "care_change_assessments",
 }
 
 WRITABLE = {
@@ -45,6 +50,11 @@ WRITABLE = {
                           "evidence_ids", "is_intended_outcome"},
     "reconciliations": {"target_type", "target_id", "reconciliation_status", "competing_claim_ids",
                         "evidence_ids", "decision_notes"},
+    "follow-up-links": {"source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids"},
+    "review-decisions": {"target_type", "target_id", "review_decision", "reason", "evidence_ids"},
+    "provenance": {"target_type", "target_id", "source_type", "source_id", "evidence_id", "source_label", "source_span", "metadata"},
+    "timeline": {"source_type", "source_id", "entry_type", "title", "summary", "occurred_at", "evidence_ids", "epistemic_status", "is_projection"},
+    "change-assessments": {"change_id", "assessment_status", "significance", "evidence_status", "assessment_notes", "evidence_ids"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -71,6 +81,10 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "integrity-resolutions": [("care_integrity_findings", "finding_id")],
         "decision-outcomes": [("care_decisions", "decision_id")],
     }
+    if resource == "provenance" and payload.get("evidence_id"):
+        checks.setdefault(resource, []).append(("evidence", "evidence_id"))
+    if resource == "change-assessments":
+        checks.setdefault(resource, []).append(("changes", "change_id"))
     for table_name, field in checks.get(resource, []):
         value = payload.get(field)
         if not value:
@@ -135,6 +149,11 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "decisions": ("title", "decision_text"),
         "decision-outcomes": ("decision_id", "outcome_status"),
         "reconciliations": ("target_type", "target_id", "reconciliation_status"),
+        "follow-up-links": ("source_type", "source_id", "target_type", "target_id"),
+        "review-decisions": ("target_type", "target_id", "review_decision"),
+        "provenance": ("target_type", "target_id", "source_type"),
+        "timeline": ("source_type", "source_id", "entry_type", "title"),
+        "change-assessments": ("change_id",),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
@@ -144,6 +163,12 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     data["person_id"] = person_id
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
+    if "recorded_by_caregiver_id" in table.c:
+        data["recorded_by_caregiver_id"] = caregiver_id
+    if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
+        data["reviewed_by_caregiver_id"] = caregiver_id
+    if "assessed_by_caregiver_id" in table.c and resource == "change-assessments":
+        data["assessed_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "delta-items" and data.get("reconciliation_status") != "pending_review":
         data["reviewed_by_caregiver_id"] = caregiver_id
         data["reviewed_at"] = datetime.now().astimezone()
