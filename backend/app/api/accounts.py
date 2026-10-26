@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_account import CaregiverAccount
-from app.models.identity_security import LoginAttemptLimit
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
@@ -137,7 +136,10 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
     if limit is None:
         limit = LoginAttemptLimit(key_hash=key_hash, attempts=0, window_started_at=now, updated_at=now)
         db.add(limit)
-    if not limit.window_started_at or (now - limit.window_started_at).total_seconds() > 900:
+    window_started = limit.window_started_at if limit else None
+    if window_started and window_started.tzinfo is None:
+        window_started = window_started.replace(tzinfo=timezone.utc)
+    if not window_started or (now - window_started).total_seconds() > 900:
         limit.window_started_at = now
         limit.attempts = 0
         limit.blocked_until = None
