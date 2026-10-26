@@ -7,9 +7,11 @@ from alembic import op
 from sqlalchemy import inspect
 
 from app.core.database import Base
-# Import registers all table definitions in Base.metadata for Alembic.
+# Register referenced parent tables and all table definitions before create_all.
+from app.models import care as _care  # noqa: F401
 from app.models import ai_output_governance as _ai_output_governance  # noqa: F401
 from app.models import qwen_background_job as _qwen_background_job  # noqa: F401
+from app.models import safety as _safety  # noqa: F401
 
 revision = "20261027_01_ai_output_governance"
 down_revision = "20261026_04_qwen_output_safety"
