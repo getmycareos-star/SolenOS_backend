@@ -441,7 +441,7 @@ def _greeting_reply_needs_revision(reply: str) -> bool:
     """Greeting-only replies should mirror the user, not start a new interview."""
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
-    repeats_automatic_question = bool(re.search(r"\\bhow are you(?: doing)?\\b", normalized))
+    repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     return not words or len(words) > 12 or repeats_automatic_question
 
 
@@ -1092,14 +1092,52 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
-        if (
+        invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
             or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
             or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
             or (greeting_only and _greeting_reply_needs_revision(reply))
-        ):
+        )
+        if invalid_reply and greeting_only:
+            # Ask the model to revise its own overlong greeting. This is another
+            # inference pass, not a stored answer or hardcoded fallback.
+            retry_messages = [
+                *model_messages,
+                {"role": "assistant", "content": str(reply or "")},
+                {
+                    "role": "user",
+                    "content": (
+                        "Revise your previous response for the current greeting. "
+                        "Return only a natural reply of at most 8 words. Do not ask a question, "
+                        "mention caregiving, introduce a topic, or describe your capabilities. "
+                        "Use fresh wording appropriate to the current message."
+                    ),
+                },
+            ]
+            try:
+                reply = await asyncio.to_thread(
+                    _ollama_chat,
+                    base,
+                    model,
+                    retry_messages,
+                    {"temperature": 0.25, "num_predict": 24},
+                )
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                ) from exc
+            invalid_reply = (
+                not isinstance(reply, str)
+                or not reply.strip()
+                or _companion_message_needs_revision(reply)
+                or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
+                or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                or _greeting_reply_needs_revision(reply)
+            )
+        if invalid_reply:
             raise HTTPException(
                 status_code=503,
                 detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
