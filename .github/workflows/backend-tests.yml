@@ -257,7 +257,7 @@ jobs:
           echo "QWEN_E2E: durable background job"
           events_before=$(curl --fail --silent --show-error -H "$auth_header" "http://127.0.0.1:8080/api/v1/events/$person_id")
           queued=$(curl --fail --silent --show-error -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"task_text":"Help me prepare for the next doctor appointment and organize questions that are still unanswered.","context_text":"The appointment date has not been supplied."}' \
+            -d '{"task_text":"Please summarize this exact note: appointment date not supplied.","context_text":"Appointment date: not supplied. No clinician notes have been provided."}' \
             http://127.0.0.1:8080/api/v1/assistant/jobs)
           job_id=$(python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "queued"; print(d["job_id"])' "$queued")
           completed=0
@@ -279,6 +279,14 @@ jobs:
             echo "Background Qwen job did not complete within six minutes: $job" >&2
             exit 1
           fi
+          # A different anonymous caregiver must not read the completed job.
+          other_session=$(curl --fail --silent --show-error -H "Content-Type: application/json" \
+            -d '{"caregiver_name":"Second CI-only caregiver"}' http://127.0.0.1:8080/api/v1/sessions/anonymous)
+          other_token=$(python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<< "$other_session")
+          other_status=$(curl --silent --show-error --output /tmp/other-job.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $other_token" "http://127.0.0.1:8080/api/v1/assistant/jobs/$job_id")
+          test "$other_status" = "404"
+
           events_after=$(curl --fail --silent --show-error -H "$auth_header" "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; assert json.loads(sys.argv[1]) == json.loads(sys.argv[2]), "Background Qwen unexpectedly changed the Living Care Record"' "$events_before" "$events_after"
 
