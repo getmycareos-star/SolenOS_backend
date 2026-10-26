@@ -9,6 +9,7 @@ and anonymous-session tables are preserved and are not recreated.
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
+import uuid
 
 revision = "20261026_03_identity_security"
 down_revision = "20261026_02_improve_examples"
@@ -352,6 +353,37 @@ def upgrade():
         sa.Column("details", json, nullable=True),
         sa.Column("created_at", dt, nullable=False, server_default=NOW),
     ], [("ix_iae_person_id", ["person_id"], False), ("ix_iae_created_at", ["created_at"], False)])
+
+    # Backfill relationship mappings from authoritative rows already present.
+    # This is additive and idempotent; it does not move or delete care data.
+    inspector = inspect(bind)
+    if inspector.has_table("caregivers") and inspector.has_table("caregiver_person_relationships"):
+        caregiver_columns = {column["name"] for column in inspector.get_columns("caregivers")}
+        if {"id", "person_id", "relationship"}.issubset(caregiver_columns):
+            rows = bind.execute(sa.text("SELECT id, person_id, relationship FROM caregivers WHERE person_id IS NOT NULL")).mappings().all()
+            for row in rows:
+                exists = bind.execute(sa.text(
+                    "SELECT 1 FROM caregiver_person_relationships WHERE caregiver_id=:caregiver_id AND person_id=:person_id"
+                ), {"caregiver_id": row["id"], "person_id": row["person_id"]}).first()
+                if not exists:
+                    bind.execute(sa.text(
+                        "INSERT INTO caregiver_person_relationships (id, caregiver_id, person_id, relationship, status, created_at) "
+                        "VALUES (:id, :caregiver_id, :person_id, :relationship, 'active', CURRENT_TIMESTAMP)"
+                    ), {"id": str(uuid.uuid4()), "caregiver_id": row["id"], "person_id": row["person_id"], "relationship": row["relationship"] or "Family"})
+
+    if inspector.has_table("caregiver_accounts") and inspector.has_table("caregiver_account_links"):
+        account_columns = {column["name"] for column in inspector.get_columns("caregiver_accounts")}
+        if {"id", "person_id", "caregiver_id"}.issubset(account_columns):
+            rows = bind.execute(sa.text("SELECT id, person_id, caregiver_id FROM caregiver_accounts")).mappings().all()
+            for row in rows:
+                exists = bind.execute(sa.text(
+                    "SELECT 1 FROM caregiver_account_links WHERE account_id=:account_id AND caregiver_id=:caregiver_id AND person_id=:person_id"
+                ), {"account_id": row["id"], "caregiver_id": row["caregiver_id"], "person_id": row["person_id"]}).first()
+                if not exists:
+                    bind.execute(sa.text(
+                        "INSERT INTO caregiver_account_links (id, account_id, caregiver_id, person_id, status, created_at) "
+                        "VALUES (:id, :account_id, :caregiver_id, :person_id, 'active', CURRENT_TIMESTAMP)"
+                    ), {"id": str(uuid.uuid4()), "account_id": row["id"], "caregiver_id": row["caregiver_id"], "person_id": row["person_id"]})
 
 
 def downgrade():
