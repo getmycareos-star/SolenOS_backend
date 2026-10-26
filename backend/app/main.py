@@ -109,7 +109,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     # Community is intentionally disabled at the API boundary as well as in the UI.
     # Keep its implementation/data intact, but do not serve feed, post, reaction, or experience routes.
-    if path == "/api/v1/community" or path.startswith("/api/v1/community/"):
+    if path.lower().startswith("/api/v1/community"):
         return JSONResponse(status_code=404, content={"detail": "Community is currently disabled"})
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
