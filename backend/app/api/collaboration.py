@@ -1058,13 +1058,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             }, ensure_ascii=False),
         })
         base, model = _ollama_url()
-        reply = await asyncio.to_thread(
-            _ollama_chat,
-            base,
-            model,
-            model_messages,
-            {"temperature": 0.25, "num_predict": 192},
-        )
+        try:
+            reply = await asyncio.to_thread(
+                _ollama_chat,
+                base,
+                model,
+                model_messages,
+                {"temperature": 0.25, "num_predict": 192},
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+            ) from exc
         if (
             not isinstance(reply, str)
             or not reply.strip()
