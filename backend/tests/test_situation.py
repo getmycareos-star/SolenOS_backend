@@ -279,3 +279,67 @@ def test_invalid_observation_timestamp_is_rejected_not_replaced_with_now():
         db.close()
     finally:
         teardown_db()
+
+
+@pytest.mark.session_security
+def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeypatch):
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "LCR Orientation Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+
+        saved = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "raw_input": "The person slept poorly last night.",
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        before_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
+
+        captured = {}
+        monkeypatch.setattr(main_module, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+        def fake_qwen(base, model, messages, options=None):
+            captured["base"] = base
+            captured["model"] = model
+            captured["messages"] = messages
+            return "The record notes poor sleep last night. What has changed since then?"
+        monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
+
+        response = client.post(
+            "/api/lcr/orientation",
+            headers=headers,
+            json={"raw_input": "Hi"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["reply"] == "The record notes poor sleep last night. What has changed since then?"
+        assert body["ai_generated"] is True
+        assert body["care_record_unchanged"] is True
+        assert body["companion_history_unchanged"] is True
+        assert body["written_to_lcr"] is False
+        prompt = captured["messages"][0]["content"]
+        assert "slept poorly last night" in prompt
+        assert "Do not use canned replies" in prompt
+        after_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
+        assert after_count == before_count
+
+        unauthorized = client.post("/api/lcr/orientation", json={"raw_input": "Hi"})
+        assert unauthorized.status_code == 401
+    finally:
+        teardown_db()
+
+
+def test_lcr_interaction_only_classifier_includes_insults_without_response_templates():
+    assert main_module._is_casual_conversation_only("Hi")
+    assert main_module._is_casual_conversation_only("This thing is useless.")
+    assert main_module._is_casual_conversation_only("You never get anything right")
+    assert main_module._is_casual_conversation_only("You are dumb")
+    assert not main_module._is_casual_conversation_only("Mom fell last night")
