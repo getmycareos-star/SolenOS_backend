@@ -81,6 +81,12 @@ app.include_router(change_router, prefix="/api/v1")
 app.include_router(caregiver_intelligence_router, prefix="/api/v1")
 app.include_router(safety_router, prefix="/api/v1")
 app.include_router(causal_router, prefix="/api/v1")
+# Community is intentionally suspended, not deleted. Keep its implementation and data
+# in the repository, but do not register any Community endpoint on the public API.
+collaboration_router.routes[:] = [
+    route for route in collaboration_router.routes
+    if not getattr(route, "path", "").lower().startswith("/community")
+]
 app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
@@ -107,10 +113,6 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
-    # Community is intentionally disabled at the API boundary as well as in the UI.
-    # Keep its implementation/data intact, but do not serve feed, post, reaction, or experience routes.
-    if path.lower().startswith("/api/v1/community"):
-        return JSONResponse(status_code=404, content={"detail": "Community is currently disabled"})
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
