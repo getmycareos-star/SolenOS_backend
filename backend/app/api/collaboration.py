@@ -512,9 +512,19 @@ def _contains_unsupported_operational_claim(
         (r"\baccount\s+(?:is|has been|was)\s+(?:recovered|verified|locked|unlocked)\b",
          r"\baccount\s+(?:status|verification)\s*[:=]\s*(?:recovered|verified|locked|unlocked)\b"),
     )
+    uncertainty_phrases = r"\\b(?:cannot|can.t|unable to)\\s+(?:verify|confirm|determine|tell)\\b|\\b(?:unknown|not supplied|not provided|no matching status)\\b"
     for claim_pattern, context_pattern in state_claims:
-        if re.search(claim_pattern, text) and not re.search(context_pattern, context):
-            return True
+        if re.search(context_pattern, context):
+            continue
+        for match in re.finditer(claim_pattern, text):
+            # A claim embedded in a clause explicitly saying it cannot be
+            # verified is uncertainty, not an assertion about actual state.
+            left = max(text.rfind(".", 0, match.start()), text.rfind(";", 0, match.start()), text.rfind(",", 0, match.start())) + 1
+            ends = [p for p in (text.find(".", match.end()), text.find(";", match.end()), text.find(",", match.end())) if p >= 0]
+            right = min(ends) if ends else len(text)
+            clause = text[left:right]
+            if not re.search(uncertainty_phrases, clause):
+                return True
     # Do not invent a person's uncertainty, intentions, feelings, or future events.
     if re.search(r"\b(?:she|he|they|the caregiver|the person)\s+(?:is|was)\s+(?:unsure|worried|afraid|anxious|confused|upset)\b", text) and not re.search(
         r"\b(?:unsure|worried|afraid|anxious|confused|upset)\b", source
