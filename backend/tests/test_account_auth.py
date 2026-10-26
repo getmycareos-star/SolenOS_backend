@@ -53,13 +53,16 @@ def setup_function():
         conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_mfa_recovery_codes (
             id VARCHAR(36) PRIMARY KEY, account_id VARCHAR NOT NULL, code_hash VARCHAR(64) NOT NULL,
             used_at DATETIME NULL, created_at DATETIME NOT NULL)""")
+        conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_recovery_codes (
+            id VARCHAR(32) PRIMARY KEY, account_id VARCHAR NOT NULL, code_hash VARCHAR(64) NOT NULL,
+            used_at DATETIME NULL, created_at DATETIME NOT NULL)""")
         conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_login_attempts (
             id VARCHAR(36) PRIMARY KEY, email_hash VARCHAR(64) NOT NULL, ip_hash VARCHAR(64) NOT NULL,
             attempted_at DATETIME NOT NULL, succeeded BOOLEAN NOT NULL)""")
         conn.exec_driver_sql("""CREATE TABLE IF NOT EXISTS account_security_requests (
             id VARCHAR(36) PRIMARY KEY, email_hash VARCHAR(64) NOT NULL, ip_hash VARCHAR(64) NOT NULL,
             purpose VARCHAR(32) NOT NULL, requested_at DATETIME NOT NULL)""")
-        for table in ("account_security_tokens", "account_mfa_secrets", "account_mfa_recovery_codes", "account_login_attempts", "account_security_requests"):
+        for table in ("account_security_tokens", "account_mfa_secrets", "account_mfa_recovery_codes", "account_recovery_codes", "account_login_attempts", "account_security_requests"):
             conn.exec_driver_sql(f"DELETE FROM {table}")
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
@@ -91,7 +94,7 @@ def _set_verified_for_test(email):
 
 def _complete_registration(client, response, email, password):
     body = response.json()
-    _verify_from_email(client, email)
+    assert body.get("recovery_code"), "signup must return the one-time recovery key"
     logged = client.post("/api/v1/sessions/login", json={"email": email, "password": password})
     assert logged.status_code == 200, logged.text
     return SimpleNamespace(status_code=201, text=response.text, json=lambda: {**body, **logged.json()})
@@ -112,25 +115,33 @@ def register(client, email="caregiver@example.com", password="long-enough-passwo
     return response
 
 
-def test_register_requires_email_verification_and_only_then_issues_session():
+def test_signup_and_login_work_without_smtp_and_issue_recovery_key(monkeypatch):
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("SMTP_USERNAME", raising=False)
+    monkeypatch.delenv("SMTP_PASSWORD", raising=False)
+    monkeypatch.delenv("SMTP_FROM_EMAIL", raising=False)
     client = TestClient(app)
     raw = client.post("/api/v1/sessions/register", json={
         "email": "caregiver@example.com", "password": "long-enough-password",
         "caregiver_name": "Family caregiver", "care_recipient_name": "Care recipient",
     })
     assert raw.status_code == 201, raw.text
-    assert raw.json()["email_verification_required"] is True
+    assert raw.json()["email_verification_required"] is False
+    recovery_key = raw.json()["recovery_code"]
+    assert recovery_key.startswith("SOLENOS-")
     assert "access_token" not in raw.json()
-    denied = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "long-enough-password"})
-    assert denied.status_code == 403
-    verified = _verify_from_email(client, "caregiver@example.com")
-    assert verified.status_code == 200, verified.text
-    token = re.search(r"token=([A-Za-z0-9_-]+)", sent_messages[-1][2]).group(1)
-    replay = client.post("/api/v1/account-security/verification/confirm", json={"token": token})
-    assert replay.status_code == 400
-    login = client.post("/api/v1/sessions/login", json={"email": "caregiver@example.com", "password": "long-enough-password"})
-    assert login.status_code == 200, login.text
-    assert login.json()["access_token"]
+    logged = client.post("/api/v1/sessions/login", json={
+        "email": "caregiver@example.com", "password": "long-enough-password",
+    })
+    assert logged.status_code == 200, logged.text
+    db = TestSessionLocal()
+    try:
+        stored = db.execute(text("SELECT code_hash FROM account_recovery_codes")).scalar_one()
+        import hashlib
+        assert stored == hashlib.sha256(recovery_key.encode()).hexdigest()
+        assert stored != recovery_key
+    finally:
+        db.close()
 
 
 def test_register_persists_account_with_hashed_password_and_scoped_session():
@@ -234,8 +245,6 @@ def test_signup_safely_claims_existing_anonymous_record_and_revokes_old_capabili
     assert registered.json()["person"]["id"] == old["person"]["id"]
     assert registered.json()["caregiver"]["id"] == old["caregiver"]["id"]
     assert client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {old['access_token']}"}).status_code == 401
-    verified = _verify_from_email(client, "claim@example.com")
-    assert verified.status_code == 200, verified.text
     login = client.post("/api/v1/sessions/login", json={"email": "claim@example.com", "password": "claim-long-password"})
     assert login.status_code == 200, login.text
     assert client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {login.json()['access_token']}"}).json()["account"]["email"] == "claim@example.com"
@@ -321,3 +330,47 @@ def test_security_request_throttle_is_persistent_and_does_not_enumerate_email():
     # The same limit applies to existing addresses; response shape doesn't reveal account existence.
     existing = client.post("/api/v1/account-security/password-reset/request", json={"email": "caregiver@example.com"})
     assert existing.status_code == 202
+
+
+def test_recovery_key_resets_password_once_and_revokes_old_sessions():
+    client = TestClient(app)
+    registered = client.post("/api/v1/sessions/register", json={
+        "email": "recover@example.com", "password": "initial-long-password",
+        "caregiver_name": "Caregiver", "care_recipient_name": "Mum",
+    })
+    assert registered.status_code == 201, registered.text
+    key = registered.json()["recovery_code"]
+    session = client.post("/api/v1/sessions/login", json={
+        "email": "recover@example.com", "password": "initial-long-password",
+    })
+    assert session.status_code == 200, session.text
+    old_token = session.json()["access_token"]
+    reset = client.post("/api/v1/account-security/recovery/confirm", json={
+        "email": "recover@example.com", "recovery_code": key, "new_password": "replacement-long-password",
+    })
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["recovery_key_consumed"] is True
+    assert client.get("/api/v1/sessions/me", headers={"Authorization": f"Bearer {old_token}"}).status_code == 401
+    replay = client.post("/api/v1/account-security/recovery/confirm", json={
+        "email": "recover@example.com", "recovery_code": key, "new_password": "another-long-password",
+    })
+    assert replay.status_code == 400, replay.text
+    assert client.post("/api/v1/sessions/login", json={
+        "email": "recover@example.com", "password": "replacement-long-password",
+    }).status_code == 200
+
+
+def test_signed_in_password_change_revokes_current_session():
+    client = TestClient(app)
+    account = register(client, email="change@example.com", password="initial-long-password").json()
+    changed = client.post("/api/v1/account-security/password/change", headers={
+        "Authorization": f"Bearer {account['access_token']}",
+    }, json={"current_password": "initial-long-password", "new_password": "replacement-long-password"})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["sessions_revoked"] is True
+    assert client.get("/api/v1/sessions/me", headers={
+        "Authorization": f"Bearer {account['access_token']}",
+    }).status_code == 401
+    assert client.post("/api/v1/sessions/login", json={
+        "email": "change@example.com", "password": "replacement-long-password",
+    }).status_code == 200
