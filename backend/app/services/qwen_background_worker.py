@@ -33,18 +33,107 @@ ENABLED_WORKFLOWS = (
 )
 
 
+def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
+    """Resolve unmistakable task language internally before asking a small model to classify it.
+
+    This is invisible to caregivers. Qwen still generates every completed suggestion;
+    the hints prevent the 0.5B classifier from confusing corrections, summaries,
+    access-state questions, and other high-impact workflows.
+    """
+    text = f"{task_text}\\n{context_text}".casefold()
+    rules = (
+        ("after_appointment", r"after[- ]appointment|after the appointment|after today.s appointment|clinician notes"),
+        ("two_week_review", r"last fourteen days|last 14 days|past 14 days|two[- ]week review|last two weeks"),
+        ("delta_engine", r"delta engine|review candidate|candidate change|reconcile|against the prior note"),
+        ("care_situation_change", r"compare these two|compare.*yesterday|what changed|situation change"),
+        ("uncertainty_contradictions", r"contradict|conflict(?:ing)? notes|two notes conflict|ambiguous date"),
+        ("evidence_provenance", r"provenance|source and certainty|label the source|source of this claim"),
+        ("returning_caregiver", r"returning caregiver|returning to caregiving|returning after"),
+        ("professional_summary", r"professional-facing summary|professional summary"),
+        ("appointment", r"prepare questions for.*appointment|appointment preparation"),
+        ("handoff", r"\\bhandoff\\b|hand-off"),
+        ("open_loops", r"unresolved question|open loop|follow-up|need to confirm"),
+        ("decision_outcome", r"decision and outcome|decision from its outcome|decision.*outcome"),
+        ("reminders_notifications", r"\\breminder\\b|\\bnotification delivery\\b|reminder.*delivered"),
+        ("care_coordination", r"care coordination|caregiver.*available|roles or assignments|responsibilities.*care"),
+        ("companion", r"feel overwhelmed|respond supportively|need emotional support|talk to someone"),
+        ("caregiver_feedback", r"wrong date|earlier entry|correct an existing care entry|caregiver feedback"),
+        ("sharing_export", r"shareable summary|\\bexport\\b|do not say it has been sent"),
+        ("roles_access", r"professional access|role or permission|who can access|access permissions"),
+        ("account_recovery", r"cannot sign in|can.t sign in|account recovery|recover my account|reset my password"),
+        ("settings_security", r"multi-factor|two-factor|\\bmfa\\b|security settings|privacy settings"),
+        ("record_lifecycle", r"\\barchiv(?:e|ed|ing)\\b|restore the record|delete the record|pin the record"),
+        ("offline_sync", r"\\bsync(?:ed|hronized| status)?\\b|offline changes"),
+        ("ai_reliability", r"assistant request returned an error|inference failed|qwen availability|request failed"),
+        ("audit_review", r"audit trail|audit records|review candidate status|audit review"),
+        ("medication_day", r"medication was taken|medicine was taken|medication-day|organize this medication note"),
+        ("care_history_search", r"search the available care history|search.*history|find.*in.*history|history search"),
+        ("living_care_record", r"summarize.*care record|living care record summary|available care record"),
+        ("document", r"document excerpt|exact sentence from a document|\\bdocument\\b"),
+        ("add_record", r"add a record|add record|proposed record entry|draft the correction"),
+        ("daily_capture", r"today.s caregiver observation|daily capture|organize today.s observation|caregiver note"),
+    )
+    for workflow, pattern in rules:
+        if re.search(pattern, text):
+            return workflow
+    return None
+
+
 async def _classify_task(task_text: str, context_text: str) -> str:
+    hinted = _strong_workflow_hint(task_text, context_text)
+    if hinted:
+        return hinted
     choices = ", ".join(ENABLED_WORKFLOWS)
+    descriptions = {
+        "daily_capture": "structure today's newly reported observation",
+        "add_record": "draft a new record entry or correction, without saving it",
+        "document": "explain or extract text from an uploaded document",
+        "living_care_record": "summarize the current longitudinal care record",
+        "care_history_search": "search existing recorded history for an event",
+        "care_situation_change": "compare current and prior observations",
+        "delta_engine": "reconcile candidate additions or changes against prior evidence",
+        "evidence_provenance": "label source and certainty of claims",
+        "uncertainty_contradictions": "surface conflicting or ambiguous statements",
+        "returning_caregiver": "orient a returning caregiver from existing records",
+        "appointment": "prepare for an upcoming appointment",
+        "after_appointment": "organize notes after an appointment",
+        "handoff": "draft a care handoff",
+        "professional_summary": "prepare a professional-facing summary",
+        "open_loops": "identify explicitly unresolved questions or follow-ups",
+        "two_week_review": "review recorded events from the last fourteen days",
+        "decision_outcome": "separate a reported decision from its reported outcome",
+        "medication_day": "organize a caregiver-reported medication observation",
+        "reminders_notifications": "check or interpret reminder and notification records",
+        "care_coordination": "organize caregiver availability and responsibilities",
+        "companion": "respond to an emotional-support or everyday conversational request",
+        "caregiver_feedback": "capture feedback that an existing entry is wrong",
+        "sharing_export": "prepare a summary for caregiver-reviewed sharing or export",
+        "roles_access": "explain roles or access based on authoritative records",
+        "account_recovery": "help with sign-in or account recovery",
+        "settings_security": "interpret security and privacy settings",
+        "record_lifecycle": "explain pinning, archiving, restoring or deleting records",
+        "offline_sync": "interpret offline changes and confirmed synchronization",
+        "ai_reliability": "explain an assistant availability or request failure",
+        "audit_review": "summarize audit entries and review-candidate status",
+    }
     prompt = (
-        "Classify the caregiver's request into exactly one enabled SolenOS workflow ID. "
-        "Community is disabled and is not an option. Do not answer the caregiver. "
-        "Return only a JSON object with one key workflow and a value copied exactly from this list: "
+        "Classify the request into exactly one enabled SolenOS workflow. Community is disabled. "
+        "Do not answer the caregiver. Select the best match using these meanings: "
+        + json.dumps(descriptions, ensure_ascii=False)
+        + ". Return JSON with exactly one key, workflow, whose value is one of: "
         + choices
     )
+    schema = {
+        "type": "object",
+        "properties": {"workflow": {"type": "string", "enum": list(ENABLED_WORKFLOWS)}},
+        "required": ["workflow"],
+        "additionalProperties": False,
+    }
     raw = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt},
          {"role": "user", "content": json.dumps({"request": task_text[:1800], "screen_context": context_text[:3000]})}],
+        response_format=schema,
         options={"temperature": 0, "num_predict": 48},
     )
     try:
@@ -52,7 +141,6 @@ async def _classify_task(task_text: str, context_text: str) -> str:
     except (json.JSONDecodeError, AttributeError):
         value = None
     if value not in ENABLED_WORKFLOWS:
-        # Do not guess or silently choose a workflow if model routing is malformed.
         raise ValueError("workflow_classification_invalid")
     return value
 
