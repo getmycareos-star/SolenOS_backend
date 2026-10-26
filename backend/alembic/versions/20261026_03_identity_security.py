@@ -126,6 +126,7 @@ def upgrade():
         sa.Column("verified_at", dt, nullable=True),
         sa.Column("expires_at", dt, nullable=True),
         sa.Column("created_at", dt, nullable=False, server_default=NOW),
+        sa.UniqueConstraint("device_id", name="uq_device_trust_record_device"),
     ], [("ix_dtr_device_id", ["device_id"], False)])
     _create(bind, "device_verification_challenges", [
         sa.Column("device_id", s(36), _fk("fk_dvc_device", "caregiver_devices.id"), nullable=False),
