@@ -54,6 +54,16 @@ def upgrade():
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("account_id", "code_hash", name="uq_account_mfa_recovery_code"),
         )
+    if not inspector.has_table("account_recovery_codes"):
+        op.create_table(
+            "account_recovery_codes",
+            sa.Column("id", sa.String(32), primary_key=True),
+            sa.Column("account_id", sa.String(), sa.ForeignKey("caregiver_accounts.id", ondelete="CASCADE"), nullable=False),
+            sa.Column("code_hash", sa.String(64), nullable=False),
+            sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.UniqueConstraint("account_id", "code_hash", name="uq_account_recovery_code"),
+        )
     if not inspector.has_table("account_security_requests"):
         op.create_table(
             "account_security_requests",
@@ -90,7 +100,7 @@ def upgrade():
 def downgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
-    for table in ("account_security_requests", "account_login_attempts", "account_mfa_recovery_codes", "account_mfa_secrets", "account_security_tokens"):
+    for table in ("account_security_requests", "account_login_attempts", "account_recovery_codes", "account_mfa_recovery_codes", "account_mfa_secrets", "account_security_tokens"):
         if inspector.has_table(table):
             op.drop_table(table)
     columns = {column["name"] for column in inspect(bind).get_columns("caregiver_accounts")}
