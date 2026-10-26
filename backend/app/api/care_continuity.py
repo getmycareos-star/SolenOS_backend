@@ -94,6 +94,51 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
 
+    # Every explicit evidence reference must resolve within this care record.
+    evidence_ids = payload.get("evidence_ids") or []
+    if not isinstance(evidence_ids, list):
+        raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
+    if evidence_ids:
+        evidence = _table(db, "evidence")
+        found = db.execute(
+            select(evidence.c.id).where(
+                evidence.c.person_id == person_id, evidence.c.id.in_(evidence_ids)
+            )
+        ).scalars().all()
+        if set(map(str, found)) != set(map(str, evidence_ids)):
+            raise HTTPException(status_code=404, detail="One or more evidence references are outside this care record")
+
+    typed_tables = {
+        "care_fact": "care_facts", "fact": "care_facts",
+        "care_decision": "care_decisions", "decision": "care_decisions",
+        "care_event": "care_events", "event": "care_events",
+        "evidence": "evidence", "change": "changes", "situation": "situations",
+        "open_question": "open_questions", "information_gap": "information_gaps",
+        "delta_item": "care_delta_items", "integrity_finding": "care_integrity_findings",
+    }
+    links = []
+    if resource in ("follow-up-links", "relationships"):
+        links.extend([
+            (payload.get("source_type"), payload.get("source_id"), "source_id"),
+            (payload.get("target_type"), payload.get("target_id"), "target_id"),
+        ])
+    elif resource in ("review-decisions", "provenance"):
+        links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
+        if resource == "provenance" and payload.get("source_id"):
+            links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    elif resource == "timeline":
+        links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    for type_name, target_id, field_name in links:
+        table_name = typed_tables.get(str(type_name or "").lower())
+        if table_name is None or not target_id:
+            continue
+        linked = _table(db, table_name)
+        row = db.execute(
+            select(linked.c.id).where(linked.c.id == target_id, linked.c.person_id == person_id)
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"{field_name} was not found in this care record")
+
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
