@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_account import CaregiverAccount
+from app.models.identity_security import LoginAttemptLimit
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
