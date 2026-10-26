@@ -41,7 +41,7 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
     the hints prevent the 0.5B classifier from confusing corrections, summaries,
     access-state questions, and other high-impact workflows.
     """
-    text = f"{task_text}\\n{context_text}".casefold()
+    text = f"{task_text}\n{context_text}".casefold()
     rules = (
         ("after_appointment", r"after[- ]appointment|after the appointment|after today.s appointment|clinician notes"),
         ("two_week_review", r"last fourteen days|last 14 days|past 14 days|two[- ]week review|last two weeks"),
@@ -52,25 +52,25 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("returning_caregiver", r"returning caregiver|returning to caregiving|returning after"),
         ("professional_summary", r"professional-facing summary|professional summary"),
         ("appointment", r"prepare questions for.*appointment|appointment preparation"),
-        ("handoff", r"\\bhandoff\\b|hand-off"),
+        ("handoff", r"\bhandoff\b|hand-off"),
         ("open_loops", r"unresolved question|open loop|follow-up|need to confirm"),
         ("decision_outcome", r"decision and outcome|decision from its outcome|decision.*outcome"),
-        ("reminders_notifications", r"\\breminder\\b|\\bnotification delivery\\b|reminder.*delivered"),
+        ("reminders_notifications", r"\breminder\b|\bnotification delivery\b|reminder.*delivered"),
         ("care_coordination", r"care coordination|caregiver.*available|roles or assignments|responsibilities.*care"),
         ("companion", r"feel overwhelmed|respond supportively|need emotional support|talk to someone"),
         ("caregiver_feedback", r"wrong date|earlier entry|caregiver feedback|report that an entry is wrong"),
-        ("sharing_export", r"shareable summary|\\bexport\\b|do not say it has been sent"),
+        ("sharing_export", r"shareable summary|\bexport\b|do not say it has been sent"),
         ("roles_access", r"professional access|role or permission|who can access|access permissions"),
         ("account_recovery", r"cannot sign in|can.t sign in|account recovery|recover my account|reset my password"),
-        ("settings_security", r"multi-factor|two-factor|\\bmfa\\b|security settings|privacy settings"),
-        ("record_lifecycle", r"\\barchiv(?:e|ed|ing)\\b|restore the record|delete the record|pin the record"),
-        ("offline_sync", r"\\bsync(?:ed|hronized| status)?\\b|offline changes"),
+        ("settings_security", r"multi-factor|two-factor|\bmfa\b|security settings|privacy settings"),
+        ("record_lifecycle", r"\barchiv(?:e|ed|ing)\b|restore the record|delete the record|pin the record"),
+        ("offline_sync", r"\bsync(?:ed|hronized| status)?\b|offline changes"),
         ("ai_reliability", r"assistant request returned an error|inference failed|qwen availability|request failed"),
         ("audit_review", r"audit trail|audit records|review candidate status|audit review"),
         ("medication_day", r"medication was taken|medicine was taken|medication-day|organize this medication note"),
         ("care_history_search", r"search the available care history|search.*history|find.*in.*history|history search"),
         ("living_care_record", r"summarize.*care record|living care record summary|available care record"),
-        ("document", r"document excerpt|exact sentence from a document|\\bdocument\\b"),
+        ("document", r"document excerpt|exact sentence from a document|\bdocument\b"),
         ("add_record", r"add a record|add record|proposed record entry|draft the correction"),
         ("daily_capture", r"today.s caregiver observation|daily capture|organize today.s observation|caregiver note"),
     )
