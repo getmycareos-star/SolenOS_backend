@@ -352,6 +352,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         tags=["daily_capture"],
     )
     db.add(event)
+    db.flush()
+    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
+    enqueue_qwen_event_analysis(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        source_type="daily_capture",
+        source_id=event.id,
+        summary=f"{title}. {source_text}",
+        context_text="A daily capture has been persisted. A quick extraction may already exist; this background pass should focus on reconciliation, missing context and open questions. Do not duplicate candidate facts or write to the LCR.",
+    )
     db.commit()
     db.refresh(event)
     _log_and_learn(
@@ -367,7 +378,6 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     # Analyze the saved capture through the shared Railway-local Qwen gateway.
     # This response is a review aid only; candidate output is never written as
     # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
-    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
     qwen_status = "unavailable"
     qwen_candidates = None
     try:
