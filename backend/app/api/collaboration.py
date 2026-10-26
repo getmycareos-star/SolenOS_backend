@@ -78,7 +78,7 @@ class QwenAssistRequest(BaseModel):
         "reminders_notifications", "care_coordination", "companion",
         "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
         "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-        "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_coverage_gap", "care_coverage_gap",
+        "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
     ]
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
@@ -675,7 +675,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "delta_engine", "evidence_provenance", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
-        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness",
+        "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
@@ -696,7 +696,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     appointment_workflows = {
         "living_care_record", "care_history_search", "care_situation_change",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
-        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through", "emergency_readiness",
+        "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap",
     }
     if payload.workflow in appointment_workflows:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
