@@ -107,3 +107,9 @@ def test_rejects_changed_source_attribution():
     source = "Caregiver observed she seemed tired this morning."
     reply = "She reported feeling tired this morning."
     assert _contains_unsupported_operational_claim(reply, source, []) is True
+
+def test_allows_explicit_uncertainty_about_unverified_sync_state():
+    reply = "I cannot verify whether the record is synced because no server receipt was supplied."
+    assert _contains_unsupported_operational_claim(
+        reply, "No synchronization status or server receipt is supplied.", []
+    ) is False
