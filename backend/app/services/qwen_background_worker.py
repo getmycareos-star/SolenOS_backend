@@ -70,7 +70,6 @@ def _strong_workflow_hint(task_text: str, context_text: str = "") -> str | None:
         ("medication_day", r"medication was taken|medicine was taken|medication-day|organize this medication note"),
         ("care_history_search", r"search the available care history|search.*history|find.*in.*history|history search"),
         ("living_care_record", r"summarize.*care record|living care record summary|available care record"),
-        ("caregiver_feedback", r"wrong date|earlier entry|caregiver feedback|report that an entry is wrong"),
         ("add_record", r"add a record|add record|proposed record entry|draft the correction"),
         ("document", r"document excerpt|exact sentence from a document|\bdocument\b"),
         ("daily_capture", r"today.s caregiver observation|daily capture|organize today.s observation|caregiver note"),
