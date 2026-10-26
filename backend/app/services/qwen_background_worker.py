@@ -96,7 +96,7 @@ def _requests_disabled_community(task_text: str) -> bool:
 async def _classify_task(task_text: str, context_text: str) -> str:
     if _requests_disabled_community(task_text):
         raise ValueError("community_disabled")
-    routed = _route_from_text(task_text, context_text)
+    routed = _route_from_text(task_text)
     if routed is not None:
         return routed
 
