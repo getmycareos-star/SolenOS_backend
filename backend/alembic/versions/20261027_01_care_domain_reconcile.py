@@ -78,8 +78,12 @@ def upgrade():
     for table in Base.metadata.sorted_tables:
         if table.name not in existing_tables:
             continue
+        actual_columns = {column["name"] for column in inspector.get_columns(table.name)}
         for index in table.indexes:
-            index.create(bind=bind, checkfirst=True)
+            # Legacy tables may intentionally have a reduced schema. Never try
+            # to create an index that references a column absent from that table.
+            if set(index.columns.keys()).issubset(actual_columns):
+                index.create(bind=bind, checkfirst=True)
 
 
 def downgrade():
