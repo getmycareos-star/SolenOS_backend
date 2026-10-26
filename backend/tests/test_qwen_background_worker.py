@@ -63,6 +63,7 @@ def test_background_classifier_rejects_malformed_output(monkeypatch):
     ("offline_sync", "Check whether my offline changes have synced."),
     ("ai_reliability", "Explain the current Qwen availability or retry state."),
     ("audit_review", "Summarize audit and review candidates."),
+    ("care_transition", "Help me reconcile the hospital discharge summary with the current care record."),
 ])
 def test_clear_requests_route_to_the_correct_internal_workflow(expected, task, monkeypatch):
     def should_not_call_model(*args, **kwargs):
