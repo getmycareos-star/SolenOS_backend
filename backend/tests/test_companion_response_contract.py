@@ -157,7 +157,7 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
             headers={"Authorization": f"Bearer {token}"},
             json={"person_id": person_id, "text": "Can you help me understand the care history?"},
         )
-        assert response.status_code == 500
+        assert response.status_code == 503
         db = TestingSessionLocal()
         try:
             assert db.query(ConversationMessage).count() == 0
