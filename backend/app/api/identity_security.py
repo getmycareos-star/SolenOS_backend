@@ -141,7 +141,10 @@ def request_account_recovery(payload: RecoveryRequestInput, request: Request, db
     if limit is None:
         limit = LoginAttemptLimit(key_hash=rate_key, attempts=0, window_started_at=now, updated_at=now)
         db.add(limit)
-    if not limit.window_started_at or (now - limit.window_started_at).total_seconds() > 3600:
+    window_started = limit.window_started_at if limit else None
+    if window_started and window_started.tzinfo is None:
+        window_started = window_started.replace(tzinfo=timezone.utc)
+    if not window_started or (now - window_started).total_seconds() > 3600:
         limit.window_started_at = now
         limit.attempts = 0
         limit.blocked_until = None
