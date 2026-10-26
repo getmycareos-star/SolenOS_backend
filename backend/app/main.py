@@ -33,9 +33,27 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
+from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
+from app.services.qwen_background_worker import qwen_worker_loop
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
+
+
+@app.on_event("startup")
+async def start_qwen_background_worker():
+    app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
+
+
+@app.on_event("shutdown")
+async def stop_qwen_background_worker():
+    task = getattr(app.state, "qwen_worker_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 # CORS is configurable per deployment. The Netlify production site is the
 # default; additional origins must be explicitly listed in CORS_ORIGINS.
