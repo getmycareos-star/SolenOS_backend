@@ -6,6 +6,7 @@ then delegates to the same authenticated, grounded assistant implementation.
 from __future__ import annotations
 
 import asyncio
+import re
 import json
 import logging
 from datetime import datetime, timedelta, timezone
