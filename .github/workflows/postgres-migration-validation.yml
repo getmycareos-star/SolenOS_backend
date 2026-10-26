@@ -88,7 +88,7 @@ jobs:
           "
           python -m alembic upgrade head
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261026_03_identity_security"
-          for table in care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events; do
+          for table in care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             test "$found" = "$table"
           done
