@@ -515,6 +515,20 @@ def _contains_unsupported_operational_claim(
     for claim_pattern, context_pattern in state_claims:
         if re.search(claim_pattern, text) and not re.search(context_pattern, context):
             return True
+    # Do not invent a person's uncertainty, intentions, feelings, or future events.
+    if re.search(r"\b(?:she|he|they|the caregiver|the person)\s+(?:is|was)\s+(?:unsure|worried|afraid|anxious|confused|upset)\b", text) and not re.search(
+        r"\b(?:unsure|worried|afraid|anxious|confused|upset)\b", source
+    ):
+        return True
+    future_time = r"\b(?:tonight|tomorrow|later today|this evening|next week|next month)\b"
+    if re.search(future_time, text) and not re.search(future_time, source):
+        return True
+    # Preserve who supplied information; a caregiver observing a person is not
+    # equivalent to the person reporting their own symptoms.
+    if re.search(r"\bcaregiver\s+(?:reports?|reported|says?|said|observed|noticed)\b", source) and re.search(
+        r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", text
+    ) and not re.search(r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", source):
+        return True
     care_terms = r"\b(?:medication|medicine|prescription|dosage|dose)\b"
     if re.search(care_terms, text) and not re.search(care_terms, source):
         return True
@@ -825,7 +839,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
-        "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        "Keep the response to 35 words or fewer. Do not invent the person's feelings, uncertainty, intentions, future plans, or events. "
+        "Distinguish \"the source did not say\" from \"the person is unsure\". Preserve exactly who reported or observed each fact. "
+        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
@@ -856,7 +872,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
                         "unreported clinical outcome into a fact. Do not infer diagnosis, treatment response, test results, "
                         "medication status, symptom change, appointments, tasks, owners or deadlines. If a detail is absent, "
-                        "say it was not supplied or ask for clarification. Remove internal jargon and repetition. "
+                        "say it was not supplied or ask for clarification. Do not invent feelings, intentions, uncertainty, future events, "
+                        "or change who reported a fact. Remove internal jargon and repetition. "
                         "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
                         "Return only the revised response, not an explanation."
                     ),
