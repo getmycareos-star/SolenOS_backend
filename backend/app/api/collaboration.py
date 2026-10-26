@@ -24,7 +24,7 @@ from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.improvement_training_example import ImprovementTrainingExample
 
 router = APIRouter(tags=["community and companion"])
@@ -644,11 +644,19 @@ async def get_qwen_background_job(
     ).first()
     if job is None:
         raise HTTPException(status_code=404, detail="Background request not found")
+    output = db.query(QwenModelOutput).filter(
+        QwenModelOutput.job_id == job.id,
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+    ).first() if job.status == "completed" else None
     return {
         "job_id": job.id,
         "status": job.status,
         "workflow": job.workflow,
-        "reply": job.result_text if job.status == "completed" else None,
+        "reply": output.output_text if output else None,
+        "output_id": output.id if output else None,
+        "output_review_status": output.review_status if output else None,
+        "written_to_lcr": bool(output.written_to_lcr) if output else False,
         "error": "We couldn’t complete that request. Please try again." if job.status == "failed" else None,
         "source_event_ids": json.loads(job.source_event_ids_json or "[]") if job.status == "completed" else [],
         "source_evidence_ids": json.loads(job.source_evidence_ids_json or "[]") if job.status == "completed" else [],
