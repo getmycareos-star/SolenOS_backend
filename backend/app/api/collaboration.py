@@ -1094,7 +1094,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ):
             raise HTTPException(
                 status_code=503,
-                detail="Companion could not produce a sufficiently grounded response. No reply was saved; please clarify or retry.",
+                detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
             )
         reply = reply.strip()
         verdict = "passed"
