@@ -411,6 +411,27 @@ jobs:
             exit 1
           fi
 
+          echo "QWEN_E2E: Companion resolves a follow-up reference from conversation history"
+          companion_session_id=$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["session_id"])' /tmp/qwen-companion-context.json)
+          companion_followup_status=""
+          for attempt in $(seq 1 3); do
+            companion_followup_status=$(curl --silent --show-error --output /tmp/qwen-companion-followup.json --write-out '%{http_code}' --max-time 90 \
+              -H "$daily_auth_header" -H "Content-Type: application/json" \
+              -d "{\"person_id\":\"$daily_person_id\",\"session_id\":\"$companion_session_id\",\"text\":\"What was that observation about?\"}" \
+              http://127.0.0.1:8080/api/v1/conversation/message || true)
+            if [ "$companion_followup_status" = "200" ]; then
+              break
+            fi
+            echo "Companion follow-up inference unavailable (HTTP $companion_followup_status, attempt $attempt/3)." >&2
+            cat /tmp/qwen-companion-followup.json >&2 || true
+            sleep 2
+          done
+          if [ "$companion_followup_status" != "200" ]; then
+            echo "Actual Qwen Companion failed the follow-up conversation contract." >&2
+            exit 1
+          fi
+          python -c 'import json,re,sys; d=json.load(open(sys.argv[1])); reply=d.get("reply",""); assert d.get("ai_generated") is True, d; assert d.get("guard_verdict") == "passed", d; assert d.get("written_to_lcr") is False, d; assert sys.argv[2] in d.get("source_event_ids", []), d; assert re.search(r"(?i)breakfast|intake", reply), reply; assert len(reply.split()) <= 220, reply' /tmp/qwen-companion-followup.json "$daily_event_id"
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
