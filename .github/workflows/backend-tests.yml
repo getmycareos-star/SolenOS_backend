@@ -166,6 +166,12 @@ jobs:
                   missing_columns = required_columns - columns
                   if missing_columns:
                       raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+              cur.execute(
+                  "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='notification_read_receipts' AND indexname='uq_notification_read_receipt_reader'"
+              )
+              receipt_index = cur.fetchone()
+              if not receipt_index or "CREATE UNIQUE INDEX" not in receipt_index[0].upper():
+                  raise SystemExit("notification read receipt uniqueness index is missing")
           conn.close()
           print(f"PostgreSQL verified {len(required_tables)} privacy/sharing/audit/notification/reminder/handoff tables and common columns.")
           PY
