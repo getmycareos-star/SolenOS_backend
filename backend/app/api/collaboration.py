@@ -1023,6 +1023,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
         + ("\n".join(context_lines) if context_lines else "No matching recorded context was found.")
     )
+    # The authorized record context is now materialized as plain strings.
+    # End the read transaction before waiting on local model inference; otherwise
+    # each slow Qwen call can pin a PostgreSQL connection for the full inference
+    # duration and starve caregiver requests when several jobs overlap.
+    db.rollback()
     reply = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
@@ -1120,6 +1125,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
+        # Keep the conversation container durable even if model inference fails.
+        # This commit contains no care-record facts or conversation messages.
+        db.commit()
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
@@ -1382,6 +1390,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
                 "Generate the wording for this exact message; do not reuse a stored response."
             )
+        # All ORM data needed for this prompt has been copied into JSON/plain
+        # strings. Release the read transaction before slow Qwen inference so
+        # concurrent Companion requests cannot pin the finite DB pool while
+        # waiting for the local model. Conversation persistence starts afterward.
+        db.rollback()
         base, model = _ollama_url()
         try:
             reply = await asyncio.to_thread(
