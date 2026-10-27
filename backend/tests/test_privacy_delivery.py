@@ -694,3 +694,15 @@ def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
     refreshed = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
     assert refreshed.status_code == 200, refreshed.text
     assert refreshed.json()["items"][0]["status"] == "revoked"
+
+    db = TestSessionLocal()
+    try:
+        revoked_notice = db.query(CareNotification).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=recipient_id,
+            source_event_id=handoff_id,
+            title="Care handoff access revoked",
+        ).one()
+        assert "no longer available" in revoked_notice.body.lower()
+    finally:
+        db.close()
