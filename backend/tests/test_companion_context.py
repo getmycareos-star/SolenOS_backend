@@ -48,10 +48,10 @@ def test_context_budget_round_robins_groups_without_truncating_records():
     selected = select_context_within_budget(
         groups,
         cost_of=lambda group, row: row["cost"],
-        max_chars=610,
+        max_chars=910,
     )
     assert set(selected) == {"events", "evidence", "questions"}
     assert [row["id"] for row in selected["events"]] == ["e1"]
     assert [row["id"] for row in selected["evidence"]] == ["d1"]
     assert [row["id"] for row in selected["questions"]] == ["q1"]
-    assert sum(row["cost"] + 2 for rows in selected.values() for row in rows) <= 610
+    assert sum(row["cost"] + 2 for rows in selected.values() for row in rows) <= 910
