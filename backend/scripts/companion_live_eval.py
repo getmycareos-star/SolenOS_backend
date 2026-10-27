@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -41,10 +42,12 @@ def post_json(url: str, token: str, payload: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--base-url", required=True)
-    parser.add_argument("--token", required=True)
-    parser.add_argument("--person-id", required=True)
+    parser.add_argument("--base-url", default=os.environ.get("COMPANION_BASE_URL"))
+    parser.add_argument("--token", default=os.environ.get("COMPANION_TOKEN"))
+    parser.add_argument("--person-id", default=os.environ.get("COMPANION_PERSON_ID"))
     args = parser.parse_args()
+    if not args.base_url or not args.token or not args.person_id:
+        parser.error("provide --base-url, --token, --person-id or their COMPANION_* environment variables")
     endpoint = args.base_url.rstrip("/") + "/api/v1/conversation/message"
 
     first = post_json(endpoint, args.token, {
