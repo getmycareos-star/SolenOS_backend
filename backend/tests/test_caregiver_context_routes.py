@@ -1,5 +1,5 @@
 from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint, func
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
@@ -456,6 +456,13 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     )
     assert record_response.status_code == 201, record_response.text
     record_id = record_response.json()["id"]
+    db = TestingSessionLocal()
+    record_table = Base.metadata.tables["living_care_records"]
+    persisted_record = db.execute(
+        select(record_table.c.id, record_table.c.person_id).where(record_table.c.id == record_id)
+    ).first()
+    print("LCR snapshot debug", record_id, first.get("person"), persisted_record)
+    db.close()
 
     version_response = client.post(
         "/api/v1/care-continuity/record-versions",
