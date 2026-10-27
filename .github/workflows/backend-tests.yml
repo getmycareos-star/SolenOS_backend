@@ -303,6 +303,61 @@ jobs:
             exit 1
           fi
 
+          echo "QWEN_E2E: dedicated Daily Care history retrieval and real Qwen answer"
+          # Keep the dedicated Daily Care test record separate from the empty-record
+          # Companion and document-isolation checks later in this job.
+          daily_session=$(curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d '{"caregiver_name":"CI Daily Care caregiver"}' \
+            http://127.0.0.1:8080/api/v1/sessions/anonymous)
+          daily_token=$(python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<< "$daily_session")
+          daily_person_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["person"]["id"])' <<< "$daily_session")
+          daily_caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$daily_session")
+          daily_auth_header="Authorization: Bearer $daily_token"
+          daily_event_payload=$(python -c 'import json,sys; print(json.dumps({
+            "person_id":sys.argv[1],
+            "event_type":"observation",
+            "status":"recorded",
+            "occurred_at":"2026-10-27T08:00:00Z",
+            "title":"CI Daily Care breakfast observation",
+            "description":"Caregiver reports that breakfast intake was lower than usual today. Cause is unknown.",
+            "created_by_caregiver_id":sys.argv[2],
+            "time_provenance":"caregiver_reported",
+            "tags":["daily_capture","ci_qwen_e2e"]
+          }))' "$daily_person_id" "$daily_caregiver_id")
+          daily_event=$(curl --fail --silent --show-error \
+            -H "$daily_auth_header" -H "Content-Type: application/json" \
+            -d "$daily_event_payload" \
+            http://127.0.0.1:8080/api/v1/events)
+          daily_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$daily_event")
+          daily_question=$(python -c 'import json,sys; print(json.dumps({
+            "question":"What was recorded about breakfast intake? Cite the source ID and date, and say what remains unknown.",
+            "history_query":"breakfast",
+            "prepare_lcr_proposals":False
+          }))')
+          daily_answer=""
+          daily_ready=0
+          for attempt in $(seq 1 5); do
+            daily_status=$(curl --silent --show-error --output /tmp/qwen-daily-care.json --write-out '%{http_code}' --max-time 90 \
+              -H "$daily_auth_header" -H "Content-Type: application/json" \
+              -d "$daily_question" \
+              http://127.0.0.1:8080/api/v1/daily-care/intelligence/ask || true)
+            if [ "$daily_status" = "200" ]; then
+              daily_answer=$(cat /tmp/qwen-daily-care.json)
+              if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["status"] == "completed", d; assert isinstance(d["answer"],str) and d["answer"].strip(), d; assert d["written_to_lcr"] is False, d; assert d["proposal_analysis_id"] is None, d; assert d["history_scope"]["records_sent_to_model"] >= 1, d; assert any(s["source_id"] == sys.argv[2] for s in d["source_records"]), d' "$daily_answer" "$daily_event_id" 2>/dev/null; then
+                daily_ready=1
+                break
+              fi
+            fi
+            echo "Daily Care Qwen failed real-inference contract check (HTTP $daily_status, attempt $attempt/5)." >&2
+            cat /tmp/qwen-daily-care.json >&2 || true
+            sleep 2
+          done
+          if [ "$daily_ready" -ne 1 ]; then
+            echo "Actual Qwen inference failed the dedicated Daily Care retrieval contract." >&2
+            exit 1
+          fi
+
           echo "QWEN_E2E: Companion greeting"
           # The status endpoint may report the model inventory before the runner is
           # ready. Probe actual authenticated inference with retries instead.

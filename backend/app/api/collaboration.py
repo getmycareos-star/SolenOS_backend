@@ -24,6 +24,7 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
+from app.models.care_continuity import CareAssertion
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
@@ -1049,6 +1050,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
     source_appointment_ids: list[str] = []
+    source_assertion_ids: list[str] = []
 
     if emergency:
         # A fixed emergency instruction is a safety control, not a conversational
@@ -1088,6 +1090,38 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }, ensure_ascii=False)
             )
         source_context.extend(event_context)
+
+        # Daily Care Qwen assertions enter Companion only after explicit caregiver
+        # approval. Pending proposals and model-only interpretations are excluded.
+        approved_assertions = (
+            db.query(CareAssertion)
+            .filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.assertion_status == "caregiver_reviewed",
+            )
+            .order_by(CareAssertion.recorded_at.desc())
+            .limit(12)
+            .all()
+        )
+        assertion_context: list[str] = []
+        for assertion in approved_assertions:
+            source_assertion_ids.append(str(assertion.id))
+            assertion_context.append(
+                "Caregiver-approved LCR assertion (source-attributed): "
+                + json.dumps({
+                    "assertion_id": str(assertion.id),
+                    "field": assertion.field,
+                    "value": assertion.asserted_value,
+                    "assertion_kind": assertion.assertion_kind,
+                    "source_label": assertion.source_label,
+                    "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
+                    "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
+                    "source_text": assertion.source_text or "",
+                    "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                    "status": assertion.assertion_status,
+                }, ensure_ascii=False)
+            )
+        source_context.extend(assertion_context)
 
         appointments = (
             db.query(Appointment)
@@ -1191,6 +1225,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "care_recipient_name": person.name,
             "caregiver_relationship": caregiver.relationship,
             "lcr_events": event_context,
+            "caregiver_approved_lcr_assertions": assertion_context,
             "appointments": appointment_context,
             "caregiver_provided_evidence": evidence_context,
             "conversation_is_not_care_evidence": True,
@@ -1350,6 +1385,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_event_ids": source_event_ids,
         "source_evidence_ids": source_evidence_ids,
         "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",

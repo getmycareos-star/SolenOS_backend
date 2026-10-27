@@ -23,6 +23,7 @@ from app.api.care_continuity import router as care_continuity_router, RESOURCES 
 from app.api.reminders import router as reminders_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
+from app.api.daily_care_intelligence import router as daily_care_intelligence_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -98,6 +99,7 @@ app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
+app.include_router(daily_care_intelligence_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -206,6 +208,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/handoffs")
             or path.startswith("/api/v1/notifications")
             or path.startswith("/api/v1/capture/analyses/")
+            or path.startswith("/api/v1/daily-care/intelligence")
         ):
             # These operations use the bearer session as their record scope.
             # Assistant requests intentionally omit client-selected person IDs;
