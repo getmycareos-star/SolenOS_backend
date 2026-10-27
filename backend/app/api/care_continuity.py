@@ -320,6 +320,9 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
         "decision_outcomes", "care_timeline_entries", "care_follow_up_links",
         "care_review_decisions", "care_provenance_records", "care_uncertainties",
         "care_missing_information", "care_conflicts", "care_action_outcomes",
+        "record_provenance", "record_provenance_links", "care_record_change_sets",
+        "care_record_change_items", "care_corrections", "record_amendments",
+        "record_amendment_items", "care_record_audit_log",
         "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
     )
     tables_payload = {}
