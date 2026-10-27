@@ -52,6 +52,7 @@ from app.core.caregiver_enums import (
     HandoffAcceptanceStatus,
     CaregiverActivityType,
     InformationVisibility,
+    IdentityMatchConfidence,
 )
 
 router = APIRouter()
@@ -141,7 +142,15 @@ def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, so
 
 @router.post("/caregiver-profiles", response_model=CaregiverProfile)
 def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, db: Session = Depends(get_db)):
-    _assert_person_scope(request, profile.person_id)
+    person_id, _session_caregiver_id = _assert_person_scope(request, profile.person_id)
+    # Client-supplied names/emails do not verify identity or primary-caregiver status.
+    profile = CaregiverProfileCreate(**{
+        **profile.model_dump(),
+        "person_id": person_id,
+        "identity_match_confidence": IdentityMatchConfidence.UNKNOWN,
+        "is_primary_designated": False,
+        "primary_designation_source": None,
+    })
     service = CaregiverIntelligenceService(db)
     db_profile = service.create_caregiver_profile(profile)
     _log_and_learn(
