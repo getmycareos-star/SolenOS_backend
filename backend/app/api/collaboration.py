@@ -1081,7 +1081,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(200)
             .all()
         )
-        event_candidates_considered = len(recent_events)
         recent_events = rank_authorized_context(
             recent_events,
             user_text,
@@ -1097,7 +1096,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        appointment_candidates_considered = len(appointments)
         appointments = rank_authorized_context(
             appointments,
             user_text,
@@ -1141,7 +1139,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
                 evidence_candidates.append(row)
-        evidence_candidates_considered = len(evidence_candidates)
         evidence_rows = rank_authorized_context(
             evidence_candidates,
             user_text,
@@ -1161,7 +1158,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(120)
             .all()
         )
-        assertion_candidates_considered = len(assertion_candidates)
         assertions = rank_authorized_context(
             assertion_candidates,
             user_text,
@@ -1180,7 +1176,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(80)
             .all()
         )
-        gap_candidates_considered = len(gap_candidates)
         gaps = rank_authorized_context(
             gap_candidates,
             user_text,
@@ -1204,7 +1199,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(80)
             .all()
         )
-        question_candidates_considered = len(question_candidates)
         questions = rank_authorized_context(
             question_candidates,
             user_text,
@@ -1223,7 +1217,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(80)
             .all()
         )
-        contradiction_candidates_considered = len(contradiction_candidates)
         contradictions = rank_authorized_context(
             contradiction_candidates,
             user_text,
@@ -1242,7 +1235,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(80)
             .all()
         )
-        outcome_candidates_considered = len(outcome_candidates)
         outcomes = rank_authorized_context(
             outcome_candidates,
             user_text,
@@ -1345,7 +1337,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         selected_context = select_context_within_budget(
             context_candidates,
             cost_of=lambda group, item: len(render_context_item(group, item)),
-            max_chars=1400,
+            max_chars=1600,
         )
         event_context = [render_context_item("lcr_events", item) for item in selected_context.get("lcr_events", [])]
         appointment_context = [render_context_item("appointments", item) for item in selected_context.get("appointments", [])]
