@@ -603,6 +603,13 @@ def revoke_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
         for recipient in db.query(HandoffRecipient).filter(HandoffRecipient.handoff_id == handoff.id).all():
             recipient.access_status = "revoked"
             recipient.revoked_at = now
+            db.add(CareNotification(
+                id=str(uuid.uuid4()), person_id=person_id, caregiver_id=recipient.recipient_id,
+                title="Care handoff access revoked",
+                body="Access to a shared care summary was revoked. The summary is no longer available.",
+                category="handoff", priority="normal", source_event_id=handoff.id,
+                created_at=now,
+            ))
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.revoke", "allowed")
     db.commit()
     db.refresh(handoff)
