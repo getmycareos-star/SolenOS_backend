@@ -721,6 +721,18 @@ def test_shared_lcr_context_is_bounded_and_person_scoped():
             source_type="caregiver_report",
         )
         db.add_all([event, evidence])
+        db.flush()
+        facts = Base.metadata.tables["care_facts"]
+        db.execute(facts.insert().values(
+            id="lcr-context-fact-one",
+            person_id=first["person"]["id"],
+            subject_type="person",
+            subject_id=first["person"]["id"],
+            fact_type="routine",
+            fact_value="Usually wakes around 7 AM",
+            epistemic_status="reported",
+            created_by_caregiver_id=first["caregiver"]["id"],
+        ))
         db.commit()
     finally:
         db.close()
@@ -736,6 +748,8 @@ def test_shared_lcr_context_is_bounded_and_person_scoped():
     assert body["person_id"] == first["person"]["id"]
     assert body["sources"]["events"]["returned_count"] == 1
     assert body["sources"]["events"]["items"][0]["title"] == "Breakfast was mostly uneaten."
+    assert body["sources"]["facts"]["returned_count"] == 1
+    assert body["sources"]["facts"]["items"][0]["fact_value"] == "Usually wakes around 7 AM"
     assert body["sources"]["evidence"]["returned_count"] == 1
     evidence_row = body["sources"]["evidence"]["items"][0]
     assert evidence_row["source_text"] == "Caregiver observed that breakfast was mostly uneaten."
@@ -750,6 +764,7 @@ def test_shared_lcr_context_is_bounded_and_person_scoped():
     other_body = other.json()
     assert other_body["person_id"] == second["person"]["id"]
     assert other_body["sources"]["events"]["items"] == []
+    assert other_body["sources"]["facts"]["items"] == []
     assert other_body["sources"]["evidence"]["items"] == []
 
     denied = client.get("/api/v1/care-continuity/context")
