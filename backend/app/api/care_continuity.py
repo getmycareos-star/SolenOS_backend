@@ -191,11 +191,39 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         if table_name is None or not target_id:
             continue
         linked = _table(db, table_name)
+        if "person_id" not in linked.c:
+            raise HTTPException(status_code=422, detail=f"{field_name} type is not person-scoped")
         row = db.execute(
             select(linked.c.id).where(linked.c.id == target_id, linked.c.person_id == person_id)
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field_name} was not found in this care record")
+
+    # Validate direct foreign-key-like references against the active person's
+    # rows before inserts. These are logical links where the DB schema cannot
+    # express a polymorphic foreign key.
+    scoped_references = {
+        "record-change-sets": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "record-change-items": (("care_record_change_sets", "change_set_id"), ("record_provenance", "provenance_id")),
+        "record-provenance-links": (("record_provenance", "provenance_id"),),
+        "corrections": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "amendments": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "amendment-items": (("record_amendments", "amendment_id"),),
+        "record-audit": (("living_care_records", "care_record_id"),),
+        "uncertainties": (("living_care_records", "care_record_id"),),
+        "missing-information": (("living_care_records", "care_record_id"),),
+        "conflicts": (("living_care_records", "care_record_id"),),
+    }
+    for table_name, field in scoped_references.get(resource, ()):
+        value = payload.get(field)
+        if value is None:
+            continue
+        linked = _table(db, table_name)
+        row = db.execute(
+            select(linked.c.id).where(linked.c.id == value, linked.c.person_id == person_id)
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
 
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
