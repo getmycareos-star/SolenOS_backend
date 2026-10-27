@@ -233,9 +233,11 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
             continue
         table_name = typed_tables.get(str(type_name or "").lower())
         if table_name is None:
-            if resource in strict_link_resources:
-                raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
-            continue
+            # Polymorphic IDs are security boundaries. Silently skipping an
+            # unknown type lets a caller attach an unverified cross-record ID.
+            # Reject unknown linked types for every resource, not just the
+            # subset that was previously marked strict.
+            raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
         linked = _table(db, table_name)
         if "person_id" not in linked.c:
             raise HTTPException(status_code=422, detail=f"{field_name} type is not person-scoped")
