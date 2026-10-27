@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+import hashlib
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -122,6 +124,30 @@ class HandoffAcknowledge(BaseModel):
         return value.strip()
 
 
+class HandoffSummaryInput(BaseModel):
+    summary_text: str = Field(min_length=1, max_length=20000)
+    source_record_ids: list[str] = Field(min_length=1, max_length=100)
+    caregiver_reviewed: bool
+    prepared_at: datetime | None = None
+
+    @field_validator("summary_text")
+    @classmethod
+    def nonblank_summary(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("summary_text cannot be blank")
+        return value.strip()
+
+    @field_validator("source_record_ids")
+    @classmethod
+    def unique_source_ids(cls, value: list[str]) -> list[str]:
+        cleaned = [item.strip() for item in value]
+        if any(not item for item in cleaned):
+            raise ValueError("source record IDs cannot be blank")
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("source record IDs must be unique")
+        return cleaned
+
+
 def _view(db: Session, handoff: HandoffRecord) -> dict:
     recipients = db.query(HandoffRecipient).filter(
         HandoffRecipient.handoff_id == handoff.id
@@ -233,6 +259,109 @@ def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.read", "allowed")
     db.commit()
     return _view(db, handoff)
+
+
+@router.put("/{handoff_id}/summary")
+def attach_handoff_summary(
+    handoff_id: str, payload: HandoffSummaryInput,
+    request: Request, db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    handoff = db.query(HandoffRecord).filter(
+        HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
+    ).first()
+    if handoff is None or handoff.created_by != caregiver_id:
+        if handoff is not None:
+            _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="not_owner")
+            db.commit()
+        raise HTTPException(status_code=404, detail="Handoff not found")
+    now = datetime.now(timezone.utc)
+    if not _has_required_consent(db, person_id, caregiver_id):
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="required_consent_missing")
+        db.commit()
+        raise HTTPException(status_code=403, detail="Required consent is missing or revoked")
+    if (
+        handoff.handoff_status == "revoked"
+        or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now)
+    ):
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="expired_or_revoked")
+        db.commit()
+        raise HTTPException(status_code=409, detail="This handoff has expired or been revoked")
+    if "lcr_summary" not in (handoff.scope_snapshot or []):
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="summary_outside_scope")
+        db.commit()
+        raise HTTPException(status_code=403, detail="This handoff does not include the LCR summary scope")
+    if not payload.caregiver_reviewed:
+        raise HTTPException(status_code=422, detail="The caregiver must review the summary before attaching it")
+    if handoff.summary_snapshot is not None:
+        raise HTTPException(status_code=409, detail="A summary snapshot is already attached; create a new handoff to replace it")
+
+    snapshot = {
+        "text": payload.summary_text,
+        "source_record_ids": payload.source_record_ids,
+        "prepared_at": payload.prepared_at.isoformat() if payload.prepared_at else None,
+        "stored_at": now.isoformat(),
+        "caregiver_reviewed": True,
+        "review_attestation": "client_declared_not_server_verified",
+        "source_id_validation": "not_server_verified",
+    }
+    canonical = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    snapshot["content_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    handoff.summary_snapshot = snapshot
+    handoff.summary_id = str(uuid.uuid4())
+    _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "allowed")
+    db.commit()
+    return {
+        "handoff_id": handoff.id,
+        "summary_id": handoff.summary_id,
+        "content_sha256": snapshot["content_sha256"],
+        "review_attestation": snapshot["review_attestation"],
+    }
+
+
+@router.get("/{handoff_id}/summary")
+def read_handoff_summary(handoff_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    handoff = db.query(HandoffRecord).filter(
+        HandoffRecord.id == handoff_id, HandoffRecord.person_id == person_id
+    ).first()
+    if handoff is None:
+        raise HTTPException(status_code=404, detail="Handoff not found")
+    is_owner = handoff.created_by == caregiver_id
+    if not is_owner:
+        recipient = db.query(HandoffRecipient).filter(
+            HandoffRecipient.handoff_id == handoff.id,
+            HandoffRecipient.recipient_id == caregiver_id,
+            HandoffRecipient.access_status == "accepted",
+            HandoffRecipient.revoked_at.is_(None),
+        ).first()
+        if (
+            recipient is None
+            or not _has_required_consent(db, person_id, caregiver_id)
+            or not _has_required_consent(db, person_id, handoff.created_by)
+            or handoff.handoff_status == "revoked"
+            or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= datetime.now(timezone.utc))
+        ):
+            _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.read", "denied", reason_code="not_authorized_or_consent_revoked")
+            db.commit()
+            raise HTTPException(status_code=404, detail="Handoff summary not found")
+    if not handoff.summary_snapshot:
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.read", "denied", reason_code="summary_missing")
+        db.commit()
+        raise HTTPException(status_code=404, detail="Handoff summary not found")
+
+    snapshot = dict(handoff.summary_snapshot)
+    expected_hash = snapshot.pop("content_sha256", None)
+    canonical = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    actual_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    if not expected_hash or expected_hash != actual_hash:
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.read", "denied", reason_code="summary_integrity_failure")
+        db.commit()
+        raise HTTPException(status_code=409, detail="Handoff summary integrity check failed")
+    snapshot["content_sha256"] = expected_hash
+    _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.read", "allowed")
+    db.commit()
+    return {"handoff_id": handoff.id, "summary_id": handoff.summary_id, "summary": snapshot}
 
 
 @router.post("/{handoff_id}/accept")
