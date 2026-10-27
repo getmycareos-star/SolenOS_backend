@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 
 from app.core.database import SessionLocal
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.services.qwen_gateway import qwen_chat
 
 logger = logging.getLogger(__name__)
@@ -164,10 +164,12 @@ async def process_one_qwen_job() -> bool:
         )
         if job is None:
             return False
+        previous_status = job.status
         job.status = "processing"
         job.locked_at = now
         job.attempt_count = int(job.attempt_count or 0) + 1
         job.error_code = None
+        db.add(QwenJobEvent(job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id, event_type="job_claimed", from_status=previous_status, to_status="processing", metadata_json={"attempt": job.attempt_count}))
         db.commit()
         db.refresh(job)
 
@@ -191,7 +193,23 @@ async def process_one_qwen_job() -> bool:
             state=SimpleNamespace(scoped_person_id=job.person_id, scoped_caregiver_id=job.caregiver_id)
         )
         result = await qwen_support_assist(payload, fake_request, db)
-        job.result_text = result["reply"]
+        output = QwenModelOutput(
+            job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id,
+            workflow=result["workflow"], model_name=None, output_text=result["reply"],
+            output_metadata={"persistence": "read_only_assistance", "written_to_lcr": False},
+            source_event_ids_json=json.dumps(result.get("source_event_ids", [])),
+            source_evidence_ids_json=json.dumps(result.get("source_evidence_ids", [])),
+            review_status="pending_review", review_required=True, written_to_lcr=False,
+        )
+        db.add(output)
+        db.flush()
+        db.add(QwenSafetyEvaluation(
+            output_id=output.id, job_id=job.id, person_id=job.person_id,
+            caregiver_id=job.caregiver_id, risk_class="unassessed",
+            decision="review_required", human_review_required=True,
+            violations_json=[], policy_references_json=[],
+        ))
+        job.result_text = None
         job.workflow = result["workflow"]
         job.source_event_ids_json = json.dumps(result.get("source_event_ids", []))
         job.source_evidence_ids_json = json.dumps(result.get("source_evidence_ids", []))
@@ -199,6 +217,7 @@ async def process_one_qwen_job() -> bool:
         job.completed_at = datetime.now(timezone.utc)
         job.locked_at = None
         job.error_code = None
+        db.add(QwenJobEvent(job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id, event_type="job_completed", from_status="processing", to_status="completed", metadata_json={"output_id": output.id, "review_required": True, "written_to_lcr": False}))
         db.commit()
         return True
     except Exception as exc:
@@ -208,6 +227,7 @@ async def process_one_qwen_job() -> bool:
                 db.rollback()
                 current = db.query(QwenBackgroundJob).filter(QwenBackgroundJob.id == job.id).first()
                 if current is not None:
+                    previous_status = current.status
                     current.locked_at = None
                     current.error_code = exc.detail[:48] if isinstance(exc, HTTPException) else (
                         str(exc)[:48] if isinstance(exc, ValueError) else "qwen_processing_failed"
@@ -219,6 +239,7 @@ async def process_one_qwen_job() -> bool:
                         current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
                     else:
                         current.status = "failed"
+                    db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count}))
                     db.commit()
             except Exception:
                 db.rollback()
