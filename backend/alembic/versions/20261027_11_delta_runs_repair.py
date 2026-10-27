@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261027_11_delta_runs_repair"
-down_revision = "20261027_10_appointment_workspace"
+down_revision = "20261027_10_appt_workspace"
 branch_labels = None
 depends_on = None
 
