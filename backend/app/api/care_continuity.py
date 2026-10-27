@@ -382,6 +382,47 @@ def list_record_snapshots(request: Request, limit: int = 50, db: Session = Depen
     return [_jsonable(dict(row)) for row in rows]
 
 
+@router.get("/record-revisions")
+def list_record_revisions(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    revision_specs = (
+        ("care_fact_revisions", "care_fact_id"),
+        ("care_assertion_revisions", "assertion_id"),
+        ("care_decision_revisions", "decision_id"),
+        ("care_event_revisions", "event_id"),
+        ("care_observation_revisions", "observation_id"),
+        ("care_change_revisions", "change_id"),
+        ("care_situation_revisions", "situation_id"),
+        ("care_evidence_revisions", "evidence_id"),
+    )
+    inspector = inspect(db.get_bind())
+    collected = []
+    for table_name, target_column in revision_specs:
+        if not inspector.has_table(table_name):
+            continue
+        table = _table(db, table_name)
+        rows = db.execute(
+            select(table).where(table.c.person_id == person_id)
+            .order_by(desc(table.c.changed_at))
+            .limit(max(1, min(limit, 100)))
+        ).mappings().all()
+        for row in rows:
+            item = dict(row)
+            target_id = item.pop(target_column, None)
+            item["target_id"] = target_id
+            item["revision_type"] = table_name
+            changed_at = item.get("changed_at")
+            if isinstance(changed_at, datetime):
+                if changed_at.tzinfo is None:
+                    changed_at = changed_at.replace(tzinfo=timezone.utc)
+                sort_key = changed_at.timestamp()
+            else:
+                sort_key = 0
+            collected.append((sort_key, item))
+    collected.sort(key=lambda pair: pair[0], reverse=True)
+    return [_jsonable(item) for _, item in collected[:max(1, min(limit, 100))]]
+
+
 @router.post("/record-versions", status_code=201)
 def create_record_version(payload: dict, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
