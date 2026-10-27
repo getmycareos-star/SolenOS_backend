@@ -400,6 +400,8 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
         assert db.query(AuditLogEvent).filter_by(target_id=notification_id, action="notification.read").count() == 1
         assert db.query(AuditLogEvent).filter_by(action="notification.list", person_id=person_id).count() >= 2
         assert db.query(AuditLogEvent).filter_by(action="notification.preferences.update", person_id=person_id).count() == 1
+        audit_events = db.query(AuditLogEvent).filter_by(person_id=person_id).all()
+        assert all("A caregiver recorded a new care event." not in str(event.record_metadata) for event in audit_events)
     finally:
         db.close()
 
