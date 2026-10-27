@@ -66,12 +66,13 @@ def list_notifications(
     if unread_only:
         query = query.filter(CareNotification.read_at.is_(None))
     rows = query.order_by(CareNotification.created_at.desc(), CareNotification.id.asc()).limit(limit).all()
-    return [{
+    items = [{
         "id": row.id, "title": row.title, "body": row.body,
         "category": row.category, "priority": row.priority,
         "source_event_id": row.source_event_id, "created_at": row.created_at,
         "read_at": row.read_at, "is_read": row.read_at is not None,
     } for row in rows]
+    return {"items": items, "count": len(items), "limit": limit, "unread_only": unread_only}
 
 
 @router.patch("/{notification_id}/read")
