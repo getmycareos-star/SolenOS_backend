@@ -35,7 +35,8 @@ def upgrade():
     # Context is a caregiver's situated account, not an asserted clinical fact.
     _create_if_missing(bind, "caregiver_contexts", [
         sa.Column("person_id", s(36), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
         sa.Column("context_type", s(100), nullable=False),
         sa.Column("context_payload", js, nullable=False),
         sa.Column("epistemic_status", s(32), nullable=False, server_default="reported"),
@@ -103,7 +104,8 @@ def upgrade():
     additive_columns = {
         "caregiver_contexts": {
             "person_id": sa.Column("person_id", s(36), nullable=True),
-            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+            "reported_by_caregiver_id": sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
             "context_type": sa.Column("context_type", s(100), nullable=True),
             "context_payload": sa.Column("context_payload", js, nullable=True),
             "epistemic_status": sa.Column("epistemic_status", s(32), nullable=True, server_default="reported"),
@@ -152,6 +154,18 @@ def upgrade():
             if name not in actual:
                 op.add_column(table, column)
                 actual.add(name)
+
+    # The legacy caregiver_id points to caregiver_profiles, while anonymous
+    # sessions point to caregivers. Keep the legacy link nullable and store the
+    # authenticated session actor separately; never place an incompatible ID in it.
+    for table in ("caregiver_contexts", "caregiver_perspectives", "caregiver_observations"):
+        column = next((item for item in inspect(bind).get_columns(table) if item["name"] == "caregiver_id"), None)
+        if column and not column.get("nullable", True):
+            if bind.dialect.name == "sqlite":
+                with op.batch_alter_table(table, recreate="always") as batch_op:
+                    batch_op.alter_column("caregiver_id", existing_type=column["type"], nullable=True)
+            else:
+                op.alter_column(table, "caregiver_id", existing_type=column["type"], nullable=True)
 
     # Verify the final schema shape without backfilling fabricated history.
     inspector = inspect(bind)
