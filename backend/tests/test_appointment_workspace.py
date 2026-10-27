@@ -57,6 +57,8 @@ def client():
         yield test_client, first.json(), second.json()
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
+    with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS care_facts"))
     Base.metadata.drop_all(bind=engine)
 
 
