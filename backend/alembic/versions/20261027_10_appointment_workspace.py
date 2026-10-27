@@ -2,6 +2,7 @@
 
 The record is a workflow workspace linked to the LCR/person, not a second medical history.
 Every update appends a revision and uses optimistic version checking.
+The upgrade tolerates local ORM bootstrap having already created the same tables.
 """
 from alembic import op
 import sqlalchemy as sa
