@@ -56,7 +56,8 @@ def upgrade():
     # Perspectives preserve who reported an interpretation and its uncertainty.
     _create_if_missing(bind, "caregiver_perspectives", [
         sa.Column("person_id", s(36), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
         sa.Column("topic", s(160), nullable=False),
         sa.Column("perspective_text", txt, nullable=False),
         sa.Column("epistemic_status", s(32), nullable=False, server_default="reported"),
@@ -76,7 +77,8 @@ def upgrade():
     # Caregiver-attributed observations are not automatically promoted to facts.
     _create_if_missing(bind, "caregiver_observations", [
         sa.Column("person_id", s(36), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+        sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
         sa.Column("observation_type", s(100), nullable=False),
         sa.Column("description", txt, nullable=False),
         sa.Column("observed_value", js, nullable=True),
@@ -114,13 +116,15 @@ def upgrade():
             "recorded_at": sa.Column("recorded_at", dt, nullable=True, server_default=now),
             "effective_from": sa.Column("effective_from", dt, nullable=True),
             "effective_to": sa.Column("effective_to", dt, nullable=True),
+            "effective_start": sa.Column("effective_start", dt, nullable=True),
             "notes": sa.Column("notes", txt, nullable=True),
             "created_at": sa.Column("created_at", dt, nullable=True, server_default=now),
             "updated_at": sa.Column("updated_at", dt, nullable=True, server_default=now),
         },
         "caregiver_perspectives": {
             "person_id": sa.Column("person_id", s(36), nullable=True),
-            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+            "reported_by_caregiver_id": sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
             "topic": sa.Column("topic", s(160), nullable=True),
             "perspective_text": sa.Column("perspective_text", txt, nullable=True),
             "epistemic_status": sa.Column("epistemic_status", s(32), nullable=True, server_default="reported"),
@@ -135,8 +139,10 @@ def upgrade():
         },
         "caregiver_observations": {
             "person_id": sa.Column("person_id", s(36), nullable=True),
-            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
-            "observation_type": sa.Column("observation_type", s(100), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
+            "reported_by_caregiver_id": sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
+            "observation_type": sa.Column("observation_type", s(100), nullable=True, server_default="direct"),
+            "observation_category": sa.Column("observation_category", s(100), nullable=True),
             "description": sa.Column("description", txt, nullable=True),
             "observed_value": sa.Column("observed_value", js, nullable=True),
             "observed_at": sa.Column("observed_at", dt, nullable=True),
@@ -170,9 +176,9 @@ def upgrade():
     # Verify the final schema shape without backfilling fabricated history.
     inspector = inspect(bind)
     for table, expected in {
-        "caregiver_contexts": {"person_id", "caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
-        "caregiver_perspectives": {"person_id", "caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
-        "caregiver_observations": {"person_id", "caregiver_id", "observation_type", "description", "epistemic_status", "recorded_at"},
+        "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
+        "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
+        "caregiver_observations": {"person_id", "reported_by_caregiver_id", "observation_category", "description", "epistemic_status", "recorded_at"},
     }.items():
         actual = {column["name"] for column in inspector.get_columns(table)}
         missing_columns = sorted(expected - actual)
