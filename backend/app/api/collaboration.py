@@ -516,6 +516,28 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     return [line for _, _, line in scored[:limit]]
 
 
+def _context_query_with_history(current_text: str, prior_messages: list) -> str:
+    """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
+    current = (current_text or "").strip()
+    if not prior_messages:
+        return current
+    referential = re.search(
+        r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
+        r"what about|what happened|why did that|the same|that appointment|"
+        r"this appointment|what was that|and then)\b",
+        current.casefold(),
+    )
+    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
+    if not referential and word_count > 8:
+        return current
+    recent = [
+        f"{message.role}: {(message.content or '')[:500]}"
+        for message in reversed(prior_messages[-4:])
+        if getattr(message, "role", None) in {"user", "assistant"}
+    ]
+    return "\n".join([current, *recent]) if recent else current
+
+
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
     """Extract only IDs from records actually selected for the model context."""
     identifiers = []
@@ -1267,23 +1289,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(evidence_context)
 
-        # Select context by the current question, not recency alone. Keep source
-        # IDs exactly aligned with records sent to Qwen; unselected records are
-        # not cited as if the model had seen them.
-        event_context = _rank_context_lines(user_text, event_context, 5)
-        assertion_context = _rank_context_lines(user_text, assertion_context, 4)
-        appointment_context = _rank_context_lines(user_text, appointment_context, 3)
-        evidence_context = _rank_context_lines(user_text, evidence_context, 4)
-        source_event_ids = _context_record_ids(event_context, "event_id")
-        source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
-        source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
-        source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
-        source_context = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context
-        ]
-
-        # Prior conversation is conversational context only; it is not care
-        # evidence and must never be promoted to the LCR by this endpoint.
+        # Prior conversation can resolve a follow-up reference, but it remains
+        # conversational context only and is never care evidence.
         prior_messages = (
             db.query(ConversationMessage)
             .filter_by(session_id=session.id)
@@ -1291,6 +1298,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(8)
             .all()
         )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+
+        # Select context by the current question and, for referential follow-ups,
+        # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
+        event_context = _rank_context_lines(retrieval_query, event_context, 5)
+        assertion_context = _rank_context_lines(retrieval_query, assertion_context, 4)
+        appointment_context = _rank_context_lines(retrieval_query, appointment_context, 3)
+        evidence_context = _rank_context_lines(retrieval_query, evidence_context, 4)
+        source_event_ids = _context_record_ids(event_context, "event_id")
+        source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
+        source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
+        source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
+        source_context = [
+            *event_context, *assertion_context, *appointment_context, *evidence_context
+        ]
         context_payload = {
             "care_recipient_name": person.name,
             "caregiver_relationship": caregiver.relationship,
