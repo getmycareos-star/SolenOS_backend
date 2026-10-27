@@ -65,7 +65,64 @@ class DraftRequest(BaseModel):
         "family_transition", "professional_appointment", "hospital_discharge",
         "return_to_care", "period_summary"
     ] = "family_transition"
+    audience: Literal["family", "professional"] = "family"
     window_days: int = Field(default=30, ge=1, le=MAX_DAYS)
+
+
+# Templates define what a handoff should cover; they do not manufacture missing
+# values. Coverage is explicitly computed from source adapter availability only.
+TEMPLATES = {
+    "family": [
+        ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
+        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries"), ("Today", "Change from baseline", "Uncertainty")),
+        ("daily_routine", "How to care for them", (), ("Daily routine", "Communication preferences", "Comfort and preferences", "Known distress triggers and helpful responses")),
+        ("health_medication", "Health and medication information", (), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
+        ("next_actions", "What needs to happen next", ("care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
+        ("safety_contingencies", "Safety and when to seek help", (), ("Documented safety needs", "Existing care-plan instructions", "Emergency and clinical contacts")),
+        ("family_coordination", "Family coordination", (), ("Primary caregiver", "Backup caregiver", "Next check-in", "Practical support needs")),
+        ("receipt", "Handoff acceptance", (), ("Information reviewed", "Responsibilities understood", "Unresolved questions", "Outgoing and receiving caregiver confirmation")),
+    ],
+    "professional": [
+        ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
+        ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
+        ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_decisions", "open_questions", "information_gaps"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Conflicts", "Corrections")),
+        ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
+        ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
+        ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "care_facts"), ("Issue", "Evidence/status", "Required response", "Owner", "Deadline")),
+        ("care_plan", "Treatment and care plan", ("care_decisions",), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
+        ("action_register", "Action register and accountability", ("care_decisions", "open_questions", "information_gaps"), ("Action", "Owner", "Deadline", "Status", "Outcome")),
+        ("person_family_context", "Person-centred and family context", (), ("Communication preferences", "Relevant routines", "Authorised contacts", "Caregiver support needs", "Documented information-sharing basis")),
+        ("transition_details", "Transition-specific information", (), ("Sending/receiving setting", "Reason for transfer", "Course/interventions", "Discharge instructions", "Follow-ups", "Pending results", "Equipment/supplies")),
+        ("contingency", "Contingency planning", (), ("Documented trigger/concern", "Existing authorised response", "Escalation contact", "Emergency pathway", "Limitations")),
+        ("integrity", "Document and record integrity", ("care_facts", "care_timeline_entries", "care_decisions", "open_questions", "information_gaps"), ("Source record IDs/versions", "Generated timestamp/timezone", "Last verified", "Known gaps/stale information")),
+        ("receipt", "Handoff receipt and acceptance", (), ("Sender/receiver identity and role", "Receipt timestamp", "Responsibility transfer time", "Critical items confirmed", "Questions/clarifications", "Unaccepted actions", "Acceptance status")),
+    ],
+}
+
+
+def _template_coverage(audience: str, statuses: dict) -> list[dict]:
+    template = TEMPLATES[audience]
+    result = []
+    for key, title, source_tables, fields in template:
+        if not source_tables:
+            coverage = "not_assessed"
+        else:
+            source_states = [statuses.get(name, {}).get("status", "unavailable") for name in source_tables]
+            if any(value == "available" for value in source_states):
+                coverage = "partial"
+            elif any(value == "empty" for value in source_states):
+                coverage = "no_records_returned"
+            else:
+                coverage = "unavailable"
+        result.append({
+            "key": key,
+            "title": title,
+            "required_fields": list(fields),
+            "source_tables": list(source_tables),
+            "coverage_status": coverage,
+            "coverage_note": "Source coverage only; each field still requires review and may be missing or unverified.",
+        })
+    return result
 
 
 def _iso(value):
@@ -214,6 +271,8 @@ def prepare_handoff_draft(
     return {
         "draft_id": str(uuid.uuid4()),
         "purpose": payload.purpose,
+        "audience": payload.audience,
+        "template_sections": _template_coverage(payload.audience, statuses),
         "prepared_at": now.isoformat(),
         "window": {"days": payload.window_days, "from": cutoff.isoformat(), "to": now.isoformat()},
         "read_only": True,
