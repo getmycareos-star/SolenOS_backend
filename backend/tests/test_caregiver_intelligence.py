@@ -50,6 +50,9 @@ def get_test_client():
     try:
         caregiver = (
             db.query(Caregiver)
+            .filter(Caregiver.id == "caregiver-sarah", Caregiver.person_id == "person-1")
+            .first()
+            or db.query(Caregiver)
             .filter(Caregiver.person_id == "person-1")
             .order_by(Caregiver.id.asc())
             .first()
@@ -61,7 +64,7 @@ def get_test_client():
             person_id="person-1",
             caregiver_id=caregiver.id,
             token_hash=hashlib.sha256(TEST_TOKEN.encode("utf-8")).hexdigest(),
-            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
         ))
         db.commit()
     finally:
@@ -114,7 +117,7 @@ def test_create_caregiver_profile():
                 "timezone": "UTC",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         data = response.json()
         assert data["name"] == "Sarah"
         assert data["relationship"] == "Daughter"
