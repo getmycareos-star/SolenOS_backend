@@ -517,3 +517,156 @@ def test_provenance_link_cannot_reference_another_persons_provenance():
         },
     )
     assert denied.status_code == 404, denied.text
+
+def test_change_item_appends_same_person_fact_revision():
+    client = TestClient(app)
+    session = _session(client, "Revision caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    fact = client.post(
+        "/api/v1/care-continuity/facts",
+        headers=headers,
+        json={"subject_type": "care_recipient", "subject_id": record.json()["id"],
+              "fact_type": "care_need", "fact_value": "needs support"},
+    )
+    assert fact.status_code == 201, fact.text
+    change_set = client.post(
+        "/api/v1/care-continuity/record-change-sets",
+        headers=headers,
+        json={"care_record_id": record.json()["id"], "operation": "update", "reason": "Correction review"},
+    )
+    assert change_set.status_code == 201, change_set.text
+
+    first = client.post(
+        "/api/v1/care-continuity/record-change-items",
+        headers=headers,
+        json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
+              "target_id": fact.json()["id"], "operation": "update",
+              "before_value": {"fact_value": "needs support"},
+              "after_value": {"fact_value": "needs daily support"}},
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/api/v1/care-continuity/record-change-items",
+        headers=headers,
+        json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
+              "target_id": fact.json()["id"], "operation": "update",
+              "before_value": {"fact_value": "needs daily support"},
+              "after_value": {"fact_value": "needs daily support with supervision"}},
+    )
+    assert second.status_code == 201, second.text
+    revisions = client.get("/api/v1/care-continuity/fact-revisions", headers=headers)
+    assert revisions.status_code == 200, revisions.text
+    assert [row["revision_number"] for row in revisions.json()] == [2, 1]
+    assert revisions.json()[0]["current_payload"]["fact_value"] == "needs daily support with supervision"
+
+
+def test_lcr_sections_upsert_and_record_status_history_is_persisted():
+    client = TestClient(app)
+    session = _session(client, "Section caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    record_id = record.json()["id"]
+
+    first = client.post(
+        "/api/v1/care-continuity/record-sections",
+        headers=headers,
+        json={"care_record_id": record_id, "section_key": "current-situation",
+              "section_payload": {"summary": "Needs assistance"}},
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/api/v1/care-continuity/record-sections",
+        headers=headers,
+        json={"care_record_id": record_id, "section_key": "current-situation",
+              "section_payload": {"summary": "Needs daily assistance"}},
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["version_number"] == 2
+    history = client.get("/api/v1/care-continuity/record-status-history", headers=headers)
+    assert history.status_code == 200, history.text
+    assert len(history.json()) == 1
+    assert history.json()[0]["new_status"] == "active"
+
+
+def test_identifier_fingerprint_and_retraction_restoration_lifecycle():
+    client = TestClient(app)
+    session = _session(client, "Record governance caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    record_id = record.json()["id"]
+
+    invalid_identifier = client.post(
+        "/api/v1/care-continuity/record-identifiers",
+        headers=headers,
+        json={"care_record_id": record_id, "identifier_type": "external_reference",
+              "identifier_fingerprint": "raw-id-must-not-be-stored"},
+    )
+    assert invalid_identifier.status_code == 422, invalid_identifier.text
+    identifier = client.post(
+        "/api/v1/care-continuity/record-identifiers",
+        headers=headers,
+        json={"care_record_id": record_id, "identifier_type": "external_reference",
+              "identifier_fingerprint": "a" * 64, "masked_value": "…1234"},
+    )
+    assert identifier.status_code == 201, identifier.text
+
+    retraction = client.post(
+        "/api/v1/care-continuity/record-retractions",
+        headers=headers,
+        json={"care_record_id": record_id, "target_type": "living_care_record",
+              "target_id": record_id, "reason": "Test retraction"},
+    )
+    assert retraction.status_code == 201, retraction.text
+    restoration = client.post(
+        "/api/v1/care-continuity/record-restorations",
+        headers=headers,
+        json={"care_record_id": record_id, "retraction_id": retraction.json()["id"],
+              "reason": "Restored after review"},
+    )
+    assert restoration.status_code == 201, restoration.text
+    listed = client.get("/api/v1/care-continuity/record-retractions", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["status"] == "restored"
+
+
+def test_lcr_record_link_rejects_cross_person_target():
+    client = TestClient(app)
+    first = _session(client, "Record link first caregiver")
+    second = _session(client, "Record link second caregiver")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    first_record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=first_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    second_record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=second_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert first_record.status_code == 201, first_record.text
+    assert second_record.status_code == 201, second_record.text
+    denied = client.post(
+        "/api/v1/care-continuity/record-links",
+        headers=first_headers,
+        json={"source_record_id": first_record.json()["id"],
+              "target_record_id": second_record.json()["id"], "relationship": "related_to"},
+    )
+    assert denied.status_code == 404, denied.text
