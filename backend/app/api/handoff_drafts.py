@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select
+from sqlalchemy import MetaData, Table, inspect, select, func, or_
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
@@ -132,10 +132,13 @@ def prepare_handoff_draft(
             continue
 
         query = select(*selected).where(table.c.person_id == person_id)
-        timestamp_column = next((table.c[name] for name in spec["time_fields"] if name in table.c), None)
-        if timestamp_column is not None:
-            query = query.where((timestamp_column.is_(None)) | (timestamp_column >= cutoff))
-            query = query.order_by(timestamp_column.desc().nullslast())
+        timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
+        timestamp_expression = func.coalesce(*timestamp_columns) if timestamp_columns else None
+        if timestamp_expression is not None:
+            # Use the first populated timestamp, not merely the first existing
+            # column, so a null effective_at cannot bypass the requested window.
+            query = query.where(or_(timestamp_expression.is_(None), timestamp_expression >= cutoff))
+            query = query.order_by(timestamp_expression.desc().nullslast())
         query = query.limit(MAX_ROWS_PER_SOURCE)
         rows = [dict(row) for row in db.execute(query).mappings().all()]
         source_status = "available" if rows else "empty"
@@ -160,7 +163,7 @@ def prepare_handoff_draft(
                 "recorded_at": _iso(time_value),
                 "epistemic_status": str(status_value) if status_value is not None else "not_recorded",
                 "text": text,
-                "stale_warning": bool(time_value is not None and _iso(time_value) < cutoff.isoformat()),
+                "stale_warning": bool(time_value is not None and _iso(time_value) < (now - timedelta(days=30)).isoformat()),
             })
 
     # These modules are intentionally not represented as read when no verified
