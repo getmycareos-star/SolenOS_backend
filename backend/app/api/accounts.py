@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_account import CaregiverAccount
+from app.models.caregiver_intelligence import CaregiverProfile
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
@@ -223,6 +224,14 @@ def delete_my_account(payload: AccountDelete, request: Request, db: Session = De
             linked_session.account_id = None
         else:
             linked_session.revoked_at = now
+    # Account deletion removes the account email from the linked caregiver
+    # profile while retaining the anonymous care-record identity and history.
+    profile = db.query(CaregiverProfile).filter(
+        CaregiverProfile.person_id == person_id,
+        CaregiverProfile.session_caregiver_id == caregiver_id,
+    ).first()
+    if profile and profile.email and profile.email.casefold() == account.email_normalized.casefold():
+        profile.email = None
     db.delete(account)
     db.commit()
     return {
