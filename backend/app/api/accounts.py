@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_account import CaregiverAccount
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
@@ -112,6 +113,13 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         if not session or session.person_id != person_id or session.caregiver_id != caregiver_id:
             db.rollback()
             raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
+        try:
+            ensure_caregiver_profile_for_session(
+                db, person_id=person_id, session_caregiver_id=caregiver_id, email=email
+            )
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
         session.account_id = account.id
         db.commit()
     except HTTPException:
@@ -155,6 +163,16 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         db.add(AccountSecurityEvent(account_id=account.id if account else None, caregiver_id=account.caregiver_id if account else None, event_type="login_failed"))
         db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    try:
+        ensure_caregiver_profile_for_session(
+            db,
+            person_id=account.person_id,
+            session_caregiver_id=account.caregiver_id,
+            email=account.email_normalized,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
     limit.attempts = 0
     limit.blocked_until = None
     limit.updated_at = now
