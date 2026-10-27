@@ -84,14 +84,14 @@ def test_daily_care_history_is_paginated_and_scoped_to_authenticated_person():
     add_event(second, "Foreign record", "Must not appear in first record.", "2026-10-27T09:00:00Z")
 
     auth = {"Authorization": f"Bearer {first['access_token']}"}
-    page1 = client.get("/api/v1/daily-care/intelligence/history?limit=1&offset=0", headers=auth)
+    page1 = client.get("/api/v1/daily-care/intelligence/history?person_id=" + first["person"]["id"] + "&limit=1&offset=0", headers=auth)
     assert page1.status_code == 200, page1.text
     body1 = page1.json()
     assert body1["page"]["total_matching"] == 2
     assert body1["page"]["has_more"] is True
     assert "Foreign record" not in json.dumps(body1)
 
-    page2 = client.get("/api/v1/daily-care/intelligence/history?limit=1&offset=1", headers=auth)
+    page2 = client.get("/api/v1/daily-care/intelligence/history?person_id=" + first["person"]["id"] + "&limit=1&offset=1", headers=auth)
     assert page2.status_code == 200, page2.text
     assert page2.json()["page"]["returned"] == 1
     assert page2.json()["page"]["has_more"] is False
@@ -123,7 +123,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     answer = client.post(
         "/api/v1/daily-care/intelligence/ask",
         headers=auth,
-        json={"question": "What was recorded about sleep?", "prepare_lcr_proposals": True},
+        json={"person_id": session["person"]["id"], "question": "What was recorded about sleep?", "prepare_lcr_proposals": True},
     )
     assert answer.status_code == 200, answer.text
     result = answer.json()
@@ -218,7 +218,7 @@ def test_daily_care_proposal_cannot_be_reviewed_by_another_caregiver_session(mon
     response = client.post(
         "/api/v1/daily-care/intelligence/ask",
         headers=first_auth,
-        json={"question": "Summarize sleep", "prepare_lcr_proposals": True},
+        json={"person_id": first["person"]["id"], "question": "Summarize sleep", "prepare_lcr_proposals": True},
     )
     assert response.status_code == 200, response.text
     analysis_id = response.json()["proposal_analysis_id"]
