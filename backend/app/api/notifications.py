@@ -72,6 +72,14 @@ def list_notifications(
         "source_event_id": row.source_event_id, "created_at": row.created_at,
         "read_at": row.read_at, "is_read": row.read_at is not None,
     } for row in rows]
+    # Listing is an access to care-related notification content; record the
+    # access without copying notification text or other sensitive payloads.
+    _audit(
+        db, request, person_id, caregiver_id, "notification.list",
+        "notification_collection", person_id,
+        {"limit": limit, "unread_only": unread_only, "result_count": len(items)},
+    )
+    db.commit()
     return {"items": items, "count": len(items), "limit": limit, "unread_only": unread_only}
 
 
