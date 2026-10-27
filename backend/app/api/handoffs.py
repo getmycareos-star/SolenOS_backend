@@ -125,7 +125,7 @@ class HandoffAcknowledge(BaseModel):
 
 
 class HandoffSummaryInput(BaseModel):
-    sections: dict[str, str] = Field(min_length=1, max_length=4)
+    sections: dict[str, str] = Field(default_factory=dict)
     source_record_ids: list[str] = Field(min_length=1, max_length=100)
     caregiver_reviewed: bool
     prepared_at: datetime | None = None
@@ -134,8 +134,8 @@ class HandoffSummaryInput(BaseModel):
     @classmethod
     def valid_summary_sections(cls, value: dict[str, str]) -> dict[str, str]:
         allowed = {"lcr_summary", "open_loops", "appointments", "documents"}
-        if not value or not set(value).issubset(allowed):
-            raise ValueError("summary sections must use supported care scope names")
+        if not value or len(value) > 4 or not set(value).issubset(allowed):
+            raise ValueError("summary sections must use one or more supported care scope names")
         cleaned = {}
         for key, text in value.items():
             if not isinstance(text, str) or not text.strip() or len(text) > 20000:
