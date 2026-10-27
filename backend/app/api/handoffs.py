@@ -338,10 +338,12 @@ def read_handoff_summary(handoff_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Handoff not found")
     is_owner = handoff.created_by == caregiver_id
     if not is_owner:
+        # Pending recipients may review the caregiver-reviewed summary before
+        # accepting the handoff; they still cannot read handoff metadata until accepted.
         recipient = db.query(HandoffRecipient).filter(
             HandoffRecipient.handoff_id == handoff.id,
             HandoffRecipient.recipient_id == caregiver_id,
-            HandoffRecipient.access_status == "accepted",
+            HandoffRecipient.access_status.in_(["pending", "accepted"]),
             HandoffRecipient.revoked_at.is_(None),
         ).first()
         if (
