@@ -328,6 +328,51 @@ jobs:
           fi
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
 
+          echo "QWEN_E2E: Companion retrieves older relevant care evidence and communicates limits"
+          relevant_event_id=$(docker exec -i solenos-qwen-e2e python - "$person_id" "$caregiver_id" <<'PY'
+          import sys
+          from datetime import datetime, timedelta, timezone
+          from app.core.database import SessionLocal
+          from app.models.care import CareEvent
+
+          person_id, caregiver_id = sys.argv[1:3]
+          db = SessionLocal()
+          now = datetime.now(timezone.utc).replace(tzinfo=None)
+          for index in range(25):
+              db.add(CareEvent(
+                  person_id=person_id,
+                  event_type="observation",
+                  status="recorded",
+                  occurred_at=now - timedelta(days=index),
+                  title=f"Routine note {index}",
+                  description="Routine observation; no additional details supplied.",
+                  evidence_ids=[],
+                  created_by_caregiver_id=caregiver_id,
+                  time_provenance="caregiver_reported",
+              ))
+          target = CareEvent(
+              person_id=person_id,
+              event_type="incident",
+              status="recorded",
+              occurred_at=now - timedelta(days=240),
+              title="Fall at home",
+              description="Caregiver reported a fall during the winter.",
+              evidence_ids=[],
+              created_by_caregiver_id=caregiver_id,
+              time_provenance="caregiver_reported",
+          )
+          db.add(target)
+          db.commit()
+          print(target.id)
+          db.close()
+          PY
+          )
+          companion_response=$(curl --fail --silent --show-error --max-time 90 \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"text\":\"Did Mum fall last winter?\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); target=sys.argv[2]; assert target in d["source_event_ids"], "Relevant historical event was not retrieved"; assert d["written_to_lcr"] is False; assert d["persistence"] == "conversation_only"; assert ("fall" in reply or "winter" in reply), reply; assert not re.search(r"\b(?:several falls|multiple falls|frequent falls|falls are getting worse)\b", reply), reply' "$companion_response" "$relevant_event_id"
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
