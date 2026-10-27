@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint, func
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -142,7 +142,25 @@ def _ensure_test_tables():
             Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
             Column("changed_at", DateTime(timezone=True)),
         )
-    for target_table in ("care_facts", "care_assertions", "care_decisions", "care_events", "caregiver_observations", "changes", "situations", "evidence"):
+    if "care_facts" not in metadata.tables:
+        Table(
+            "care_facts", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("subject_type", String(80), nullable=False),
+            Column("subject_id", String(36)),
+            Column("fact_type", String(100), nullable=False),
+            Column("fact_value", Text, nullable=False),
+            Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+            Column("effective_at", DateTime(timezone=True)),
+            Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("review_notes", Text),
+            Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("updated_at", DateTime(timezone=True)),
+        )
+    for target_table in ("care_assertions", "care_decisions", "care_events", "caregiver_observations", "changes", "situations", "evidence"):
         if target_table not in metadata.tables:
             Table(
                 target_table, metadata,
