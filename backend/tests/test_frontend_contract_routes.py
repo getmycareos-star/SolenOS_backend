@@ -354,12 +354,12 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         assert evidence_id in response.json()["source_evidence_ids"]
 
         user_payload = json.loads(captured["messages"][-1]["content"])
-        evidence_context = user_payload["authorized_record_context"]["caregiver_provided_evidence"]
+        evidence_context = user_payload["authorized_record_context"]["evidence"]
         assert any(
             item.get("evidence_id") == evidence_id
             and item.get("filename") == "care-letter.txt"
             and "follow-up date is not stated" in item.get("source_text", "").lower()
-            for item in map(json.loads, [entry.removeprefix("Caregiver-provided evidence: ") for entry in evidence_context])
+            for item in evidence_context
         )
         assert "A newer upload does not automatically supersede an older document" in captured["messages"][0]["content"]
     finally:
