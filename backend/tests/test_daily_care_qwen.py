@@ -192,6 +192,23 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     finally:
         db.close()
 
+    db = TestSessionLocal()
+    try:
+        facts = Base.metadata.tables["care_facts"]
+        db.execute(facts.insert().values(
+            id="companion-shared-lcr-fact",
+            person_id=session["person"]["id"],
+            subject_type="person",
+            subject_id=session["person"]["id"],
+            fact_type="sleep_pattern",
+            fact_value="Caregiver reports poor sleep before breakfast.",
+            epistemic_status="reported",
+            created_by_caregiver_id=session["caregiver"]["id"],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
     captured = {}
     def fake_companion(base, model, messages, options=None):
         captured["messages"] = messages
@@ -211,8 +228,11 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     companion_body = companion.json()
     assert approved.json()["proposal"]["review_status"] == "accepted_by_caregiver"
     assert companion_body["source_assertion_ids"]
+    assert "companion-shared-lcr-fact" in companion_body["source_lcr_context_ids"]
+    assert companion_body["lcr_context_coverage"]["history_coverage"] == "bounded_subset"
     serialized_messages = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Caregiver reported that sleep was poor last night." in serialized_messages
+    assert "Caregiver reports poor sleep before breakfast." in serialized_messages
     assert approved.json()["proposal"]["source_ids"][0] in serialized_messages
 
 
