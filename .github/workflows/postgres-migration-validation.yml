@@ -53,6 +53,71 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
+      - name: Verify LCR history schema columns, indexes and foreign keys
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          expected = {
+              "living_care_records": {"person_id", "record_status", "schema_version"},
+              "care_record_versions": {"care_record_id", "version_number", "snapshot_payload"},
+              "care_record_snapshots": {"care_record_id", "as_of", "snapshot_payload"},
+              "record_provenance": {"person_id", "source_type", "recorded_at", "metadata"},
+              "record_provenance_links": {"person_id", "provenance_id", "target_type", "target_id"},
+              "care_record_change_sets": {"person_id", "operation", "status"},
+              "care_record_change_items": {"person_id", "change_set_id", "target_type", "target_id"},
+              "care_corrections": {"person_id", "target_type", "target_id", "corrected_value", "correction_reason"},
+              "record_amendments": {"person_id", "amendment_type", "reason"},
+              "record_amendment_items": {"person_id", "amendment_id", "target_type", "target_id"},
+              "care_record_audit_log": {"person_id", "actor_type", "action", "occurred_at"},
+              "care_uncertainties": {"person_id", "question", "uncertainty_type", "status"},
+              "care_missing_information": {"person_id", "topic", "description", "status"},
+              "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
+              "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
+              "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
+              "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
+              "caregiver_observations": {"person_id", "reported_by_caregiver_id", "observation_category", "description", "epistemic_status", "recorded_at"},
+          }
+          for table, required in expected.items():
+              assert inspector.has_table(table), f"missing table: {table}"
+              actual = {column["name"] for column in inspector.get_columns(table)}
+              missing = required - actual
+              assert not missing, f"{table} missing columns: {sorted(missing)}"
+              print(f"PASS {table}: {len(required)} required columns")
+
+          fks = {
+              "living_care_records": "person_id",
+              "care_record_versions": "care_record_id",
+              "care_record_snapshots": "care_record_id",
+              "record_provenance": "person_id",
+              "care_record_change_sets": "person_id",
+              "care_record_change_items": "change_set_id",
+              "care_corrections": "person_id",
+              "record_amendments": "person_id",
+              "care_record_audit_log": "person_id",
+              "care_uncertainties": "person_id",
+              "care_missing_information": "person_id",
+              "care_conflicts": "person_id",
+          }
+          for table, column in fks.items():
+              foreign_keys = inspector.get_foreign_keys(table)
+              assert any(column in fk.get("constrained_columns", []) for fk in foreign_keys), f"{table}.{column} missing foreign key"
+              print(f"PASS FK {table}.{column}")
+          unique = inspector.get_unique_constraints("care_record_versions")
+          indexes = inspector.get_indexes("care_record_versions")
+          has_version_uniqueness = (
+              any(set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in unique)
+              or any(item.get("unique") and set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in indexes)
+          )
+          assert has_version_uniqueness, "care record version uniqueness missing"
+          print("PASS unique version per care record")
+          engine.dispose()
+          PY
+
       - name: Verify migration graph has exactly one head
         working-directory: backend
         run: |
@@ -71,6 +136,7 @@ jobs:
           createdb -h localhost -U postgres solenos_legacy_empty
           createdb -h localhost -U postgres solenos_legacy_populated
           createdb -h localhost -U postgres solenos_stamped_04
+          createdb -h localhost -U postgres solenos_qwen_backfill
 
       - name: Upgrade a production-like database already stamped at revision 20261024_04
         env:
@@ -88,10 +154,38 @@ jobs:
           "
           python -m alembic upgrade head
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_03_privacy_delivery"
-          for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events shared_summary_expirations shared_summary_revocations shared_summary_access_logs shared_summary_downloads shared_summary_generation_jobs shared_summary_delivery_receipts shared_summary_consent_records shared_summary_disclosure_records shared_summary_link_events data_deletion_requests data_deletion_jobs data_export_requests privacy_incidents privacy_incident_events data_processing_records data_subject_requests sensitive_data_access_logs legal_holds audit_log_events audit_log_integrity_checks audit_log_access_records privileged_access_logs authorization_decisions failed_access_attempts care_notifications care_notification_preferences notification_delivery_attempts notification_delivery_receipts notification_read_receipts care_reminders reminder_acknowledgements reminder_escalations handoff_records handoff_recipients handoff_access_logs handoff_acknowledgements delivery_failure_events; do
+          for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events qwen_model_outputs qwen_job_events qwen_safety_evaluations assessment_dimensions ai_output_rejections ai_safety_checks ai_safety_violations ai_model_versions ai_prompt_versions ai_inference_metrics ai_job_status_events ai_human_feedback ai_output_lcr_proposals ai_output_lcr_decisions shared_summary_expirations shared_summary_revocations shared_summary_access_logs shared_summary_downloads shared_summary_generation_jobs shared_summary_delivery_receipts shared_summary_consent_records shared_summary_disclosure_records shared_summary_link_events data_deletion_requests data_deletion_jobs data_export_requests privacy_incidents privacy_incident_events data_processing_records data_subject_requests sensitive_data_access_logs legal_holds audit_log_events audit_log_integrity_checks audit_log_access_records privileged_access_logs authorization_decisions failed_access_attempts care_notifications care_notification_preferences notification_delivery_attempts notification_delivery_receipts notification_read_receipts care_reminders reminder_acknowledgements reminder_escalations handoff_records handoff_recipients handoff_access_logs handoff_acknowledgements delivery_failure_events; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             test "$found" = "$table"
           done
+
+      - name: Preserve completed Qwen outputs and source IDs during schema migration
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_qwen_backfill
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_qwen_backfill
+        working-directory: backend
+        run: |
+          # Upgrade to the pre-governance canonical head, then seed a completed legacy job.
+          python -m alembic upgrade 20261027_04_caregiver_context
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            INSERT INTO persons (id, name) VALUES ('p-qwen-backfill', 'Backfill test person');
+            INSERT INTO caregivers (id, name, email, relationship, person_id, timezone)
+              VALUES ('c-qwen-backfill', 'Backfill caregiver', 'qwen-backfill@example.invalid', 'family', 'p-qwen-backfill', 'UTC');
+            INSERT INTO qwen_background_jobs
+              (id, person_id, caregiver_id, status, task_text, context_text, evidence_ids_json, workflow, result_text, source_event_ids_json, source_evidence_ids_json, attempt_count)
+              VALUES
+              ('job-qwen-backfill', 'p-qwen-backfill', 'c-qwen-backfill', 'completed', 'Summarize the appointment note', '', '[]', 'appointment', 'Preserve this exact completed suggestion.', '[\"event-source-1\"]', '[\"evidence-source-1\"]', 1);
+          "
+          python -m alembic upgrade head
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_03_privacy_delivery"
+          test "$(psql "$PSQL_URL" -Atc "SELECT result_text IS NULL FROM qwen_background_jobs WHERE id='job-qwen-backfill'")" = "t"
+          test "$(psql "$PSQL_URL" -Atc "SELECT output_text FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "Preserve this exact completed suggestion."
+          test "$(psql "$PSQL_URL" -Atc "SELECT source_event_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["event-source-1"]'
+          test "$(psql "$PSQL_URL" -Atc "SELECT source_evidence_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["evidence-source-1"]'
+          test "$(psql "$PSQL_URL" -Atc "SELECT written_to_lcr FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "f"
+          test "$(psql "$PSQL_URL" -Atc "SELECT review_status FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "pending_review"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_safety_evaluations WHERE job_id='job-qwen-backfill' AND human_review_required")" = "1"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_job_events WHERE job_id='job-qwen-backfill' AND event_type='legacy_output_backfilled'")" = "1"
 
       - name: Test empty legacy caregivers table is reconciled on PostgreSQL
         env:
