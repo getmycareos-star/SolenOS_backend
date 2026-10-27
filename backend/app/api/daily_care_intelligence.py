@@ -82,7 +82,7 @@ def _history_bundle(
     # conflicts, provenance, and records contributed by other authorised caregivers.
     events_q = db.query(CareEvent).filter(CareEvent.person_id == person_id)
     if query:
-        terms = [term for term in re.findall(r"[\\w'-]{3,}", query.casefold()) if term]
+        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term]
         if terms:
             clauses = []
             for term in terms[:8]:
@@ -103,7 +103,7 @@ def _history_bundle(
         EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
     )
     if query:
-        terms = [term for term in re.findall(r"[\\w'-]{3,}", query.casefold()) if term][:8]
+        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term][:8]
         if terms:
             from sqlalchemy import or_
             evidence_q = evidence_q.filter(or_(*[
@@ -224,7 +224,7 @@ def _history_bundle(
             }
             if query or context_query:
                 search_text = json.dumps(row, ensure_ascii=False, default=str).casefold()
-                terms = re.findall(r"[\\w'-]{3,}", (context_query or query or "").casefold())[:8]
+                terms = re.findall(r"[A-Za-z0-9_-]{3,}", (context_query or query or "").casefold())[:8]
                 if terms and not any(term in search_text for term in terms):
                     continue
             records.append(row)
