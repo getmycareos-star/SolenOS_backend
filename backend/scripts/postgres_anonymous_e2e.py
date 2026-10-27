@@ -228,10 +228,11 @@ def main():
         )
         require(status == 403, f"cross-care-record write must return 403, got {status}: {cross_write}")
 
-        status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
+        token_before_refresh = token_a
+        status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_before_refresh)
         require(status == 200, f"token refresh expected 200, got {status}: {refreshed}")
         token_a = refreshed["access_token"]
-        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=first["access_token"])
+        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_before_refresh)
         require(status == 401, f"rotated token should be rejected, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
         require(status == 200, f"new token should retain record access, got {status}")
