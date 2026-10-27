@@ -6,6 +6,107 @@ from app.models.care import Caregiver, Person, Evidence, CareEvent
 from app.schemas.situation import SituationInput, SituationResponse, SituationEvent, SituationDocument
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
+from app.services.capture_analysis import analyze_capture_with_qwen
+
+
+def analyze_saved_care_event(db: Session, care_event_id: str) -> dict:
+    """Run the shared deterministic change/situation analysis for an already-saved event.
+
+    The original caregiver report is committed before analysis starts. A derived-analysis
+    failure is reported explicitly and never presented as a complete analysis.
+    """
+    care_event = db.query(CareEvent).filter(CareEvent.id == care_event_id).first()
+    if care_event is None:
+        return {
+            "analysis_status": "failed",
+            "analysis_error": "The saved care event could not be reloaded for analysis.",
+            "what_changed": None,
+            "attention_candidate": False,
+            "follow_up_candidate": False,
+            "situations": [],
+            "qwen_extraction_status": "skipped",
+            "qwen_candidates": None,
+        }
+
+    person_id = care_event.person_id
+    occurred_at = care_event.occurred_at
+    try:
+        changes = detect_event_changes(
+            db, person_id, care_event.event_type, None, occurred_at
+        ) or []
+        significant_changes = [
+            item for item in changes
+            if item.significance_verdict
+            and item.significance_verdict.value != "insufficient_evidence"
+        ]
+        attention_candidate = any(item.attention_candidate for item in significant_changes)
+        follow_up_candidate = any(item.follow_up_candidate for item in significant_changes)
+        change_parts = [
+            f"{item.change_type.value}: {item.subject_type}"
+            for item in significant_changes if item.change_type
+        ]
+        what_changed = "; ".join(change_parts) if change_parts else None
+
+        detected = detect_situations(db, person_id, occurred_at) or []
+        active_situations = [item for item in detected if item.state.value == "active"]
+        if active_situations:
+            attention_candidate = attention_candidate or any(
+                item.attention_candidate for item in active_situations
+            )
+            follow_up_candidate = follow_up_candidate or any(
+                item.follow_up_candidate for item in active_situations
+            )
+
+        care_event = db.query(CareEvent).filter(CareEvent.id == care_event_id).first()
+        if care_event is None:
+            raise RuntimeError("Saved event disappeared during analysis")
+        care_event.significance_verdict = (
+            significant_changes[0].significance_verdict.value
+            if significant_changes else None
+        )
+        care_event.attention_candidate = attention_candidate
+        care_event.follow_up_candidate = follow_up_candidate
+        care_event.confidence = significant_changes[0].confidence if significant_changes else None
+        if detected:
+            care_event.situation_id = detected[0].id
+        db.commit()
+        result = {
+            "analysis_status": "complete",
+            "analysis_error": None,
+            "what_changed": what_changed,
+            "attention_candidate": attention_candidate,
+            "follow_up_candidate": follow_up_candidate,
+            "situations": [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "description": item.description,
+                    "situation_type": item.situation_type.value if item.situation_type else None,
+                    "state": item.state.value if item.state else None,
+                    "confidence": item.confidence,
+                    "attention_candidate": item.attention_candidate,
+                    "follow_up_candidate": item.follow_up_candidate,
+                }
+                for item in detected
+            ],
+        }
+        result.update(analyze_capture_with_qwen(db, care_event_id))
+        return result
+    except Exception:
+        # The original event was committed before analysis. Roll back only derived work,
+        # reload the source event, and return an explicit partial-success state.
+        db.rollback()
+        result = {
+            "analysis_status": "failed",
+            "analysis_error": "The report was saved, but derived analysis could not be completed.",
+            "what_changed": None,
+            "attention_candidate": False,
+            "follow_up_candidate": False,
+            "situations": [],
+        }
+        result.update(analyze_capture_with_qwen(db, care_event_id))
+        return result
+
 
 
 def _utc_now() -> datetime:
@@ -39,11 +140,16 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
             metadata = {
                 "ocr_confidence": doc.ocr_confidence,
                 "mime_type": doc.mime_type,
+                "extraction_source": doc.extraction_source,
+                "extraction_warnings": doc.extraction_warnings or [],
+                "sha256": doc.sha256,
+                "extracted_char_count": doc.extracted_char_count if doc.extracted_char_count is not None else len(source_text),
             }
+            metadata = {key: value for key, value in metadata.items() if value is not None}
         evidence = Evidence(
             person_id=payload.person_id,
             type="note" if not doc else "document",
@@ -52,9 +158,9 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=1.0 if not doc else (doc.ocr_confidence or 0.5),
+            confidence=1.0 if not doc else (doc.ocr_confidence if doc.ocr_confidence is not None else 0.5),
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type="document" if doc else "caregiver_observation",
         )
         db.add(evidence)
         db.flush()

@@ -10,7 +10,7 @@ from sqlalchemy import inspect, text
 from app.core.database import Base
 
 revision = "20261022_01"
-down_revision = None
+down_revision = "20261022_0005"
 branch_labels = None
 depends_on = None
 

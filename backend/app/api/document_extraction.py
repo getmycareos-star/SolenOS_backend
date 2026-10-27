@@ -1,0 +1,607 @@
+"""Authenticated document text extraction for the Living Care Record.
+
+Extraction is deliberately pre-cognitive: it returns source text and technical
+quality metadata only. It does not diagnose, summarize, or authorize care.
+"""
+from __future__ import annotations
+
+import hashlib
+import shutil
+import io
+import json
+import re
+import uuid
+from pathlib import PurePath
+from typing import Any
+
+from datetime import datetime, timezone
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import Response
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.document_asset import DocumentAsset
+
+router = APIRouter(tags=["document-extraction"])
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+MAX_PDF_PAGES = 10
+MAX_OCR_PIXELS = 20_000_000
+PDF_OCR_SCALE = 1.5
+TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {".pdf"}
+PDF_MAGIC = b"%PDF-"
+LOW_CONFIDENCE_THRESHOLD = 0.65
+
+
+def _ocr_image(image: Any) -> tuple[str, float | None]:
+    width, height = image.size
+    if width <= 0 or height <= 0 or width * height > MAX_OCR_PIXELS:
+        raise ValueError("Image dimensions exceed the safe OCR processing limit. Resize the image and try again.")
+    try:
+        import pytesseract
+        from pytesseract import Output
+    except ImportError as exc:
+        raise RuntimeError("OCR dependencies are not installed on this service.") from exc
+
+    try:
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 3")
+    except pytesseract.pytesseract.TesseractNotFoundError as exc:
+        raise RuntimeError("Tesseract OCR is not installed or is not available on this service.") from exc
+    words: list[str] = []
+    confidences: list[float] = []
+    for word, raw_confidence in zip(data.get("text", []), data.get("conf", [])):
+        word = str(word).strip()
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            continue
+        if word and confidence >= 0:
+            words.append(word)
+            confidences.append(confidence / 100.0)
+    if not words:
+        return "", None
+    return " ".join(words), sum(confidences) / len(confidences)
+
+
+def extract_document_content(filename: str, content_type: str, data: bytes) -> dict[str, Any]:
+    """Extract a bounded document without persisting raw binary content."""
+    if not data:
+        raise ValueError("The selected file is empty.")
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise ValueError("The selected file exceeds the 10 MiB limit.")
+
+    extension = PurePath(filename or "").suffix.lower()
+    if extension not in SUPPORTED_EXTENSIONS:
+        raise ValueError("Supported formats are PDF, common image files, and plain text files.")
+    digest = hashlib.sha256(data).hexdigest()
+    warnings: list[str] = []
+    confidence: float | None = None
+    source = "text"
+
+    if extension in TEXT_EXTENSIONS:
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ValueError("This text file is not valid UTF-8 and could not be read safely.") from exc
+    elif extension == ".pdf":
+        if not data.startswith(PDF_MAGIC):
+            raise ValueError("The file extension says PDF, but its content is not a valid PDF.")
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data), strict=True)
+            if reader.is_encrypted:
+                raise ValueError("This PDF is encrypted. Export an unlocked copy and try again.")
+            pages = reader.pages
+            if not pages:
+                raise ValueError("This PDF has no readable pages.")
+            if len(pages) > MAX_PDF_PAGES:
+                warnings.append(f"Only the first {MAX_PDF_PAGES} of {len(pages)} pages were processed.")
+            page_text = [(page.extract_text() or "").strip() for page in pages[:MAX_PDF_PAGES]]
+            text = "\n\n".join(part for part in page_text if part)
+            source = "pdf_text"
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError("This PDF could not be opened. The file may be damaged or unsupported.") from exc
+
+        # Mixed PDFs often contain selectable text on some pages and scanned images
+        # on others. OCR only the pages without embedded text so those pages are not
+        # silently omitted from the saved evidence.
+        missing_text_pages = [index for index, part in enumerate(page_text) if not part]
+        if missing_text_pages:
+            try:
+                import fitz
+                from PIL import Image
+                document = fitz.open(stream=data, filetype="pdf")
+                ocr_by_page: dict[int, str] = {}
+                page_confidences: list[float] = []
+                ocr_unavailable = False
+                try:
+                    for page_index in missing_text_pages:
+                        page = document[page_index]
+                        page_rect = page.rect
+                        rendered_width = int(page_rect.width * PDF_OCR_SCALE)
+                        rendered_height = int(page_rect.height * PDF_OCR_SCALE)
+                        if rendered_width <= 0 or rendered_height <= 0 or rendered_width * rendered_height > MAX_OCR_PIXELS:
+                            raise ValueError("A scanned PDF page exceeds the safe OCR processing limit. Export a smaller page and try again.")
+                        pixmap = page.get_pixmap(matrix=fitz.Matrix(PDF_OCR_SCALE, PDF_OCR_SCALE), alpha=False)
+                        with Image.open(io.BytesIO(pixmap.tobytes("png"))) as image_obj:
+                            try:
+                                page_text_value, page_confidence = _ocr_image(image_obj)
+                            except RuntimeError:
+                                ocr_unavailable = True
+                                break
+                        if page_text_value:
+                            ocr_by_page[page_index] = page_text_value
+                        if page_confidence is not None:
+                            page_confidences.append(page_confidence)
+                finally:
+                    document.close()
+
+                for page_index, page_ocr_text in ocr_by_page.items():
+                    page_text[page_index] = page_ocr_text
+                text = "\n\n".join(part for part in page_text if part)
+                if ocr_by_page:
+                    source = "pdf_text_ocr" if any(part for index, part in enumerate(page_text) if index not in ocr_by_page) else "pdf_ocr"
+                if page_confidences:
+                    confidence = sum(page_confidences) / len(page_confidences)
+                if ocr_unavailable:
+                    warnings.append("OCR was unavailable for one or more scanned pages; embedded text from readable pages was preserved.")
+                    if not text.strip():
+                        raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.")
+            except RuntimeError as exc:
+                if not text.strip():
+                    raise ValueError("This PDF appears to be scanned, but OCR is unavailable on this service.") from exc
+                warnings.append("OCR was unavailable for one or more scanned pages; embedded text from readable pages was preserved.")
+            except ValueError:
+                raise
+            except Exception as exc:
+                raise ValueError("Text could not be extracted from scanned PDF pages.") from exc
+    else:
+        try:
+            from PIL import Image
+            image_obj = Image.open(io.BytesIO(data))
+            image_obj.verify()
+            image_obj = Image.open(io.BytesIO(data))
+            text, confidence = _ocr_image(image_obj)
+            source = "image_ocr"
+        except RuntimeError as exc:
+            raise ValueError("OCR is unavailable on this service. Try a text-based PDF or text file.") from exc
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError("This image could not be read. Try a clearer JPG, PNG, or TIFF image.") from exc
+
+    text = re.sub(r"\x00", "", text).strip()
+    if not text:
+        raise ValueError("No readable text was found. The document may be blank, damaged, or too unclear.")
+    if confidence is not None and confidence < LOW_CONFIDENCE_THRESHOLD:
+        warnings.append("OCR confidence is low. Check the extracted text against the original before relying on it.")
+    if len(text) > 500_000:
+        text = text[:500_000]
+        warnings.append("Extracted text was truncated at 500,000 characters.")
+    return {
+        "ok": True,
+        "document": {
+            "id": f"doc_{digest[:24]}",
+            "name": PurePath(filename).name[:255],
+            "mime_type": content_type or "application/octet-stream",
+            "extracted_text": text,
+            "extracted_text_preview": text[:600],
+            "extracted_char_count": len(text),
+            "ocr_confidence": confidence,
+            "extraction_source": source,
+            "extraction_warnings": warnings,
+            "sha256": digest,
+        },
+    }
+
+
+@router.post("/documents/extract")
+async def extract_document(request: Request, file: UploadFile = File(...)):
+    # Session-scope middleware sets these only after validating the bearer token.
+    if not getattr(request.state, "scoped_person_id", None) or not getattr(request.state, "scoped_caregiver_id", None):
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    try:
+        data = await file.read(MAX_DOCUMENT_BYTES + 1)
+        result = extract_document_content(file.filename or "upload", file.content_type or "", data)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await file.close()
+    return result
+
+
+
+
+def _extract_document_candidates(text: str, evidence_id: str) -> list[dict[str, Any]]:
+    """Create exact-source, review-only candidates; this is not clinical interpretation."""
+    candidates: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    medication = re.compile(r"\b(medication|prescription|tablet|capsule|dosage|dose|\d+(?:\.\d+)?\s?(?:mg|mcg|g|ml|mL|units?)|take\s+\d+)\b", re.IGNORECASE)
+    result = re.compile(r"\b(result|test|laboratory|lab|reference range|positive|negative|elevated|low|high|normal|abnormal|mmol|mg/dl|mmhg|bpm)\b", re.IGNORECASE)
+    follow_up = re.compile(r"\b(follow[- ]?up|appointment|return (?:to|in)|recheck|contact|call (?:the|your|clinic|doctor)|schedule|refer(?:ral)?|within \d+ (?:day|week|month)s?)\b", re.IGNORECASE)
+    instruction = re.compile(r"\b(instruct(?:ion|ed|ions)?|continue|stop|avoid|monitor|keep taking|do not|don't|must|should|call|seek care|return if)\b", re.IGNORECASE)
+
+    # Preserve exact source spans as short line/sentence quotes. Do not merge facts
+    # across unrelated sections or infer a date, dose, diagnosis, or action.
+    fragments = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+    cursor = 0
+    for fragment in fragments:
+        source_start = text.find(fragment, cursor)
+        if source_start < 0:
+            source_start = text.find(fragment)
+        source_end = source_start + len(fragment) if source_start >= 0 else None
+        cursor = source_end if source_end is not None else cursor
+        quote = fragment[:1000]
+        # A single source sentence can legitimately mention more than one
+        # review category. Preserve separate candidates against the same exact
+        # quote instead of silently dropping medication/instruction signals when
+        # a follow-up phrase appears in that sentence.
+        matched_kinds = []
+        if follow_up.search(quote):
+            matched_kinds.append("follow_up")
+        if medication.search(quote):
+            matched_kinds.append("medication")
+        if result.search(quote):
+            matched_kinds.append("result")
+        if instruction.search(quote):
+            matched_kinds.append("instruction")
+        for kind in matched_kinds:
+            key = (kind, quote.casefold())
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append({
+                "candidate_id": f"{evidence_id}:{len(candidates)}",
+                "candidate_type": kind,
+                "subject": {
+                    "medication": "Medication reference",
+                    "instruction": "Care instruction",
+                    "result": "Test or result reference",
+                    "follow_up": "Follow-up reference",
+                }[kind],
+                "observation": quote,
+                "source_quote": quote,
+                "source_evidence_id": evidence_id,
+                "source_span_start": source_start if source_start >= 0 else None,
+                "source_span_end": min(source_start + len(quote), source_end) if source_start >= 0 and source_end is not None else None,
+                "confidence": None,
+                "review_status": "pending_review",
+            })
+            if len(candidates) >= 30:
+                break
+        if len(candidates) >= 30:
+            break
+    return candidates
+
+
+def _classify_document_type(text: str, filename: str) -> str:
+    lowered = text.casefold()
+    if any(term in lowered for term in ("discharge summary", "discharge instructions", "discharged from")):
+        return "discharge_instructions"
+    if any(term in lowered for term in ("medication list", "prescription", "drug name", "dosage")):
+        return "medication_document"
+    if any(term in lowered for term in ("laboratory result", "lab results", "reference range", "test result")):
+        return "test_result"
+    if any(term in lowered for term in ("care plan", "care instructions", "treatment plan")):
+        return "care_plan"
+    if any(term in lowered for term in ("appointment", "follow-up visit", "clinic visit")):
+        return "appointment_document"
+    suffix = PurePath(filename).suffix.lower()
+    return "pdf_document" if suffix == ".pdf" else ("image_document" if suffix in IMAGE_EXTENSIONS else "text_document")
+
+
+def _document_date_candidate(text: str) -> str | None:
+    patterns = (
+        r"\b(20\d{2}-\d{2}-\d{2})\b",
+        r"\b(\d{1,2}/\d{1,2}/20\d{2})\b",
+        r"\b(\d{1,2}[- ](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*[- ,]+20\d{2})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return match.group(1)
+    return None
+
+
+@router.get("/documents/ocr-status")
+def document_ocr_runtime_status(request: Request):
+    """Report OCR runtime capability for authenticated staging/operations checks."""
+    if not getattr(request.state, "scoped_person_id", None) or not getattr(request.state, "scoped_caregiver_id", None):
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    executable = shutil.which("tesseract")
+    if not executable:
+        return {"available": False, "binary_found": False, "languages": [], "version": None}
+    try:
+        import pytesseract
+        version = str(pytesseract.get_tesseract_version())
+        languages = sorted(pytesseract.get_languages(config=""))
+    except Exception:
+        return {"available": False, "binary_found": True, "languages": [], "version": None}
+    return {
+        "available": "eng" in languages,
+        "binary_found": True,
+        "languages": languages,
+        "version": version,
+    }
+
+
+@router.post("/documents/intake", status_code=201)
+async def intake_document(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Extract and persist both original source bytes and review-only text candidates."""
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
+
+    try:
+        data = await file.read(MAX_DOCUMENT_BYTES + 1)
+    finally:
+        await file.close()
+    filename = (file.filename or "care-document").replace("\\", "/").split("/")[-1][:255]
+    content_type = (file.content_type or "application/octet-stream").lower().strip()
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status_code=413, detail="The selected file exceeds the 10 MiB limit.")
+    suffix = PurePath(filename).suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=415, detail="Unsupported document format.")
+    if suffix == ".pdf" and (not data.startswith(PDF_MAGIC) or content_type not in {"application/pdf", "application/octet-stream"}):
+        raise HTTPException(status_code=415, detail="PDF signature or declared content type is invalid.")
+    if suffix in IMAGE_EXTENSIONS:
+        expected_image_mime = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+            ".webp": "image/webp", ".tif": "image/tiff", ".tiff": "image/tiff",
+            ".bmp": "image/bmp",
+        }[suffix]
+        if content_type not in {expected_image_mime, "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail="Image extension and declared content type do not match.")
+        try:
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image_obj:
+                image_obj.verify()
+        except Exception as exc:
+            raise HTTPException(status_code=415, detail="The uploaded image is invalid or unreadable.") from exc
+    if suffix in TEXT_EXTENSIONS:
+        if content_type not in {"text/plain", "text/markdown", "text/csv", "application/json", "application/octet-stream"}:
+            raise HTTPException(status_code=415, detail="Text extension and declared content type do not match.")
+        try:
+            data.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(status_code=422, detail="Text document is not valid UTF-8.") from exc
+    try:
+        extraction = extract_document_content(filename, content_type, data)
+        document = extraction["document"]
+        extracted_text = document["extracted_text"]
+        extraction_source = document["extraction_source"]
+        ocr_confidence = document["ocr_confidence"]
+        warnings = document["extraction_warnings"]
+        extraction_status = "extracted"
+        extraction_error = None
+        digest = document["sha256"]
+    except ValueError as exc:
+        # Unsupported types, empty files, and oversized files are rejected. A supported
+        # but unreadable/scanned file is still retained with an explicit extraction failure.
+        suffix = PurePath(filename).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS or not data or len(data) > MAX_DOCUMENT_BYTES:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        digest = hashlib.sha256(data).hexdigest()
+        extracted_text = ""
+        extraction_source = "failed"
+        ocr_confidence = None
+        warnings = [str(exc)]
+        extraction_status = "pending_ocr" if "OCR is unavailable" in str(exc) else "extraction_failed"
+        extraction_error = str(exc)
+
+    document_type = _classify_document_type(extracted_text, filename)
+    document_date = _document_date_candidate(extracted_text) if extracted_text else None
+    # Evidence ID is generated before candidate IDs so every candidate can point back to its source.
+    evidence_id = str(uuid.uuid4())
+    document_candidates = _extract_document_candidates(extracted_text, evidence_id) if extracted_text else []
+    metadata = {
+        "original_filename": filename,
+        "mime_type": content_type,
+        "size_bytes": len(data),
+        "sha256": digest,
+        "document_type_candidate": document_type,
+        "document_date_candidate": document_date,
+        "document_date_review_status": "pending_review" if document_date else "not_detected",
+        "extraction_status": extraction_status,
+        "extraction_source": extraction_source,
+        "extraction_version": "document-intake-v1",
+        "ocr_confidence": ocr_confidence,
+        "extraction_warnings": warnings,
+        "extraction_error": extraction_error,
+        "extracted_char_count": len(extracted_text),
+        "review_status": "pending_review",
+        "document_candidates": document_candidates,
+        "source_file_preserved": True,
+    }
+    evidence = Evidence(
+        id=evidence_id,
+        person_id=person_id,
+        type="document",
+        source_text=extracted_text if extracted_text else "Document source preserved; readable text is not currently available. No document facts have been verified.",
+        original_file_path="pending",
+        uploaded_by_caregiver_id=caregiver_id,
+        extra_metadata=json.dumps(metadata, ensure_ascii=False),
+        confidence=ocr_confidence,
+        evidence_status="uploaded",
+        source_type="document_upload",
+    )
+    db.add(evidence)
+    db.flush()
+    evidence.original_file_path = f"db://document-assets/{evidence.id}"
+    db.add(DocumentAsset(
+        evidence_id=evidence.id,
+        person_id=person_id,
+        uploaded_by_caregiver_id=caregiver_id,
+        original_filename=filename,
+        content_type=content_type,
+        size_bytes=len(data),
+        sha256=digest,
+        content=data,
+    ))
+    now = datetime.now(timezone.utc)
+    event = CareEvent(
+        person_id=person_id,
+        event_type="document_intake",
+        status="recorded",
+        occurred_at=now,
+        occurred_at_timezone=caregiver.timezone,
+        time_provenance="document_upload_time_not_document_date",
+        title=f"Document added: {filename}"[:200],
+        description=(
+            f"Document uploaded. Text extraction status: {extraction_status}. "
+            "Detected type/date and extracted content are unverified candidates pending caregiver review."
+        ),
+        evidence_ids=[evidence.id],
+        created_by_caregiver_id=caregiver_id,
+        tags=[f"document_type:{document_type}", f"document_extraction:{extraction_status}"],
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(evidence)
+    db.refresh(event)
+
+    return {
+        "evidence_id": evidence.id,
+        "care_event_id": event.id,
+        "person_id": person_id,
+        "filename": filename,
+        "content_type": content_type,
+        "size_bytes": len(data),
+        "sha256": digest,
+        "document_type_candidate": document_type,
+        "document_date_candidate": document_date,
+        "document_date_review_status": metadata["document_date_review_status"],
+        "extraction_status": extraction_status,
+        "extraction_source": extraction_source,
+        "extraction_version": metadata["extraction_version"],
+        "ocr_confidence": ocr_confidence,
+        "extraction_warnings": warnings,
+        "extraction_error": extraction_error,
+        "extracted_char_count": len(extracted_text),
+        "source_file_preserved": True,
+        "review_required": True,
+        "document_candidates": document_candidates,
+        "candidate_count": len(document_candidates),
+    }
+
+
+@router.get("/documents/{evidence_id}/file")
+def download_document_file(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id = getattr(request.state, "scoped_person_id", None)
+    if not person_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    asset = db.query(DocumentAsset).filter(
+        DocumentAsset.evidence_id == evidence_id,
+        DocumentAsset.person_id == person_id,
+    ).first()
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Document file not found for this care record.")
+    filename = quote(asset.original_filename, safe="")
+    return Response(
+        content=asset.content,
+        media_type=asset.content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+
+@router.post("/documents/{evidence_id}/candidates/{candidate_index}/review")
+async def review_document_candidate(
+    evidence_id: str,
+    candidate_index: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Persist a review decision without promoting candidate content to care facts."""
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        raise HTTPException(status_code=401, detail="An authenticated care-record session is required.")
+    # Validate both sides of the session scope. A caregiver ID supplied by session
+    # middleware is not, by itself, proof that the caregiver belongs to this person.
+    caregiver = db.query(Caregiver).filter(
+        Caregiver.id == caregiver_id,
+        Caregiver.person_id == person_id,
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="The authenticated caregiver is not linked to this care record.")
+
+    # Lock the evidence row so simultaneous review attempts serialize on PostgreSQL.
+    # This prevents two concurrent requests from both accepting a pending candidate.
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.type == "document",
+    ).with_for_update().first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Document evidence not found for this care record.")
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="A review decision is required.") from exc
+    decision = payload.get("decision") if isinstance(payload, dict) else None
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=422, detail="Decision must be accept or reject.")
+    try:
+        metadata = json.loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Document metadata is unreadable; review cannot be safely saved.")
+    if not isinstance(metadata, dict):
+        raise HTTPException(status_code=409, detail="Document metadata is not in a reviewable format.")
+    candidates = metadata.get("document_candidates")
+    if not isinstance(candidates, list) or candidate_index < 0 or candidate_index >= len(candidates):
+        raise HTTPException(status_code=404, detail="Document candidate not found.")
+    if not isinstance(candidates[candidate_index], dict):
+        raise HTTPException(status_code=409, detail="Document candidate metadata is malformed; review cannot be safely saved.")
+    candidate = dict(candidates[candidate_index])
+    if candidate.get("review_status") != "pending_review":
+        raise HTTPException(status_code=409, detail="This candidate already has a review decision.")
+    now = datetime.now(timezone.utc).isoformat()
+    candidate["review_status"] = "accepted_by_caregiver" if decision == "accept" else "rejected_by_caregiver"
+    candidate["reviewed_at"] = now
+    candidate["reviewed_by_caregiver_id"] = caregiver_id
+    candidates[candidate_index] = candidate
+    history_value = metadata.get("document_review_history", [])
+    if not isinstance(history_value, list):
+        raise HTTPException(status_code=409, detail="Document review history is malformed; review cannot be safely saved.")
+    history = list(history_value)
+    history.append({
+        "candidate_index": candidate_index,
+        "decision": decision,
+        "reviewed_at": now,
+        "reviewed_by_caregiver_id": caregiver_id,
+        "source_evidence_id": evidence.id,
+    })
+    metadata["document_candidates"] = candidates
+    metadata["document_review_history"] = history
+    metadata["review_notice"] = (
+        "Review is a caregiver decision only. It does not verify the source or write a fact into the Living Care Record."
+    )
+    evidence.extra_metadata = __import__("json").dumps(metadata, ensure_ascii=False)
+    db.commit()
+    return {
+        "evidence_id": evidence.id,
+        "candidate_index": candidate_index,
+        "candidate": candidate,
+        "authoritative_lcr_write": False,
+        "message": "Review decision saved. The original document remains preserved and the Living Care Record was not changed.",
+    }

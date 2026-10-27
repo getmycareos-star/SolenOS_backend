@@ -1,4 +1,6 @@
+import ipaddress
 import os
+from urllib.parse import urlparse
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +16,11 @@ class Settings(BaseSettings):
     secret_key: str = ""
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24
+    cors_origins: str = "http://localhost:5173,http://localhost:3000,https://solenosai.netlify.app"
+    # AI requests are routed only to the configured private Ollama service; no hosted fallback.
+    ollama_base_url: str = ""
+    ollama_model: str = "qwen2.5:1.5b"
+    ollama_timeout_seconds: float = 60.0
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -21,6 +28,28 @@ class Settings(BaseSettings):
         case_sensitive=False,
         extra="ignore",
     )
+
+    @property
+    def ollama_configured(self) -> bool:
+        url = self.ollama_base_url.strip()
+        model = self.ollama_model.strip()
+        if not url or not model:
+            return False
+        try:
+            parsed = urlparse(url)
+            host = (parsed.hostname or "").lower()
+        except ValueError:
+            return False
+        if parsed.scheme != "http" or not host.endswith(".railway.internal"):
+            return False
+        if host == "localhost":
+            return False
+        try:
+            if ipaddress.ip_address(host).is_loopback:
+                return False
+        except ValueError:
+            pass
+        return True
 
     @property
     def is_production(self) -> bool:
