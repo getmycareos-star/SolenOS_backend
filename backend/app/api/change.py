@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
 from app.models.change import Baseline, Change, Pattern, Situation
@@ -18,6 +18,25 @@ from app.services.situation_formation import detect_situations, update_situation
 from app.services.explanation import explain_situation
 
 router = APIRouter(prefix="/change", tags=["change"])
+
+
+def _parse_reference_time(value: Optional[str]) -> Optional[datetime]:
+    """Parse optional ISO-8601 reference time and return a client error if invalid.
+
+    Naive timestamps are interpreted as UTC for backwards compatibility.
+    """
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="reference_time must be a valid ISO-8601 timestamp",
+        ) from exc
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 @router.post("/baselines", response_model=BaselineSchema)
@@ -45,7 +64,7 @@ def detect_changes(
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
+    ref_time = _parse_reference_time(reference_time)
     changes = detect_event_changes(db, person_id, event_type, subject_id, ref_time)
     return changes
 
@@ -67,7 +86,7 @@ def detect_patterns_endpoint(
     db: Session = Depends(get_db),
 ):
     from app.services.pattern_detection import detect_patterns as _detect_patterns
-    ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
+    ref_time = _parse_reference_time(reference_time)
     patterns = _detect_patterns(db, person_id, event_type, subject_id, ref_time)
     return patterns
 
@@ -86,7 +105,7 @@ def detect_situations_endpoint(
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
+    ref_time = _parse_reference_time(reference_time)
     situations = detect_situations(db, person_id, ref_time)
     result = []
     for s in situations:
@@ -154,6 +173,6 @@ def update_situations_endpoint(
     event = db.query(CareEvent).filter(CareEvent.id == event_id, CareEvent.person_id == person_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
-    ref_time = datetime.fromisoformat(reference_time.replace("Z", "+00:00")) if reference_time else None
+    ref_time = _parse_reference_time(reference_time)
     updated = update_situations(db, person_id, event, ref_time)
     return updated
