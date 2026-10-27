@@ -133,7 +133,7 @@ def prepare_handoff_draft(
 
         query = select(*selected).where(table.c.person_id == person_id)
         timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
-        timestamp_expression = func.coalesce(*timestamp_columns) if timestamp_columns else None
+        timestamp_expression = (func.coalesce(*timestamp_columns) if len(timestamp_columns) > 1 else timestamp_columns[0]) if timestamp_columns else None
         if timestamp_expression is not None:
             # Use the first populated timestamp, not merely the first existing
             # column, so a null effective_at cannot bypass the requested window.
