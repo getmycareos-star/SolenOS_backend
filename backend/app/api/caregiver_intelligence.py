@@ -346,7 +346,12 @@ def promote_perspective(perspective_id: str, request: Request, caregiver_id: Opt
 
 
 @router.post("/caregiver-handoffs", response_model=CaregiverHandoff)
-def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db)):
+def create_handoff(handoff: CaregiverHandoffCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, handoff.person_id)
+    _assert_actor_id(handoff.from_caregiver_id, current_profile.id, session_caregiver_id)
+    recipient = _resolve_profile_target(db, handoff.to_caregiver_id, person_id)
+    handoff = CaregiverHandoffCreate(**{**handoff.model_dump(), "person_id": person_id, "from_caregiver_id": current_profile.id, "to_caregiver_id": recipient.id})
     service = CaregiverIntelligenceService(db)
     db_handoff = service.record_handoff(handoff)
     _log_and_learn(
@@ -362,18 +367,22 @@ def create_handoff(handoff: CaregiverHandoffCreate, db: Session = Depends(get_db
 
 
 @router.post("/caregiver-handoffs/{handoff_id}/accept")
-def accept_handoff(handoff_id: str, acceptance_evidence: Optional[str] = None, db: Session = Depends(get_db)):
+def accept_handoff(handoff_id: str, request: Request, acceptance_evidence: Optional[str] = None, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
-    handoff = service.accept_handoff(handoff_id, acceptance_evidence)
+    handoff = service.accept_handoff(handoff_id, acceptance_evidence, person_id=person_id, accepting_caregiver_id=current_profile.id)
     if not handoff:
         raise HTTPException(status_code=404, detail="Handoff not found")
     return {"id": handoff.id, "acceptance_status": handoff.acceptance_status.value, "is_completed": handoff.is_completed}
 
 
 @router.get("/caregiver-handoffs/{person_id}", response_model=List[CaregiverHandoff])
-def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Optional[str] = None, db: Session = Depends(get_db)):
+def list_handoffs(person_id: str, request: Request, caregiver_id: Optional[str] = None, status: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, _session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
-    handoffs = service.get_pending_handoffs(person_id, caregiver_id)
+    # The inbox is always scoped to the authenticated recipient, never a caller-selected ID.
+    handoffs = service.get_pending_handoffs(scoped_person_id, current_profile.id)
     if status:
         try:
             status_enum = HandoffAcceptanceStatus(status)
@@ -384,20 +393,38 @@ def list_handoffs(person_id: str, caregiver_id: Optional[str] = None, status: Op
 
 
 @router.post("/caregiver-activities", response_model=CaregiverActivity)
-def create_activity(activity: CaregiverActivityCreate, db: Session = Depends(get_db)):
+def create_activity(activity: CaregiverActivityCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, activity.person_id)
+    _assert_actor_id(activity.caregiver_id, current_profile.id, session_caregiver_id)
+    if activity.is_anonymous:
+        raise HTTPException(status_code=422, detail="Anonymous activity must use the dedicated unknown-actor workflow")
+    activity = CaregiverActivityCreate(**{**activity.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id, "is_anonymous": False, "shared_account_id": None})
     service = CaregiverIntelligenceService(db)
     db_activity = service.record_activity(activity)
     return db_activity
 
 
 @router.get("/caregiver-activities/{person_id}", response_model=List[CaregiverActivity])
-def list_activities(person_id: str, caregiver_id: Optional[str] = None, limit: int = 100, db: Session = Depends(get_db)):
+def list_activities(person_id: str, request: Request, caregiver_id: Optional[str] = None, limit: int = 100, db: Session = Depends(get_db)):
+    scoped_person_id, _session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
-    return service.get_activity_history(person_id, caregiver_id, limit)
+    return service.get_activity_history(scoped_person_id, current_profile.id, min(max(limit, 1), 100))
 
 
 @router.post("/caregiver-communications", response_model=CaregiverCommunication)
-def create_communication(communication: CaregiverCommunicationCreate, db: Session = Depends(get_db)):
+def create_communication(communication: CaregiverCommunicationCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, communication.person_id)
+    _assert_actor_id(communication.from_caregiver_id, current_profile.id, session_caregiver_id)
+    target_id = communication.to_caregiver_id
+    if target_id:
+        target_id = _resolve_profile_target(db, target_id, person_id).id
+    recipients = []
+    for recipient_id in communication.recipient_caregiver_ids or []:
+        recipients.append(_resolve_profile_target(db, recipient_id, person_id).id)
+    communication = CaregiverCommunicationCreate(**{**communication.model_dump(), "person_id": person_id, "from_caregiver_id": current_profile.id, "to_caregiver_id": target_id, "recipient_caregiver_ids": recipients})
     service = CaregiverIntelligenceService(db)
     db_comm = service.record_communication(communication)
     _log_and_learn(
@@ -413,27 +440,46 @@ def create_communication(communication: CaregiverCommunicationCreate, db: Sessio
 
 
 @router.get("/caregiver-communications/{person_id}", response_model=List[CaregiverCommunication])
-def list_communications(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
-    service = CaregiverIntelligenceService(db)
-    if caregiver_id:
-        return service.get_communications_for_caregiver(person_id, caregiver_id)
-    return (
+def list_communications(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, _session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
+    communications = (
         db.query(CaregiverCommunicationModel)
-        .filter(CaregiverCommunicationModel.person_id == person_id)
+        .filter(CaregiverCommunicationModel.person_id == scoped_person_id)
         .order_by(CaregiverCommunicationModel.communication_time.desc())
         .all()
     )
+    visible = []
+    for item in communications:
+        recipients = set(item.recipient_caregiver_ids or [])
+        is_party = (
+            str(item.from_caregiver_id) == str(current_profile.id)
+            or str(item.to_caregiver_id or "") == str(current_profile.id)
+            or str(current_profile.id) in {str(value) for value in recipients}
+        )
+        visibility = getattr(item.visibility, "value", item.visibility)
+        is_restricted = bool(item.is_private) or str(visibility).lower() in {"private", "restricted"}
+        if is_restricted and not is_party:
+            continue
+        visible.append(item)
+    return visible
 
 
 @router.post("/care-network-relationships", response_model=CareNetworkRelationship)
-def create_network_relationship(relationship: CareNetworkRelationshipCreate, db: Session = Depends(get_db)):
+def create_network_relationship(relationship: CareNetworkRelationshipCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, relationship.person_id)
+    _assert_actor_id(relationship.from_caregiver_id, current_profile.id, session_caregiver_id)
+    target_id = _resolve_profile_target(db, relationship.to_caregiver_id, person_id).id if relationship.to_caregiver_id else None
+    relationship = CareNetworkRelationshipCreate(**{**relationship.model_dump(), "person_id": person_id, "from_caregiver_id": current_profile.id, "to_caregiver_id": target_id})
     service = CaregiverIntelligenceService(db)
     db_rel = service.create_care_network_relationship(relationship)
     return db_rel
 
 
 @router.get("/care-network-relationships/{person_id}", response_model=List[CareNetworkRelationship])
-def list_network_relationships(person_id: str, db: Session = Depends(get_db)):
+def list_network_relationships(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _assert_person_scope(request, person_id)
     service = CaregiverIntelligenceService(db)
     return service.get_care_network(person_id)
 
