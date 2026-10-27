@@ -52,6 +52,9 @@ RESOURCES = {
     "open-questions": "open_questions",
     "information-gaps": "information_gaps",
     "assertions": "care_assertions",
+    "caregiver-contexts": "caregiver_contexts",
+    "caregiver-perspectives": "caregiver_perspectives",
+    "caregiver-observations": "caregiver_observations",
 }
 
 WRITABLE = {
@@ -74,6 +77,11 @@ WRITABLE = {
     "provenance": {"target_type", "target_id", "source_type", "source_id", "evidence_id", "source_label", "source_span", "metadata"},
     "timeline": {"source_type", "source_id", "entry_type", "title", "summary", "occurred_at", "evidence_ids", "epistemic_status", "is_projection"},
     "change-assessments": {"change_id", "assessment_status", "significance", "evidence_status", "assessment_notes", "evidence_ids"},
+    # Caregiver-reported context remains attributed perspective, not an LCR fact.
+    # Identity fields are injected from the server-issued session below.
+    "caregiver-contexts": {"context_type", "context_payload", "epistemic_status", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "notes"},
+    "caregiver-perspectives": {"topic", "perspective_text", "epistemic_status", "evidence_ids", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "supersedes_id"},
+    "caregiver-observations": {"observation_type", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -218,6 +226,9 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "provenance": ("target_type", "target_id", "source_type"),
         "timeline": ("source_type", "source_id", "entry_type", "title"),
         "change-assessments": ("change_id",),
+        "caregiver-contexts": ("context_type", "context_payload"),
+        "caregiver-perspectives": ("topic", "perspective_text"),
+        "caregiver-observations": ("observation_type", "description"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
@@ -227,6 +238,9 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     data["person_id"] = person_id
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
+    # Never trust client-supplied caregiver attribution.
+    if "caregiver_id" in table.c:
+        data["caregiver_id"] = caregiver_id
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
