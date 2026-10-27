@@ -105,9 +105,9 @@ WRITABLE = {
     "amendments": {"care_record_id", "amendment_type", "reason", "status", "provenance_id"},
     "amendment-items": {"amendment_id", "target_type", "target_id", "field_name", "before_value", "after_value"},
     "record-audit": {"care_record_id", "actor_type", "actor_id", "action", "target_type", "target_id", "outcome", "reason", "metadata", "occurred_at", "request_id"},
-    "uncertainties": {"care_record_id", "target_type", "target_id", "question", "uncertainty_type", "status", "source_ids", "resolved_at", "resolution"},
-    "missing-information": {"care_record_id", "field_name", "question", "importance", "status", "source_ids", "resolved_at", "resolution"},
-    "conflicts": {"care_record_id", "target_type", "target_id", "conflict_type", "status", "claim_ids", "resolution", "resolved_at"},
+    "uncertainties": {"care_record_id", "target_type", "target_id", "question", "uncertainty_type", "status", "source_ids", "resolved_at"},
+    "missing-information": {"care_record_id", "topic", "description", "priority", "status", "resolved_at"},
+    "conflicts": {"care_record_id", "conflict_type", "status", "claim_refs", "description", "resolution", "resolved_at"},
     "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
 }
 
@@ -269,8 +269,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "amendment-items": ("amendment_id", "target_type", "target_id"),
         "record-audit": ("actor_type", "action"),
         "uncertainties": ("question", "uncertainty_type"),
-        "missing-information": ("field_name", "question"),
-        "conflicts": ("target_type", "target_id", "conflict_type"),
+        "missing-information": ("topic", "description"),
+        "conflicts": ("conflict_type", "description"),
         "action-outcomes": ("action_id", "action_type", "outcome_status"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
@@ -288,6 +288,17 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     # Never trust client-supplied caregiver attribution.
     if "caregiver_id" in table.c:
         data["caregiver_id"] = caregiver_id
+    if resource == "record-provenance" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "record-change-sets" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "corrections" and "requested_by_caregiver_id" in table.c:
+        data["requested_by_caregiver_id"] = caregiver_id
+    if resource == "amendments" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "record-audit":
+        data["actor_type"] = "caregiver"
+        data["actor_id"] = caregiver_id
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
