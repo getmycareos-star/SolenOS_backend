@@ -303,7 +303,7 @@ jobs:
             -H "$auth_header" -H "Content-Type: application/json" \
             -d "{\"person_id\":\"$person_id\",\"text\":\"Did my reminder get delivered?\"}" \
             http://127.0.0.1:8080/api/v1/conversation/message)
-          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); assert d["ai_generated"] is True; assert d["written_to_lcr"] is False; assert not re.search(r"\\breminder\\s+(?:was|has been)\\s+delivered\\b",reply) or re.search(r"\\b(?:cannot|can.t|unable to)\\s+(?:verify|confirm|determine|tell)\\b|\\b(?:unknown|not supplied|not provided|no matching status)\\b",reply), reply' "$reminder_response"
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); assert d["ai_generated"] is True; assert d["written_to_lcr"] is False; assert not re.search(r"\breminder\s+(?:was|has been)\s+delivered\b",reply) or re.search(r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|no matching status)\b",reply), reply' "$reminder_response"
 
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
