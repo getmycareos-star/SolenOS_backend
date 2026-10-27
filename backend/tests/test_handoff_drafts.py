@@ -61,6 +61,28 @@ def test_draft_requires_session(client):
     assert response.status_code == 401, response.text
 
 
+@pytest.mark.parametrize("audience, expected_sections", [
+    ("family", {"start_here", "daily_routine", "health_medication", "next_actions", "receipt"}),
+    ("professional", {"transition_summary", "provenance", "medication_reconciliation", "action_register", "integrity", "receipt"}),
+])
+def test_draft_returns_audience_specific_template_and_explicit_unassessed_sections(client, audience, expected_sections):
+    test_client, session = client
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "family_transition", "audience": audience, "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["audience"] == audience
+    sections = {section["key"]: section for section in body["template_sections"]}
+    assert expected_sections.issubset(sections)
+    assert all(section["required_fields"] for section in body["template_sections"])
+    # Medication and routine adapters are not part of this verified source slice.
+    assert sections["medication_reconciliation" if audience == "professional" else "health_medication"]["coverage_status"] == "not_assessed"
+    assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
+
+
 def test_draft_is_read_only_and_only_includes_records_for_session_person(client):
     test_client, session = client
     token = session["access_token"]
