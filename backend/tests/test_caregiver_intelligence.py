@@ -42,34 +42,49 @@ def teardown_db():
 TEST_TOKEN = "test-only-caregiver-intelligence-session-token"
 
 
-def get_test_client():
+def get_test_client(caregiver_id=None):
     from app.core.database import get_db
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestingSessionLocal
     db = TestingSessionLocal()
     try:
-        caregiver = (
-            db.query(Caregiver)
-            .filter(Caregiver.id == "caregiver-sarah", Caregiver.person_id == "person-1")
-            .first()
-            or db.query(Caregiver)
-            .filter(Caregiver.person_id == "person-1")
-            .order_by(Caregiver.id.asc())
-            .first()
-        )
+        query = db.query(Caregiver).filter(Caregiver.person_id == "person-1")
+        caregiver = query.filter(Caregiver.id == caregiver_id).first() if caregiver_id else query.filter(Caregiver.id == "caregiver-sarah").first()
+        if caregiver is None:
+            caregiver = query.order_by(Caregiver.id.asc()).first()
         if caregiver is None:
             raise AssertionError("test fixture must create a caregiver before creating an authenticated session")
-        db.add(AnonymousSession(
-            id="test-session",
-            person_id="person-1",
-            caregiver_id=caregiver.id,
-            token_hash=hashlib.sha256(TEST_TOKEN.encode("utf-8")).hexdigest(),
-            expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
-        ))
-        db.commit()
+        token = f"{TEST_TOKEN}-{caregiver.id}"
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        existing = db.query(AnonymousSession).filter(AnonymousSession.token_hash == token_hash).first()
+        if existing is None:
+            db.add(AnonymousSession(
+                id=f"test-session-{caregiver.id}",
+                person_id="person-1",
+                caregiver_id=caregiver.id,
+                token_hash=token_hash,
+                expires_at=datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=1),
+            ))
+            db.commit()
     finally:
         db.close()
-    return TestClient(app, headers={"Authorization": f"Bearer {TEST_TOKEN}"})
+    return TestClient(app, headers={"Authorization": f"Bearer {token}"})
+
+
+def create_test_profile(caregiver_id, name):
+    actor_client = get_test_client(caregiver_id)
+    response = actor_client.post(
+        "/api/v1/caregiver-profiles",
+        json={
+            "person_id": "person-1",
+            "name": name,
+            "email": f"{name.lower()}@example.com",
+            "relationship": "Family",
+            "participation_category": "family",
+        },
+    )
+    assert response.status_code == 200, response.text
+    return actor_client, response.json()["id"]
 
 
 def create_test_person_and_caregivers(db):
@@ -199,7 +214,7 @@ def test_caregiver_observation_preserves_identity():
         db.close()
 
         client = get_test_client()
-        client.post(
+        profile_response = client.post(
             "/api/v1/caregiver-profiles",
             json={
                 "person_id": "person-1",
@@ -209,10 +224,12 @@ def test_caregiver_observation_preserves_identity():
                 "participation_category": "family",
             },
         )
+        assert profile_response.status_code == 200, profile_response.text
+        profile_id = profile_response.json()["id"]
         response = client.post(
             "/api/v1/caregiver-observations",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_id,
                 "person_id": "person-1",
                 "observation_content": "Mom seemed more confused today",
                 "observation_type": "direct",
@@ -221,7 +238,7 @@ def test_caregiver_observation_preserves_identity():
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["caregiver_id"] == "caregiver-sarah"
+        assert data["caregiver_id"] == profile_id
         assert data["observation_content"] == "Mom seemed more confused today"
         assert data["is_promoted_to_shared"] is False
     finally:
@@ -236,31 +253,24 @@ def test_conflicting_observations_preserved():
         db.close()
 
         client = get_test_client()
+        actor_clients = {}
+        profile_ids = {}
         for cid, name in [("caregiver-sarah", "Sarah"), ("caregiver-john", "John")]:
-            client.post(
-                "/api/v1/caregiver-profiles",
-                json={
-                    "person_id": "person-1",
-                    "name": name,
-                    "email": f"{name.lower()}@example.com",
-                    "relationship": "Family",
-                    "participation_category": "family",
-                },
-            )
+            actor_clients[cid], profile_ids[cid] = create_test_profile(cid, name)
 
-        client.post(
+        actor_clients["caregiver-sarah"].post(
             "/api/v1/caregiver-perspectives",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_ids["caregiver-sarah"],
                 "person_id": "person-1",
                 "claim_type": "observation",
                 "claim_content": "Mom fell yesterday",
             },
         )
-        client.post(
+        actor_clients["caregiver-john"].post(
             "/api/v1/caregiver-perspectives",
             json={
-                "caregiver_id": "caregiver-john",
+                "caregiver_id": profile_ids["caregiver-john"],
                 "person_id": "person-1",
                 "claim_type": "observation",
                 "claim_content": "Mom did not fall",
@@ -270,8 +280,8 @@ def test_conflicting_observations_preserved():
             "/api/v1/perspective-conflicts",
             json={
                 "person_id": "person-1",
-                "caregiver_a_id": "caregiver-sarah",
-                "caregiver_b_id": "caregiver-john",
+                "caregiver_a_id": profile_ids["caregiver-sarah"],
+                "caregiver_b_id": profile_ids["caregiver-john"],
                 "conflict_type": "observation_conflict",
                 "claim_a": "Mom fell yesterday",
                 "claim_b": "Mom did not fall",
@@ -498,7 +508,7 @@ def test_shared_observation_preserves_provenance():
         db.close()
 
         client = get_test_client()
-        client.post(
+        profile_response = client.post(
             "/api/v1/caregiver-profiles",
             json={
                 "person_id": "person-1",
@@ -508,22 +518,24 @@ def test_shared_observation_preserves_provenance():
                 "participation_category": "family",
             },
         )
+        assert profile_response.status_code == 200, profile_response.text
+        profile_id = profile_response.json()["id"]
         obs_response = client.post(
             "/api/v1/caregiver-observations",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_id,
                 "person_id": "person-1",
                 "observation_content": "Mom fell yesterday",
                 "observation_type": "direct",
             },
         )
         obs_id = obs_response.json()["id"]
-        client.post(f"/api/v1/caregiver-observations/{obs_id}/promote", params={"caregiver_id": "caregiver-sarah"})
+        client.post(f"/api/v1/caregiver-observations/{obs_id}/promote", params={"caregiver_id": profile_id, "person_id": "person-1"})
         response = client.get("/api/v1/caregiver-observations/person-1")
         assert response.status_code == 200
         shared = response.json()
         assert len(shared) == 1
-        assert shared[0]["caregiver_id"] == "caregiver-sarah"
+        assert shared[0]["caregiver_id"] == profile_id
         assert shared[0]["is_promoted_to_shared"] is True
     finally:
         teardown_db()
@@ -537,7 +549,7 @@ def test_responsibility_history_preserved():
         db.close()
 
         client = get_test_client()
-        client.post(
+        profile_response = client.post(
             "/api/v1/caregiver-profiles",
             json={
                 "person_id": "person-1",
@@ -547,12 +559,14 @@ def test_responsibility_history_preserved():
                 "participation_category": "family",
             },
         )
+        assert profile_response.status_code == 200, profile_response.text
+        profile_id = profile_response.json()["id"]
         past = datetime.now(timezone.utc) - timedelta(days=30)
         future = datetime.now(timezone.utc) + timedelta(days=30)
         client.post(
             "/api/v1/caregiver-responsibilities",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_id,
                 "person_id": "person-1",
                 "responsibility_type": "medication",
                 "effective_start": past.isoformat(),
@@ -571,7 +585,7 @@ def test_responsibility_history_preserved():
                 "status": "active",
             },
         )
-        response = client.get("/api/v1/caregiver-responsibilities/history/caregiver-sarah", params={"person_id": "person-1"})
+        response = client.get(f"/api/v1/caregiver-responsibilities/history/{profile_id}", params={"person_id": "person-1"})
         assert response.status_code == 200
         history = response.json()
         assert len(history) == 2
@@ -587,22 +601,15 @@ def test_no_caregiver_reliability_scores():
         db.close()
 
         client = get_test_client()
+        actor_clients = {}
+        profile_ids = {}
         for cid, name in [("caregiver-sarah", "Sarah"), ("caregiver-john", "John")]:
-            client.post(
-                "/api/v1/caregiver-profiles",
-                json={
-                    "person_id": "person-1",
-                    "name": name,
-                    "email": f"{name.lower()}@example.com",
-                    "relationship": "Family",
-                    "participation_category": "family",
-                },
-            )
+            actor_clients[cid], profile_ids[cid] = create_test_profile(cid, name)
         for _ in range(5):
-            client.post(
+            actor_clients["caregiver-sarah"].post(
                 "/api/v1/caregiver-activities",
                 json={
-                    "caregiver_id": "caregiver-sarah",
+                    "caregiver_id": profile_ids["caregiver-sarah"],
                     "person_id": "person-1",
                     "activity_type": "performed_task",
                     "description": "Administered medication",
@@ -610,10 +617,10 @@ def test_no_caregiver_reliability_scores():
                 },
             )
         for _ in range(2):
-            client.post(
+            actor_clients["caregiver-john"].post(
                 "/api/v1/caregiver-activities",
                 json={
-                    "caregiver_id": "caregiver-john",
+                    "caregiver_id": profile_ids["caregiver-john"],
                     "person_id": "person-1",
                     "activity_type": "performed_task",
                     "description": "Administered medication",
@@ -639,30 +646,23 @@ def test_multi_caregiver_summary():
         db.close()
 
         client = get_test_client()
+        actor_clients = {}
+        profile_ids = {}
         for cid, name in [("caregiver-sarah", "Sarah"), ("caregiver-john", "John")]:
-            client.post(
-                "/api/v1/caregiver-profiles",
-                json={
-                    "person_id": "person-1",
-                    "name": name,
-                    "email": f"{name.lower()}@example.com",
-                    "relationship": "Family",
-                    "participation_category": "family",
-                },
-            )
-        client.post(
+            actor_clients[cid], profile_ids[cid] = create_test_profile(cid, name)
+        actor_clients["caregiver-sarah"].post(
             "/api/v1/caregiver-responsibilities",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_ids["caregiver-sarah"],
                 "person_id": "person-1",
                 "responsibility_type": "medication",
                 "effective_start": datetime.now(timezone.utc).isoformat(),
             },
         )
-        client.post(
+        actor_clients["caregiver-john"].post(
             "/api/v1/caregiver-responsibilities",
             json={
-                "caregiver_id": "caregiver-john",
+                "caregiver_id": profile_ids["caregiver-john"],
                 "person_id": "person-1",
                 "responsibility_type": "appointment",
                 "effective_start": datetime.now(timezone.utc).isoformat(),
@@ -685,21 +685,14 @@ def test_care_network_state():
         db.close()
 
         client = get_test_client()
+        actor_clients = {}
+        profile_ids = {}
         for cid, name in [("caregiver-sarah", "Sarah"), ("caregiver-john", "John")]:
-            client.post(
-                "/api/v1/caregiver-profiles",
-                json={
-                    "person_id": "person-1",
-                    "name": name,
-                    "email": f"{name.lower()}@example.com",
-                    "relationship": "Family",
-                    "participation_category": "family",
-                },
-            )
-        client.post(
+            actor_clients[cid], profile_ids[cid] = create_test_profile(cid, name)
+        actor_clients["caregiver-sarah"].post(
             "/api/v1/caregiver-roles",
             json={
-                "caregiver_id": "caregiver-sarah",
+                "caregiver_id": profile_ids["caregiver-sarah"],
                 "person_id": "person-1",
                 "role_type": "medication_manager",
                 "effective_start": datetime.now(timezone.utc).isoformat(),
@@ -755,23 +748,16 @@ def test_duplicate_action_detection():
         db.close()
 
         client = get_test_client()
+        actor_clients = {}
+        profile_ids = {}
         for cid, name in [("caregiver-sarah", "Sarah"), ("caregiver-john", "John")]:
-            client.post(
-                "/api/v1/caregiver-profiles",
-                json={
-                    "person_id": "person-1",
-                    "name": name,
-                    "email": f"{name.lower()}@example.com",
-                    "relationship": "Family",
-                    "participation_category": "family",
-                },
-            )
-        response = client.post(
+            actor_clients[cid], profile_ids[cid] = create_test_profile(cid, name)
+        response = actor_clients["caregiver-sarah"].post(
             "/api/v1/duplicate-actions",
             json={
                 "person_id": "person-1",
-                "caregiver_a_id": "caregiver-sarah",
-                "caregiver_b_id": "caregiver-john",
+                "caregiver_a_id": profile_ids["caregiver-sarah"],
+                "caregiver_b_id": profile_ids["caregiver-john"],
                 "action_type": "appointment_scheduling",
                 "action_description_a": "Scheduled cardiology appointment",
                 "action_description_b": "Scheduled cardiology appointment",
