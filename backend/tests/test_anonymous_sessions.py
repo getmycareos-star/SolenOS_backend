@@ -351,6 +351,43 @@ def _accept_required_privacy_terms(client, created, *, improvement=False):
     return headers
 
 
+def test_optional_improvement_preference_can_be_toggled_without_required_acknowledgement():
+    client = TestClient(app)
+    created = create_session(client, "Independent improvement preference recipient")
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    url = "/api/v1/consent"
+
+    initial = client.get(url, params={"person_id": created["person"]["id"]}, headers=headers)
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["required"] is True
+    assert initial.json()["verified"] is False
+
+    for enabled in (True, False, True, False):
+        saved = client.post(
+            url,
+            headers=headers,
+            json={
+                "person_id": created["person"]["id"],
+                "caregiver_id": created["caregiver"]["id"],
+                "action": "update_data_improvement",
+                "data_improvement_consent": enabled,
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        body = saved.json()
+        assert body["profile"]["data_improvement_consent"] is enabled
+        # The optional choice must not silently accept the required terms.
+        assert body["verified"] is False
+        assert body["required"] is True
+
+        reread = client.get(
+            url, params={"person_id": created["person"]["id"]}, headers=headers
+        )
+        assert reread.status_code == 200, reread.text
+        assert reread.json()["profile"]["data_improvement_consent"] is enabled
+        assert reread.json()["required"] is True
+
+
 def test_required_privacy_and_optional_improvement_choice_persist_per_session():
     client = TestClient(app)
     created = create_session(client, "Consent persistence recipient")
