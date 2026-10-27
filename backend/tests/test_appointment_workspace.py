@@ -79,7 +79,7 @@ def test_appointment_workspace_persists_versions_and_revision_history(client):
 
     revised = {**payload, "clinician_findings": "Clinician statement recorded by caregiver; source needs confirmation"}
     updated = test_client.patch(f"/api/v1/appointment-workspaces/{record_id}", headers=headers, json={
-        "expected_version": 1, "status": "follow-up_pending", "payload": revised,
+        "expected_version": 1, "status": "follow_up_pending", "payload": revised,
         "change_reason": "Added visit notes after appointment"
     })
     assert updated.status_code == 200, updated.text
