@@ -6,6 +6,7 @@ import math
 import os
 import re
 import secrets
+import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
+from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.improvement_training_example import ImprovementTrainingExample
 
@@ -1398,6 +1400,7 @@ def _notification_preferences(db: Session, person_id: str, caregiver_id: str) ->
         "quiet_hours_enabled": bool(preference.quiet_hours_enabled) if preference else False,
         "reminders_enabled": bool(preference.reminders_enabled) if preference else True,
         "updated_at": preference.updated_at.isoformat() if preference and preference.updated_at else None,
+        "configured": preference is not None,
     }
 
 
@@ -1406,6 +1409,7 @@ def list_care_notifications(
     request: Request,
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    unread_only: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
@@ -1413,9 +1417,21 @@ def list_care_notifications(
         CareNotification.person_id == person_id,
         CareNotification.caregiver_id == caregiver_id,
     )
+    if unread_only:
+        query = query.filter(CareNotification.read_at.is_(None))
     total = query.count()
     items = query.order_by(CareNotification.created_at.desc(), CareNotification.id.desc()).offset(offset).limit(limit).all()
-    return {"items": [_notification_json(item) for item in items], "total": total, "limit": limit, "offset": offset}
+    now = datetime.now(timezone.utc)
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action="notification.list",
+        target_type="notification_collection", target_id=person_id, occurred_at=now,
+        outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version="notification-access-v1",
+        record_metadata={"limit": limit, "offset": offset, "unread_only": unread_only, "result_count": len(items)},
+    ))
+    db.commit()
+    return {"items": [_notification_json(item) for item in items], "total": total, "limit": limit, "offset": offset, "unread_only": unread_only}
 
 
 @router.get("/notifications/unread-count")
@@ -1440,7 +1456,22 @@ def mark_care_notification_read(notification_id: str, request: Request, db: Sess
     if item is None:
         raise HTTPException(status_code=404, detail="Notification not found")
     if item.read_at is None:
-        item.read_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        item.read_at = now
+        request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        db.add(NotificationReadReceipt(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id,
+            notification_id=item.id, reader_id=caregiver_id, read_at=now,
+            client=(request.headers.get("user-agent") or "")[:255],
+            request_id=request_id, policy_version="notification-access-v1",
+        ))
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id, action="notification.read",
+            target_type="notification", target_id=item.id, occurred_at=now,
+            outcome="allowed", request_id=request_id, policy_version="notification-access-v1",
+        ))
         db.commit()
         db.refresh(item)
     return _notification_json(item)
@@ -1478,6 +1509,16 @@ def update_care_notification_preferences(
     if payload.reminders_enabled is not None:
         preference.reminders_enabled = payload.reminders_enabled
     preference.updated_at = datetime.now(timezone.utc)
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id,
+        action="notification.preferences.update", target_type="notification_preferences",
+        target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
+        outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version="notification-access-v1",
+        record_metadata={"quiet_hours_enabled": payload.quiet_hours_enabled,
+                         "reminders_enabled": payload.reminders_enabled},
+    ))
     db.commit()
     db.refresh(preference)
     return _notification_preferences(db, person_id, caregiver_id)
@@ -1495,6 +1536,22 @@ class ConsentUpdate(BaseModel):
 
 
 CONSENT_TERMS_VERSION = "2026-10"
+
+
+def _audit_consent_change(
+    db: Session, request: Request, person_id: str, caregiver_id: str,
+    action: str, record: ConsentRecord, metadata: Optional[dict] = None,
+) -> None:
+    # Flush first so newly created consent records have a stable audit target ID.
+    db.flush()
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action=action,
+        target_type="caregiver_consent", target_id=record.id,
+        occurred_at=datetime.now(timezone.utc), outcome="allowed",
+        request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version="consent-v1", record_metadata=metadata or {},
+    ))
 
 
 def _consent_is_verified(record: Optional[ConsentRecord]) -> bool:
@@ -1547,6 +1604,7 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
         db.query(ImprovementTrainingExample).filter_by(
             person_id=person_id, caregiver_id=caregiver_id
         ).delete(synchronize_session=False)
+        _audit_consent_change(db, request, person_id, caregiver_id, "consent.revoked", record)
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
@@ -1566,6 +1624,10 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
             db.query(ImprovementTrainingExample).filter_by(
                 person_id=person_id, caregiver_id=caregiver_id
             ).delete(synchronize_session=False)
+        _audit_consent_change(
+            db, request, person_id, caregiver_id, "consent.data_improvement.update",
+            record, {"data_improvement_consent": payload.data_improvement_consent},
+        )
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
@@ -1584,6 +1646,14 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
     record.accepted_terms_version = payload.accepted_terms_version or CONSENT_TERMS_VERSION
     record.accepted_at = now
     record.revoked_at = None
+    _audit_consent_change(
+        db, request, person_id, caregiver_id, "consent.accepted", record,
+        {"terms_version": record.accepted_terms_version,
+         "medical_disclaimer_acknowledged": True,
+         "privacy_model_acknowledged": True,
+         "multi_caregiver_acknowledged": True,
+         "no_advertising_acknowledged": True},
+    )
     db.commit()
     db.refresh(record)
     return {"ok": True, **_consent_response(record)}
