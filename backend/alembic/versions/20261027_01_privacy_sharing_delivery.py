@@ -52,6 +52,7 @@ TABLES = {
     "notification_delivery_attempts": ["notification_id", "attempt_number", "channel", "attempted_at", "result", "failure_code", "provider_reference"],
     "notification_delivery_receipts": ["notification_id", "provider_reference", "receipt_status", "received_at", "details"],
     "notification_read_receipts": ["notification_id", "reader_id", "read_at", "client"],
+    "reminders": ["person_id", "created_by", "title", "description", "due_at", "status", "priority", "acknowledged_at", "completed_at"],
     "reminder_acknowledgements": ["reminder_id", "acknowledged_by", "acknowledged_at", "acknowledgement", "note"],
     "reminder_escalations": ["reminder_id", "recipient_id", "escalation_level", "reason_code", "escalated_at", "resolved_at", "status"],
     # Care handoffs
@@ -102,13 +103,12 @@ def upgrade():
             # Never rebuild or drop existing data. Add only missing nullable/defaulted columns.
             existing = {col["name"] for col in inspector.get_columns(table_name)}
             for name in required:
-                if name in existing or name == "id":
+                if name in existing:
                     continue
                 definition = _column_definition(name)
-                if name in ("created_at", "updated_at", "metadata"):
-                    op.add_column(table_name, definition)
-                else:
-                    op.add_column(table_name, sa.Column(name, definition.type, nullable=True))
+                # Existing tables receive nullable columns only; never impose a new
+                # primary-key constraint over populated legacy data.
+                op.add_column(table_name, sa.Column(name, definition.type, nullable=True))
                 existing.add(name)
             inspector = inspect(bind)
 
