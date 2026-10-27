@@ -359,6 +359,24 @@ def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
     items = []
     for handoff in rows:
         item = _view(db, handoff)
+        recipient_rows = db.query(HandoffRecipient, Caregiver).join(
+            Caregiver, Caregiver.id == HandoffRecipient.recipient_id
+        ).filter(
+            HandoffRecipient.handoff_id == handoff.id,
+            Caregiver.person_id == person_id,
+        ).order_by(HandoffRecipient.invited_at.asc()).all()
+        item["recipients"] = [
+            {
+                "caregiver_id": recipient.recipient_id,
+                "name": caregiver.name,
+                "role": recipient.recipient_role,
+                "status": recipient.access_status,
+                "invited_at": recipient.invited_at,
+                "accepted_at": recipient.accepted_at,
+                "revoked_at": recipient.revoked_at,
+            }
+            for recipient, caregiver in recipient_rows
+        ]
         item["has_summary"] = handoff.summary_snapshot is not None
         item["is_expired"] = bool(
             _aware(handoff.expires_at) and _aware(handoff.expires_at) <= now
