@@ -208,6 +208,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/handoffs")
             or path.startswith("/api/v1/notifications")
             or path.startswith("/api/v1/capture/analyses/")
+            or path.startswith("/api/v1/daily-care/intelligence")
         ):
             # These operations use the bearer session as their record scope.
             # Assistant requests intentionally omit client-selected person IDs;
