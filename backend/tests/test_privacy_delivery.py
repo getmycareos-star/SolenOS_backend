@@ -268,6 +268,56 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
 
 
 
+def test_required_consent_acceptance_and_revocation_are_audited():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    client = TestClient(app)
+    owner = create_session(client, "Consent audit recipient")
+    person_id = owner["person"]["id"]
+    caregiver_id = owner["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    accepted = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "medical_disclaimer_acknowledged": True,
+            "privacy_model_acknowledged": True,
+            "multi_caregiver_acknowledged": True,
+            "no_advertising_acknowledged": True,
+            "data_improvement_consent": False,
+            "accepted_terms_version": "2026-10",
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["verified"] is True
+
+    revoked = client.post(
+        "/api/v1/consent",
+        headers=headers,
+        json={"person_id": person_id, "caregiver_id": caregiver_id, "action": "revoke"},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["verified"] is False
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(AuditLogEvent).filter_by(
+            person_id=person_id, action="consent.accepted"
+        ).count() == 1
+        assert db.query(AuditLogEvent).filter_by(
+            person_id=person_id, action="consent.revoked"
+        ).count() == 1
+        accepted_event = db.query(AuditLogEvent).filter_by(
+            person_id=person_id, action="consent.accepted"
+        ).one()
+        assert accepted_event.target_id is not None
+    finally:
+        db.close()
+
+
 def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
     from app.models.notifications import CareNotification, CareNotificationPreference
     from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
