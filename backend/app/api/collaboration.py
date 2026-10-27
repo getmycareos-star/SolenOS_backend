@@ -512,7 +512,7 @@ def _contains_unsupported_operational_claim(
         (r"\baccount\s+(?:is|has been|was)\s+(?:recovered|verified|locked|unlocked)\b",
          r"\baccount\s+(?:status|verification)\s*[:=]\s*(?:recovered|verified|locked|unlocked)\b"),
     )
-    uncertainty_phrases = r"\\b(?:cannot|can.t|unable to)\\s+(?:verify|confirm|determine|tell)\\b|\\b(?:unknown|not supplied|not provided|no matching status)\\b"
+    uncertainty_phrases = r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|no matching status)\b"
     for claim_pattern, context_pattern in state_claims:
         if re.search(context_pattern, context):
             continue
