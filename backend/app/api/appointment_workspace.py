@@ -6,7 +6,7 @@ canonical LCR facts. It never promotes a note to a verified clinical fact.
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -107,7 +107,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         raise HTTPException(status_code=422, detail="window_days must be between 1 and 365")
     person_id, _ = _scope(request, db)
     now = datetime.now(timezone.utc)
-    cutoff = now - __import__("datetime").timedelta(days=window_days)
+    cutoff = now - timedelta(days=window_days)
 
     try:
         fact_rows = db.execute(text("""
