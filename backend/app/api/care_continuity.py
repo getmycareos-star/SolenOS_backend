@@ -171,6 +171,17 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "evidence": "evidence", "change": "changes", "situation": "situations",
         "open_question": "open_questions", "information_gap": "information_gaps",
         "delta_item": "care_delta_items", "integrity_finding": "care_integrity_findings",
+        "care_assertion": "care_assertions", "assertion": "care_assertions",
+        "care_state_revision": "care_state_revisions", "state_revision": "care_state_revisions",
+        "caregiver_context": "caregiver_contexts", "caregiver_perspective": "caregiver_perspectives",
+        "caregiver_observation": "caregiver_observations",
+        "record_change_set": "care_record_change_sets", "care_record_change_set": "care_record_change_sets",
+        "record_change_item": "care_record_change_items", "care_record_change_item": "care_record_change_items",
+        "care_correction": "care_corrections", "correction": "care_corrections",
+        "record_amendment": "record_amendments", "amendment": "record_amendments",
+        "care_uncertainty": "care_uncertainties", "uncertainty": "care_uncertainties",
+        "care_conflict": "care_conflicts", "conflict": "care_conflicts",
+        "care_action_outcome": "care_action_outcomes", "action_outcome": "care_action_outcomes",
     }
     links = []
     if resource in ("follow-up-links", "relationships"):
@@ -187,9 +198,17 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
     elif resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         if payload.get("source_id"):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"):
+        if payload.get("target_id"):
+            links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
+    strict_link_resources = {"record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
     for type_name, target_id, field_name in links:
+        if not target_id:
+            continue
         table_name = typed_tables.get(str(type_name or "").lower())
-        if table_name is None or not target_id:
+        if table_name is None:
+            if resource in strict_link_resources:
+                raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
             continue
         linked = _table(db, table_name)
         if "person_id" not in linked.c:
