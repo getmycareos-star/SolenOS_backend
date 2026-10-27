@@ -427,18 +427,18 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["effective_start"] = data.get("effective_from") or datetime.now(timezone.utc)
     if resource == "caregiver-perspectives":
         if "claim_type" in table.c:
-            data["claim_type"] = ClaimType.INTERPRETATION
+            data["claim_type"] = ClaimType.INTERPRETATION.name
         if "claim_content" in table.c:
             data["claim_content"] = data.get("perspective_text")
         if "information_visibility" in table.c:
-            data["information_visibility"] = InformationVisibility.PRIVATE
+            data["information_visibility"] = InformationVisibility.PRIVATE.name
         if "is_promoted_to_shared" in table.c:
             data["is_promoted_to_shared"] = False
     if resource == "caregiver-observations":
         if "observation_content" in table.c:
             data["observation_content"] = data.get("description")
         if "observation_type" in table.c:
-            data["observation_type"] = ObservationType.DIRECT
+            data["observation_type"] = ObservationType.DIRECT.name
         if "information_visibility" in table.c:
             data["information_visibility"] = InformationVisibility.PRIVATE
         if "is_promoted_to_shared" in table.c:
