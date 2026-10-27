@@ -88,6 +88,7 @@ def upgrade():
     revision_specs = [
         ("care_fact_revisions", "care_fact_id", "care_facts"),
         ("care_assertion_revisions", "assertion_id", "care_assertions"),
+        ("care_decision_revisions", "decision_id", "care_decisions"),
         ("care_event_revisions", "event_id", "care_events"),
         ("care_observation_revisions", "observation_id", "caregiver_observations"),
         ("care_change_revisions", "change_id", "changes"),
