@@ -301,3 +301,19 @@ def test_companion_uses_canonical_assertions_gaps_questions_and_contradictions(m
         assert data["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_companion_blocks_unsupported_positive_trend_but_allows_uncertainty():
+    unsupported = "The current record shows that Mum's sleep has been getting worse this week."
+    assert collaboration._contains_unsupported_longitudinal_claim(unsupported, [])
+
+    uncertain = "I can't tell whether Mum's sleep has been getting worse from the available record."
+    assert not collaboration._contains_unsupported_longitudinal_claim(uncertain, [])
+
+    single_observation = ["LCR care event: caregiver reported poor sleep last night."]
+    assert collaboration._contains_unsupported_longitudinal_claim(unsupported, single_observation)
+
+    explicit_comparison = [
+        "LCR care event: sleep worsened compared with the previous week; source=caregiver report."
+    ]
+    assert not collaboration._contains_unsupported_longitudinal_claim(unsupported, explicit_comparison)
