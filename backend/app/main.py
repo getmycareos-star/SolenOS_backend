@@ -25,6 +25,8 @@ from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
 from app.api.daily_care_intelligence import router as daily_care_intelligence_router
 from app.api.handoff_drafts import router as handoff_drafts_router
+from app.api.appointment_workspace import router as appointment_workspace_router
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -108,6 +110,7 @@ app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(handoff_drafts_router, prefix="/api/v1")
+app.include_router(appointment_workspace_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
 app.include_router(daily_care_intelligence_router, prefix="/api/v1")
 
@@ -219,6 +222,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/notifications")
             or path.startswith("/api/v1/capture/analyses/")
             or path.startswith("/api/v1/daily-care/intelligence")
+            or path.startswith("/api/v1/appointment-workspaces")
         ):
             # These operations use the bearer session as their record scope.
             # Assistant requests intentionally omit client-selected person IDs;
