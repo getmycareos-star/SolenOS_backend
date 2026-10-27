@@ -219,6 +219,25 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     denied_read = client.get(f"/api/v1/handoffs/{handoff_id}", headers=recipient_headers)
     assert denied_read.status_code == 404
 
+    second_recipient_id, second_recipient_token = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], second_recipient_id)
+    second_handoff = client.post(
+        "/api/v1/handoffs",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [second_recipient_id],
+            "scope": ["lcr_summary"],
+        },
+    )
+    assert second_handoff.status_code == 201, second_handoff.text
+    revoke_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    creator_revoked_accept = client.post(
+        f"/api/v1/handoffs/{second_handoff.json()['id']}/accept",
+        headers={"Authorization": f"Bearer {second_recipient_token}"},
+    )
+    assert creator_revoked_accept.status_code == 404
+
 
 def test_handoff_rejects_recipient_from_another_person():
     client = TestClient(app)
