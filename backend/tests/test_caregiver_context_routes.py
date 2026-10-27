@@ -56,6 +56,36 @@ def _ensure_test_tables():
             Column("created_at", DateTime(timezone=True)),
             Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
         )
+    if "record_provenance" not in metadata.tables:
+        Table(
+            "record_provenance", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id")),
+            Column("source_type", String(80), nullable=False),
+            Column("source_id", String(36)),
+            Column("author_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("author_label", String(240)),
+            Column("method", String(80), nullable=False, default="manual"),
+            Column("recorded_at", DateTime(timezone=True)),
+            Column("occurred_at", DateTime(timezone=True)),
+            Column("effective_from", DateTime(timezone=True)),
+            Column("effective_to", DateTime(timezone=True)),
+            Column("reason", Text),
+            Column("metadata", JSON),
+            Column("created_at", DateTime(timezone=True)),
+        )
+    if "record_provenance_links" not in metadata.tables:
+        Table(
+            "record_provenance_links", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id"), nullable=False),
+            Column("target_type", String(100), nullable=False),
+            Column("target_id", String(36), nullable=False),
+            Column("relationship", String(40), nullable=False, default="originates"),
+            Column("created_at", DateTime(timezone=True)),
+        )
     if "caregiver_contexts" not in metadata.tables:
         Table(
             "caregiver_contexts", metadata,
@@ -291,5 +321,38 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
         "/api/v1/care-continuity/record-versions",
         headers=second_headers,
         json={"care_record_id": record_id},
+    )
+    assert denied.status_code == 404, denied.text
+
+def test_provenance_link_cannot_reference_another_persons_provenance():
+    client = TestClient(app)
+    first = _session(client, "First caregiver")
+    second = _session(client, "Second caregiver")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=first_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+
+    source = client.post(
+        "/api/v1/care-continuity/record-provenance",
+        headers=second_headers,
+        json={"source_type": "caregiver_report", "reason": "isolated test source"},
+    )
+    assert source.status_code == 201, source.text
+
+    denied = client.post(
+        "/api/v1/care-continuity/record-provenance-links",
+        headers=first_headers,
+        json={
+            "provenance_id": source.json()["id"],
+            "target_type": "living_care_record",
+            "target_id": record.json()["id"],
+            "relationship": "supports",
+        },
     )
     assert denied.status_code == 404, denied.text
