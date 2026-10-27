@@ -593,7 +593,7 @@ async def generate_lcr_orientation(
         "Use only facts present in the authorized context. The context is a bounded subset, not necessarily the complete care history. " 
         "If context metadata marks schema partial or a source unavailable, do not infer that the corresponding information does not exist; say only that the available information does not show it. Never mention internal schema or systems. " 
         "Do not say no care history exists solely because this bounded context is empty. Do not imply an update was saved unless the system says so. "
-        "Do not invent a recipient, events, prior history, emotions, intentions, diagnoses, or causes. If no history is recorded, do not imply otherwise. "
+        "Do not invent a recipient, events, prior history, emotions, intentions, diagnoses, or causes. If context is empty, say only that the available information does not show it; do not claim the person has no care history. "
         "Acknowledge frustration without arguing, shaming, demanding an apology, or claiming human feelings. If the caregiver identifies an error, "
         "invite or perform a focused correction based only on the available record. Do not turn insults into care evidence. "
         "Do not diagnose, prescribe, or advise medication changes. Distinguish recorded facts from uncertainty. "
