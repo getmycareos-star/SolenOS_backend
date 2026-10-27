@@ -58,6 +58,35 @@ SOURCES = {
         "text_fields": ("title", "summary", "entry_type"),
         "time_fields": ("occurred_at", "created_at"),
     },
+    "care_events": {
+        "label": "Recorded care events",
+        "kind": "care_event",
+        "fields": ("id", "event_type", "status", "occurred_at", "recorded_at", "title", "description", "time_provenance", "confidence"),
+        "text_fields": ("title", "description", "event_type", "time_provenance"),
+        "time_fields": ("occurred_at", "recorded_at"),
+    },
+    "care_transitions": {
+        "label": "Care transitions",
+        "kind": "care_transition",
+        "fields": ("id", "from_location", "to_location", "transition_type", "occurred_at", "notes", "time_provenance", "location_provenance"),
+        "text_fields": ("transition_type", "from_location", "to_location", "notes", "time_provenance", "location_provenance"),
+        "time_fields": ("occurred_at", "created_at"),
+    },
+    "appointments": {
+        "label": "Appointments",
+        "kind": "appointment",
+        "fields": ("id", "title", "scheduled_at", "scheduled_at_timezone", "location", "provider", "healthcare_org", "preparation_notes", "medication_questions", "travel_notes", "status", "time_provenance", "location_provenance", "created_at", "updated_at"),
+        "text_fields": ("title", "provider", "healthcare_org", "location", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
+        "time_fields": ("scheduled_at", "created_at", "updated_at"),
+    },
+    "actions": {
+        "label": "Recorded care actions",
+        "kind": "care_action",
+        "fields": ("id", "source_evidence_id", "source_passage", "source_authority", "actor_label", "subject_label", "action_type", "action_object", "normalized_action", "original_text", "modality", "condition_text", "trigger_text", "deadline", "start_time", "status", "provenance_notes", "created_at", "updated_at"),
+        "text_fields": ("normalized_action", "original_text", "action_object", "actor_label", "subject_label", "condition_text", "trigger_text", "provenance_notes"),
+        "time_fields": ("created_at", "deadline", "start_time", "updated_at"),
+        "require_caregiver_owned_evidence": True,
+    },
 }
 
 class DraftRequest(BaseModel):
@@ -73,28 +102,28 @@ class DraftRequest(BaseModel):
 # values. Coverage is explicitly computed from source adapter availability only.
 TEMPLATES = {
     "family": [
-        ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
-        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries"), ("Today", "Change from baseline", "Uncertainty")),
+        ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
+        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events"), ("Today", "Change from baseline", "Uncertainty")),
         ("daily_routine", "How to care for them", (), ("Daily routine", "Communication preferences", "Comfort and preferences", "Known distress triggers and helpful responses")),
-        ("health_medication", "Health and medication information", (), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
-        ("next_actions", "What needs to happen next", ("care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
+        ("health_medication", "Health and medication information", ("appointments",), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
+        ("next_actions", "What needs to happen next", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
         ("safety_contingencies", "Safety and when to seek help", (), ("Documented safety needs", "Existing care-plan instructions", "Emergency and clinical contacts")),
         ("family_coordination", "Family coordination", (), ("Primary caregiver", "Backup caregiver", "Next check-in", "Practical support needs")),
         ("receipt", "Handoff acceptance", (), ("Information reviewed", "Responsibilities understood", "Unresolved questions", "Outgoing and receiving caregiver confirmation")),
     ],
     "professional": [
-        ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
-        ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
-        ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_decisions", "open_questions", "information_gaps"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Conflicts", "Corrections")),
+        ("transition_summary", "Executive summary and current situation", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Reason for handoff", "Current situation", "Immediate priorities", "Clinician-assessed acuity if documented")),
+        ("baseline", "Relevant history and baseline", ("care_facts", "care_timeline_entries", "care_events"), ("Documented diagnoses and source", "Relevant history", "Cognitive and functional baseline", "Changes from baseline", "Person's goals and preferences")),
+        ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Conflicts", "Corrections")),
         ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
-        ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "care_facts"), ("Issue", "Evidence/status", "Required response", "Owner", "Deadline")),
-        ("care_plan", "Treatment and care plan", ("care_decisions",), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
-        ("action_register", "Action register and accountability", ("care_decisions", "open_questions", "information_gaps"), ("Action", "Owner", "Deadline", "Status", "Outcome")),
+        ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "care_facts", "care_events", "actions"), ("Issue", "Evidence/status", "Required response", "Owner", "Deadline")),
+        ("care_plan", "Treatment and care plan", ("care_decisions", "actions"), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
+        ("action_register", "Action register and accountability", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Owner", "Deadline", "Status", "Outcome")),
         ("person_family_context", "Person-centred and family context", (), ("Communication preferences", "Relevant routines", "Authorised contacts", "Caregiver support needs", "Documented information-sharing basis")),
-        ("transition_details", "Transition-specific information", (), ("Sending/receiving setting", "Reason for transfer", "Course/interventions", "Discharge instructions", "Follow-ups", "Pending results", "Equipment/supplies")),
+        ("transition_details", "Transition-specific information", ("care_transitions", "appointments", "care_events"), ("Sending/receiving setting", "Reason for transfer", "Course/interventions", "Discharge instructions", "Follow-ups", "Pending results", "Equipment/supplies")),
         ("contingency", "Contingency planning", (), ("Documented trigger/concern", "Existing authorised response", "Escalation contact", "Emergency pathway", "Limitations")),
-        ("integrity", "Document and record integrity", ("care_facts", "care_timeline_entries", "care_decisions", "open_questions", "information_gaps"), ("Source record IDs/versions", "Generated timestamp/timezone", "Last verified", "Known gaps/stale information")),
+        ("integrity", "Document and record integrity", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps"), ("Source record IDs/versions", "Generated timestamp/timezone", "Last verified", "Known gaps/stale information")),
         ("receipt", "Handoff receipt and acceptance", (), ("Sender/receiver identity and role", "Receipt timestamp", "Responsibility transfer time", "Critical items confirmed", "Questions/clarifications", "Unaccepted actions", "Acceptance status")),
     ],
 }
@@ -135,9 +164,15 @@ def _display_text(row: dict, fields: tuple[str, ...]) -> str:
     parts = []
     for key in fields:
         value = row.get(key)
-        if value is None or isinstance(value, (dict, list)):
+        if value is None or isinstance(value, dict):
             continue
-        text = str(value).strip()
+        if isinstance(value, list):
+            scalar_values = [str(item).strip() for item in value if isinstance(item, (str, int, float, bool))]
+            if not scalar_values:
+                continue
+            text = "; ".join(scalar_values)
+        else:
+            text = str(value).strip()
         if text and text not in parts:
             parts.append(text)
     return " — ".join(parts)[:1200]
@@ -178,6 +213,25 @@ def prepare_handoff_draft(
             }
             continue
 
+        if spec.get("require_caregiver_owned_evidence"):
+            if not inspector.has_table("evidence"):
+                statuses[table_name] = {
+                    "status": "unavailable",
+                    "reason": "evidence_scope_adapter_unavailable",
+                    "label": spec["label"],
+                    "count": 0,
+                }
+                continue
+            evidence_table = Table("evidence", metadata, autoload_with=bind)
+            if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or "source_evidence_id" not in table.c:
+                statuses[table_name] = {
+                    "status": "unavailable",
+                    "reason": "evidence_scope_not_verifiable",
+                    "label": spec["label"],
+                    "count": 0,
+                }
+                continue
+
         selected = [table.c[name] for name in spec["fields"] if name in table.c]
         if not selected:
             statuses[table_name] = {
@@ -189,6 +243,11 @@ def prepare_handoff_draft(
             continue
 
         query = select(*selected).where(table.c.person_id == person_id)
+        if spec.get("require_caregiver_owned_evidence"):
+            query = query.join(evidence_table, table.c.source_evidence_id == evidence_table.c.id).where(
+                evidence_table.c.person_id == person_id,
+                evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
+            )
         timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
         timestamp_expression = (func.coalesce(*timestamp_columns) if len(timestamp_columns) > 1 else timestamp_columns[0]) if timestamp_columns else None
         if timestamp_expression is not None:
@@ -212,13 +271,15 @@ def prepare_handoff_draft(
             text = _display_text(row, spec["text_fields"])
             if not text:
                 continue
-            status_value = next((row.get(k) for k in ("epistemic_status", "decision_status", "status") if row.get(k) is not None), None)
+            epistemic_value = next((row.get(k) for k in ("epistemic_status", "assertion_status") if row.get(k) is not None), None)
+            record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
             records.append({
                 "source_type": spec["kind"],
                 "source_table": table_name,
                 "source_id": str(source_id),
                 "recorded_at": _iso(time_value),
-                "epistemic_status": str(status_value) if status_value is not None else "not_recorded",
+                "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
+                "record_status": str(record_status) if record_status is not None else "not_recorded",
                 "text": text,
                 "stale_warning": bool(time_value is not None and _iso(time_value) < (now - timedelta(days=30)).isoformat()),
             })
@@ -226,7 +287,6 @@ def prepare_handoff_draft(
     # These modules are intentionally not represented as read when no verified
     # persistent, person-scoped adapter is available.
     statuses["daily_care"] = {"status": "unavailable", "reason": "verified_adapter_not_implemented", "count": 0}
-    statuses["appointments"] = {"status": "unavailable", "reason": "verified_adapter_not_implemented", "count": 0}
     statuses["documents"] = {"status": "unavailable", "reason": "document_content_adapter_not_verified", "count": 0}
     statuses["community"] = {"status": "not_authorized", "reason": "community_source_not_enabled", "count": 0}
 
@@ -283,7 +343,7 @@ def prepare_handoff_draft(
         "source_statuses": statuses,
         "sections": sections,
         "source_references": [
-            {key: item[key] for key in ("source_type", "source_table", "source_id", "recorded_at", "epistemic_status", "stale_warning")}
+            {key: item[key] for key in ("source_type", "source_table", "source_id", "recorded_at", "epistemic_status", "record_status", "stale_warning")}
             for item in records
         ],
         "limitations": gaps,
