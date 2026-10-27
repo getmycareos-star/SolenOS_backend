@@ -27,7 +27,7 @@ from app.core.caregiver_enums import (
 class CaregiverProfileBase(BaseModel):
     person_id: str
     name: str
-    email: str
+    email: Optional[str] = None
     relationship: str
     participation_category: CaregiverParticipationCategory = CaregiverParticipationCategory.FAMILY
     involvement_status: CaregiverInvolvementStatus = CaregiverInvolvementStatus.ACTIVE
@@ -36,7 +36,7 @@ class CaregiverProfileBase(BaseModel):
     timezone: str = "UTC"
     is_primary_designated: bool = False
     primary_designation_source: Optional[str] = None
-    identity_match_confidence: IdentityMatchConfidence = IdentityMatchConfidence.CERTAIN
+    identity_match_confidence: IdentityMatchConfidence = IdentityMatchConfidence.UNKNOWN
     identity_notes: Optional[str] = None
 
 
