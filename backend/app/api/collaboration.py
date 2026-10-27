@@ -1285,7 +1285,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 break
         source_context = [json.dumps(item, ensure_ascii=False) for item in (event_context + assertion_context + appointment_context + evidence_context)]
         system_prompt = (
-            "You are SolenOS Companion. Answer the caregiver's question first in plain, natural language. Use only authorized "
+            "You are SolenOS Companion. Answer the caregiver's question first plainly. Use only authorized "
             "context; distinguish reports, document text, reviewed assertions, inference, and unknowns. Preserve dates, sources, "
             "and contradictions. One observation cannot establish a trend. State important evidence gaps; missing from bounded "
             "context is not proof of absence. Prior messages may resolve references but are not care evidence. Ask one focused "
