@@ -172,6 +172,13 @@ jobs:
           test "$(grep -c '(head)' /tmp/alembic-heads.txt)" -eq 1
           python -m alembic current
 
+      - name: Verify LCR query indexes on the fully migrated PostgreSQL schema
+        run: |
+            for index in ix_care_events_person_occurred_recorded_id ix_evidence_person_uploaded_id ix_care_facts_person_recorded_id ix_care_assertions_person_recorded_id ix_appointments_person_scheduled_id ix_care_timeline_person_occurred_id ix_decision_outcomes_person_observed_id ix_care_uncertainties_person_created_id ix_care_missing_info_person_created_id ix_care_conflicts_person_created_id ix_caregiver_observations_person_observed_id; do
+              found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$index')")"
+              test "$found" = "$index"
+            done
+
       - name: Exercise anonymous care continuity against PostgreSQL over HTTP
         working-directory: backend
         run: python scripts/postgres_anonymous_e2e.py
@@ -206,10 +213,6 @@ jobs:
             test "$found" = "$table"
           done
 
-          for index in ix_care_events_person_occurred_recorded_id ix_evidence_person_uploaded_id ix_care_facts_person_recorded_id ix_care_assertions_person_recorded_id ix_appointments_person_scheduled_id ix_care_timeline_person_occurred_id ix_decision_outcomes_person_observed_id ix_care_uncertainties_person_created_id ix_care_missing_info_person_created_id ix_care_conflicts_person_created_id ix_caregiver_observations_person_observed_id; do
-            found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$index')")"
-            test "$found" = "$index"
-          done
 
       - name: Preserve completed Qwen outputs and source IDs during schema migration
         env:
