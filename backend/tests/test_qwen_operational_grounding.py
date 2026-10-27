@@ -1,6 +1,7 @@
 import pytest
 
 from app.api.collaboration import _contains_unsupported_operational_claim
+from app.services.qwen_background_worker import ENABLED_WORKFLOWS, _route_from_text
 
 
 @pytest.mark.parametrize(
@@ -60,3 +61,52 @@ def test_rejects_claim_that_assistant_will_change_the_record():
         "The earlier entry has the wrong date.",
         [],
     ) is True
+
+
+@pytest.mark.parametrize(
+    ("workflow", "request"),
+    [
+        ("daily_capture", "daily capture"),
+        ("add_record", "add a record"),
+        ("document", "uploaded document"),
+        ("living_care_record", "living care record"),
+        ("care_history_search", "search care history"),
+        ("care_situation_change", "care situation change"),
+        ("delta_engine", "delta engine"),
+        ("evidence_provenance", "evidence provenance"),
+        ("uncertainty_contradictions", "uncertainty and contradictions"),
+        ("returning_caregiver", "returning caregiver"),
+        ("appointment", "prepare appointment questions"),
+        ("after_appointment", "after appointment"),
+        ("handoff", "care handoff"),
+        ("professional_summary", "professional summary"),
+        ("open_loops", "open loops"),
+        ("two_week_review", "two-week review"),
+        ("decision_outcome", "decision and outcome"),
+        ("medication_day", "medication day"),
+        ("reminders_notifications", "reminders and notifications"),
+        ("care_coordination", "care coordination"),
+        ("companion", "I feel overwhelmed"),
+        ("caregiver_feedback", "caregiver feedback"),
+        ("sharing_export", "shareable care summary"),
+        ("roles_access", "roles and access"),
+        ("account_recovery", "account recovery"),
+        ("settings_security", "security settings"),
+        ("record_lifecycle", "record lifecycle"),
+        ("offline_sync", "offline sync"),
+        ("ai_reliability", "qwen reliability"),
+        ("audit_review", "audit review"),
+        ("care_transition", "care transition"),
+        ("incident_follow_through", "incident follow-through"),
+        ("emergency_readiness", "emergency readiness"),
+        ("care_coverage_gap", "care coverage gap"),
+        ("care_instruction_change_tracker", "care instruction change tracker"),
+        ("critical_information_completeness", "critical information completeness"),
+        ("personal_preferences_distress_context", "personal preferences and distress context"),
+        ("caregiver_strain_support", "caregiver strain and support"),
+        ("document_validity_renewal", "document validity and renewal"),
+    ],
+)
+def test_deterministic_routing_covers_all_enabled_workflows(workflow, request):
+    assert workflow in ENABLED_WORKFLOWS
+    assert _route_from_text(request) == workflow
