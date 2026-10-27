@@ -132,6 +132,6 @@ import app.models.privacy_delivery  # register privacy and handoff lifecycle tab
 import app.models.appointment_workspace  # register durable appointment workflow records before local schema bootstrap
 
 
-if not RAILWAY_RUNTIME:
+if database_url.startswith("sqlite") and not RAILWAY_RUNTIME:
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()
