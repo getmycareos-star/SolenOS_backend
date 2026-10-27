@@ -21,6 +21,7 @@ from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_continuity import router as care_continuity_router
 from app.api.reminders import router as reminders_router
+from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
@@ -95,6 +96,7 @@ app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
