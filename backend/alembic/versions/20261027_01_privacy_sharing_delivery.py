@@ -1,6 +1,6 @@
 """Add privacy, sharing, audit, notification, reminder and handoff lifecycle records.
 
-Revision ID: 20261027_01_privacy_sharing_delivery
+Revision ID: 20261027_03_privacy_delivery
 Revises: 20261027_02_continuity_lifecycle
 
 Additive and idempotent: existing tables are preserved. Domain-specific payloads are
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261027_01_privacy_sharing_delivery"
+revision = "20261027_03_privacy_delivery"
 down_revision = "20261027_02_continuity_lifecycle"
 branch_labels = None
 depends_on = None
@@ -113,7 +113,8 @@ def upgrade():
                 op.create_index(f"ix_{table_name}_{col}", table_name, [col])
         # Every audit/event stream should support time-ordered review.
         if any(x in table_name for x in ("logs", "events", "receipts", "attempts", "acknowledgements", "revocations", "downloads")):
-            for candidate in ("occurred_at", "attempted_at", "acknowledged_at", "revoked_at", "downloaded_at", "disclosed_at", "received_at", "read_at", "created_at"):
+            # created_at already has an index above; do not create it twice.
+            for candidate in ("occurred_at", "attempted_at", "acknowledged_at", "revoked_at", "downloaded_at", "disclosed_at", "received_at", "read_at"):
                 if candidate in [c.name for c in columns]:
                     op.create_index(f"ix_{table_name}_{candidate}", table_name, [candidate])
                     break
