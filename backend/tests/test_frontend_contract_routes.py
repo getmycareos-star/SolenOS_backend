@@ -276,6 +276,60 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
 
 
 
+
+def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
+    import json
+    import app.api.collaboration as collaboration_api
+
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    captured = {}
+    monkeypatch.setattr(collaboration_api, "_ollama_url", lambda: ("http://unused", "test-model"))
+
+    def fake_chat(_base, _model, messages, _options):
+        captured["messages"] = messages
+        return "The saved document says the follow-up date is not stated."
+
+    monkeypatch.setattr(collaboration_api, "_ollama_chat", fake_chat)
+    try:
+        auth = {"Authorization": f"Bearer {token}"}
+        original_text = b"Care letter: follow-up date is not stated."
+        upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": original_text.decode("utf-8"),
+            },
+            files={"file": ("care-letter.txt", original_text, "text/plain")},
+        )
+        assert upload.status_code == 201, upload.text
+        evidence_id = upload.json()["evidence_id"]
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers=auth,
+            json={"person_id": person_id, "text": "What does the uploaded document say?"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["ai_generated"] is True
+        assert evidence_id in response.json()["source_evidence_ids"]
+
+        user_payload = json.loads(captured["messages"][-1]["content"])
+        evidence_context = user_payload["authorized_record_context"]["caregiver_provided_evidence"]
+        assert any(
+            item.get("evidence_id") == evidence_id
+            and item.get("filename") == "care-letter.txt"
+            and "follow-up date is not stated" in item.get("source_text", "").lower()
+            for item in map(json.loads, [entry.removeprefix("Caregiver-provided evidence: ") for entry in evidence_context])
+        )
+        assert "A newer upload does not automatically supersede an older document" in captured["messages"][0]["content"]
+    finally:
+        teardown()
+
+
+
 def test_document_extraction_requires_session_and_supports_utf8_text(monkeypatch):
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     try:
