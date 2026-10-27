@@ -304,6 +304,16 @@ jobs:
           fi
 
           echo "QWEN_E2E: dedicated Daily Care history retrieval and real Qwen answer"
+          # Keep the dedicated Daily Care test record separate from the empty-record
+          # Companion and document-isolation checks later in this job.
+          daily_session=$(curl --fail --silent --show-error \
+            -H "Content-Type: application/json" \
+            -d '{"caregiver_name":"CI Daily Care caregiver"}' \
+            http://127.0.0.1:8080/api/v1/sessions/anonymous)
+          daily_token=$(python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' <<< "$daily_session")
+          daily_person_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["person"]["id"])' <<< "$daily_session")
+          daily_caregiver_id=$(python -c 'import json,sys; print(json.load(sys.stdin)["caregiver"]["id"])' <<< "$daily_session")
+          daily_auth_header="Authorization: Bearer $daily_token"
           daily_event_payload=$(python -c 'import json,sys; print(json.dumps({
             "person_id":sys.argv[1],
             "event_type":"observation",
@@ -314,9 +324,9 @@ jobs:
             "created_by_caregiver_id":sys.argv[2],
             "time_provenance":"caregiver_reported",
             "tags":["daily_capture","ci_qwen_e2e"]
-          }))' "$person_id" "$caregiver_id")
+          }))' "$daily_person_id" "$daily_caregiver_id")
           daily_event=$(curl --fail --silent --show-error \
-            -H "$auth_header" -H "Content-Type: application/json" \
+            -H "$daily_auth_header" -H "Content-Type: application/json" \
             -d "$daily_event_payload" \
             http://127.0.0.1:8080/api/v1/events)
           daily_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$daily_event")
@@ -329,7 +339,7 @@ jobs:
           daily_ready=0
           for attempt in $(seq 1 5); do
             daily_status=$(curl --silent --show-error --output /tmp/qwen-daily-care.json --write-out '%{http_code}' --max-time 90 \
-              -H "$auth_header" -H "Content-Type: application/json" \
+              -H "$daily_auth_header" -H "Content-Type: application/json" \
               -d "$daily_question" \
               http://127.0.0.1:8080/api/v1/daily-care/intelligence/ask || true)
             if [ "$daily_status" = "200" ]; then
