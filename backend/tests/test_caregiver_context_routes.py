@@ -306,6 +306,7 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     version = version_response.json()
     assert version["version_number"] == 1
     assert len(version["record_digest"]) == 64
+    assert "record_provenance" in version["tables_captured"]
 
     versions = client.get("/api/v1/care-continuity/record-versions", headers=first_headers)
     snapshots = client.get("/api/v1/care-continuity/record-snapshots", headers=first_headers)
