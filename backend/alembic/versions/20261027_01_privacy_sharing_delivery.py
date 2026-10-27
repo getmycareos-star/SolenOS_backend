@@ -63,6 +63,45 @@ TABLES = {
     "delivery_failure_events": ["delivery_type", "delivery_id", "recipient_id", "failure_code", "failure_detail_redacted", "occurred_at", "retryable", "resolved_at"],
 }
 
+REQUIRED_COLUMNS = {
+    "shared_summary_expirations": {"summary_id", "expires_at", "status"},
+    "shared_summary_revocations": {"summary_id", "revoked_by", "revoked_at"},
+    "shared_summary_access_logs": {"summary_id", "access_type", "decision"},
+    "shared_summary_downloads": {"summary_id", "downloaded_at", "result"},
+    "shared_summary_generation_jobs": {"summary_id", "job_status"},
+    "shared_summary_delivery_receipts": {"summary_id", "recipient_id", "delivery_status"},
+    "shared_summary_consent_records": {"summary_id", "subject_id", "consent_status", "consent_version"},
+    "shared_summary_disclosure_records": {"summary_id", "recipient_id", "scope_snapshot", "disclosed_at"},
+    "shared_summary_link_events": {"summary_id", "event_type", "occurred_at"},
+    "data_deletion_requests": {"requester_id", "subject_id", "request_status", "requested_at"},
+    "data_deletion_jobs": {"request_id", "job_status"},
+    "data_export_requests": {"requester_id", "subject_id", "request_status", "requested_at"},
+    "privacy_incidents": {"incident_status", "severity", "detected_at"},
+    "privacy_incident_events": {"incident_id", "event_type", "occurred_at"},
+    "data_processing_records": {"processing_purpose", "data_categories", "legal_basis"},
+    "data_subject_requests": {"requester_id", "subject_id", "request_type", "request_status", "requested_at"},
+    "sensitive_data_access_logs": {"subject_id", "resource_type", "resource_id", "access_type", "decision"},
+    "legal_holds": {"subject_id", "resource_type", "resource_id", "hold_status"},
+    "audit_log_events": {"action", "target_type", "occurred_at", "outcome"},
+    "audit_log_integrity_checks": {"checked_at", "check_status"},
+    "audit_log_access_records": {"actor_id", "access_type", "decision", "occurred_at"},
+    "privileged_access_logs": {"actor_id", "privilege", "action", "occurred_at", "outcome"},
+    "authorization_decisions": {"actor_id", "resource_type", "resource_id", "action", "decision", "decided_at"},
+    "failed_access_attempts": {"action", "reason_code", "attempted_at"},
+    "notifications": {"recipient_id", "notification_type", "title", "status"},
+    "notification_preferences": {"recipient_id", "channel", "enabled"},
+    "notification_delivery_attempts": {"notification_id", "attempt_number", "channel", "attempted_at", "result"},
+    "notification_delivery_receipts": {"notification_id", "receipt_status", "received_at"},
+    "notification_read_receipts": {"notification_id", "reader_id", "read_at"},
+    "reminder_acknowledgements": {"reminder_id", "acknowledged_by", "acknowledged_at", "acknowledgement"},
+    "reminder_escalations": {"reminder_id", "recipient_id", "escalation_level", "escalated_at", "status"},
+    "handoff_records": {"person_id", "created_by", "handoff_status", "scope_snapshot"},
+    "handoff_recipients": {"handoff_id", "recipient_id", "access_status"},
+    "handoff_access_logs": {"handoff_id", "action", "decision", "occurred_at"},
+    "handoff_acknowledgements": {"handoff_id", "recipient_id", "acknowledged_at", "acknowledgement"},
+    "delivery_failure_events": {"delivery_type", "delivery_id", "failure_code", "occurred_at", "retryable"},
+}
+
 def _column_type(name):
     if name.endswith(("_at", "_from", "_until", "_start", "_end")) or name in ("expires_at", "scheduled_at", "sent_at", "read_at", "due_at"):
         return sa.DateTime(timezone=True)
@@ -77,13 +116,15 @@ def _column_type(name):
     return sa.Text()
 
 
-def _column_definition(name):
+def _column_definition(name, table_name=None):
     if name == "id":
         return sa.Column(name, sa.String(36), primary_key=True, nullable=False)
     if name == "metadata":
         return sa.Column(name, sa.JSON(), nullable=False, server_default=sa.text("'{}'"))
     if name in ("created_at", "updated_at"):
         return sa.Column(name, sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    if table_name and name in REQUIRED_COLUMNS.get(table_name, set()):
+        return sa.Column(name, _column_type(name), nullable=False)
     return sa.Column(name, _column_type(name), nullable=True)
 
 
@@ -96,7 +137,7 @@ def upgrade():
     for table_name, extra_columns in TABLES.items():
         required = list(dict.fromkeys(envelope + extra_columns + shared))
         if not inspector.has_table(table_name):
-            op.create_table(table_name, *[_column_definition(name) for name in required])
+            op.create_table(table_name, *[_column_definition(name, table_name) for name in required])
             inspector = inspect(bind)
         else:
             # Reconcile an existing table in place instead of skipping it wholesale.
@@ -105,7 +146,7 @@ def upgrade():
             for name in required:
                 if name in existing:
                     continue
-                definition = _column_definition(name)
+                definition = _column_definition(name, table_name)
                 # Existing tables receive nullable columns only; never impose a new
                 # primary-key constraint over populated legacy data.
                 op.add_column(table_name, sa.Column(name, definition.type, nullable=True))
