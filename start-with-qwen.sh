@@ -32,8 +32,13 @@ if [ "$ready" -ne 1 ]; then
   exit 1
 fi
 
-if ! ollama list | grep -q 'qwen2.5:0.5b'; then
-  ollama pull qwen2.5:0.5b
+# Do not infer model readiness from `ollama list`: a manifest can appear while
+# its blobs are still downloading. Pull/verify the configured model before
+# starting FastAPI so the API cannot advertise readiness while inference returns 503.
+ollama pull "$OLLAMA_MODEL"
+if ! ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+  echo "Configured Qwen model is not fully available after pull: $OLLAMA_MODEL" >&2
+  exit 1
 fi
 
 exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}"

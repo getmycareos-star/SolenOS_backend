@@ -120,7 +120,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261027_04_caregiver_context":
+              if revision != "20261027_06_ai_output_governance":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -286,23 +286,68 @@ jobs:
           # Retry transient 503 responses; never treat a failed inference as a pass.
           for workflow in daily_capture add_record document living_care_record care_history_search care_situation_change delta_engine evidence_provenance uncertainty_contradictions returning_caregiver appointment after_appointment handoff professional_summary open_loops two_week_review decision_outcome medication_day reminders_notifications care_coordination companion caregiver_feedback sharing_export roles_access account_recovery settings_security record_lifecycle offline_sync ai_reliability audit_review care_transition incident_follow_through emergency_readiness care_coverage_gap care_instruction_change_tracker critical_information_completeness personal_preferences_distress_context caregiver_strain_support document_validity_renewal; do
             echo "QWEN_E2E: workflow=$workflow"
+            case "$workflow" in
+              daily_capture) task_text='Organize this caregiver observation only: she slept poorly last night. Separate reported fact from unknowns.' ;;
+              add_record) task_text='Draft a correction only: the old weekday was Monday and the corrected weekday is Tuesday. Do not save it.' ;;
+              document) task_text='Document excerpt: The follow-up date is not stated. Explain only the excerpt and missing detail.' ;;
+              living_care_record) task_text='Summarize the available care record. No care events or documents have been supplied in this session.' ;;
+              care_history_search) task_text='Search the available history for a dental visit. No history is supplied; distinguish missing records from proof it did not happen.' ;;
+              care_situation_change) task_text='Compare these reports only: yesterday appetite was described as normal; today caregiver reports she ate less at breakfast. Do not infer a cause.' ;;
+              delta_engine) task_text='Review this candidate change only: prior note says normal appetite yesterday; new note says she ate less today. This is review-only.' ;;
+              evidence_provenance) task_text='Label the source of this claim: caregiver observed she seemed tired this morning. No professional assessment is supplied.' ;;
+              uncertainty_contradictions) task_text='Two notes conflict: one says Monday, another Tuesday; exact date is absent. Surface the conflict without guessing.' ;;
+              returning_caregiver) task_text='I am returning to caregiving. No prior care entries are available in this session; say recent history was not supplied and ask me to provide it.' ;;
+              appointment) task_text='Prepare appointment questions from this concern only: caregiver reports reduced appetite today. Do not recommend treatment.' ;;
+              after_appointment) task_text='No after-appointment notes have been supplied. State that notes are missing and ask me to provide them; do not invent clinician advice.' ;;
+              handoff) task_text='Draft a handoff from this report only: caregiver observed she seemed tired this morning. Recipient is unknown.' ;;
+              professional_summary) task_text='Prepare a professional-facing summary from this report only: caregiver observed she seemed tired this morning. Preserve source attribution.' ;;
+              open_loops) task_text='Identify the unresolved question only: we still need to confirm whether the appointment date is Monday or Tuesday.' ;;
+              two_week_review) task_text='Review the last fourteen days using only this supplied fact: today caregiver reports she ate less at breakfast. No other dated events are supplied.' ;;
+              decision_outcome) task_text='The family decision and its outcome are both unknown. Keep them separate and ask what information is missing.' ;;
+              medication_day) task_text='Organize this caregiver report only: prescribed medication was taken with breakfast. Do not infer dose or recommend a change.' ;;
+              reminders_notifications) task_text='No reminder or delivery record is supplied. State that delivery cannot be verified from this information.' ;;
+              care_coordination) task_text='Organize this coordination note: one caregiver is available this afternoon; no other roles or assignments are known.' ;;
+              companion) task_text='I feel overwhelmed today. Respond supportively without claiming personal experience or inventing care facts.' ;;
+              caregiver_feedback) task_text='An earlier entry has the wrong date, but the correct date is not supplied. Help phrase feedback; do not claim it was saved.' ;;
+              sharing_export) task_text='Prepare a shareable summary from only the supplied note; do not say it has been sent or exported.' ;;
+              roles_access) task_text='No role or permission record is supplied. Explain that access status cannot be verified from this information.' ;;
+              account_recovery) task_text='The user cannot sign in; no identity verification or account status is supplied. Give safe next steps without claiming the account was recovered.' ;;
+              settings_security) task_text='No account security setting is supplied. State that multi-factor authentication status cannot be verified from this information.' ;;
+              record_lifecycle) task_text='No lifecycle status is supplied. Explain that archive, restore, pin, or delete status cannot be verified.' ;;
+              offline_sync) task_text='No sync receipt is supplied. State that synchronization status cannot be verified.' ;;
+              ai_reliability) task_text='The assistant request returned an error; explain that the request failed and no model result is verified.' ;;
+              audit_review) task_text='No audit entries are supplied. State that audit history is missing rather than inventing recorded actions.' ;;
+              care_transition) task_text='No discharge summary or transition document is supplied. State that transition details are missing.' ;;
+              incident_follow_through) task_text='No incident follow-up notes are supplied. Ask for the follow-up record and do not invent an outcome.' ;;
+              emergency_readiness) task_text='No emergency plan or emergency contacts are supplied. Identify these as missing information, not as confirmed absent in the persons actual care.' ;;
+              care_coverage_gap) task_text='No care schedule or coverage assignments are supplied. State that coverage gaps cannot be determined from this information.' ;;
+              care_instruction_change_tracker) task_text='No previous or updated care instructions are supplied. Ask for both versions before comparing.' ;;
+              critical_information_completeness) task_text='No care record or emergency information is supplied. State that completeness cannot be assessed from this information.' ;;
+              personal_preferences_distress_context) task_text='No personal preferences or distress triggers are supplied. Ask what is known without inventing preferences.' ;;
+              caregiver_strain_support) task_text='The caregiver says they feel overwhelmed today. Respond supportively and ask what support they have, without diagnosing burnout.' ;;
+              document_validity_renewal) task_text='No document or expiration date is supplied. State that validity and renewal status cannot be determined.' ;;
+            esac
+            workflow_payload=$(python -c 'import json,sys; print(json.dumps({"workflow":sys.argv[1],"text":sys.argv[2]}))' "$workflow" "$task_text")
             workflow_ready=0
             workflow_response=""
             for attempt in $(seq 1 5); do
-              if workflow_response=$(curl --fail --silent --show-error --max-time 90 \
+              workflow_status=$(curl --silent --show-error --output /tmp/qwen-workflow-response.json --write-out '%{http_code}' --max-time 90 \
                 -H "$auth_header" -H "Content-Type: application/json" \
-                -d "{\"workflow\":\"$workflow\",\"text\":\"Help organize the available information and identify what remains unknown.\"}" \
-                http://127.0.0.1:8080/api/v1/assistant/assist 2>/tmp/qwen-workflow-error); then
+                -d "$workflow_payload" \
+                http://127.0.0.1:8080/api/v1/assistant/assist 2>/tmp/qwen-workflow-error || true)
+              workflow_response=$(cat /tmp/qwen-workflow-response.json 2>/dev/null || true)
+              if [ "$workflow_status" = "200" ]; then
                 if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow" 2>/dev/null; then
                   workflow_ready=1
                   break
                 fi
               fi
-              echo "Qwen workflow $workflow did not pass on attempt $attempt/5; retrying if transient."
+              echo "Qwen workflow $workflow failed contract check (HTTP $workflow_status, attempt $attempt/5)." >&2
+              cat /tmp/qwen-workflow-response.json >&2 || true
+              cat /tmp/qwen-workflow-error >&2 || true
               sleep 2
             done
             if [ "$workflow_ready" -ne 1 ]; then
-              cat /tmp/qwen-workflow-error >&2 || true
               echo "Actual Qwen inference failed contract checks for workflow=$workflow" >&2
               exit 1
             fi

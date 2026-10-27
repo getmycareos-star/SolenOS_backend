@@ -244,3 +244,4 @@ class SafetyRegressionModel(Base):
     safety_version = Column(String, nullable=True)
 
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
