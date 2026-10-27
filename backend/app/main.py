@@ -19,7 +19,7 @@ from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router, _ollama_url, _ollama_chat
 from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
-from app.api.care_continuity import router as care_continuity_router
+from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
@@ -898,7 +898,7 @@ def readiness_check(db: Session = Depends(get_db)):
             if not expected_heads or applied_heads != expected_heads:
                 raise HTTPException(status_code=503, detail="Database migrations are not current")
 
-            required_migration_tables = [
+            required_migration_tables = set([
     "care_record_identifiers",
     "care_record_sections",
     "care_record_links",
@@ -950,7 +950,8 @@ def readiness_check(db: Session = Depends(get_db)):
     "handoff_access_logs",
     "handoff_acknowledgements",
     "delivery_failure_events"
-]
+
+            ]) | set(CARE_CONTINUITY_RESOURCES.values())
             missing_migration_tables = sorted(
                 name for name in required_migration_tables if not inspector.has_table(name)
             )
