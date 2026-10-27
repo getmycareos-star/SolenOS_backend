@@ -408,7 +408,7 @@ jobs:
           companion_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$companion_event")
           companion_question=$(python -c 'import json,sys; print(json.dumps({
             "person_id":sys.argv[1],
-            "text":"Has Mum's sleep been getting worse?"
+            "text":"Has Mum sleep been getting worse?"
           }))' "$person_id")
           companion_answer=""
           companion_ready=0
@@ -441,7 +441,7 @@ jobs:
           for attempt in $(seq 1 5); do
             appointment_status=$(curl --silent --show-error --output /tmp/qwen-appointment-assist.json --write-out '%{http_code}' --max-time 90 \
               -H "$auth_header" -H "Content-Type: application/json" \
-              -d '{"workflow":"appointment","text":"Help organize the available appointment details and unanswered questions."}' \
+              -d '{"workflow":"appointment","text":"The caregiver-provided note says: the follow-up appointment date is not stated. Clinician name and appointment time are not supplied. Organize only these explicit missing details and do not invent an appointment."}' \
               http://127.0.0.1:8080/api/v1/assistant/assist || true)
             if [ "$appointment_status" = "200" ]; then
               appointment_response=$(cat /tmp/qwen-appointment-assist.json)
