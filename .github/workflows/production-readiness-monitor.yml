@@ -1,0 +1,94 @@
+name: Production readiness monitor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions:
+  contents: read
+
+# This monitor intentionally runs separately from push CI so a deployment
+# cannot be blocked by a smoke test waiting for that same deployment.
+jobs:
+  production-readiness-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for deployed service health and database readiness
+        timeout-minutes: 16
+        run: |
+          base='https://solenosbackend-production.up.railway.app'
+          ready=0
+          for attempt in $(seq 1 48); do
+            health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
+            ready_json=$(curl --silent --show-error --fail --max-time 20 "${base}/ready" 2>/dev/null || true)
+            status=0
+            migration_state=""
+            continuity_schema=""
+            migration_head=""
+            if [ -n "$ready_json" ]; then
+              status=200
+              migration_state=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_state",""))' 2>/dev/null || true)
+              continuity_schema=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("continuity_schema",""))' 2>/dev/null || true)
+              migration_head=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_head",""))' 2>/dev/null || true)
+            else
+              status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
+            fi
+            openapi=$(curl --silent --show-error --fail --max-time 20 "${base}/openapi.json" 2>/dev/null || true)
+            has_lcr_routes=0
+            if printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-versions' &&
+               printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-snapshots'; then
+              has_lcr_routes=1
+            fi
+            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; migration_state=${migration_state}; migration_head=${migration_head}; continuity_schema=${continuity_schema}; LCR version routes present: ${has_lcr_routes}"
+            # Do not accept a healthy old deployment: readiness must report that
+            # the current image's migration graph and reflected continuity tables are present.
+            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$migration_state" = "current" ] && [ "$continuity_schema" = "verified" ] && [ -n "$migration_head" ] && [ "$has_lcr_routes" = "1" ]; then ready=1; break; fi
+            sleep 20
+          done
+          test "$ready" = "1"
+
+      # Qwen runtime readiness is intentionally not a deployment gate while work is focused on care continuity.
+      - name: Verify deployed OpenAPI exposes core continuity routes
+        run: |
+          curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
+          python - <<'PY'
+          import json
+          with open("/tmp/solenos-openapi.json", encoding="utf-8") as stream:
+              paths = set(json.load(stream).get("paths", {}))
+          required = {
+              "/api/v1/sessions/anonymous",
+              "/api/v1/sessions/refresh",
+              "/api/v1/evidence/{person_id}",
+              "/api/situation",
+              "/api/v1/share-intake",
+              "/api/v1/share-intake/{share_id}",
+              "/api/v1/assistant/status",
+              "/api/v1/assistant/assist",
+              "/api/v1/care-continuity/record-versions",
+              "/api/v1/care-continuity/record-snapshots",
+          }
+          missing = sorted(required - paths)
+          if missing:
+              raise SystemExit(f"Deployed OpenAPI is missing core continuity routes: {missing}")
+          print("PASS: deployed OpenAPI exposes anonymous sessions, refresh, evidence reads, and care capture.")
+          PY
+      - name: Diagnose deployed route paths
+        if: always()
+        shell: bash
+        run: |
+          base='https://solenosbackend-production.up.railway.app'
+          for path in /health /ready /api/health /api/v1/health /openapi.json /docs /; do
+            status=$(curl --silent --show-error --output /tmp/solenos-response --write-out '%{http_code}' --max-time 20 "${base}${path}" || true)
+            printf '%-18s HTTP %s\n' "$path" "$status"
+            if [ "$path" = "/openapi.json" ] && [ "$status" = "200" ]; then
+              python -c 'import json; d=json.load(open("/tmp/solenos-response")); print("OpenAPI paths:", ", ".join(sorted(d.get("paths", {}).keys())[:60]))'
+            fi
+          done
+      - name: Verify deployed API CORS preflight
+        if: always()
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
+          echo "OPTIONS /api/situation returned HTTP $status"
+          test "$status" = "200"
