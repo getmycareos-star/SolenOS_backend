@@ -54,3 +54,23 @@ def test_retrieval_is_bounded_and_does_not_mutate_source_rows():
 
     assert len(selected) == 3
     assert [(row.title, row.description, row.occurred_at) for row in rows] == original
+
+
+def test_recent_baseline_uses_nearest_time_including_upcoming_appointments():
+    now = datetime.now(timezone.utc)
+    nearest = Row("Routine note", "No appointment details.", now + timedelta(days=3))
+    relevant = Row("Clinic appointment", "Review date and follow-up.", now + timedelta(days=200))
+    far = Row("Other appointment", "Routine check.", now + timedelta(days=300))
+
+    selected = rank_context_rows(
+        "clinic appointment date",
+        [far, nearest, relevant],
+        text=lambda row: f"{row.title} {row.description}",
+        timestamp=lambda row: row.occurred_at,
+        limit=2,
+        fallback_recent=1,
+    )
+
+    assert relevant in selected
+    assert nearest in selected
+    assert far not in selected
