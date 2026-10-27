@@ -471,6 +471,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             data["event_time"] = data["observed_at"]
     if resource == "record-provenance" and "author_caregiver_id" in table.c:
         data["author_caregiver_id"] = caregiver_id
+    if resource == "record-provenance" and "method" in table.c and not data.get("method"):
+        data["method"] = "manual"
     if resource == "record-change-sets" and "author_caregiver_id" in table.c:
         data["author_caregiver_id"] = caregiver_id
     if resource == "corrections" and "requested_by_caregiver_id" in table.c:
