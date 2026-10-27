@@ -319,7 +319,16 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or request.query_params.get("caregiver_id")
             or request.query_params.get("created_by_caregiver_id")
         )
-        if claimed_caregiver_id and str(claimed_caregiver_id) != str(scoped_caregiver_id):
+        # A caregiver_id on a read query is legacy filtering/UI context, not
+        # authentication. The bearer token and person scope above authorize the
+        # read. Enforce caregiver attribution only on writes, where accepting a
+        # client-selected actor could falsify provenance. This avoids rejecting
+        # same-session reads when an older client still sends a local caregiver key.
+        if (
+            method in {"POST", "PUT", "PATCH", "DELETE"}
+            and claimed_caregiver_id
+            and str(claimed_caregiver_id) != str(scoped_caregiver_id)
+        ):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Caregiver attribution does not match this session"},

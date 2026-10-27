@@ -94,6 +94,17 @@ def test_session_cannot_read_another_person_evidence():
     assert response.status_code == 403, response.text
 
 
+def test_same_session_read_ignores_legacy_caregiver_query_but_keeps_person_scope():
+    client = TestClient(app)
+    created = create_session(client, "Care recipient")
+    response = client.get(
+        f"/api/v1/evidence/{created['person']['id']}?caregiver_id=legacy-client-local-key",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+
+
 def test_session_cannot_spoof_another_caregiver_attribution():
     client = TestClient(app)
     first = create_session(client, "First person")
