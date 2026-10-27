@@ -58,11 +58,10 @@ def rank_authorized_context(
         return rows[:limit]
 
     documents = [_terms(text_of(row)) for row in rows]
-    document_frequency = Counter(
-        term for term in query_terms
-        for present in [any(term in doc for doc in documents)]
-        if present
-    )
+    document_frequency = Counter({
+        term: sum(1 for doc in documents if term in set(doc))
+        for term in query_terms
+    })
     # A term appearing in many candidate records carries less discriminating value.
     scores: list[tuple[float, int]] = []
     for index, terms in enumerate(documents):
@@ -70,7 +69,7 @@ def rank_authorized_context(
         score = 0.0
         for term in query_terms:
             if counts[term]:
-                inverse_frequency = math.log1p(len(rows) / document_frequency[term])
+                inverse_frequency = math.log1p(len(rows) / max(document_frequency[term], 1))
                 score += inverse_frequency * (1.0 + math.log(counts[term]))
         if len(query_terms) >= 2:
             normalized_text = " ".join(terms)
