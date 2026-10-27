@@ -36,6 +36,8 @@ def ensure_caregiver_profile_for_session(
         if str(profile.person_id) != str(person_id):
             raise ValueError("Caregiver profile identity link crosses care records")
         if email:
+            if profile.email and profile.email.casefold() != email.casefold():
+                raise ValueError("Caregiver profile already has a different email identity")
             existing_email = (
                 db.query(CaregiverProfile)
                 .filter(CaregiverProfile.email == email, CaregiverProfile.id != profile.id)
