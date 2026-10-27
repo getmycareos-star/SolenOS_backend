@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
+from app.models.collaboration import ConsentRecord
 from app.models.privacy_delivery import (
     AuditLogEvent,
     HandoffAccessLog,
@@ -44,6 +45,21 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+def _has_required_consent(db: Session, person_id: str, caregiver_id: str) -> bool:
+    consent = db.query(ConsentRecord).filter(
+        ConsentRecord.person_id == person_id,
+        ConsentRecord.caregiver_id == caregiver_id,
+    ).first()
+    return bool(
+        consent
+        and consent.revoked_at is None
+        and consent.medical_disclaimer_acknowledged
+        and consent.privacy_model_acknowledged
+        and consent.multi_caregiver_acknowledged
+        and consent.no_advertising_acknowledged
+    )
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -133,6 +149,11 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     person_id, caregiver_id = _scope(request, db)
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if not _has_required_consent(db, person_id, caregiver_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Required privacy and multi-caregiver consent must be accepted before creating a handoff",
+        )
     if any(scope not in ALLOWED_SCOPE for scope in payload.scope):
         raise HTTPException(status_code=422, detail="Unsupported handoff scope")
     if caregiver_id in payload.recipient_caregiver_ids:
@@ -185,8 +206,10 @@ def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)
         HandoffRecipient.access_status == "accepted",
         HandoffRecipient.revoked_at.is_(None),
     ).first()
-    if not is_owner and recipient is None:
-        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.read", "denied", reason_code="not_authorized")
+    if not is_owner and (
+        recipient is None or not _has_required_consent(db, person_id, caregiver_id)
+    ):
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.read", "denied", reason_code="not_authorized_or_consent_revoked")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
     if not is_owner and (
@@ -218,7 +241,7 @@ def accept_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
         HandoffRecipient.handoff_id == handoff.id,
         HandoffRecipient.recipient_id == caregiver_id,
     ).first()
-    if recipient is None or recipient.revoked_at is not None:
+    if recipient is None or recipient.revoked_at is not None or not _has_required_consent(db, person_id, caregiver_id):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.accept", "denied", reason_code="not_a_recipient")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
@@ -247,7 +270,7 @@ def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: R
         HandoffRecipient.access_status == "accepted",
         HandoffRecipient.revoked_at.is_(None),
     ).first()
-    if recipient is None or handoff.handoff_status == "revoked" or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now):
+    if recipient is None or not _has_required_consent(db, person_id, caregiver_id) or handoff.handoff_status == "revoked" or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.acknowledge", "denied", reason_code="not_authorized_or_expired")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
