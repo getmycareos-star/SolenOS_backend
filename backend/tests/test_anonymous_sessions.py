@@ -73,6 +73,7 @@ def test_anonymous_session_bootstrap_creates_scoped_record_without_email():
         assert profile.person_id == person.id
         assert profile.session_caregiver_id == caregiver.id
         assert profile.email is None
+        assert profile.identity_match_confidence.value == "unknown"
         assert caregiver.email is None
         assert caregiver.person_id == person.id
         assert session.person_id == person.id
