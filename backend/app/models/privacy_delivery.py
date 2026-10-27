@@ -119,3 +119,24 @@ class AuditLogEvent(Base):
     record_metadata = Column("metadata", JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+
+class NotificationReadReceipt(Base):
+    __tablename__ = "notification_read_receipts"
+
+    id = Column(String(36), primary_key=True, default=_id)
+    actor_id = Column(String(255), nullable=True, index=True)
+    subject_id = Column(String(255), nullable=True, index=True)
+    person_id = Column(String(255), nullable=True, index=True)
+    caregiver_id = Column(String(255), nullable=True, index=True)
+    notification_id = Column(String(255), nullable=False, index=True)
+    reader_id = Column(String(255), nullable=False, index=True)
+    read_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    client = Column(String(255), nullable=True)
+    request_id = Column(String(255), nullable=True, index=True)
+    correlation_id = Column(String(255), nullable=True, index=True)
+    policy_version = Column(String(100), nullable=True)
+    record_metadata = Column("metadata", JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
