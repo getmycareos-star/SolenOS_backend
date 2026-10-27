@@ -113,7 +113,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 
 
 def _isolated_job_store(tmp_path, monkeypatch):
@@ -122,6 +122,9 @@ def _isolated_job_store(tmp_path, monkeypatch):
         connect_args={"check_same_thread": False},
     )
     QwenBackgroundJob.__table__.create(bind=engine)
+    QwenModelOutput.__table__.create(bind=engine)
+    QwenJobEvent.__table__.create(bind=engine)
+    QwenSafetyEvaluation.__table__.create(bind=engine)
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     monkeypatch.setattr(worker, "SessionLocal", sessions)
     return sessions
@@ -197,7 +200,16 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
     assert job.status == "completed"
     assert job.workflow == "appointment"
-    assert job.result_text == "The appointment date was not supplied."
+    assert job.result_text is None
+    output = db.query(QwenModelOutput).filter_by(job_id=job_id).one()
+    assert output.output_text == "The appointment date was not supplied."
+    assert output.review_status == "pending_review"
+    assert output.review_required is True
+    assert output.written_to_lcr is False
+    safety = db.query(QwenSafetyEvaluation).filter_by(output_id=output.id).one()
+    assert safety.decision == "review_required"
+    assert safety.human_review_required is True
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_completed").count() == 1
     assert job.completed_at is not None
     assert job.locked_at is None
     db.close()
