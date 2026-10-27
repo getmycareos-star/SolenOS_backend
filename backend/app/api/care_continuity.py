@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
+from app.core.caregiver_enums import ClaimType, ObservationType
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
 
@@ -96,7 +97,7 @@ WRITABLE = {
     # Identity fields are injected from the server-issued session below.
     "caregiver-contexts": {"context_type", "context_payload", "epistemic_status", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "notes"},
     "caregiver-perspectives": {"topic", "perspective_text", "epistemic_status", "evidence_ids", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "supersedes_id"},
-    "caregiver-observations": {"observation_type", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
+    "caregiver-observations": {"observation_category", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
     "living-records": {"record_status", "schema_version"},
     "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
     "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
@@ -389,7 +390,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "change-assessments": ("change_id",),
         "caregiver-contexts": ("context_type", "context_payload"),
         "caregiver-perspectives": ("topic", "perspective_text"),
-        "caregiver-observations": ("observation_type", "description"),
+        "caregiver-observations": ("observation_category", "description"),
         "living-records": (),
         "record-provenance": ("source_type",),
         "record-provenance-links": ("provenance_id", "target_type", "target_id"),
@@ -416,9 +417,26 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["id"] = str(uuid.uuid4())
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
-    # Never trust client-supplied caregiver attribution.
-    if "caregiver_id" in table.c:
+    # The legacy caregiver_id points to caregiver_profiles, not session caregivers.
+    # New session attribution uses a separate server-bound column.
+    if "caregiver_id" in table.c and resource not in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         data["caregiver_id"] = caregiver_id
+    if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations") and "reported_by_caregiver_id" in table.c:
+        data["reported_by_caregiver_id"] = caregiver_id
+    if resource == "caregiver-contexts" and "effective_start" in table.c and not data.get("effective_start"):
+        data["effective_start"] = data.get("effective_from") or datetime.now(timezone.utc)
+    if resource == "caregiver-perspectives":
+        if "claim_type" in table.c:
+            data["claim_type"] = ClaimType.INTERPRETATION
+        if "claim_content" in table.c:
+            data["claim_content"] = data.get("perspective_text")
+    if resource == "caregiver-observations":
+        if "observation_content" in table.c:
+            data["observation_content"] = data.get("description")
+        if "observation_type" in table.c:
+            data["observation_type"] = ObservationType.DIRECT
+        if "event_time" in table.c and data.get("observed_at"):
+            data["event_time"] = data["observed_at"]
     if resource == "record-provenance" and "author_caregiver_id" in table.c:
         data["author_caregiver_id"] = caregiver_id
     if resource == "record-change-sets" and "author_caregiver_id" in table.c:
