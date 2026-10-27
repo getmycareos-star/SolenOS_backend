@@ -102,7 +102,7 @@ def test_anonymous_session_cannot_read_another_caregivers_private_observation():
     headers = {"Authorization": f"Bearer {session['access_token']}"}
     filtered = client.get(
         f"/api/v1/caregiver-observations/{person_id}",
-        params={"caregiver_id": other_profile_id},
+        params={"person_id": person_id, "caregiver_id": other_profile_id},
         headers=headers,
     )
     assert filtered.status_code == 200, filtered.text
