@@ -184,6 +184,13 @@ def test_email_lookup_is_limited_to_the_current_care_record():
     first = create_session(client, "First person")
     second = create_session(client, "Second person")
     other_profile_id = second["caregiver"]["profile_id"]
+    db = TestSessionLocal()
+    try:
+        other_profile = db.query(CaregiverProfile).filter_by(id=other_profile_id).one()
+        other_profile.email = "second@example.invalid"
+        db.commit()
+    finally:
+        db.close()
 
     response = client.get(
         "/api/v1/caregivers/by-email",
