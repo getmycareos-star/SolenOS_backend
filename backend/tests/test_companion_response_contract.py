@@ -267,3 +267,52 @@ def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval()
         "What is the recorded emergency contact number for this person?", prior
     )
     assert query == "What is the recorded emergency contact number for this person?"
+
+
+def test_companion_rejects_unverified_sync_claim_and_does_not_persist_it(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The record is synced."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Is the record synced?"},
+        )
+        assert response.status_code == 503, response.text
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).count() == 0
+            assert db.query(CareEvent).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
+def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monkeypatch):
+    client = setup_client(monkeypatch)
+    expected = "I cannot verify whether the record is synced because no server receipt was supplied."
+
+    def fake_qwen(base, model, messages, options=None):
+        return expected
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Is the record synced?"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == expected
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
