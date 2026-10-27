@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -124,6 +124,9 @@ class AuditLogEvent(Base):
 
 class NotificationReadReceipt(Base):
     __tablename__ = "notification_read_receipts"
+    __table_args__ = (
+        UniqueConstraint("notification_id", "reader_id", name="uq_notification_read_receipt_reader"),
+    )
 
     id = Column(String(36), primary_key=True, default=_id)
     actor_id = Column(String(255), nullable=True, index=True)
