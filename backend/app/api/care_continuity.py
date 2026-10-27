@@ -5,16 +5,19 @@ temporal and uncertainty tables. It does not create duplicate open-loop or
 evidence stores. New records are always scoped from the bearer session, never
 from a caller-supplied person_id.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any
 import json
+import uuid
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import MetaData, Table, select, insert, desc
+from sqlalchemy import MetaData, Table, select, insert, desc, inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
+from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
 
@@ -52,6 +55,22 @@ RESOURCES = {
     "open-questions": "open_questions",
     "information-gaps": "information_gaps",
     "assertions": "care_assertions",
+    "caregiver-contexts": "caregiver_contexts",
+    "caregiver-perspectives": "caregiver_perspectives",
+    "caregiver-observations": "caregiver_observations",
+    "living-records": "living_care_records",
+    "record-provenance": "record_provenance",
+    "record-provenance-links": "record_provenance_links",
+    "record-change-sets": "care_record_change_sets",
+    "record-change-items": "care_record_change_items",
+    "corrections": "care_corrections",
+    "amendments": "record_amendments",
+    "amendment-items": "record_amendment_items",
+    "record-audit": "care_record_audit_log",
+    "uncertainties": "care_uncertainties",
+    "missing-information": "care_missing_information",
+    "conflicts": "care_conflicts",
+    "action-outcomes": "care_action_outcomes",
 }
 
 WRITABLE = {
@@ -74,6 +93,24 @@ WRITABLE = {
     "provenance": {"target_type", "target_id", "source_type", "source_id", "evidence_id", "source_label", "source_span", "metadata"},
     "timeline": {"source_type", "source_id", "entry_type", "title", "summary", "occurred_at", "evidence_ids", "epistemic_status", "is_projection"},
     "change-assessments": {"change_id", "assessment_status", "significance", "evidence_status", "assessment_notes", "evidence_ids"},
+    # Caregiver-reported context remains attributed perspective, not an LCR fact.
+    # Identity fields are injected from the server-issued session below.
+    "caregiver-contexts": {"context_type", "context_payload", "epistemic_status", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "notes"},
+    "caregiver-perspectives": {"topic", "perspective_text", "epistemic_status", "evidence_ids", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "supersedes_id"},
+    "caregiver-observations": {"observation_category", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
+    "living-records": {"record_status", "schema_version"},
+    "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
+    "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
+    "record-change-sets": {"care_record_id", "operation", "status", "reason", "provenance_id"},
+    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "provenance_id"},
+    "corrections": {"care_record_id", "target_type", "target_id", "original_value", "corrected_value", "correction_reason", "status", "provenance_id", "effective_at"},
+    "amendments": {"care_record_id", "amendment_type", "reason", "status", "provenance_id"},
+    "amendment-items": {"amendment_id", "target_type", "target_id", "field_name", "before_value", "after_value"},
+    "record-audit": {"care_record_id", "actor_type", "actor_id", "action", "target_type", "target_id", "outcome", "reason", "metadata", "occurred_at", "request_id"},
+    "uncertainties": {"care_record_id", "target_type", "target_id", "question", "uncertainty_type", "status", "source_ids", "resolved_at"},
+    "missing-information": {"care_record_id", "topic", "description", "priority", "status", "resolved_at"},
+    "conflicts": {"care_record_id", "conflict_type", "status", "claim_refs", "description", "resolution", "resolved_at"},
+    "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -134,6 +171,18 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "evidence": "evidence", "change": "changes", "situation": "situations",
         "open_question": "open_questions", "information_gap": "information_gaps",
         "delta_item": "care_delta_items", "integrity_finding": "care_integrity_findings",
+        "care_assertion": "care_assertions", "assertion": "care_assertions",
+        "care_state_revision": "care_state_revisions", "state_revision": "care_state_revisions",
+        "caregiver_context": "caregiver_contexts", "caregiver_perspective": "caregiver_perspectives",
+        "caregiver_observation": "caregiver_observations",
+        "record_change_set": "care_record_change_sets", "care_record_change_set": "care_record_change_sets",
+        "record_change_item": "care_record_change_items", "care_record_change_item": "care_record_change_items",
+        "care_correction": "care_corrections", "correction": "care_corrections",
+        "record_amendment": "record_amendments", "amendment": "record_amendments",
+        "care_uncertainty": "care_uncertainties", "uncertainty": "care_uncertainties",
+        "care_conflict": "care_conflicts", "conflict": "care_conflicts",
+        "care_action_outcome": "care_action_outcomes", "action_outcome": "care_action_outcomes",
+        "living_care_record": "living_care_records", "living_record": "living_care_records",
     }
     links = []
     if resource in ("follow-up-links", "relationships"):
@@ -141,22 +190,62 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
             (payload.get("source_type"), payload.get("source_id"), "source_id"),
             (payload.get("target_type"), payload.get("target_id"), "target_id"),
         ])
-    elif resource in ("review-decisions", "provenance"):
-        links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
-        if resource == "provenance" and payload.get("source_id"):
+    elif resource in ("review-decisions", "provenance", "record-provenance"):
+        if resource in ("review-decisions", "provenance"):
+            links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
+        if resource in ("provenance", "record-provenance") and payload.get("source_id"):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
     elif resource == "timeline":
         links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    elif resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
+        if payload.get("source_id"):
+            links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"):
+        if payload.get("target_id"):
+            links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
+    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
     for type_name, target_id, field_name in links:
+        if not target_id:
+            continue
         table_name = typed_tables.get(str(type_name or "").lower())
-        if table_name is None or not target_id:
+        if table_name is None:
+            if resource in strict_link_resources:
+                raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
             continue
         linked = _table(db, table_name)
+        if "person_id" not in linked.c:
+            raise HTTPException(status_code=422, detail=f"{field_name} type is not person-scoped")
         row = db.execute(
             select(linked.c.id).where(linked.c.id == target_id, linked.c.person_id == person_id)
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field_name} was not found in this care record")
+
+    # Validate direct foreign-key-like references against the active person's
+    # rows before inserts. These are logical links where the DB schema cannot
+    # express a polymorphic foreign key.
+    scoped_references = {
+        "record-change-sets": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "record-change-items": (("care_record_change_sets", "change_set_id"), ("record_provenance", "provenance_id")),
+        "record-provenance-links": (("record_provenance", "provenance_id"),),
+        "corrections": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "amendments": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "amendment-items": (("record_amendments", "amendment_id"),),
+        "record-audit": (("living_care_records", "care_record_id"),),
+        "uncertainties": (("living_care_records", "care_record_id"),),
+        "missing-information": (("living_care_records", "care_record_id"),),
+        "conflicts": (("living_care_records", "care_record_id"),),
+    }
+    for table_name, field in scoped_references.get(resource, ()):
+        value = payload.get(field)
+        if value is None:
+            continue
+        linked = _table(db, table_name)
+        row = db.execute(
+            select(linked.c.id).where(linked.c.id == value, linked.c.person_id == person_id)
+        ).first()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
 
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
@@ -181,6 +270,111 @@ def continuity_summary(request: Request, db: Session = Depends(get_db)):
             select(table.c.id).where(table.c.person_id == person_id)
         ).fetchall().__len__()
     return result
+
+@router.get("/record-versions")
+def list_record_versions(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    versions = _table(db, "care_record_versions")
+    records = _table(db, "living_care_records")
+    query = (
+        select(versions, records.c.person_id.label("person_id"))
+        .join(records, versions.c.care_record_id == records.c.id)
+        .where(records.c.person_id == person_id)
+        .order_by(desc(versions.c.created_at))
+    )
+    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+
+@router.get("/record-snapshots")
+def list_record_snapshots(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    snapshots = _table(db, "care_record_snapshots")
+    records = _table(db, "living_care_records")
+    query = (
+        select(snapshots, records.c.person_id.label("person_id"))
+        .join(records, snapshots.c.care_record_id == records.c.id)
+        .where(records.c.person_id == person_id)
+        .order_by(desc(snapshots.c.as_of))
+    )
+    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+
+@router.post("/record-versions", status_code=201)
+def create_record_version(payload: dict, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    care_record_id = payload.get("care_record_id")
+    if not care_record_id:
+        raise HTTPException(status_code=422, detail="care_record_id is required")
+    records = _table(db, "living_care_records")
+    record = db.execute(
+        select(records).where(records.c.id == care_record_id, records.c.person_id == person_id)
+    ).mappings().first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Living Care Record was not found in this session")
+
+    # Snapshot only canonical persisted rows belonging to the session's person.
+    snapshot_tables = (
+        "care_facts", "care_assertions", "care_events", "evidence", "changes", "situations",
+        "care_state_revisions", "care_delta_runs", "care_delta_items", "care_decisions",
+        "decision_outcomes", "care_timeline_entries", "care_follow_up_links",
+        "care_review_decisions", "care_provenance_records", "care_uncertainties",
+        "care_missing_information", "care_conflicts", "care_action_outcomes",
+        "record_provenance", "record_provenance_links", "care_record_change_sets",
+        "care_record_change_items", "care_corrections", "record_amendments",
+        "record_amendment_items", "care_record_audit_log",
+        "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
+    )
+    tables_payload = {}
+    inspector = inspect(db.get_bind())
+    for table_name in snapshot_tables:
+        if not inspector.has_table(table_name):
+            continue
+        table = _table(db, table_name)
+        if "person_id" not in table.c:
+            continue
+        query = select(table).where(table.c.person_id == person_id)
+        if "created_at" in table.c:
+            query = query.order_by(desc(table.c.created_at))
+        rows = db.execute(query.limit(1000)).mappings().all()
+        tables_payload[table_name] = [_jsonable(dict(row)) for row in rows]
+
+    captured_at = datetime.now(timezone.utc)
+    snapshot_payload = {"person_id": person_id, "captured_at": captured_at.isoformat(), "tables": tables_payload}
+    encoded = json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    versions = _table(db, "care_record_versions")
+    snapshots = _table(db, "care_record_snapshots")
+    latest = db.execute(
+        select(versions.c.version_number)
+        .where(versions.c.care_record_id == care_record_id)
+        .order_by(desc(versions.c.version_number))
+        .limit(1)
+    ).scalar_one_or_none()
+    version_id = str(uuid.uuid4())
+    snapshot_id = str(uuid.uuid4())
+    version_number = int(latest or 0) + 1
+    reason = str(payload.get("reason") or "care-continuity snapshot")[:2000]
+    try:
+        db.execute(insert(versions).values(
+            id=version_id, care_record_id=care_record_id, version_number=version_number,
+            record_digest=digest, snapshot_payload=snapshot_payload,
+            created_by_caregiver_id=caregiver_id, reason=reason,
+        ))
+        db.execute(insert(snapshots).values(
+            id=snapshot_id, care_record_id=care_record_id, version_id=version_id,
+            as_of=captured_at, snapshot_payload=snapshot_payload, record_digest=digest,
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Record version could not be committed; refresh and retry") from exc
+    return {"id": version_id, "care_record_id": care_record_id, "version_number": version_number,
+            "snapshot_id": snapshot_id, "record_digest": digest, "captured_at": captured_at.isoformat(),
+            "tables_captured": sorted(tables_payload.keys())}
+
 
 @router.get("/{resource}")
 def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
@@ -218,6 +412,22 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "provenance": ("target_type", "target_id", "source_type"),
         "timeline": ("source_type", "source_id", "entry_type", "title"),
         "change-assessments": ("change_id",),
+        "caregiver-contexts": ("context_type", "context_payload"),
+        "caregiver-perspectives": ("topic", "perspective_text"),
+        "caregiver-observations": ("observation_category", "description"),
+        "living-records": (),
+        "record-provenance": ("source_type",),
+        "record-provenance-links": ("provenance_id", "target_type", "target_id"),
+        "record-change-sets": ("operation",),
+        "record-change-items": ("change_set_id", "target_type", "target_id", "operation"),
+        "corrections": ("target_type", "target_id", "corrected_value", "correction_reason"),
+        "amendments": ("amendment_type", "reason"),
+        "amendment-items": ("amendment_id", "target_type", "target_id"),
+        "record-audit": ("actor_type", "action"),
+        "uncertainties": ("question", "uncertainty_type"),
+        "missing-information": ("topic", "description"),
+        "conflicts": ("conflict_type", "description"),
+        "action-outcomes": ("action_id", "action_type", "outcome_status"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
@@ -225,8 +435,58 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     _validate_links(db, person_id, resource, data)
     table = _table(db, RESOURCES[resource])
     data["person_id"] = person_id
+    # Migration-created continuity tables use UUID-shaped string primary keys
+    # without database-side generators; issue IDs server-side for every insert.
+    if "id" in table.c and "id" not in data:
+        data["id"] = str(uuid.uuid4())
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
+    # The legacy caregiver_id points to caregiver_profiles, not session caregivers.
+    # New session attribution uses a separate server-bound column.
+    if "caregiver_id" in table.c and resource not in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
+        data["caregiver_id"] = caregiver_id
+    if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations") and "reported_by_caregiver_id" in table.c:
+        data["reported_by_caregiver_id"] = caregiver_id
+    if resource == "caregiver-contexts" and "effective_start" in table.c and not data.get("effective_start"):
+        data["effective_start"] = data.get("effective_from") or datetime.now(timezone.utc)
+    if resource == "caregiver-perspectives":
+        if "claim_type" in table.c:
+            data["claim_type"] = ClaimType.INTERPRETATION.name
+        if "claim_content" in table.c:
+            data["claim_content"] = data.get("perspective_text")
+        if "information_visibility" in table.c:
+            data["information_visibility"] = InformationVisibility.PRIVATE.name
+        if "is_promoted_to_shared" in table.c:
+            data["is_promoted_to_shared"] = False
+    if resource == "caregiver-observations":
+        if "observation_content" in table.c:
+            data["observation_content"] = data.get("description")
+        if "observation_type" in table.c:
+            data["observation_type"] = ObservationType.DIRECT.name
+        if "information_visibility" in table.c:
+            data["information_visibility"] = InformationVisibility.PRIVATE
+        if "is_promoted_to_shared" in table.c:
+            data["is_promoted_to_shared"] = False
+        if "event_time" in table.c and data.get("observed_at"):
+            data["event_time"] = data["observed_at"]
+    if resource == "record-provenance" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "record-provenance" and "method" in table.c and not data.get("method"):
+        data["method"] = "manual"
+    if resource == "record-change-sets" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "corrections" and "requested_by_caregiver_id" in table.c:
+        data["requested_by_caregiver_id"] = caregiver_id
+    if resource == "amendments" and "author_caregiver_id" in table.c:
+        data["author_caregiver_id"] = caregiver_id
+    if resource == "record-audit":
+        data["actor_type"] = "caregiver"
+        data["actor_id"] = caregiver_id
+        if "occurred_at" in table.c:
+            data["occurred_at"] = datetime.now(timezone.utc)
+    # recorded_at is server receipt time, never a client-controlled timestamp.
+    if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations", "record-provenance") and "recorded_at" in table.c:
+        data["recorded_at"] = datetime.now(timezone.utc)
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
@@ -253,4 +513,4 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Care-continuity record could not be saved; check linked IDs and field types") from exc
+        raise HTTPException(status_code=422, detail=f"Care-continuity record could not be saved ({type(exc).__name__}); check linked IDs and field types") from exc

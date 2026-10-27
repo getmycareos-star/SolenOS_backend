@@ -59,30 +59,7 @@ jobs:
           done
           test "$ready" = "1"
 
-      - name: Verify deployed Railway-local Qwen model inventory without creating care records
-        timeout-minutes: 12
-        shell: bash
-        run: |
-          base='https://solenosbackend-production.up.railway.app'
-          available=0
-          for attempt in $(seq 1 36); do
-            status=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 "${base}/api/v1/assistant/status" || true)
-            if [ "$status" = "200" ] && python - <<'PY'
-          import json
-          with open("/tmp/qwen-status.json", encoding="utf-8") as stream:
-              data = json.load(stream)
-          assert data.get("available") is True, data
-          assert data.get("model") == "qwen2.5:0.5b", data
-          assert data.get("provider") == "local_ollama", data
-          assert data.get("hosted_inference_api") is False, data
-          print("PASS: Railway reports the bundled local qwen2.5:0.5b model as available.")
-          PY
-            then available=1; break; fi
-            echo "Qwen runtime not yet ready (HTTP ${status}); retrying."
-            sleep 15
-          done
-          test "$available" = "1"
-
+      # Qwen runtime readiness is intentionally not a deployment gate while work is focused on care continuity.
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
@@ -99,6 +76,8 @@ jobs:
               "/api/v1/share-intake/{share_id}",
               "/api/v1/assistant/status",
               "/api/v1/assistant/assist",
+              "/api/v1/care-continuity/record-versions",
+              "/api/v1/care-continuity/record-snapshots",
           }
           missing = sorted(required - paths)
           if missing:

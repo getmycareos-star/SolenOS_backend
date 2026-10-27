@@ -53,6 +53,71 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
+      - name: Verify LCR history schema columns, indexes and foreign keys
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          expected = {
+              "living_care_records": {"person_id", "record_status", "schema_version"},
+              "care_record_versions": {"care_record_id", "version_number", "snapshot_payload"},
+              "care_record_snapshots": {"care_record_id", "as_of", "snapshot_payload"},
+              "record_provenance": {"person_id", "source_type", "recorded_at", "metadata"},
+              "record_provenance_links": {"person_id", "provenance_id", "target_type", "target_id"},
+              "care_record_change_sets": {"person_id", "operation", "status"},
+              "care_record_change_items": {"person_id", "change_set_id", "target_type", "target_id"},
+              "care_corrections": {"person_id", "target_type", "target_id", "corrected_value", "correction_reason"},
+              "record_amendments": {"person_id", "amendment_type", "reason"},
+              "record_amendment_items": {"person_id", "amendment_id", "target_type", "target_id"},
+              "care_record_audit_log": {"person_id", "actor_type", "action", "occurred_at"},
+              "care_uncertainties": {"person_id", "question", "uncertainty_type", "status"},
+              "care_missing_information": {"person_id", "topic", "description", "status"},
+              "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
+              "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
+              "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
+              "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
+              "caregiver_observations": {"person_id", "reported_by_caregiver_id", "observation_category", "description", "epistemic_status", "recorded_at"},
+          }
+          for table, required in expected.items():
+              assert inspector.has_table(table), f"missing table: {table}"
+              actual = {column["name"] for column in inspector.get_columns(table)}
+              missing = required - actual
+              assert not missing, f"{table} missing columns: {sorted(missing)}"
+              print(f"PASS {table}: {len(required)} required columns")
+
+          fks = {
+              "living_care_records": "person_id",
+              "care_record_versions": "care_record_id",
+              "care_record_snapshots": "care_record_id",
+              "record_provenance": "person_id",
+              "care_record_change_sets": "person_id",
+              "care_record_change_items": "change_set_id",
+              "care_corrections": "person_id",
+              "record_amendments": "person_id",
+              "care_record_audit_log": "person_id",
+              "care_uncertainties": "person_id",
+              "care_missing_information": "person_id",
+              "care_conflicts": "person_id",
+          }
+          for table, column in fks.items():
+              foreign_keys = inspector.get_foreign_keys(table)
+              assert any(column in fk.get("constrained_columns", []) for fk in foreign_keys), f"{table}.{column} missing foreign key"
+              print(f"PASS FK {table}.{column}")
+          unique = inspector.get_unique_constraints("care_record_versions")
+          indexes = inspector.get_indexes("care_record_versions")
+          has_version_uniqueness = (
+              any(set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in unique)
+              or any(item.get("unique") and set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in indexes)
+          )
+          assert has_version_uniqueness, "care record version uniqueness missing"
+          print("PASS unique version per care record")
+          engine.dispose()
+          PY
+
       - name: Verify migration graph has exactly one head
         working-directory: backend
         run: |
@@ -87,7 +152,7 @@ jobs:
             INSERT INTO alembic_version (version_num) VALUES ('20261024_04');
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_02_continuity_lifecycle"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_04_caregiver_context"
           for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             test "$found" = "$table"
