@@ -56,6 +56,7 @@ def test_create_account_sign_in_and_delete_account():
     )
     assert created.status_code == 201, created.text
     assert created.json()["account"]["email"] == "caregiver@example.com"
+    assert created.json()["caregiver_profile_id"] == session["caregiver"]["profile_id"]
 
     from app.models.caregiver_intelligence import CaregiverProfile
     db = TestSessionLocal()
@@ -80,6 +81,7 @@ def test_create_account_sign_in_and_delete_account():
     assert login.status_code == 200, login.text
     assert login.json()["person_id"] == session["person"]["id"]
     assert login.json()["caregiver_id"] == session["caregiver"]["id"]
+    assert login.json()["caregiver_profile_id"] == session["caregiver"]["profile_id"]
     assert login.json()["access_token"] != session["access_token"]
 
     wrong_password = client.request(
