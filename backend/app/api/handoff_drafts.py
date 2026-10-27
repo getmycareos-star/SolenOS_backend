@@ -258,6 +258,7 @@ def prepare_handoff_draft(
             policy_version=POLICY_VERSION,
             record_metadata={
                 "purpose": payload.purpose,
+                "audience": payload.audience,
                 "window_days": payload.window_days,
                 "source_statuses": {key: value["status"] for key, value in statuses.items()},
                 "source_record_count": len(records),
