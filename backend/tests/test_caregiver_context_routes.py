@@ -111,6 +111,58 @@ def _ensure_test_tables():
         )
 
 
+    # These names already exist in the ORM with an older care-network contract.
+    # Extend test metadata to match the additive production migration rather than
+    # replacing those legacy table definitions.
+    additions = {
+        "caregiver_contexts": {
+            "reported_by_caregiver_id": Column("reported_by_caregiver_id", String(36), ForeignKey("caregivers.id"), nullable=True),
+            "context_type": Column("context_type", String(100), nullable=True),
+            "context_payload": Column("context_payload", JSON, nullable=True),
+            "epistemic_status": Column("epistemic_status", String(32), nullable=True),
+            "source_type": Column("source_type", String(80), nullable=True),
+            "source_id": Column("source_id", String(36), nullable=True),
+            "recorded_at": Column("recorded_at", DateTime(timezone=True), nullable=True),
+            "effective_from": Column("effective_from", DateTime(timezone=True), nullable=True),
+            "effective_to": Column("effective_to", DateTime(timezone=True), nullable=True),
+            "notes": Column("notes", Text, nullable=True),
+            "updated_at": Column("updated_at", DateTime(timezone=True), nullable=True),
+        },
+        "caregiver_perspectives": {
+            "reported_by_caregiver_id": Column("reported_by_caregiver_id", String(36), ForeignKey("caregivers.id"), nullable=True),
+            "topic": Column("topic", String(160), nullable=True),
+            "perspective_text": Column("perspective_text", Text, nullable=True),
+            "epistemic_status": Column("epistemic_status", String(32), nullable=True),
+            "evidence_ids": Column("evidence_ids", JSON, nullable=True),
+            "source_type": Column("source_type", String(80), nullable=True),
+            "source_id": Column("source_id", String(36), nullable=True),
+            "recorded_at": Column("recorded_at", DateTime(timezone=True), nullable=True),
+            "effective_from": Column("effective_from", DateTime(timezone=True), nullable=True),
+            "effective_to": Column("effective_to", DateTime(timezone=True), nullable=True),
+            "supersedes_id": Column("supersedes_id", String(36), nullable=True),
+        },
+        "caregiver_observations": {
+            "reported_by_caregiver_id": Column("reported_by_caregiver_id", String(36), ForeignKey("caregivers.id"), nullable=True),
+            "observation_category": Column("observation_category", String(100), nullable=True),
+            "description": Column("description", Text, nullable=True),
+            "observed_value": Column("observed_value", JSON, nullable=True),
+            "observed_at": Column("observed_at", DateTime(timezone=True), nullable=True),
+            "recorded_at": Column("recorded_at", DateTime(timezone=True), nullable=True),
+            "epistemic_status": Column("epistemic_status", String(32), nullable=True),
+            "evidence_ids": Column("evidence_ids", JSON, nullable=True),
+            "source_type": Column("source_type", String(80), nullable=True),
+            "source_id": Column("source_id", String(36), nullable=True),
+        },
+    }
+    for table_name, columns in additions.items():
+        table = metadata.tables[table_name]
+        if "caregiver_id" in table.c:
+            table.c.caregiver_id.nullable = True
+        for column_name, column in columns.items():
+            if column_name not in table.c:
+                table.append_column(column)
+
+
 def _override_db():
     db = TestingSessionLocal()
     try:
@@ -161,7 +213,7 @@ def test_caregiver_context_api_binds_identity_to_bearer_session():
     row = created.json()
     assert row["person_id"] == first["person"]["id"]
     assert row["recorded_at"] != "2000-01-01T00:00:00+00:00"
-    assert row["caregiver_id"] == first["caregiver"]["id"]
+    assert row["reported_by_caregiver_id"] == first["caregiver"]["id"]
     assert row["context_payload"] == {"reported": "prefers morning visits"}
 
     own = client.get(
@@ -191,12 +243,12 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     observation = client.post(
         "/api/v1/care-continuity/caregiver-observations",
         headers=headers,
-        json={"observation_type": "sleep", "description": "Caregiver-reported observation."},
+        json={"observation_category": "sleep", "description": "Caregiver-reported observation."},
     )
     assert perspective.status_code == 201, perspective.text
     assert observation.status_code == 201, observation.text
-    assert perspective.json()["caregiver_id"] == first["caregiver"]["id"]
-    assert observation.json()["caregiver_id"] == first["caregiver"]["id"]
+    assert perspective.json()["reported_by_caregiver_id"] == first["caregiver"]["id"]
+    assert observation.json()["reported_by_caregiver_id"] == first["caregiver"]["id"]
     assert perspective.json()["person_id"] == first["person"]["id"]
     assert observation.json()["person_id"] == first["person"]["id"]
 
