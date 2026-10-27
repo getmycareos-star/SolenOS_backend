@@ -79,7 +79,11 @@ def rank_context_rows(
     # Reserve slots for a small recent baseline even when an older record is a
     # strong lexical match. This supports comparison without allowing recency to
     # crowd out query-relevant history.
-    baseline = candidates[:min(fallback_recent, limit)]
+    def temporal_distance(row: T) -> float:
+        observed = _as_utc(timestamp(row))
+        return abs((now - observed).total_seconds()) if observed else float("inf")
+
+    baseline = sorted(candidates, key=temporal_distance)[:min(fallback_recent, limit)]
     baseline_ids = {id(row) for row in baseline}
     relevant_slots = max(limit - len(baseline), 0)
     relevant = [
