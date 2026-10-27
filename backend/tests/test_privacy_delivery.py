@@ -678,6 +678,7 @@ def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
     assert item["has_summary"] is False
     assert item["status"] == "pending"
     assert item["recipients"][0]["caregiver_id"] == recipient_id
+    assert item["recipients"][0]["name"] == "Second caregiver"
 
     recipient_outbox = client.get("/api/v1/handoffs/outbox", headers=recipient_headers)
     assert recipient_outbox.status_code == 200, recipient_outbox.text
