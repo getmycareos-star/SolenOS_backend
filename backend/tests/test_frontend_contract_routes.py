@@ -190,6 +190,23 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         )
         assert spoofed.status_code == 422, spoofed.text
 
+        invalid_metadata_cases = [
+            ({"scan_review_status": "verified_by_server"}, "Unsupported scan review status"),
+            ({"scan_rotation_degrees": "nan"}, "Scan rotation is outside the supported range"),
+            ({"scan_crop_json": "{not-json"}, "Scan crop metadata must be valid JSON"),
+            ({"scan_crop_json": json.dumps({"left": 50, "right": 35})}, "Scan crop leaves too little page area"),
+            ({"scan_crop_json": json.dumps({"top": -1})}, "Scan crop percentage is outside the supported range"),
+        ]
+        for invalid_fields, expected_detail in invalid_metadata_cases:
+            rejected = client.post(
+                "/api/v1/upload",
+                headers=auth,
+                data={"person_id": person_id, "caregiver_id": caregiver_id, **invalid_fields},
+                files={"file": ("valid.png", original, "image/png")},
+            )
+            assert rejected.status_code == 422, rejected.text
+            assert expected_detail in rejected.text, rejected.text
+
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
