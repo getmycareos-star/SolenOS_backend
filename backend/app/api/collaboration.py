@@ -1398,6 +1398,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
+        validation_source = user_text + "\n" + "\n".join(source_context)
         invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
