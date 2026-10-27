@@ -145,8 +145,34 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
 
+    out_of_scope = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"appointments": "This section was not approved for sharing."},
+            "source_record_ids": ["record-1"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert out_of_scope.status_code == 403
+
+    attached = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {
+                "lcr_summary": "Caregiver-reported changes.",
+                "open_loops": "Question to confirm at the next visit.",
+            },
+            "source_record_ids": ["evidence-1", "care-event-1"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert attached.status_code == 200, attached.text
+    assert len(attached.json()["content_sha256"]) == 64
+
     before_accept = client.get(
-        f"/api/v1/handoffs/{handoff['id']}",
+        f"/api/v1/handoffs/{handoff['id']}/summary",
         headers=recipient_headers,
     )
     assert before_accept.status_code == 404
@@ -157,6 +183,15 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     )
     assert accepted.status_code == 200, accepted.text
     assert accepted.json()["recipients"][0]["status"] == "accepted"
+
+    recipient_summary = client.get(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=recipient_headers,
+    )
+    assert recipient_summary.status_code == 200, recipient_summary.text
+    assert recipient_summary.json()["summary"]["sections"]["lcr_summary"] == "Caregiver-reported changes."
+    assert recipient_summary.json()["summary"]["review_attestation"] == "client_declared_not_server_verified"
+    assert recipient_summary.json()["summary"]["source_id_validation"] == "not_server_verified"
 
     acknowledged = client.post(
         f"/api/v1/handoffs/{handoff['id']}/acknowledge",
@@ -178,6 +213,11 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
         headers=recipient_headers,
     )
     assert blocked.status_code == 404
+    blocked_summary = client.get(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=recipient_headers,
+    )
+    assert blocked_summary.status_code == 404
 
     db = TestSessionLocal()
     try:
