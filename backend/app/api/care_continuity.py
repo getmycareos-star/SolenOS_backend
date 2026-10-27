@@ -5,10 +5,11 @@ temporal and uncertainty tables. It does not create duplicate open-loop or
 evidence stores. New records are always scoped from the bearer session, never
 from a caller-supplied person_id.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Any
 import json
 import uuid
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import MetaData, Table, select, insert, desc
@@ -219,6 +220,108 @@ def continuity_summary(request: Request, db: Session = Depends(get_db)):
             select(table.c.id).where(table.c.person_id == person_id)
         ).fetchall().__len__()
     return result
+
+@router.get("/record-versions")
+def list_record_versions(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    versions = _table(db, "care_record_versions")
+    records = _table(db, "living_care_records")
+    query = (
+        select(versions, records.c.person_id.label("person_id"))
+        .join(records, versions.c.care_record_id == records.c.id)
+        .where(records.c.person_id == person_id)
+        .order_by(desc(versions.c.created_at))
+    )
+    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+
+@router.get("/record-snapshots")
+def list_record_snapshots(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    snapshots = _table(db, "care_record_snapshots")
+    records = _table(db, "living_care_records")
+    query = (
+        select(snapshots, records.c.person_id.label("person_id"))
+        .join(records, snapshots.c.care_record_id == records.c.id)
+        .where(records.c.person_id == person_id)
+        .order_by(desc(snapshots.c.as_of))
+    )
+    rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+
+@router.post("/record-versions", status_code=201)
+def create_record_version(payload: dict, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    care_record_id = payload.get("care_record_id")
+    if not care_record_id:
+        raise HTTPException(status_code=422, detail="care_record_id is required")
+    records = _table(db, "living_care_records")
+    record = db.execute(
+        select(records).where(records.c.id == care_record_id, records.c.person_id == person_id)
+    ).mappings().first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Living Care Record was not found in this session")
+
+    # Snapshot only canonical persisted rows belonging to the session's person.
+    snapshot_tables = (
+        "care_facts", "care_assertions", "care_events", "evidence", "changes", "situations",
+        "care_state_revisions", "care_delta_runs", "care_delta_items", "care_decisions",
+        "decision_outcomes", "care_timeline_entries", "care_follow_up_links",
+        "care_review_decisions", "care_provenance_records", "care_uncertainties",
+        "care_missing_information", "care_conflicts", "care_action_outcomes",
+        "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
+    )
+    tables_payload = {}
+    inspector = inspect(db.get_bind())
+    for table_name in snapshot_tables:
+        if not inspector.has_table(table_name):
+            continue
+        table = _table(db, table_name)
+        if "person_id" not in table.c:
+            continue
+        query = select(table).where(table.c.person_id == person_id)
+        if "created_at" in table.c:
+            query = query.order_by(desc(table.c.created_at))
+        rows = db.execute(query.limit(1000)).mappings().all()
+        tables_payload[table_name] = [_jsonable(dict(row)) for row in rows]
+
+    captured_at = datetime.now(timezone.utc)
+    snapshot_payload = {"person_id": person_id, "captured_at": captured_at.isoformat(), "tables": tables_payload}
+    encoded = json.dumps(snapshot_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    versions = _table(db, "care_record_versions")
+    snapshots = _table(db, "care_record_snapshots")
+    latest = db.execute(
+        select(versions.c.version_number)
+        .where(versions.c.care_record_id == care_record_id)
+        .order_by(desc(versions.c.version_number))
+        .limit(1)
+    ).scalar_one_or_none()
+    version_id = str(uuid.uuid4())
+    snapshot_id = str(uuid.uuid4())
+    version_number = int(latest or 0) + 1
+    reason = str(payload.get("reason") or "care-continuity snapshot")[:2000]
+    try:
+        db.execute(insert(versions).values(
+            id=version_id, care_record_id=care_record_id, version_number=version_number,
+            record_digest=digest, snapshot_payload=snapshot_payload,
+            created_by_caregiver_id=caregiver_id, reason=reason,
+        ))
+        db.execute(insert(snapshots).values(
+            id=snapshot_id, care_record_id=care_record_id, version_id=version_id,
+            as_of=captured_at, snapshot_payload=snapshot_payload, record_digest=digest,
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Record version could not be committed; refresh and retry") from exc
+    return {"id": version_id, "care_record_id": care_record_id, "version_number": version_number,
+            "snapshot_id": snapshot_id, "record_digest": digest, "captured_at": captured_at.isoformat(),
+            "tables_captured": sorted(tables_payload.keys())}
+
 
 @router.get("/{resource}")
 def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
