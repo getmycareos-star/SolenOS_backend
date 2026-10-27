@@ -127,8 +127,6 @@ def update_appointment_workspace(record_id: str, payload: AppointmentWorkspaceUp
             "current_version": row.version_number,
             "message": "This workspace changed elsewhere. Reload before saving to avoid overwriting newer notes.",
         })
-    if payload.appointment_id if hasattr(payload, "appointment_id") else False:
-        raise HTTPException(status_code=422, detail="Appointment linkage cannot be changed by this endpoint")
     next_version = row.version_number + 1
     row.payload = payload.payload
     if payload.status is not None:
