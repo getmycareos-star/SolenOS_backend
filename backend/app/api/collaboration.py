@@ -1493,6 +1493,20 @@ class ConsentUpdate(BaseModel):
 CONSENT_TERMS_VERSION = "2026-10"
 
 
+def _audit_consent_change(
+    db: Session, request: Request, person_id: str, caregiver_id: str,
+    action: str, record: ConsentRecord, metadata: Optional[dict] = None,
+) -> None:
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id, action=action,
+        target_type="caregiver_consent", target_id=record.id,
+        occurred_at=datetime.now(timezone.utc), outcome="allowed",
+        request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version="consent-v1", record_metadata=metadata or {},
+    ))
+
+
 def _consent_is_verified(record: Optional[ConsentRecord]) -> bool:
     return bool(record and record.revoked_at is None and record.medical_disclaimer_acknowledged
         and record.privacy_model_acknowledged and record.multi_caregiver_acknowledged
@@ -1543,6 +1557,7 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
         db.query(ImprovementTrainingExample).filter_by(
             person_id=person_id, caregiver_id=caregiver_id
         ).delete(synchronize_session=False)
+        _audit_consent_change(db, request, person_id, caregiver_id, "consent.revoked", record)
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
@@ -1562,6 +1577,10 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
             db.query(ImprovementTrainingExample).filter_by(
                 person_id=person_id, caregiver_id=caregiver_id
             ).delete(synchronize_session=False)
+        _audit_consent_change(
+            db, request, person_id, caregiver_id, "consent.data_improvement.update",
+            record, {"data_improvement_consent": payload.data_improvement_consent},
+        )
         db.commit()
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
@@ -1580,6 +1599,14 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
     record.accepted_terms_version = payload.accepted_terms_version or CONSENT_TERMS_VERSION
     record.accepted_at = now
     record.revoked_at = None
+    _audit_consent_change(
+        db, request, person_id, caregiver_id, "consent.accepted", record,
+        {"terms_version": record.accepted_terms_version,
+         "medical_disclaimer_acknowledged": True,
+         "privacy_model_acknowledged": True,
+         "multi_caregiver_acknowledged": True,
+         "no_advertising_acknowledged": True},
+    )
     db.commit()
     db.refresh(record)
     return {"ok": True, **_consent_response(record)}
