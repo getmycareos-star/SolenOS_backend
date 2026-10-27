@@ -80,6 +80,7 @@ def upgrade():
         sa.Column("caregiver_id", s(36), sa.ForeignKey("caregiver_profiles.id", ondelete="CASCADE"), nullable=True),
         sa.Column("reported_by_caregiver_id", s(36), sa.ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True),
         sa.Column("observation_type", s(100), nullable=False),
+        sa.Column("observation_category", s(100), nullable=True),
         sa.Column("description", txt, nullable=False),
         sa.Column("observed_value", js, nullable=True),
         sa.Column("observed_at", dt, nullable=True),
