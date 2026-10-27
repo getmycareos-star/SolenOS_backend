@@ -82,8 +82,8 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
         )
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :status, :created_at)"""),
+                (id, person_id, subject_type, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :fact_type, :fact_value, :status, :created_at)"""),
             {
                 "id": "other-person-fact",
                 "person_id": "another-person",
