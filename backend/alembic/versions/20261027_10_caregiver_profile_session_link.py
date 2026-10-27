@@ -1,6 +1,6 @@
 """Bind caregiver profiles to server-issued caregiver identities.
 
-Revision ID: 20261027_10_caregiver_profile_session_link
+Revision ID: 20261027_10_profile_link
 Revises: 20261027_09_lcr_query_indexes
 
 Anonymous sessions do not have email addresses. A separate nullable link lets the
@@ -10,7 +10,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-revision = "20261027_10_caregiver_profile_session_link"
+revision = "20261027_10_profile_link"
 down_revision = "20261027_09_lcr_query_indexes"
 branch_labels = None
 depends_on = None
