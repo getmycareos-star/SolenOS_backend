@@ -10,9 +10,10 @@ from typing import Any
 import json
 import uuid
 import hashlib
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import MetaData, Table, select, insert, desc, inspect
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -71,6 +72,20 @@ RESOURCES = {
     "missing-information": "care_missing_information",
     "conflicts": "care_conflicts",
     "action-outcomes": "care_action_outcomes",
+    "record-identifiers": "care_record_identifiers",
+    "record-sections": "care_record_sections",
+    "record-links": "care_record_links",
+    "record-status-history": "care_record_status_history",
+    "fact-revisions": "care_fact_revisions",
+    "assertion-revisions": "care_assertion_revisions",
+    "decision-revisions": "care_decision_revisions",
+    "event-revisions": "care_event_revisions",
+    "observation-revisions": "care_observation_revisions",
+    "change-revisions": "care_change_revisions",
+    "situation-revisions": "care_situation_revisions",
+    "evidence-revisions": "care_evidence_revisions",
+    "record-retractions": "care_record_retractions",
+    "record-restorations": "care_record_restorations",
 }
 
 WRITABLE = {
@@ -111,6 +126,11 @@ WRITABLE = {
     "missing-information": {"care_record_id", "topic", "description", "priority", "status", "resolved_at"},
     "conflicts": {"care_record_id", "conflict_type", "status", "claim_refs", "description", "resolution", "resolved_at"},
     "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
+    "record-identifiers": {"care_record_id", "identifier_type", "identifier_fingerprint", "masked_value", "source_type", "source_id", "status", "valid_from", "valid_to"},
+    "record-sections": {"care_record_id", "section_key", "section_payload"},
+    "record-links": {"source_record_id", "target_record_id", "relationship"},
+    "record-retractions": {"care_record_id", "target_type", "target_id", "reason", "provenance_id"},
+    "record-restorations": {"care_record_id", "retraction_id", "reason", "provenance_id"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -428,6 +448,11 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "missing-information": ("topic", "description"),
         "conflicts": ("conflict_type", "description"),
         "action-outcomes": ("action_id", "action_type", "outcome_status"),
+        "record-identifiers": ("care_record_id", "identifier_type", "identifier_fingerprint"),
+        "record-sections": ("care_record_id", "section_key", "section_payload"),
+        "record-links": ("source_record_id", "target_record_id", "relationship"),
+        "record-retractions": ("care_record_id", "target_type", "target_id", "reason"),
+        "record-restorations": ("care_record_id", "retraction_id", "reason"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
