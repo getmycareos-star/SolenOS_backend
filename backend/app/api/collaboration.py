@@ -1280,7 +1280,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "source_text": (item.source_text or "")[:220],
                     "time_provenance": item.time_provenance, "confidence": item.confidence,
                 }
-                return "Caregiver-provided source evidence (not independently verified by this label): " + json.dumps(data, ensure_ascii=False)
+                return "Caregiver-provided evidence: " + json.dumps(data, ensure_ascii=False)
             if group == "care_assertions":
                 data = {
                     "assertion_id": str(item.id), "field": item.field,
