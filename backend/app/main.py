@@ -949,7 +949,8 @@ def readiness_check(db: Session = Depends(get_db)):
                 "handoff_recipients",
                 "handoff_access_logs",
                 "handoff_acknowledgements",
-                "delivery_failure_events"            ]) | set(CARE_CONTINUITY_RESOURCES.values())
+                "delivery_failure_events",
+            ]) | set(CARE_CONTINUITY_RESOURCES.values())
             missing_migration_tables = sorted(
                 name for name in required_migration_tables if not inspector.has_table(name)
             )
