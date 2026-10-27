@@ -532,7 +532,7 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     recent = [
         f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[-4:])
+        for message in reversed(prior_messages[:4])
         if getattr(message, "role", None) in {"user", "assistant"}
     ]
     return "\n".join([current, *recent]) if recent else current
