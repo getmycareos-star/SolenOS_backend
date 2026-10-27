@@ -64,7 +64,7 @@ def test_rejects_claim_that_assistant_will_change_the_record():
 
 
 @pytest.mark.parametrize(
-    ("workflow", "request"),
+    ("workflow", "task_text"),
     [
         ("daily_capture", "daily capture"),
         ("add_record", "add a record"),
@@ -107,6 +107,6 @@ def test_rejects_claim_that_assistant_will_change_the_record():
         ("document_validity_renewal", "document validity and renewal"),
     ],
 )
-def test_deterministic_routing_covers_all_enabled_workflows(workflow, request):
+def test_deterministic_routing_covers_all_enabled_workflows(workflow, task_text):
     assert workflow in ENABLED_WORKFLOWS
-    assert _route_from_text(request) == workflow
+    assert _route_from_text(task_text) == workflow
