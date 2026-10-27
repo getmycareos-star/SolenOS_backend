@@ -1497,6 +1497,8 @@ def _audit_consent_change(
     db: Session, request: Request, person_id: str, caregiver_id: str,
     action: str, record: ConsentRecord, metadata: Optional[dict] = None,
 ) -> None:
+    # Flush first so newly created consent records have a stable audit target ID.
+    db.flush()
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
         person_id=person_id, caregiver_id=caregiver_id, action=action,
