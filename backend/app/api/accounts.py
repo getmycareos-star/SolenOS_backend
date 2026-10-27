@@ -114,7 +114,7 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
             db.rollback()
             raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
         try:
-            ensure_caregiver_profile_for_session(
+            caregiver_profile = ensure_caregiver_profile_for_session(
                 db, person_id=person_id, session_caregiver_id=caregiver_id, email=email
             )
         except ValueError as exc:
@@ -129,7 +129,7 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         db.rollback()
         raise HTTPException(status_code=409, detail="We could not create this account. The email or care record may already be registered.")
     db.refresh(account)
-    return {"account": _account_json(account), "message": "Account created and linked to this care record."}
+    return {"account": _account_json(account), "caregiver_profile_id": caregiver_profile.id, "message": "Account created and linked to this care record."}
 
 
 @router.post("/login")
@@ -164,7 +164,7 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
     try:
-        ensure_caregiver_profile_for_session(
+        caregiver_profile = ensure_caregiver_profile_for_session(
             db,
             person_id=account.person_id,
             session_caregiver_id=account.caregiver_id,
@@ -193,6 +193,7 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         "session_id": session.id,
         "person_id": account.person_id,
         "caregiver_id": account.caregiver_id,
+        "caregiver_profile_id": caregiver_profile.id,
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
