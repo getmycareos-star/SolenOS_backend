@@ -1403,8 +1403,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             not isinstance(reply, str)
             or not reply.strip()
             or _companion_message_needs_revision(reply)
-            or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
-            or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+            or _contains_unrequested_saba(reply, validation_source)
+            or _contains_unsupported_care_claim(reply, validation_source)
+            or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
@@ -1444,8 +1445,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     not isinstance(reply, str)
                     or not reply.strip()
                     or _companion_message_needs_revision(reply)
-                    or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
-                    or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unrequested_saba(reply, validation_source)
+                    or _contains_unsupported_care_claim(reply, validation_source)
+                    or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _greeting_reply_needs_revision(reply)
                 )
                 if not invalid_reply:
