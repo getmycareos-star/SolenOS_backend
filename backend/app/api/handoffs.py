@@ -270,7 +270,7 @@ def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
         action="handoff.recipients.list", target_type="handoff_directory",
         target_id=person_id, occurred_at=datetime.now(timezone.utc),
         outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
-        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items), "owner_consent_active": owner_consent_active},
     ))
     db.commit()
     return {"items": items, "count": len(items)}
@@ -337,19 +337,10 @@ def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
 @router.get("/outbox")
 def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
-    if not _has_required_consent(db, person_id, caregiver_id):
-        db.add(AuditLogEvent(
-            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
-            person_id=person_id, caregiver_id=caregiver_id,
-            action="handoff.outbox.list", target_type="handoff_outbox",
-            target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
-            outcome="denied", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
-            policy_version=POLICY_VERSION,
-            record_metadata={"reason_code": "required_consent_missing"},
-        ))
-        db.commit()
-        raise HTTPException(status_code=403, detail="Required consent is missing or revoked")
-
+    # Owners must retain a narrow management path after consent is revoked so
+    # they can locate and revoke existing shares. The outbox never returns summary
+    # contents, and recipient access remains blocked by the read endpoints.
+    owner_consent_active = _has_required_consent(db, person_id, caregiver_id)
     now = datetime.now(timezone.utc)
     rows = db.query(HandoffRecord).filter(
         HandoffRecord.person_id == person_id,
