@@ -389,6 +389,28 @@ jobs:
           fi
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
 
+          echo "QWEN_E2E: Companion answers from relevant authorized care context"
+          companion_context_ready=0
+          for attempt in $(seq 1 3); do
+            companion_context_status=$(curl --silent --show-error --output /tmp/qwen-companion-context.json --write-out '%{http_code}' --max-time 90 \
+              -H "$daily_auth_header" -H "Content-Type: application/json" \
+              -d "{\"person_id\":\"$daily_person_id\",\"text\":\"What was recorded about breakfast intake, and what is still unknown?\"}" \
+              http://127.0.0.1:8080/api/v1/conversation/message || true)
+            if [ "$companion_context_status" = "200" ]; then
+              if python -c 'import json,re,sys; d=json.load(open(sys.argv[1])); reply=d.get("reply",""); assert d.get("ai_generated") is True, d; assert d.get("guard_verdict") == "passed", d; assert d.get("written_to_lcr") is False, d; assert sys.argv[2] in d.get("source_event_ids", []), d; assert re.search(r"(?i)breakfast|intake", reply), reply; assert re.search(r"(?i)unknown|not recorded|not enough information|cannot tell|can.t tell|not possible to tell", reply), reply; assert len(reply.split()) <= 220, reply' /tmp/qwen-companion-context.json "$daily_event_id" 2>/dev/null; then
+                companion_context_ready=1
+                break
+              fi
+            fi
+            echo "Companion context contract failed (HTTP $companion_context_status, attempt $attempt/3)." >&2
+            cat /tmp/qwen-companion-context.json >&2 || true
+            sleep 2
+          done
+          if [ "$companion_context_ready" -ne 1 ]; then
+            echo "Actual Qwen Companion failed the grounded answer/context contract." >&2
+            exit 1
+          fi
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
