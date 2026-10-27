@@ -207,6 +207,7 @@ jobs:
             CREATE TABLE persons (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL);
             CREATE TABLE caregivers (id VARCHAR PRIMARY KEY, password_hash TEXT, display_name VARCHAR);
             CREATE TABLE care_events (id VARCHAR PRIMARY KEY, person_id VARCHAR NOT NULL REFERENCES persons(id));
+            CREATE TABLE evidence (id VARCHAR PRIMARY KEY, person_id VARCHAR NOT NULL REFERENCES persons(id));
             CREATE TABLE contradictions (id VARCHAR PRIMARY KEY);
             CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL);
             INSERT INTO alembic_version (version_num) VALUES ('20261024_04');
