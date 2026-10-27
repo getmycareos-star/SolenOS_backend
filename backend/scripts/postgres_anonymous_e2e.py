@@ -56,17 +56,18 @@ def start_server():
             raise RuntimeError(f"Uvicorn exited early; see {log_path}\\n{detail}")
         try:
             status, ready = request("GET", "/ready")
-            if status == 200:
-                require(ready.get("migration_state") == "current",
-                        f"PostgreSQL readiness did not verify current Alembic head: {ready}")
-                require(ready.get("migration_head"),
-                        f"PostgreSQL readiness did not report its Alembic head: {ready}")
-                require(ready.get("continuity_schema") == "verified",
-                        f"PostgreSQL readiness did not verify migration-created continuity tables: {ready}")
-                log.close()
-                return process
         except Exception:
-            pass
+            time.sleep(0.5)
+            continue
+        if status == 200:
+            require(ready.get("migration_state") == "current",
+                    f"PostgreSQL readiness did not verify current Alembic head: {ready}")
+            require(ready.get("migration_head"),
+                    f"PostgreSQL readiness did not report its Alembic head: {ready}")
+            require(ready.get("continuity_schema") == "verified",
+                    f"PostgreSQL readiness did not verify migration-created continuity tables: {ready}")
+            log.close()
+            return process
         time.sleep(0.5)
     process.terminate()
     try:
