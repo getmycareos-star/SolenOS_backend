@@ -68,11 +68,12 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
     with engine.begin() as connection:
         connection.execute(
             text("""INSERT INTO care_facts
-                (id, person_id, fact_type, fact_value, epistemic_status, created_at)
-                VALUES (:id, :person_id, :fact_type, :fact_value, :status, :created_at)"""),
+                (id, person_id, subject_type, fact_type, fact_value, epistemic_status, created_at)
+                VALUES (:id, :person_id, :subject_type, :fact_type, :fact_value, :status, :created_at)"""),
             {
                 "id": "owned-fact",
                 "person_id": person_id,
+                "subject_type": "care_recipient",
                 "fact_type": "caregiver_observation",
                 "fact_value": "Breakfast was mostly uneaten",
                 "status": "reported",
@@ -86,6 +87,7 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
             {
                 "id": "other-person-fact",
                 "person_id": "another-person",
+                "subject_type": "care_recipient",
                 "fact_type": "private",
                 "fact_value": "MUST NOT LEAK",
                 "status": "reported",
