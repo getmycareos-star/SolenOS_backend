@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.action import Action as ActionModel, ActionStatus
+from app.models.care import Evidence as EvidenceModel, Caregiver as CaregiverModel
 from app.schemas.action import (
     ActionCreate,
     Action as ActionSchema,
@@ -42,6 +43,31 @@ def extract_actions_from_document(
     caregiver_id: str = None,
     db: Session = Depends(get_db),
 ):
+    # Derive the care recipient from the persisted source evidence. Do not
+    # create an action with a missing person_id or trust a caller-supplied
+    # caregiver ID unless that caregiver is linked to this record.
+    if not caregiver_id:
+        raise HTTPException(status_code=422, detail="caregiver_id is required")
+
+    source_evidence = (
+        db.query(EvidenceModel)
+        .filter(EvidenceModel.id == document_id)
+        .first()
+    )
+    if not source_evidence:
+        raise HTTPException(status_code=404, detail="Source evidence not found")
+
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(
+            CaregiverModel.id == caregiver_id,
+            CaregiverModel.person_id == source_evidence.person_id,
+        )
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to the source care record")
+
     ref_dt = datetime.fromisoformat(reference_date) if reference_date else datetime.utcnow()
 
     candidates = extraction_engine.extract(
@@ -61,7 +87,7 @@ def extract_actions_from_document(
             continue
 
         action_model = ActionModel(
-            person_id=None,
+            person_id=source_evidence.person_id,
             source_evidence_id=candidate.source_evidence_id,
             source_passage=candidate.source_passage,
             source_document_type=source_document_type,
@@ -206,7 +232,10 @@ def update_action(action_id: str, update: ActionUpdate, db: Session = Depends(ge
 @router.post("/actions/{action_id}/complete", response_model=ActionSchema)
 def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Session = Depends(get_db)):
     db_action = _get_action_or_404(db, action_id)
-    return lifecycle_service.record_completion(db_action, evidence, db)
+    try:
+        return lifecycle_service.record_completion(db_action, evidence, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
