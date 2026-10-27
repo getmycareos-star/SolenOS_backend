@@ -126,7 +126,7 @@ class HandoffAcknowledge(BaseModel):
 
 class HandoffSummaryInput(BaseModel):
     sections: dict[str, str] = Field(default_factory=dict)
-    source_record_ids: list[str] = Field(min_length=1, max_length=100)
+    source_record_ids: list[str] = Field(default_factory=list, max_length=100)
     caregiver_reviewed: bool
     prepared_at: datetime | None = None
 
@@ -352,7 +352,7 @@ def attach_handoff_summary(
         "stored_at": now.isoformat(),
         "caregiver_reviewed": True,
         "review_attestation": "client_declared_not_server_verified",
-        "source_id_validation": "not_server_verified",
+        "source_id_validation": "not_server_verified" if payload.source_record_ids else "not_supplied",
     }
     canonical = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     snapshot["content_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
