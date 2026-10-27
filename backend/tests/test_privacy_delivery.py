@@ -308,6 +308,19 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     assert denied_accept.status_code == 404
 
     accept_required_consent(owner["person"]["id"], recipient_id)
+    missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert missing_summary_accept.status_code == 409
+
+    attached = client.put(
+        f"/api/v1/handoffs/{handoff_id}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Reviewed handoff summary."},
+            "source_record_ids": [],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert attached.status_code == 200, attached.text
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert accepted.status_code == 200, accepted.text
 
