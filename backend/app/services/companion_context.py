@@ -50,9 +50,6 @@ def rank_authorized_context(
     rows = list(items)
     if limit <= 0 or not rows:
         return []
-    if len(rows) <= limit:
-        return rows
-
     query_terms = set(_terms(query))
     anchor_count = min(max(always_keep_recent, 0), limit, len(rows))
     if not query_terms:
