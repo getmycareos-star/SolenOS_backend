@@ -13,7 +13,7 @@ import hashlib
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -335,23 +335,46 @@ def continuity_summary(request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
     result = {"person_id": person_id, "sources": "existing evidence/events/changes/situations are reused",
               "resources": {}}
-    for resource, table_name in RESOURCES.items():
-        table = _table(db, table_name)
-        result["resources"][resource] = db.execute(
-            select(table.c.id).where(table.c.person_id == person_id)
-        ).fetchall().__len__()
-    # Open questions and information gaps are the existing equivalents of open loops.
-    for key, table_name in (("open_questions", "open_questions"), ("information_gaps", "information_gaps"),
-                            ("changes", "changes"), ("situations", "situations"),
-                            ("events", "care_events"), ("evidence", "evidence"),
-                            ("temporal_contradictions", "temporal_contradictions"),
-                            ("uncertainty_assessments", "uncertainty_assessments"),
-                            ("significance_assessments", "significance_assessments"),
-                            ("delta_runs", "care_delta_runs")):
-        table = _table(db, table_name)
-        result["resources"][key] = db.execute(
-            select(table.c.id).where(table.c.person_id == person_id)
-        ).fetchall().__len__()
+    # Reflect the inventory in bulk, then count in SQL. The old implementation
+    # reflected every table separately and fetched every matching ID into Python,
+    # causing the workspace's first care-continuity request to time out on larger
+    # inventories. Keep the same keys and session-derived person scope.
+    extra_resources = (
+        ("open_questions", "open_questions"), ("information_gaps", "information_gaps"),
+        ("changes", "changes"), ("situations", "situations"), ("events", "care_events"),
+        ("evidence", "evidence"), ("temporal_contradictions", "temporal_contradictions"),
+        ("uncertainty_assessments", "uncertainty_assessments"),
+        ("significance_assessments", "significance_assessments"), ("delta_runs", "care_delta_runs"),
+    )
+    resource_to_table = dict(RESOURCES)
+    resource_to_table.update(dict(extra_resources))
+    table_names = list(dict.fromkeys(resource_to_table.values()))
+    bind = db.get_bind()
+    available_tables = set(inspect(bind).get_table_names())
+    missing_tables = [name for name in table_names if name not in available_tables]
+    if missing_tables:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Care-continuity schema is not ready: {missing_tables[0]}",
+        )
+    metadata = MetaData()
+    metadata.reflect(bind=bind, only=table_names)
+    for table_name in table_names:
+        table = metadata.tables[table_name]
+        if "person_id" not in table.c:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Care-continuity schema is not ready: {table_name}",
+            )
+    count_expressions = [
+        select(func.count()).select_from(metadata.tables[table_name])
+        .where(metadata.tables[table_name].c.person_id == person_id)
+        .scalar_subquery().label(table_name)
+        for table_name in table_names
+    ]
+    counts = dict(db.execute(select(*count_expressions)).mappings().one())
+    for resource, table_name in resource_to_table.items():
+        result["resources"][resource] = counts[table_name]
     return result
 
 @router.get("/record-versions")
