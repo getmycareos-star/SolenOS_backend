@@ -30,8 +30,11 @@ class CaregiverProfile(Base):
     __tablename__ = "caregiver_profiles"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    # Links this team/profile identity to the server-issued caregiver identity
+    # used by anonymous sessions and account login. It is never client-authoritative.
+    session_caregiver_id = Column(String, ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True, unique=True)
     name = Column(String, nullable=False)
-    email = Column(String, unique=True, nullable=False)
+    email = Column(String, unique=True, nullable=True)
     relationship = Column(String, nullable=False)
     participation_category = Column(Enum(CaregiverParticipationCategory), nullable=False, default=CaregiverParticipationCategory.FAMILY)
     involvement_status = Column(Enum(CaregiverInvolvementStatus), nullable=False, default=CaregiverInvolvementStatus.ACTIVE)
