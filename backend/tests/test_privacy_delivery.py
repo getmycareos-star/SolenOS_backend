@@ -189,6 +189,8 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
 
 
 def test_handoff_requires_current_consent_for_creator_and_recipient():
+    from app.models.privacy_delivery import AuditLogEvent
+
     client = TestClient(app)
     owner = create_session(client, "Consent owner")
     recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
