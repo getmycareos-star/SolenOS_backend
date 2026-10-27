@@ -24,6 +24,7 @@ from app.models.time_location import Appointment
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.services.qwen_gateway import qwen_chat
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(prefix="/daily-care/intelligence", tags=["daily-care-qwen"])
 
@@ -68,11 +69,20 @@ def _event_json(event: CareEvent) -> dict:
     }
 
 
-def _history_bundle(db: Session, person_id: str, caregiver_id: str, query: str | None = None) -> dict:
-    # Every query is scoped by the server-issued session's person ID.
+def _history_bundle(
+    db: Session,
+    person_id: str,
+    caregiver_id: str,
+    query: str | None = None,
+    *,
+    context_query: str | None = None,
+) -> dict:
+    # Existing paginated event/evidence reads remain available for the history UI.
+    # The shared LCR projection adds facts, assertions, decisions, uncertainty,
+    # conflicts, provenance, and records contributed by other authorised caregivers.
     events_q = db.query(CareEvent).filter(CareEvent.person_id == person_id)
     if query:
-        terms = [term for term in re.findall(r"[\w'-]{3,}", query.casefold()) if term]
+        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term]
         if terms:
             clauses = []
             for term in terms[:8]:
@@ -86,14 +96,14 @@ def _history_bundle(db: Session, person_id: str, caregiver_id: str, query: str |
         Correction.person_id == person_id
     ).order_by(Correction.created_at.desc()).all()
 
-    # Evidence uploaded by the active caregiver only; linked event evidence is
-    # separately represented by the event's source IDs, never fetched by arbitrary ID.
+    # The direct history list remains caregiver-aware. The shared LCR projection
+    # below also includes other evidence the authenticated caregiver is authorised to see.
     evidence_q = db.query(EvidenceModel).filter(
         EvidenceModel.person_id == person_id,
         EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
     )
     if query:
-        terms = [term for term in re.findall(r"[\w'-]{3,}", query.casefold()) if term][:8]
+        terms = [term for term in re.findall(r"[A-Za-z0-9_-]{3,}", query.casefold()) if term][:8]
         if terms:
             from sqlalchemy import or_
             evidence_q = evidence_q.filter(or_(*[
@@ -119,21 +129,21 @@ def _history_bundle(db: Session, person_id: str, caregiver_id: str, query: str |
             "created_by_caregiver_id": str(correction.caregiver_id),
         })
     for item in evidence:
-        metadata = item.extra_metadata or {}
-        if isinstance(metadata, str):
+        metadata_value = item.extra_metadata or {}
+        if isinstance(metadata_value, str):
             try:
-                metadata = json.loads(metadata)
+                metadata_value = json.loads(metadata_value)
             except (TypeError, ValueError):
-                metadata = {}
-        if not isinstance(metadata, dict):
-            metadata = {}
+                metadata_value = {}
+        if not isinstance(metadata_value, dict):
+            metadata_value = {}
         records.append({
             "source_type": "evidence",
             "source_id": str(item.id),
             "evidence_type": item.type,
             "source_text": (item.source_text or "")[:6000],
             "status": item.evidence_status,
-            "source_label": metadata.get("filename") or item.source_type or "Caregiver-provided evidence",
+            "source_label": metadata_value.get("filename") or item.source_type or "Caregiver-provided evidence",
             "uploaded_at": _iso(item.uploaded_at),
             "time_provenance": item.time_provenance,
         })
@@ -145,7 +155,92 @@ def _history_bundle(db: Session, person_id: str, caregiver_id: str, query: str |
             "status": appointment.status,
             "scheduled_at": _iso(appointment.scheduled_at),
         })
+
+    lcr_context = build_lcr_context(
+        db,
+        person_id,
+        limit_per_source=50,
+        query=context_query if context_query is not None else query,
+    )
+    existing_keys = {
+        (str(row.get("source_type") or ""), str(row.get("source_id") or ""))
+        for row in records
+    }
+    source_type_by_name = {
+        "events": "care_event",
+        "evidence": "evidence",
+        "facts": "care_fact",
+        "assertions": "care_assertion",
+        "decisions": "care_decision",
+        "decision_outcomes": "decision_outcome",
+        "timeline": "care_timeline_entry",
+        "uncertainties": "care_uncertainty",
+        "missing_information": "missing_information",
+        "conflicts": "care_conflict",
+        "provenance": "provenance_record",
+        "caregiver_observations": "caregiver_observation",
+        "caregiver_contexts": "caregiver_context",
+        "caregiver_perspectives": "caregiver_perspective",
+        "corrections": "correction",
+        "appointments": "appointment",
+    }
+    lcr_added = 0
+    for source_name, source in lcr_context["sources"].items():
+        if source_name == "living_record":
+            continue
+        canonical_type = source_type_by_name.get(source_name)
+        if not canonical_type:
+            continue
+        for item in source.get("items", []):
+            source_id = str(item.get("id") or "")
+            if not source_id or (canonical_type, source_id) in existing_keys:
+                continue
+            text_value = (
+                item.get("description") or item.get("summary") or item.get("fact_value")
+                or item.get("asserted_value") or item.get("decision_text") or item.get("perspective_text")
+                or item.get("question") or item.get("source_text") or item.get("notes")
+                or item.get("reason") or item.get("resolution") or item.get("context")
+            )
+            if isinstance(text_value, (dict, list)):
+                text_value = json.dumps(text_value, ensure_ascii=False, default=str)
+            row = {
+                "source_type": canonical_type,
+                "source_id": source_id,
+                "title": item.get("title") or item.get("fact_type") or item.get("field")
+                         or item.get("topic") or item.get("context_type") or item.get("entry_type")
+                         or item.get("target_type") or canonical_type.replace("_", " ").title(),
+                "text": str(text_value or "")[:6000],
+                "occurred_at": item.get("occurred_at") or item.get("effective_at")
+                               or item.get("observed_at") or item.get("decided_at")
+                               or item.get("scheduled_at"),
+                "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
+                "status": item.get("status") or item.get("epistemic_status")
+                          or item.get("assertion_status") or item.get("decision_status")
+                          or item.get("outcome_status"),
+                "evidence_ids": item.get("evidence_ids") or [],
+                "source_label": item.get("source_label") or item.get("source_type") or source_name,
+                "lcr_context_source": source_name,
+                "lcr_fields": item,
+            }
+            if query or context_query:
+                search_text = json.dumps(row, ensure_ascii=False, default=str).casefold()
+                terms = re.findall(r"[A-Za-z0-9_-]{3,}", (context_query or query or "").casefold())[:8]
+                if terms and not any(term in search_text for term in terms):
+                    continue
+            records.append(row)
+            existing_keys.add((canonical_type, source_id))
+            lcr_added += 1
+
     records.sort(key=lambda row: row.get("occurred_at") or row.get("recorded_at") or row.get("uploaded_at") or row.get("scheduled_at") or "", reverse=True)
+    source_summary = {
+        name: {
+            "status": source.get("status"),
+            "returned_count": source.get("returned_count", 0),
+            "has_more": source.get("has_more", False),
+            "limit": source.get("limit", 50),
+        }
+        for name, source in lcr_context["sources"].items()
+    }
     return {
         "records": records,
         "counts": {
@@ -153,7 +248,16 @@ def _history_bundle(db: Session, person_id: str, caregiver_id: str, query: str |
             "corrections": len(corrections),
             "evidence": len(evidence),
             "appointments": len(appointments),
+            "lcr_context_records_added": lcr_added,
             "matched_records": len(records),
+        },
+        "lcr_context": {
+            "schema_status": lcr_context["schema_status"],
+            "history_coverage": lcr_context["history_coverage"],
+            "query_applied": lcr_context["query_applied"],
+            "missing_required_sources": lcr_context["missing_required_sources"],
+            "missing_optional_sources": lcr_context["missing_optional_sources"],
+            "sources": source_summary,
         },
         "oldest_record_at": min(
             (row.get("occurred_at") or row.get("recorded_at") or row.get("uploaded_at") or row.get("scheduled_at")
@@ -191,7 +295,7 @@ def daily_care_history(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
-    bundle = _history_bundle(db, person_id, caregiver_id, query)
+    bundle = _history_bundle(db, person_id, caregiver_id, query, context_query=query)
     all_records = bundle.pop("records")
     page = all_records[offset:offset + limit]
     return {
@@ -200,7 +304,7 @@ def daily_care_history(
                  "has_more": offset + len(page) < len(all_records)},
         "history": bundle,
         "identity_scope": "server_session_person_and_caregiver",
-        "notice": "History is paginated. Use page.has_more and continue with the next offset to inspect every matching record.",
+        "notice": "History is paginated. LCR context also includes a bounded subset of facts, assertions, decisions, and unresolved items; see history.lcr_context for source coverage and truncation metadata.",
     }
 
 
@@ -211,16 +315,18 @@ async def ask_daily_care_qwen(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
-    bundle = _history_bundle(db, person_id, caregiver_id, payload.history_query)
+    bundle = _history_bundle(db, person_id, caregiver_id, payload.history_query, context_query=payload.history_query or payload.question)
     records = bundle["records"]
     if not records:
         return {
             "status": "no_matching_records",
-            "answer": "I could not establish an answer from the Daily Care records available to this session. No matching records were found.",
+            "answer": ("I could not find matching information in the available record view. Some record sources could not be checked, so this does not mean the information is absent."
+                      if bundle.get("lcr_context", {}).get("schema_status") != "complete"
+                      else "I could not establish an answer from the Daily Care records available to this session. No matching records were found."),
             "source_records": [],
             "proposal_analysis_id": None,
             "proposals": [],
-            "history_scope": bundle["counts"],
+            "history_scope": {**bundle["counts"], "lcr_context": bundle.get("lcr_context", {})},
             "review_required": True,
             "written_to_lcr": False,
         }
@@ -272,6 +378,7 @@ async def ask_daily_care_qwen(
         "their exact source IDs and dates. Distinguish caregiver reports, document text, corrections, appointment "
         "status, and your interpretation. If sources conflict, state the conflict without choosing a winner. Never "
         "infer diagnosis, cause, medication changes, or clinical certainty. Never say that anything has been saved. "
+        "The retrieved context includes explicit schema and bounded-history metadata. If a source is unavailable or the schema is partial, do not claim the information is absent. " 
         "Propose an LCR update only when it would improve longitudinal continuity; proposals are not facts and "
         "must retain source IDs and uncertainty. Do not propose a value that is unsupported by the supplied records. "
         "If there is no supported proposal, return an empty proposals array. Return only the required JSON."
@@ -289,6 +396,7 @@ async def ask_daily_care_qwen(
                         "records_sent_to_model": len(selected),
                         "oldest_record_at": bundle["oldest_record_at"],
                         "newest_record_at": bundle["newest_record_at"],
+                        "lcr_context": bundle.get("lcr_context", {}),
                     },
                     "lcr_proposals_requested": payload.prepare_lcr_proposals,
                 }, ensure_ascii=False)},
@@ -374,6 +482,7 @@ async def ask_daily_care_qwen(
         "proposals": proposals,
         "history_scope": {
             **bundle["counts"],
+            "lcr_context": bundle.get("lcr_context", {}),
             "records_sent_to_model": len(selected),
             "oldest_record_at": bundle["oldest_record_at"],
             "newest_record_at": bundle["newest_record_at"],

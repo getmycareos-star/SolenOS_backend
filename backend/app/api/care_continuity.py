@@ -12,7 +12,7 @@ import uuid
 import hashlib
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func
 from sqlalchemy.orm import Session
 
@@ -332,10 +332,15 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
 
 
 @router.get("/context")
-def read_lcr_context(request: Request, limit_per_source: int = 20, db: Session = Depends(get_db)):
+def read_lcr_context(
+    request: Request,
+    limit_per_source: int = Query(default=20, ge=1, le=50),
+    query: str | None = Query(default=None, max_length=500),
+    db: Session = Depends(get_db),
+):
     """Read one bounded, permission-scoped context projection shared by LCR-facing modules."""
     person_id, _ = _scoped_identity(request, db)
-    return build_lcr_context(db, person_id, limit_per_source=limit_per_source)
+    return build_lcr_context(db, person_id, limit_per_source=limit_per_source, query=query)
 
 
 @router.get("/summary")

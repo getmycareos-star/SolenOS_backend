@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, String, Table, Text, create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -34,6 +34,24 @@ def override_get_db():
 
 
 def setup_function():
+    if "care_facts" not in Base.metadata.tables:
+        Table(
+            "care_facts", Base.metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("subject_type", String(80), nullable=False),
+            Column("subject_id", String(36)),
+            Column("fact_type", String(100), nullable=False),
+            Column("fact_value", Text, nullable=False),
+            Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+            Column("effective_at", DateTime(timezone=True)),
+            Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("review_notes", Text),
+            Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("updated_at", DateTime(timezone=True)),
+        )
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
@@ -233,3 +251,51 @@ def test_daily_care_proposal_cannot_be_reviewed_by_another_caregiver_session(mon
         assert db.query(CareAssertion).filter_by(person_id=second["person"]["id"]).count() == 0
     finally:
         db.close()
+
+
+
+def test_daily_care_qwen_reads_shared_lcr_facts_and_reports_context_coverage(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "LCR fact context recipient")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    db = TestSessionLocal()
+    try:
+        facts = Base.metadata.tables["care_facts"]
+        db.execute(facts.insert().values(
+            id="daily-qwen-shared-lcr-fact",
+            person_id=session["person"]["id"],
+            subject_type="person",
+            subject_id=session["person"]["id"],
+            fact_type="morning_routine",
+            fact_value="Usually sleeps poorly before waking around 7 AM.",
+            epistemic_status="reported",
+            created_by_caregiver_id=session["caregiver"]["id"],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    captured = {}
+    def fake_qwen(*args, **kwargs):
+        captured["messages"] = args[0]
+        return json.dumps({"answer": "The recorded routine mentions poor sleep before waking around 7 AM.", "proposals": []})
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "question": "What morning routine is recorded?",
+            "prepare_lcr_proposals": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["written_to_lcr"] is False
+    assert body["history_scope"]["lcr_context"]["query_applied"] is True
+    serialized = json.dumps(captured["messages"], ensure_ascii=False)
+    assert "Usually sleeps poorly before waking around 7 AM." in serialized
+    assert "care_fact" in serialized
