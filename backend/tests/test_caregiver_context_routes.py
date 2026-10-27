@@ -2,12 +2,14 @@ from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, 
 from sqlalchemy import create_engine, select
 import os
 import tempfile
+from datetime import datetime, timezone
 from sqlalchemy.orm import sessionmaker
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_db
 from app.main import app
 import app.main as main_module
+from app.models.care import CareEvent, Evidence
 
 
 _test_db_file = tempfile.NamedTemporaryFile(prefix="solenos-care-continuity-", suffix=".sqlite", delete=False)
@@ -690,3 +692,80 @@ def test_lcr_record_link_rejects_cross_person_target():
               "target_record_id": second_record.json()["id"], "relationship": "related_to"},
     )
     assert denied.status_code == 404, denied.text
+
+
+
+def test_shared_lcr_context_is_bounded_and_person_scoped():
+    client = TestClient(app)
+    first = _session(client, "Context Caregiver One")
+    second = _session(client, "Context Caregiver Two")
+
+    db = TestingSessionLocal()
+    try:
+        event = CareEvent(
+            id="lcr-context-event-one",
+            person_id=first["person"]["id"],
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Breakfast was mostly uneaten.",
+            description="Caregiver reported the meal was mostly untouched.",
+            created_by_caregiver_id=first["caregiver"]["id"],
+        )
+        evidence = Evidence(
+            id="lcr-context-evidence-one",
+            person_id=first["person"]["id"],
+            type="caregiver_note",
+            source_text="Caregiver observed that breakfast was mostly uneaten.",
+            uploaded_by_caregiver_id=first["caregiver"]["id"],
+            source_type="caregiver_report",
+        )
+        db.add_all([event, evidence])
+        db.flush()
+        facts = Base.metadata.tables["care_facts"]
+        db.execute(facts.insert().values(
+            id="lcr-context-fact-one",
+            person_id=first["person"]["id"],
+            subject_type="person",
+            subject_id=first["person"]["id"],
+            fact_type="routine",
+            fact_value="Usually wakes around 7 AM",
+            epistemic_status="reported",
+            created_by_caregiver_id=first["caregiver"]["id"],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(
+        "/api/v1/care-continuity/context?limit_per_source=10",
+        headers={"Authorization": f"Bearer {first['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["read_only"] is True
+    assert body["history_coverage"] == "bounded_subset"
+    assert body["person_id"] == first["person"]["id"]
+    assert body["sources"]["events"]["returned_count"] == 1
+    assert body["sources"]["events"]["items"][0]["title"] == "Breakfast was mostly uneaten."
+    assert body["sources"]["facts"]["returned_count"] == 1
+    assert body["sources"]["facts"]["items"][0]["fact_value"] == "Usually wakes around 7 AM"
+    assert body["sources"]["evidence"]["returned_count"] == 1
+    evidence_row = body["sources"]["evidence"]["items"][0]
+    assert evidence_row["source_text"] == "Caregiver observed that breakfast was mostly uneaten."
+    assert "original_file_path" not in evidence_row
+    assert body["schema_status"] in {"complete", "partial"}
+
+    other = client.get(
+        "/api/v1/care-continuity/context",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert other.status_code == 200, other.text
+    other_body = other.json()
+    assert other_body["person_id"] == second["person"]["id"]
+    assert other_body["sources"]["events"]["items"] == []
+    assert other_body["sources"]["facts"]["items"] == []
+    assert other_body["sources"]["evidence"]["items"] == []
+
+    denied = client.get("/api/v1/care-continuity/context")
+    assert denied.status_code == 401
