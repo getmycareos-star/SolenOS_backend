@@ -166,8 +166,20 @@ jobs:
                   missing_columns = required_columns - columns
                   if missing_columns:
                       raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+              cur.execute(
+                  "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='notification_read_receipts' AND indexname='uq_notification_read_receipt_reader'"
+              )
+              receipt_index = cur.fetchone()
+              if not receipt_index or "CREATE UNIQUE INDEX" not in receipt_index[0].upper():
+                  raise SystemExit("notification read receipt uniqueness index is missing")
+              cur.execute(
+                  "SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='handoff_records' AND column_name='summary_snapshot'"
+              )
+              summary_column = cur.fetchone()
+              if not summary_column or summary_column[0] not in {"json", "jsonb"}:
+                  raise SystemExit("handoff summary_snapshot JSON column is missing or has the wrong type")
           conn.close()
-          print(f"PostgreSQL verified {len(required_tables)} privacy/sharing/audit/notification/reminder/handoff tables and common columns.")
+          print(f"PostgreSQL verified {len(required_tables)} privacy/delivery tables, the unique read-receipt index and handoff summary JSON storage.")
           PY
 
       - name: Run real HTTP + PostgreSQL identity and persistence E2E
