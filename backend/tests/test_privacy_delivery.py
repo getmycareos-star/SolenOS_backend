@@ -629,3 +629,45 @@ def test_notification_read_isolated_between_caregiver_sessions():
         headers={"Authorization": f"Bearer {second['access_token']}"},
     )
     assert response.status_code == 404
+
+
+
+def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
+    client = TestClient(app)
+    owner = create_session(client, "Outbox recipient")
+    recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+
+    created = client.post(
+        "/api/v1/handoffs",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+
+    owner_outbox = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert owner_outbox.status_code == 200, owner_outbox.text
+    assert owner_outbox.json()["count"] == 1
+    item = owner_outbox.json()["items"][0]
+    assert item["id"] == handoff_id
+    assert item["has_summary"] is False
+    assert item["status"] == "pending"
+    assert item["recipients"][0]["caregiver_id"] == recipient_id
+
+    recipient_outbox = client.get("/api/v1/handoffs/outbox", headers=recipient_headers)
+    assert recipient_outbox.status_code == 200, recipient_outbox.text
+    assert recipient_outbox.json()["count"] == 0
+
+    revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
+    assert revoked.status_code == 200, revoked.text
+    refreshed = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["items"][0]["status"] == "revoked"
