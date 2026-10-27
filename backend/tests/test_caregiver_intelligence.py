@@ -1,11 +1,14 @@
 from datetime import datetime, timezone, timedelta
+import hashlib
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.database import Base, SessionLocal as DefaultSessionLocal
+import app.main as main_module
 from app.main import app
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -33,12 +36,37 @@ def setup_db():
 def teardown_db():
     Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+
+
+TEST_TOKEN = "test-only-caregiver-intelligence-session-token"
 
 
 def get_test_client():
     from app.core.database import get_db
     app.dependency_overrides[get_db] = override_get_db
-    return TestClient(app)
+    main_module.SessionLocal = TestingSessionLocal
+    db = TestingSessionLocal()
+    try:
+        caregiver = (
+            db.query(Caregiver)
+            .filter(Caregiver.person_id == "person-1")
+            .order_by(Caregiver.id.asc())
+            .first()
+        )
+        if caregiver is None:
+            raise AssertionError("test fixture must create a caregiver before creating an authenticated session")
+        db.add(AnonymousSession(
+            id="test-session",
+            person_id="person-1",
+            caregiver_id=caregiver.id,
+            token_hash=hashlib.sha256(TEST_TOKEN.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+    return TestClient(app, headers={"Authorization": f"Bearer {TEST_TOKEN}"})
 
 
 def create_test_person_and_caregivers(db):
