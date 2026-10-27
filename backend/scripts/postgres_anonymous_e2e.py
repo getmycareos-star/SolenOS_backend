@@ -143,10 +143,77 @@ def main():
         ]
         require(observation in raw_observations, "capture did not appear in persisted hydration")
 
+        # Authenticated UPDATE must persist in PostgreSQL and be visible on a fresh read.
+        updated_name = "PostgreSQL E2E person A updated"
+        status, updated = request(
+            "PATCH",
+            "/api/situation",
+            token=token_a,
+            body={
+                "person_id": person_a,
+                "caregiver_id": caregiver_a,
+                "display_name": updated_name,
+            },
+        )
+        require(status == 200, f"care-record update expected 200, got {status}: {updated}")
+        require(
+            updated.get("care_recipient_display_name") == updated_name,
+            f"update response did not confirm the new display name: {updated}",
+        )
+        status, reread = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"read after update expected 200, got {status}: {reread}")
+        require(
+            reread.get("care_recipient_display_name") == updated_name,
+            "authenticated update was not persisted to PostgreSQL",
+        )
+
+        # Account login on a fresh client/session must recover the same care record.
+        # This models a second device without reusing browser localStorage.
+        account_email = "postgres-e2e-continuity@example.test"
+        account_password = "CI-only-strong-passphrase-2026!"
+        status, account_created = request(
+            "POST",
+            "/api/v1/accounts",
+            token=token_a,
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 201, f"account linking expected 201, got {status}: {account_created}")
+        status, second_device = request(
+            "POST",
+            "/api/v1/accounts/login",
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 200, f"second-device account login expected 200, got {status}: {second_device}")
+        require(second_device.get("person_id") == person_a,
+                "second-device login did not restore the same care-recipient identity")
+        require(second_device.get("caregiver_id") == caregiver_a,
+                "second-device login did not restore the same caregiver identity")
+        token_a = second_device["access_token"]
+        status, second_device_read = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"second-device read expected 200, got {status}: {second_device_read}")
+        require(second_device_read.get("care_recipient_display_name") == updated_name,
+                "second-device login did not retrieve the persisted updated care record")
+
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}")
         require(status == 401, f"unauthenticated evidence access must return 401, got {status}")
+
+        status, recovery_session = request(
+            "POST",
+            "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL E2E recovery person", "caregiver_name": "PostgreSQL E2E recovery caregiver"},
+        )
+        require(status == 201, f"recovery session creation expected 201, got {status}: {recovery_session}")
+        recovery_token = recovery_session["access_token"]
+        status, revoked = request("POST", "/api/v1/sessions/revoke", body={}, token=recovery_token)
+        require(status == 200 and revoked.get("revoked") is True,
+                f"session revocation expected success, got {status}: {revoked}")
+        status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
+        require(status == 401, f"revoked token must be rejected, got {status}")
+        # Revoking one capability must not break another caregiver's valid session.
+        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
+        require(status == 200, f"valid independent session failed after revocation, got {status}")
 
         status, cross_write = request(
             "POST",
@@ -161,10 +228,11 @@ def main():
         )
         require(status == 403, f"cross-care-record write must return 403, got {status}: {cross_write}")
 
-        status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_a)
+        token_before_refresh = token_a
+        status, refreshed = request("POST", "/api/v1/sessions/refresh", token=token_before_refresh)
         require(status == 200, f"token refresh expected 200, got {status}: {refreshed}")
         token_a = refreshed["access_token"]
-        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=first["access_token"])
+        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_before_refresh)
         require(status == 401, f"rotated token should be rejected, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
         require(status == 200, f"new token should retain record access, got {status}")
