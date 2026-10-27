@@ -137,17 +137,43 @@ jobs:
           import psycopg2
 
           required_tables = {
-              "shared_summary_expirations", "shared_summary_revocations", "shared_summary_access_logs",
-              "shared_summary_downloads", "shared_summary_generation_jobs", "shared_summary_delivery_receipts",
-              "shared_summary_consent_records", "shared_summary_disclosure_records", "shared_summary_link_events",
-              "data_deletion_requests", "data_deletion_jobs", "data_export_requests", "privacy_incidents",
-              "privacy_incident_events", "data_processing_records", "data_subject_requests",
-              "sensitive_data_access_logs", "legal_holds", "audit_log_events", "audit_log_integrity_checks",
-              "audit_log_access_records", "privileged_access_logs", "authorization_decisions",
-              "failed_access_attempts", "care_notifications", "care_notification_preferences",
-              "notification_delivery_attempts", "notification_delivery_receipts", "notification_read_receipts",
-              "care_reminders", "reminder_acknowledgements", "reminder_escalations", "handoff_records",
-              "handoff_recipients", "handoff_access_logs", "handoff_acknowledgements", "delivery_failure_events",
+              "shared_summary_expirations",
+              "shared_summary_revocations",
+              "shared_summary_access_logs",
+              "shared_summary_downloads",
+              "shared_summary_generation_jobs",
+              "shared_summary_delivery_receipts",
+              "shared_summary_consent_records",
+              "shared_summary_disclosure_records",
+              "shared_summary_link_events",
+              "data_deletion_requests",
+              "data_deletion_jobs",
+              "data_export_requests",
+              "privacy_incidents",
+              "privacy_incident_events",
+              "data_processing_records",
+              "data_subject_requests",
+              "sensitive_data_access_logs",
+              "legal_holds",
+              "audit_log_events",
+              "audit_log_integrity_checks",
+              "audit_log_access_records",
+              "privileged_access_logs",
+              "authorization_decisions",
+              "failed_access_attempts",
+              "care_notifications",
+              "care_notification_preferences",
+              "notification_delivery_attempts",
+              "notification_delivery_receipts",
+              "notification_read_receipts",
+              "care_reminders",
+              "reminder_acknowledgements",
+              "reminder_escalations",
+              "handoff_records",
+              "handoff_recipients",
+              "handoff_access_logs",
+              "handoff_acknowledgements",
+              "delivery_failure_events"
           }
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
           with conn.cursor() as cur:
@@ -166,8 +192,14 @@ jobs:
                   missing_columns = required_columns - columns
                   if missing_columns:
                       raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+              cur.execute(
+                  "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='notification_read_receipts' AND indexname='uq_notification_read_receipt_reader'"
+              )
+              receipt_index = cur.fetchone()
+              if not receipt_index or "CREATE UNIQUE INDEX" not in receipt_index[0].upper():
+                  raise SystemExit("notification read receipt uniqueness index is missing")
           conn.close()
-          print(f"PostgreSQL verified {len(required_tables)} privacy/sharing/audit/notification/reminder/handoff tables and common columns.")
+          print(f"PostgreSQL verified {len(required_tables)} privacy/delivery tables and the unique read-receipt index.")
           PY
 
       - name: Run real HTTP + PostgreSQL identity and persistence E2E

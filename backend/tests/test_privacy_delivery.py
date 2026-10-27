@@ -156,6 +156,17 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     )
     assert out_of_scope.status_code == 403
 
+    unreviewed = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Draft not reviewed."},
+            "source_record_ids": ["record-1"],
+            "caregiver_reviewed": False,
+        },
+    )
+    assert unreviewed.status_code == 422
+
     attached = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
         headers=owner_headers,
@@ -171,11 +182,28 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert attached.status_code == 200, attached.text
     assert len(attached.json()["content_sha256"]) == 64
 
-    before_accept = client.get(
+    duplicate_attach = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "A later replacement."},
+            "source_record_ids": ["evidence-2"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert duplicate_attach.status_code == 409
+
+    before_accept = client.get(
+        f"/api/v1/handoffs/{handoff['id']}",
         headers=recipient_headers,
     )
     assert before_accept.status_code == 404
+    pending_summary = client.get(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=recipient_headers,
+    )
+    assert pending_summary.status_code == 200, pending_summary.text
+    assert pending_summary.json()["summary"]["sections"]["lcr_summary"] == "Caregiver-reported changes."
 
     accepted = client.post(
         f"/api/v1/handoffs/{handoff['id']}/accept",
@@ -280,6 +308,19 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     assert denied_accept.status_code == 404
 
     accept_required_consent(owner["person"]["id"], recipient_id)
+    missing_summary_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert missing_summary_accept.status_code == 409
+
+    attached = client.put(
+        f"/api/v1/handoffs/{handoff_id}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Reviewed handoff summary."},
+            "source_record_ids": [],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert attached.status_code == 200, attached.text
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert accepted.status_code == 200, accepted.text
 
@@ -305,6 +346,97 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
         headers={"Authorization": f"Bearer {second_recipient_token}"},
     )
     assert creator_revoked_accept.status_code == 404
+
+
+def test_handoff_recipient_directory_is_scoped_and_consent_aware():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    client = TestClient(app)
+    owner = create_session(client, "Directory owner")
+    recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    unrelated = create_session(client, "Unrelated person")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    denied = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert denied.status_code == 403
+
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    listed = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["count"] == 1
+    assert listed.json()["items"][0]["caregiver_id"] == recipient_id
+    assert listed.json()["items"][0]["can_receive_handoff"] is False
+    assert all(item["caregiver_id"] != unrelated["caregiver"]["id"] for item in listed.json()["items"])
+
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    listed_after_consent = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert listed_after_consent.status_code == 200
+    assert listed_after_consent.json()["items"][0]["can_receive_handoff"] is True
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(AuditLogEvent).filter_by(
+            person_id=owner["person"]["id"], action="handoff.recipients.list"
+        ).count() == 3
+    finally:
+        db.close()
+
+
+def test_handoff_inbox_is_scoped_and_requires_summary_before_acceptance():
+    client = TestClient(app)
+    owner = create_session(client, "Inbox owner")
+    recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
+    unrelated = create_session(client, "Unrelated inbox")
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+    unrelated_headers = {"Authorization": f"Bearer {unrelated['access_token']}"}
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    accept_required_consent(unrelated["person"]["id"], unrelated["caregiver"]["id"])
+
+    created = client.post(
+        "/api/v1/handoffs",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+    attached = client.put(
+        f"/api/v1/handoffs/{handoff_id}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Summary for the next caregiver."},
+            "source_record_ids": [],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert attached.status_code == 200, attached.text
+
+    inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert inbox.status_code == 200, inbox.text
+    assert inbox.json()["count"] == 1
+    assert inbox.json()["items"][0]["id"] == handoff_id
+    assert inbox.json()["items"][0]["has_summary"] is True
+    assert inbox.json()["items"][0]["status"] == "pending"
+
+    unrelated_inbox = client.get("/api/v1/handoffs/inbox", headers=unrelated_headers)
+    assert unrelated_inbox.status_code == 200
+    assert unrelated_inbox.json()["items"] == []
+
+    accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert accepted.status_code == 200, accepted.text
+    accepted_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert accepted_inbox.json()["items"][0]["status"] == "accepted"
+
+    revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
+    assert revoked.status_code == 200, revoked.text
+    empty_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert empty_inbox.status_code == 200
+    assert empty_inbox.json()["items"] == []
 
 
 def test_handoff_rejects_recipient_from_another_person():
