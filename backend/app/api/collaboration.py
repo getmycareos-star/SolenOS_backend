@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import hashlib
+import math
 import os
 import re
 import secrets
@@ -144,6 +145,10 @@ async def upload_evidence(
     caregiver_id: str = Form(...),
     evidence_type: str = Form("medication_photo"),
     extracted_text: str = Form(""),
+    scan_review_status: str = Form("not_provided"),
+    scan_rotation_degrees: str = Form("0"),
+    scan_crop_json: str = Form("{}"),
+    scan_text_prepared: str = Form("false"),
     db: Session = Depends(get_db),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db)
@@ -204,6 +209,39 @@ async def upload_evidence(
         except UnicodeDecodeError as exc:
             raise HTTPException(status_code=415, detail="Text uploads must use UTF-8 encoding") from exc
 
+    # Scan controls are client-reported processing metadata, not proof that a human
+    # reviewed the image or that OCR is accurate. Preserve the original bytes below.
+    review_status = (scan_review_status or "not_provided").strip().lower()
+    if review_status not in {"caregiver_reviewed", "not_reviewed", "not_provided"}:
+        raise HTTPException(status_code=422, detail="Unsupported scan review status")
+    try:
+        rotation_degrees = float(scan_rotation_degrees or "0")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Scan rotation must be numeric") from exc
+    if not math.isfinite(rotation_degrees) or abs(rotation_degrees) > 3600:
+        raise HTTPException(status_code=422, detail="Scan rotation is outside the supported range")
+    try:
+        crop_value = json.loads(scan_crop_json or "{}")
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Scan crop metadata must be valid JSON") from exc
+    if not isinstance(crop_value, dict):
+        raise HTTPException(status_code=422, detail="Scan crop metadata must be an object")
+    crop_insets = {}
+    for edge in ("top", "right", "bottom", "left"):
+        raw = crop_value.get(edge, 0)
+        if isinstance(raw, bool):
+            raise HTTPException(status_code=422, detail="Scan crop percentages must be numeric")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="Scan crop percentages must be numeric") from exc
+        if not math.isfinite(value) or value < 0 or value > 80:
+            raise HTTPException(status_code=422, detail="Scan crop percentage is outside the supported range")
+        crop_insets[edge] = value
+    if crop_insets["left"] + crop_insets["right"] >= 80 or crop_insets["top"] + crop_insets["bottom"] >= 80:
+        raise HTTPException(status_code=422, detail="Scan crop leaves too little page area")
+    text_prepared = (scan_text_prepared or "false").strip().lower() == "true"
+
     evidence_type = evidence_type.strip().lower()
     if evidence_type not in {"document", "medication_photo", "care_photo"}:
         raise HTTPException(status_code=422, detail="Unsupported evidence type")
@@ -229,6 +267,13 @@ async def upload_evidence(
             "size_bytes": len(data),
             "sha256": digest,
             "text_source": "client_supplied" if bounded_text else "not_available",
+            "scan_processing": {
+                "client_declared_review_status": review_status,
+                "rotation_degrees": rotation_degrees,
+                "crop_insets_percent": crop_insets,
+                "text_prepared_by_client": text_prepared,
+                "review_attestation": "client_declared_not_server_verified",
+            },
         }),
         source_type="caregiver_upload",
         evidence_status="recorded",
