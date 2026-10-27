@@ -207,7 +207,7 @@ def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)
         HandoffRecipient.revoked_at.is_(None),
     ).first()
     if not is_owner and (
-        recipient is None or not _has_required_consent(db, person_id, caregiver_id)
+        recipient is None or not _has_required_consent(db, person_id, caregiver_id) or not _has_required_consent(db, person_id, handoff.created_by)
     ):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.read", "denied", reason_code="not_authorized_or_consent_revoked")
         db.commit()
@@ -241,7 +241,7 @@ def accept_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
         HandoffRecipient.handoff_id == handoff.id,
         HandoffRecipient.recipient_id == caregiver_id,
     ).first()
-    if recipient is None or recipient.revoked_at is not None or not _has_required_consent(db, person_id, caregiver_id):
+    if recipient is None or recipient.revoked_at is not None or not _has_required_consent(db, person_id, caregiver_id) or not _has_required_consent(db, person_id, handoff.created_by):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.accept", "denied", reason_code="not_a_recipient")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
@@ -270,7 +270,7 @@ def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: R
         HandoffRecipient.access_status == "accepted",
         HandoffRecipient.revoked_at.is_(None),
     ).first()
-    if recipient is None or not _has_required_consent(db, person_id, caregiver_id) or handoff.handoff_status == "revoked" or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now):
+    if recipient is None or not _has_required_consent(db, person_id, caregiver_id) or not _has_required_consent(db, person_id, handoff.created_by) or handoff.handoff_status == "revoked" or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.acknowledge", "denied", reason_code="not_authorized_or_expired")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
