@@ -117,7 +117,7 @@ def test_anonymous_session_cannot_read_another_caregivers_private_observation():
 
     promote = client.post(
         f"/api/v1/caregiver-observations/{observation_id}/promote",
-        params={"caregiver_id": own_profile_id},
+        params={"person_id": person_id, "caregiver_id": own_profile_id},
         headers=headers,
     )
     assert promote.status_code == 404, promote.text
