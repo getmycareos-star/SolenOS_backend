@@ -6,6 +6,7 @@ events and proposal review history remain intact.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -399,7 +400,10 @@ def review_daily_care_lcr_proposal(
     ).first()
     if analysis is None or not isinstance(analysis.candidates, dict) or analysis.candidates.get("kind") != "daily_care_qwen_lcr_proposals":
         raise HTTPException(status_code=404, detail="Daily Care proposal not found")
-    proposals = analysis.candidates.get("proposals")
+    # Detach JSON-backed candidates before mutation; SQLAlchemy does not track
+    # in-place edits to nested JSON structures reliably.
+    updated_candidates = copy.deepcopy(analysis.candidates)
+    proposals = updated_candidates.get("proposals")
     if not isinstance(proposals, list) or proposal_index < 0 or proposal_index >= len(proposals):
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal = proposals[proposal_index]
@@ -459,7 +463,7 @@ def review_daily_care_lcr_proposal(
     }
     history = list(analysis.review_history or [])
     history.append(review_event)
-    analysis.candidates = {**analysis.candidates, "proposals": proposals}
+    analysis.candidates = updated_candidates
     analysis.review_history = history
     db.add(analysis)
     db.commit()
