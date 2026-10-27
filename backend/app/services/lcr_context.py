@@ -191,7 +191,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
     applying its per-source limit; unavailable sources remain explicitly marked.
     """
     limit = max(1, min(int(limit_per_source), 50))
-    terms = list(dict.fromkeys(re.findall(r"[\\w-]{3,}", (query or "").casefold())))[:8]
+    terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())))[:8]
     bind = db.get_bind()
     inspector = inspect(bind)
     available_tables = set(inspector.get_table_names())
