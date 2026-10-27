@@ -143,25 +143,25 @@ jobs:
           )
           assert has_version_uniqueness, "care record version uniqueness missing"
           print("PASS unique version per care record")
-           for table, columns in (
-               ("care_record_sections", {"care_record_id", "section_key"}),
-               ("care_fact_revisions", {"care_fact_id", "revision_number"}),
-               ("care_assertion_revisions", {"assertion_id", "revision_number"}),
-               ("care_decision_revisions", {"decision_id", "revision_number"}),
-               ("care_event_revisions", {"event_id", "revision_number"}),
-               ("care_observation_revisions", {"observation_id", "revision_number"}),
-               ("care_change_revisions", {"change_id", "revision_number"}),
-               ("care_situation_revisions", {"situation_id", "revision_number"}),
-               ("care_evidence_revisions", {"evidence_id", "revision_number"}),
-           ):
-               constraints = inspector.get_unique_constraints(table)
-               indexes = inspector.get_indexes(table)
-               has_unique = (
-                   any(set(item.get("column_names") or []) == columns for item in constraints)
-                   or any(item.get("unique") and set(item.get("column_names") or []) == columns for item in indexes)
-               )
-               assert has_unique, f"{table} missing unique target revision constraint"
-               print(f"PASS unique revision {table}")
+          for table, columns in (
+              ("care_record_sections", {"care_record_id", "section_key"}),
+              ("care_fact_revisions", {"care_fact_id", "revision_number"}),
+              ("care_assertion_revisions", {"assertion_id", "revision_number"}),
+              ("care_decision_revisions", {"decision_id", "revision_number"}),
+              ("care_event_revisions", {"event_id", "revision_number"}),
+              ("care_observation_revisions", {"observation_id", "revision_number"}),
+              ("care_change_revisions", {"change_id", "revision_number"}),
+              ("care_situation_revisions", {"situation_id", "revision_number"}),
+              ("care_evidence_revisions", {"evidence_id", "revision_number"}),
+          ):
+              constraints = inspector.get_unique_constraints(table)
+              indexes = inspector.get_indexes(table)
+              has_unique = (
+                  any(set(item.get("column_names") or []) == columns for item in constraints)
+                  or any(item.get("unique") and set(item.get("column_names") or []) == columns for item in indexes)
+              )
+              assert has_unique, f"{table} missing unique target revision constraint"
+              print(f"PASS unique revision {table}")
           engine.dispose()
           PY
 
