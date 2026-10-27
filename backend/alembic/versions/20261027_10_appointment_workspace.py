@@ -6,7 +6,7 @@ Every update appends a revision and uses optimistic version checking.
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20261027_10_appointment_workspace"
+revision = "20261027_10_appt_workspace"
 down_revision = "20261027_09_lcr_query_indexes"
 branch_labels = None
 depends_on = None
