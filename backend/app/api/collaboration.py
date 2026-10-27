@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -535,6 +536,40 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
                 return True
     return False
 
+
+
+_COMPANION_STOPWORDS = {
+    "about", "after", "again", "also", "been", "being", "could", "does", "from",
+    "have", "has", "here", "into", "just", "like", "more", "most", "much", "only",
+    "other", "please", "should", "some", "such", "than", "that", "them", "then",
+    "there", "these", "they", "this", "those", "through", "what", "when", "where",
+    "which", "while", "with", "would", "your", "you", "mum", "mom", "dad", "care",
+    "record", "records", "solenos", "getting", "worse", "better", "tell", "show",
+}
+
+
+def _companion_query_terms(text: str) -> list[str]:
+    """Extract bounded search terms; this is retrieval only, never factual inference."""
+    terms = re.findall(r"[a-z0-9]{3,}", (text or "").casefold())
+    unique = []
+    for term in terms:
+        if term not in _COMPANION_STOPWORDS and term not in unique:
+            unique.append(term)
+        if len(unique) >= 8:
+            break
+    return unique
+
+
+def _companion_relevance_score(query: str, *fields: str | None) -> int:
+    """Score lexical overlap to rank candidate sources; never treats a match as proof."""
+    terms = set(_companion_query_terms(query))
+    if not terms:
+        return 0
+    title_terms = set(re.findall(r"[a-z0-9]{3,}", (fields[0] or "").casefold())) if fields else set()
+    body_terms = set()
+    for field in fields[1:]:
+        body_terms.update(re.findall(r"[a-z0-9]{3,}", (field or "").casefold()))
+    return 3 * len(terms & title_terms) + len(terms & body_terms)
 
 def _companion_message_needs_revision(text: str) -> bool:
     """Allow detail when warranted while rejecting empty, runaway, or internal output."""
@@ -1060,13 +1095,42 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        query_terms = _companion_query_terms(user_text)
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
             .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
-            .limit(20)
+            .limit(8)
             .all()
         )
+        # Retrieve older matching events separately from the recent baseline so a
+        # relevant event is not hidden merely because more recent records exist.
+        matching_event_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+        if query_terms:
+            matching_event_query = matching_event_query.filter(or_(
+                *[CareEvent.title.ilike(f"%{term}%") for term in query_terms],
+                *[CareEvent.description.ilike(f"%{term}%") for term in query_terms],
+            ))
+        matching_events = matching_event_query.order_by(
+            CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()
+        ).limit(40).all()
+        ranked_matching_events = sorted(
+            matching_events,
+            key=lambda event: _companion_relevance_score(
+                user_text, event.title, event.description, event.event_type, event.status
+            ),
+            reverse=True,
+        )
+        selected_events = []
+        selected_event_ids = set()
+        for event in [*ranked_matching_events[:8], *recent_events]:
+            event_id = str(event.id)
+            if event_id not in selected_event_ids:
+                selected_event_ids.add(event_id)
+                selected_events.append(event)
+            if len(selected_events) >= 12:
+                break
+        recent_events = selected_events
         for event in recent_events:
             source_event_ids.append(str(event.id))
             event_context.append(
@@ -1138,9 +1202,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(8)
             .all()
         )
+        matching_evidence_query = evidence_query
+        if query_terms:
+            matching_evidence_query = matching_evidence_query.filter(or_(
+                *[EvidenceModel.source_text.ilike(f"%{term}%") for term in query_terms]
+            ))
+        matching_evidence_rows = matching_evidence_query.order_by(
+            EvidenceModel.uploaded_at.desc()
+        ).limit(30).all()
+        ranked_evidence_rows = sorted(
+            matching_evidence_rows,
+            key=lambda evidence: _companion_relevance_score(
+                user_text, evidence.type, evidence.source_text
+            ),
+            reverse=True,
+        )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        for row in [*ranked_evidence_rows[:8], *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
@@ -1259,6 +1338,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
             or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+            or _contains_unsupported_operational_claim(
+                reply, user_text + "\\n" + "\\n".join(source_context), source_context
+            )
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
@@ -1300,7 +1382,54 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _companion_message_needs_revision(reply)
                     or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
                     or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_operational_claim(
+                        reply, user_text + "\\n" + "\\n".join(source_context), source_context
+                    )
                     or _greeting_reply_needs_revision(reply)
+                )
+                if not invalid_reply:
+                    break
+        if invalid_reply and not greeting_only:
+            # Repair grounded meaning before showing an answer. The model must
+            # preserve source attribution and uncertainty; it cannot invent a
+            # fact merely to make the reply sound complete.
+            for _repair_attempt in range(2):
+                repair_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Revise the previous answer to address the caregiver's exact question. "
+                            "Use only the supplied authorized record evidence. Keep caregiver reports, "
+                            "document wording, inference, and unknowns distinct. Do not turn absence of "
+                            "a record into proof an event did not happen; do not claim sync, delivery, "
+                            "saving, scheduling, completion, or settings state without explicit backend evidence. "
+                            "If evidence is insufficient, say what is missing and ask at most one focused question. "
+                            "Use natural plain language; do not add a generic disclaimer or invented next step. "
+                            "Return only the revised caregiver-facing answer."
+                        ),
+                    },
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat, base, model, repair_messages,
+                        {"temperature": 0.1, "num_predict": 192},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_operational_claim(
+                        reply, user_text + "\\n" + "\\n".join(source_context), source_context
+                    )
                 )
                 if not invalid_reply:
                     break

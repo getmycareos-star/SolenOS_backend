@@ -256,6 +256,55 @@ jobs:
           fi
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
 
+          echo "QWEN_E2E: historical Companion grounding"
+          # Seed synthetic, isolated records: one older relevant event plus newer
+          # unrelated events. This proves the Companion retrieves relevance beyond
+          # a recent-only window while retaining server-side person scoping.
+          docker exec -i solenos-qwen-e2e python - "$person_id" "$caregiver_id" <<'PY'
+          import sys
+          from datetime import datetime, timedelta, timezone
+          from app.core.database import SessionLocal
+          from app.models.care import CareEvent
+          person_id, caregiver_id = sys.argv[1], sys.argv[2]
+          db = SessionLocal()
+          try:
+              now = datetime.now(timezone.utc)
+              older = CareEvent(
+                  person_id=person_id, event_type="observation", status="recorded",
+                  occurred_at=now - timedelta(days=90), title="Sleep pattern report",
+                  description="Caregiver reported waking several times overnight in August.",
+                  evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                  time_provenance="caregiver_reported",
+              )
+              db.add(older)
+              for index in range(12):
+                  db.add(CareEvent(
+                      person_id=person_id, event_type="observation", status="recorded",
+                      occurred_at=now - timedelta(hours=index + 1),
+                      title=f"Unrelated household note {index}",
+                      description="A household item was recorded with no sleep details.",
+                      evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                      time_provenance="caregiver_reported",
+                  ))
+              db.commit()
+              print(older.id)
+          finally:
+              db.close()
+          PY
+          sleep_event_id=$(docker exec solenos-qwen-e2e python -c 'import os; from app.core.database import SessionLocal; from app.models.care import CareEvent; db=SessionLocal(); row=db.query(CareEvent).filter(CareEvent.title=="Sleep pattern report").order_by(CareEvent.recorded_at.desc()).first(); print(row.id); db.close()')
+          history_response=$(curl --fail --silent --show-error --max-time 90 \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"text\":\"What did we record about sleep?\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["ai_generated"] is True; assert sys.argv[2] in d["source_event_ids"], d; assert d["written_to_lcr"] is False; assert isinstance(d["reply"],str) and d["reply"].strip()' "$history_response" "$sleep_event_id"
+
+          echo "QWEN_E2E: unsupported reminder-delivery claim must be qualified"
+          reminder_response=$(curl --fail --silent --show-error --max-time 90 \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"text\":\"Did my reminder get delivered?\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); assert d["ai_generated"] is True; assert d["written_to_lcr"] is False; assert not re.search(r"\breminder\s+(?:was|has been)\s+delivered\b",reply) or re.search(r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|no matching status)\b",reply), reply' "$reminder_response"
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
@@ -423,5 +472,5 @@ jobs:
             "http://127.0.0.1:8080/api/v1/events/$person_id")
           python -c 'import json,sys; events=json.loads(sys.argv[1]); daily=json.loads(sys.argv[2]); assert len(events) == 1; assert events[0]["id"] == daily["id"]' "$events_after_daily" "$daily"
 
-          echo "PASS: real Qwen inference succeeded for Companion, all 38 enabled read-only care workflows, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
+          echo "PASS: real Qwen inference succeeded for Companion, all 39 enabled read-only care workflows, document context and Daily Capture candidate extraction; support calls wrote no LCR events."
 
