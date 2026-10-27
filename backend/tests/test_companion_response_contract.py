@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -291,7 +291,7 @@ def test_companion_retrieves_relevant_older_evidence_not_only_recent_uploads(mon
     try:
         token, person_id, caregiver_id = create_session(client)
         db = TestingSessionLocal()
-        older = __import__("app.models.care", fromlist=["Evidence"]).Evidence(
+        older = Evidence(
             person_id=person_id, type="document",
             source_text="Caregiver note from August: person woke several times overnight.",
             uploaded_by_caregiver_id=caregiver_id, evidence_status="provided",
