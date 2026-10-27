@@ -194,10 +194,16 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert duplicate_attach.status_code == 409
 
     before_accept = client.get(
-        f"/api/v1/handoffs/{handoff['id']}/summary",
+        f"/api/v1/handoffs/{handoff['id']}",
         headers=recipient_headers,
     )
     assert before_accept.status_code == 404
+    pending_summary = client.get(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=recipient_headers,
+    )
+    assert pending_summary.status_code == 200, pending_summary.text
+    assert pending_summary.json()["summary"]["sections"]["lcr_summary"] == "Caregiver-reported changes."
 
     accepted = client.post(
         f"/api/v1/handoffs/{handoff['id']}/accept",
