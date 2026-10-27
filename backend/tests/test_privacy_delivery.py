@@ -248,6 +248,8 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
 
 
 def test_notification_read_isolated_between_caregiver_sessions():
+    from app.models.notifications import CareNotification
+
     client = TestClient(app)
     first = create_session(client, "First recipient")
     second = create_session(client, "Second recipient")
