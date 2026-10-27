@@ -219,7 +219,13 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
 
     listed = client.get("/api/v1/notifications?unread_only=true", headers=headers)
     assert listed.status_code == 200, listed.text
-    assert any(item["id"] == notification_id and item["is_read"] is False for item in listed.json())
+    listed_payload = listed.json()
+    listed_items = (
+        listed_payload if isinstance(listed_payload, list)
+        else listed_payload.get("items", listed_payload.get("notifications", listed_payload.get("data")))
+    )
+    assert isinstance(listed_items, list), f"Unexpected notifications response: {listed_payload!r}"
+    assert any(item["id"] == notification_id and item["is_read"] is False for item in listed_items)
 
     marked = client.patch(f"/api/v1/notifications/{notification_id}/read", headers=headers)
     assert marked.status_code == 200, marked.text
