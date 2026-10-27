@@ -86,6 +86,148 @@ def _ensure_test_tables():
             Column("relationship", String(40), nullable=False, default="originates"),
             Column("created_at", DateTime(timezone=True)),
         )
+    if "care_record_identifiers" not in metadata.tables:
+        Table(
+            "care_record_identifiers", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("identifier_type", String(80), nullable=False),
+            Column("identifier_fingerprint", String(128), nullable=False),
+            Column("masked_value", String(128)),
+            Column("source_type", String(80)),
+            Column("source_id", String(36)),
+            Column("status", String(32), nullable=False, server_default="active"),
+            Column("valid_from", DateTime(timezone=True)),
+            Column("valid_to", DateTime(timezone=True)),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("care_record_id", "identifier_type", "identifier_fingerprint"),
+        )
+    if "care_record_sections" not in metadata.tables:
+        Table(
+            "care_record_sections", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("section_key", String(100), nullable=False),
+            Column("section_payload", JSON, nullable=False),
+            Column("version_number", Integer, nullable=False, server_default="1"),
+            Column("updated_at", DateTime(timezone=True)),
+            Column("updated_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("care_record_id", "section_key"),
+        )
+    if "care_record_links" not in metadata.tables:
+        Table(
+            "care_record_links", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("source_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("target_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("relationship", String(60), nullable=False),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("source_record_id", "target_record_id", "relationship"),
+        )
+    if "care_record_status_history" not in metadata.tables:
+        Table(
+            "care_record_status_history", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("previous_status", String(32)),
+            Column("new_status", String(32), nullable=False),
+            Column("reason", Text),
+            Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("changed_at", DateTime(timezone=True)),
+        )
+    for target_table in ("care_facts", "care_assertions", "care_decisions", "care_events", "caregiver_observations", "changes", "situations", "evidence"):
+        if target_table not in metadata.tables:
+            Table(
+                target_table, metadata,
+                Column("id", String(36), primary_key=True),
+                Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            )
+    if "care_record_change_sets" not in metadata.tables:
+        Table(
+            "care_record_change_sets", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id")),
+            Column("operation", String(60), nullable=False),
+            Column("status", String(32), nullable=False, server_default="committed"),
+            Column("reason", Text),
+            Column("author_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("created_at", DateTime(timezone=True)),
+        )
+    if "care_record_change_items" not in metadata.tables:
+        Table(
+            "care_record_change_items", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("change_set_id", String(36), ForeignKey("care_record_change_sets.id"), nullable=False),
+            Column("target_type", String(100), nullable=False),
+            Column("target_id", String(36), nullable=False),
+            Column("operation", String(32), nullable=False),
+            Column("before_value", JSON),
+            Column("after_value", JSON),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("created_at", DateTime(timezone=True)),
+        )
+    if "care_record_retractions" not in metadata.tables:
+        Table(
+            "care_record_retractions", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("target_type", String(100), nullable=False),
+            Column("target_id", String(36), nullable=False),
+            Column("reason", Text, nullable=False),
+            Column("status", String(32), nullable=False, server_default="retracted"),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("retracted_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("retracted_at", DateTime(timezone=True)),
+        )
+    if "care_record_restorations" not in metadata.tables:
+        Table(
+            "care_record_restorations", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("retraction_id", String(36), ForeignKey("care_record_retractions.id"), nullable=False),
+            Column("reason", Text, nullable=False),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("restored_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("restored_at", DateTime(timezone=True)),
+        )
+    revision_specs = (
+        ("care_fact_revisions", "care_fact_id", "care_facts"),
+        ("care_assertion_revisions", "assertion_id", "care_assertions"),
+        ("care_decision_revisions", "decision_id", "care_decisions"),
+        ("care_event_revisions", "event_id", "care_events"),
+        ("care_observation_revisions", "observation_id", "caregiver_observations"),
+        ("care_change_revisions", "change_id", "changes"),
+        ("care_situation_revisions", "situation_id", "situations"),
+        ("care_evidence_revisions", "evidence_id", "evidence"),
+    )
+    for revision_table, target_column, target_table in revision_specs:
+        if revision_table not in metadata.tables:
+            Table(
+                revision_table, metadata,
+                Column("id", String(36), primary_key=True),
+                Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+                Column(target_column, String(36), ForeignKey(f"{target_table}.id"), nullable=False),
+                Column("revision_number", Integer, nullable=False),
+                Column("previous_payload", JSON),
+                Column("current_payload", JSON),
+                Column("revision_reason", Text),
+                Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+                Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+                Column("changed_at", DateTime(timezone=True)),
+                UniqueConstraint(target_column, "revision_number"),
+            )
     if "caregiver_contexts" not in metadata.tables:
         Table(
             "caregiver_contexts", metadata,
