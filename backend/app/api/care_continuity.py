@@ -10,9 +10,10 @@ from typing import Any
 import json
 import uuid
 import hashlib
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import MetaData, Table, select, insert, desc, inspect
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -71,6 +72,20 @@ RESOURCES = {
     "missing-information": "care_missing_information",
     "conflicts": "care_conflicts",
     "action-outcomes": "care_action_outcomes",
+    "record-identifiers": "care_record_identifiers",
+    "record-sections": "care_record_sections",
+    "record-links": "care_record_links",
+    "record-status-history": "care_record_status_history",
+    "fact-revisions": "care_fact_revisions",
+    "assertion-revisions": "care_assertion_revisions",
+    "decision-revisions": "care_decision_revisions",
+    "event-revisions": "care_event_revisions",
+    "observation-revisions": "care_observation_revisions",
+    "change-revisions": "care_change_revisions",
+    "situation-revisions": "care_situation_revisions",
+    "evidence-revisions": "care_evidence_revisions",
+    "record-retractions": "care_record_retractions",
+    "record-restorations": "care_record_restorations",
 }
 
 WRITABLE = {
@@ -111,6 +126,11 @@ WRITABLE = {
     "missing-information": {"care_record_id", "topic", "description", "priority", "status", "resolved_at"},
     "conflicts": {"care_record_id", "conflict_type", "status", "claim_refs", "description", "resolution", "resolved_at"},
     "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
+    "record-identifiers": {"care_record_id", "identifier_type", "identifier_fingerprint", "masked_value", "source_type", "source_id", "status", "valid_from", "valid_to"},
+    "record-sections": {"care_record_id", "section_key", "section_payload"},
+    "record-links": {"source_record_id", "target_record_id", "relationship"},
+    "record-retractions": {"care_record_id", "target_type", "target_id", "reason", "provenance_id"},
+    "record-restorations": {"care_record_id", "retraction_id", "reason", "provenance_id"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -183,6 +203,7 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "care_conflict": "care_conflicts", "conflict": "care_conflicts",
         "care_action_outcome": "care_action_outcomes", "action_outcome": "care_action_outcomes",
         "living_care_record": "living_care_records", "living_record": "living_care_records",
+        "care_record_retraction": "care_record_retractions", "record_retraction": "care_record_retractions",
     }
     links = []
     if resource in ("follow-up-links", "relationships"):
@@ -200,20 +221,21 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
     elif resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         if payload.get("source_id"):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
-    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"):
+    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts", "record-retractions"):
         if payload.get("target_id"):
             links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
-    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
+    elif resource == "record-identifiers":
+        if payload.get("source_id"):
+            links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts", "record-retractions", "record-identifiers"}
     for type_name, target_id, field_name in links:
         if not target_id:
             continue
         table_name = typed_tables.get(str(type_name or "").lower())
         if table_name is None:
-            # Polymorphic IDs are security boundaries. Silently skipping an
-            # unknown type lets a caller attach an unverified cross-record ID.
-            # Reject unknown linked types for every resource, not just the
-            # subset that was previously marked strict.
-            raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
+            if resource in strict_link_resources:
+                raise HTTPException(status_code=422, detail=f"Unsupported {field_name} type for this record")
+            continue
         linked = _table(db, table_name)
         if "person_id" not in linked.c:
             raise HTTPException(status_code=422, detail=f"{field_name} type is not person-scoped")
@@ -237,6 +259,11 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "uncertainties": (("living_care_records", "care_record_id"),),
         "missing-information": (("living_care_records", "care_record_id"),),
         "conflicts": (("living_care_records", "care_record_id"),),
+        "record-identifiers": (("living_care_records", "care_record_id"),),
+        "record-sections": (("living_care_records", "care_record_id"),),
+        "record-links": (("living_care_records", "source_record_id"), ("living_care_records", "target_record_id")),
+        "record-retractions": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "record-restorations": (("living_care_records", "care_record_id"), ("care_record_retractions", "retraction_id"), ("record_provenance", "provenance_id")),
     }
     for table_name, field in scoped_references.get(resource, ()):
         value = payload.get(field)
@@ -248,6 +275,58 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         ).first()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
+
+def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: str, data: dict):
+    target_type = str(data.get("target_type") or "").lower()
+    revision_specs = {
+        "care_fact": ("care_fact_revisions", "care_fact_id"),
+        "fact": ("care_fact_revisions", "care_fact_id"),
+        "care_assertion": ("care_assertion_revisions", "assertion_id"),
+        "assertion": ("care_assertion_revisions", "assertion_id"),
+        "care_decision": ("care_decision_revisions", "decision_id"),
+        "decision": ("care_decision_revisions", "decision_id"),
+        "care_event": ("care_event_revisions", "event_id"),
+        "event": ("care_event_revisions", "event_id"),
+        "caregiver_observation": ("care_observation_revisions", "observation_id"),
+        "care_observation": ("care_observation_revisions", "observation_id"),
+        "observation": ("care_observation_revisions", "observation_id"),
+        "care_change": ("care_change_revisions", "change_id"),
+        "change": ("care_change_revisions", "change_id"),
+        "care_situation": ("care_situation_revisions", "situation_id"),
+        "situation": ("care_situation_revisions", "situation_id"),
+        "care_evidence": ("care_evidence_revisions", "evidence_id"),
+        "evidence": ("care_evidence_revisions", "evidence_id"),
+    }
+    spec = revision_specs.get(target_type)
+    if spec is None:
+        raise HTTPException(status_code=422, detail="This target type does not have an LCR revision schema")
+    revision_table_name, target_column = spec
+    revision_table = _table(db, revision_table_name)
+    target_id = data.get("target_id")
+    latest = db.execute(
+        select(revision_table.c.revision_number)
+        .where(revision_table.c[target_column] == target_id, revision_table.c.person_id == person_id)
+        .order_by(desc(revision_table.c.revision_number))
+        .limit(1)
+    ).scalar_one_or_none()
+    change_sets = _table(db, "care_record_change_sets")
+    change_set = db.execute(
+        select(change_sets.c.reason, change_sets.c.provenance_id)
+        .where(change_sets.c.id == data.get("change_set_id"), change_sets.c.person_id == person_id)
+    ).mappings().first()
+    db.execute(insert(revision_table).values(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        **{target_column: target_id},
+        revision_number=int(latest or 0) + 1,
+        previous_payload=data.get("before_value"),
+        current_payload=data.get("after_value"),
+        revision_reason=(change_set.get("reason") if change_set else None) or data.get("operation"),
+        provenance_id=data.get("provenance_id") or (change_set.get("provenance_id") if change_set else None),
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
+
 
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
@@ -303,6 +382,47 @@ def list_record_snapshots(request: Request, limit: int = 50, db: Session = Depen
     return [_jsonable(dict(row)) for row in rows]
 
 
+@router.get("/record-revisions")
+def list_record_revisions(request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    revision_specs = (
+        ("care_fact_revisions", "care_fact_id"),
+        ("care_assertion_revisions", "assertion_id"),
+        ("care_decision_revisions", "decision_id"),
+        ("care_event_revisions", "event_id"),
+        ("care_observation_revisions", "observation_id"),
+        ("care_change_revisions", "change_id"),
+        ("care_situation_revisions", "situation_id"),
+        ("care_evidence_revisions", "evidence_id"),
+    )
+    inspector = inspect(db.get_bind())
+    collected = []
+    for table_name, target_column in revision_specs:
+        if not inspector.has_table(table_name):
+            continue
+        table = _table(db, table_name)
+        rows = db.execute(
+            select(table).where(table.c.person_id == person_id)
+            .order_by(desc(table.c.changed_at))
+            .limit(max(1, min(limit, 100)))
+        ).mappings().all()
+        for row in rows:
+            item = dict(row)
+            target_id = item.pop(target_column, None)
+            item["target_id"] = target_id
+            item["revision_type"] = table_name
+            changed_at = item.get("changed_at")
+            if isinstance(changed_at, datetime):
+                if changed_at.tzinfo is None:
+                    changed_at = changed_at.replace(tzinfo=timezone.utc)
+                sort_key = changed_at.timestamp()
+            else:
+                sort_key = 0
+            collected.append((sort_key, item))
+    collected.sort(key=lambda pair: pair[0], reverse=True)
+    return [_jsonable(item) for _, item in collected[:max(1, min(limit, 100))]]
+
+
 @router.post("/record-versions", status_code=201)
 def create_record_version(payload: dict, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scoped_identity(request, db)
@@ -326,6 +446,10 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
         "record_provenance", "record_provenance_links", "care_record_change_sets",
         "care_record_change_items", "care_corrections", "record_amendments",
         "record_amendment_items", "care_record_audit_log",
+        "care_record_identifiers", "care_record_sections", "care_record_links", "care_record_status_history",
+        "care_fact_revisions", "care_assertion_revisions", "care_decision_revisions", "care_event_revisions",
+        "care_observation_revisions", "care_change_revisions", "care_situation_revisions", "care_evidence_revisions",
+        "care_record_retractions", "care_record_restorations",
         "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
     )
     tables_payload = {}
@@ -385,8 +509,20 @@ def list_resource(resource: str, request: Request, limit: int = 50, db: Session 
     person_id, _ = _scoped_identity(request, db)
     table = _table(db, RESOURCES[resource])
     query = select(table).where(table.c.person_id == person_id)
+    ordering = []
+    # Revision sequence is the authoritative order for revisions of a given
+    # care item. Timestamps can tie or lose ordering precision across database
+    # backends, so use the monotonic revision number before timestamp fallback.
+    if "revision_number" in table.c:
+        ordering.append(desc(table.c.revision_number))
     if "created_at" in table.c:
-        query = query.order_by(desc(table.c.created_at))
+        ordering.append(desc(table.c.created_at))
+    elif "changed_at" in table.c:
+        ordering.append(desc(table.c.changed_at))
+    elif "updated_at" in table.c:
+        ordering.append(desc(table.c.updated_at))
+    if ordering:
+        query = query.order_by(*ordering)
     rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
     return [_jsonable(dict(row)) for row in rows]
 
@@ -430,6 +566,11 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "missing-information": ("topic", "description"),
         "conflicts": ("conflict_type", "description"),
         "action-outcomes": ("action_id", "action_type", "outcome_status"),
+        "record-identifiers": ("care_record_id", "identifier_type", "identifier_fingerprint"),
+        "record-sections": ("care_record_id", "section_key", "section_payload"),
+        "record-links": ("source_record_id", "target_record_id", "relationship"),
+        "record-retractions": ("care_record_id", "target_type", "target_id", "reason"),
+        "record-restorations": ("care_record_id", "retraction_id", "reason"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
@@ -466,7 +607,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         if "observation_type" in table.c:
             data["observation_type"] = ObservationType.DIRECT.name
         if "information_visibility" in table.c:
-            data["information_visibility"] = InformationVisibility.PRIVATE
+            data["information_visibility"] = InformationVisibility.PRIVATE.name
         if "is_promoted_to_shared" in table.c:
             data["is_promoted_to_shared"] = False
         if "event_time" in table.c and data.get("observed_at"):
@@ -489,6 +630,62 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     # recorded_at is server receipt time, never a client-controlled timestamp.
     if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations", "record-provenance") and "recorded_at" in table.c:
         data["recorded_at"] = datetime.now(timezone.utc)
+    if resource == "record-change-sets" and not data.get("status"):
+        data["status"] = "committed"
+    if resource == "record-identifiers":
+        fingerprint = str(data.get("identifier_fingerprint") or "")
+        if not re.fullmatch(r"(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{128})", fingerprint):
+            raise HTTPException(status_code=422, detail="identifier_fingerprint must be a SHA-256 or SHA-512 hex digest")
+        if not data.get("status"):
+            data["status"] = "active"
+    if resource == "record-links" and data.get("source_record_id") == data.get("target_record_id"):
+        raise HTTPException(status_code=422, detail="A Living Care Record cannot link to itself")
+    if resource == "record-sections":
+        try:
+            existing = db.execute(
+                select(table).where(
+                    table.c.person_id == person_id,
+                    table.c.care_record_id == data["care_record_id"],
+                    table.c.section_key == data["section_key"],
+                )
+            ).mappings().first()
+            now = datetime.now(timezone.utc)
+            if existing:
+                db.execute(update(table).where(
+                    table.c.id == existing["id"], table.c.person_id == person_id
+                ).values(
+                    section_payload=data["section_payload"],
+                    version_number=int(existing.get("version_number") or 1) + 1,
+                    updated_at=now,
+                    updated_by_caregiver_id=caregiver_id,
+                ))
+                updated = db.execute(select(table).where(table.c.id == existing["id"], table.c.person_id == person_id)).mappings().one()
+                db.commit()
+                return _jsonable(dict(updated))
+            data["version_number"] = 1
+            data["updated_at"] = now
+            data["updated_by_caregiver_id"] = caregiver_id
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Care record section could not be saved; refresh and retry") from exc
+    if resource == "record-retractions":
+        data["status"] = "retracted"
+        data["retracted_by_caregiver_id"] = caregiver_id
+        data["retracted_at"] = datetime.now(timezone.utc)
+    if resource == "record-restorations":
+        retractions = _table(db, "care_record_retractions")
+        prior = db.execute(
+            select(retractions.c.status).where(
+                retractions.c.id == data["retraction_id"], retractions.c.person_id == person_id
+            )
+        ).scalar_one_or_none()
+        if prior != "retracted":
+            raise HTTPException(status_code=409, detail="Only an active retraction can be restored")
+        data["restored_by_caregiver_id"] = caregiver_id
+        data["restored_at"] = datetime.now(timezone.utc)
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
@@ -508,6 +705,21 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     try:
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
+        if resource == "record-change-items":
+            _append_revision_for_change_item(db, person_id, caregiver_id, data)
+        if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):
+            status_history = _table(db, "care_record_status_history")
+            db.execute(insert(status_history).values(
+                id=str(uuid.uuid4()), person_id=person_id, care_record_id=row["id"],
+                previous_status=None, new_status=row.get("record_status") or "active",
+                reason="Living Care Record created", changed_by_caregiver_id=caregiver_id,
+                changed_at=datetime.now(timezone.utc),
+            ))
+        if resource == "record-restorations":
+            retractions = _table(db, "care_record_retractions")
+            db.execute(update(retractions).where(
+                retractions.c.id == data["retraction_id"], retractions.c.person_id == person_id
+            ).values(status="restored"))
         db.commit()
         return _jsonable(dict(row))
     except HTTPException:
