@@ -172,8 +172,11 @@ def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, so
 
 @router.post("/caregiver-profiles", response_model=CaregiverProfile)
 def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, db: Session = Depends(get_db)):
-    person_id, _session_caregiver_id = _assert_person_scope(request, db, profile.person_id)
-    # Client-supplied names/emails do not verify identity or primary-caregiver status.
+    person_id, session_caregiver_id = _assert_person_scope(request, db, profile.person_id)
+    # Names/emails are user-supplied profile data, never proof of identity.
+    # Link only the first profile created by this authenticated session to its
+    # server-resolved caregiver ID. Additional profiles remain unlinked until
+    # their own authenticated session establishes that relationship.
     profile = CaregiverProfileCreate(**{
         **profile.model_dump(),
         "person_id": person_id,
@@ -183,6 +186,13 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, 
     })
     service = CaregiverIntelligenceService(db)
     db_profile = service.create_caregiver_profile(profile)
+    linked_profile = db.query(CaregiverProfileModel.id).filter(
+        CaregiverProfileModel.session_caregiver_id == str(session_caregiver_id)
+    ).first()
+    if linked_profile is None:
+        db_profile.session_caregiver_id = str(session_caregiver_id)
+        db.commit()
+        db.refresh(db_profile)
     _log_and_learn(
         db,
         db_profile.person_id,
