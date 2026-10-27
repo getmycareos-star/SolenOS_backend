@@ -206,7 +206,7 @@ def main():
         )
         require(status == 201, f"recovery session creation expected 201, got {status}: {recovery_session}")
         recovery_token = recovery_session["access_token"]
-        status, revoked = request("/api/v1/sessions/revoke", body={}, token=recovery_token)
+        status, revoked = request("POST", "/api/v1/sessions/revoke", body={}, token=recovery_token)
         require(status == 200 and revoked.get("revoked") is True,
                 f"session revocation expected success, got {status}: {revoked}")
         status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
