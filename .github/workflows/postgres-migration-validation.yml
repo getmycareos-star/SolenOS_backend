@@ -78,9 +78,9 @@ jobs:
               "care_missing_information": {"person_id", "topic", "description", "status"},
               "care_conflicts": {"person_id", "conflict_type", "claim_refs", "description", "status"},
               "care_action_outcomes": {"person_id", "action_id", "outcome_status"},
-              "caregiver_contexts": {"person_id", "caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
-              "caregiver_perspectives": {"person_id", "caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
-              "caregiver_observations": {"person_id", "caregiver_id", "observation_type", "description", "epistemic_status", "recorded_at"},
+              "caregiver_contexts": {"person_id", "reported_by_caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
+              "caregiver_perspectives": {"person_id", "reported_by_caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
+              "caregiver_observations": {"person_id", "reported_by_caregiver_id", "observation_category", "description", "epistemic_status", "recorded_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -108,7 +108,12 @@ jobs:
               assert any(column in fk.get("constrained_columns", []) for fk in foreign_keys), f"{table}.{column} missing foreign key"
               print(f"PASS FK {table}.{column}")
           unique = inspector.get_unique_constraints("care_record_versions")
-          assert any(set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in unique), "care record version uniqueness missing"
+          indexes = inspector.get_indexes("care_record_versions")
+          has_version_uniqueness = (
+              any(set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in unique)
+              or any(item.get("unique") and set(item.get("column_names") or []) == {"care_record_id", "version_number"} for item in indexes)
+          )
+          assert has_version_uniqueness, "care record version uniqueness missing"
           print("PASS unique version per care record")
           engine.dispose()
           PY
