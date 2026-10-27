@@ -1516,6 +1516,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _companion_message_needs_revision(reply)
             or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
             or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+            or _contains_unsupported_longitudinal_claim(reply, event_context + evidence_context)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
@@ -1557,7 +1558,53 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _companion_message_needs_revision(reply)
                     or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
                     or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_longitudinal_claim(reply, event_context + evidence_context)
                     or _greeting_reply_needs_revision(reply)
+                )
+                if not invalid_reply:
+                    break
+        if invalid_reply and not greeting_only:
+            # Give the same model a bounded repair opportunity, but never show a
+            # candidate that still fails deterministic source-grounding checks.
+            for repair_attempt in range(2):
+                unsupported_trend = _contains_unsupported_longitudinal_claim(
+                    reply, event_context + evidence_context
+                )
+                repair_instruction = (
+                    "The draft asserted a care change or trend not established by the supplied record evidence. "
+                    "Answer the caregiver directly and naturally. Do not claim the record shows a trend unless the "
+                    "supplied source evidence explicitly supports the comparison and timeframe. Keep the caregiver's "
+                    "own conversational statement attributed to them, not as a saved LCR fact. Preserve uncertainty."
+                    if unsupported_trend else
+                    "Revise the draft to satisfy evidence grounding: remove unsupported claims, preserve source "
+                    "attribution and uncertainty, answer the current request directly, and keep conversation separate "
+                    "from authoritative care facts. Do not add a canned disclaimer or invent a replacement fact."
+                )
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {"role": "user", "content": repair_instruction},
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": 192},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_care_claim(reply, user_text + "\\n" + "\\n".join(source_context))
+                    or _contains_unsupported_longitudinal_claim(reply, event_context + evidence_context)
                 )
                 if not invalid_reply:
                     break
