@@ -1370,7 +1370,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
         source_context = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context
+            *event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines
         ]
         context_payload = {
             "care_recipient_name": person.name,
