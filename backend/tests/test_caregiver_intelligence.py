@@ -292,7 +292,7 @@ def test_conflicting_observations_preserved():
         assert response.status_code == 200
         conflicts = response.json()
         assert len(conflicts) >= 1
-        assert (conflicts[0]["caregiver_a_id"] == "caregiver-sarah" and conflicts[0]["caregiver_b_id"] == "caregiver-john") or (conflicts[0]["caregiver_a_id"] == "caregiver-john" and conflicts[0]["caregiver_b_id"] == "caregiver-sarah")
+        assert (conflicts[0]["caregiver_a_id"] == profile_ids["caregiver-sarah"] and conflicts[0]["caregiver_b_id"] == profile_ids["caregiver-john"]) or (conflicts[0]["caregiver_a_id"] == profile_ids["caregiver-john"] and conflicts[0]["caregiver_b_id"] == profile_ids["caregiver-sarah"])
     finally:
         teardown_db()
 
