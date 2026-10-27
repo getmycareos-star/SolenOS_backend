@@ -272,6 +272,26 @@ def test_current_lcr_fact_outside_time_window_is_retained_with_separate_effectiv
                 "created_at": "2020-01-01 00:00:00",
             },
         )
+        connection.execute(
+            text("""INSERT INTO care_facts
+                (id, person_id, subject_type, subject_id, fact_type, fact_value,
+                 epistemic_status, effective_at, recorded_at, created_at, superseded_by_fact_id)
+                VALUES (:id, :person_id, :subject_type, :subject_id, :fact_type, :fact_value,
+                        :epistemic_status, :effective_at, :recorded_at, :created_at, :superseded_by_fact_id)"""),
+            {
+                "id": "old-superseded-fact",
+                "person_id": person_id,
+                "subject_type": "care_recipient",
+                "subject_id": person_id,
+                "fact_type": "communication_preference",
+                "fact_value": "Old communication preference",
+                "epistemic_status": "reported",
+                "effective_at": "2019-01-01 00:00:00",
+                "recorded_at": "2019-01-01 00:00:00",
+                "created_at": "2019-01-01 00:00:00",
+                "superseded_by_fact_id": "longstanding-current-fact",
+            },
+        )
     response = test_client.post(
         "/api/v1/handoff-drafts/prepare",
         headers={"Authorization": f"Bearer {token}"},
@@ -280,6 +300,7 @@ def test_current_lcr_fact_outside_time_window_is_retained_with_separate_effectiv
     assert response.status_code == 200, response.text
     body = response.json()
     fact = next(item for item in body["source_references"] if item["source_id"] == "longstanding-current-fact")
+    assert all(item["source_id"] != "old-superseded-fact" for item in body["source_references"])
     assert fact["event_at"].startswith("2020-01-01")
     assert fact["recorded_at"].startswith("2020-01-01")
     assert fact["stale_warning"] is True
