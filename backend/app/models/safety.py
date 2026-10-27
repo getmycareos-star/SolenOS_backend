@@ -245,17 +245,3 @@ class SafetyRegressionModel(Base):
 
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
-
-class AssessmentDimensionModel(Base):
-    """Versioned assessment dimensions used by safety review, not care facts."""
-    __tablename__ = "assessment_dimensions"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    dimension_key = Column(String(80), nullable=False, unique=True, index=True)
-    display_name = Column(String(160), nullable=False)
-    description = Column(Text, nullable=True)
-    applies_to = Column(JSONList, nullable=False)
-    is_active = Column(Boolean, nullable=False, default=True)
-    version = Column(String(40), nullable=False, default="1")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
