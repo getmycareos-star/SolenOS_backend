@@ -84,6 +84,15 @@ jobs:
           conn.autocommit = True
           with conn.cursor() as cur:
               cur.execute("""
+                  CREATE TABLE persons (
+                      id VARCHAR PRIMARY KEY,
+                      name VARCHAR NOT NULL,
+                      date_of_birth DATE,
+                      created_at TIMESTAMPTZ DEFAULT now(),
+                      updated_at TIMESTAMPTZ
+                  )
+              """)
+              cur.execute("""
                   CREATE TABLE caregivers (
                       id VARCHAR PRIMARY KEY,
                       email VARCHAR UNIQUE,
@@ -92,6 +101,36 @@ jobs:
                       care_recipient_ids JSONB,
                       role VARCHAR,
                       created_at TIMESTAMPTZ DEFAULT now()
+                  )
+              """)
+              cur.execute("""
+                  CREATE TABLE evidence (
+                      id VARCHAR PRIMARY KEY,
+                      person_id VARCHAR NOT NULL REFERENCES persons(id),
+                      type VARCHAR NOT NULL,
+                      source_text TEXT NOT NULL,
+                      original_file_path VARCHAR,
+                      uploaded_at TIMESTAMPTZ DEFAULT now(),
+                      uploaded_by_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id),
+                      extra_metadata TEXT,
+                      time_provenance VARCHAR,
+                      location VARCHAR,
+                      confidence DOUBLE PRECISION,
+                      evidence_status VARCHAR,
+                      source_type VARCHAR,
+                      source_span_start INTEGER,
+                      source_span_end INTEGER
+                  )
+              """)
+              cur.execute("""
+                  CREATE TABLE anonymous_sessions (
+                      id VARCHAR PRIMARY KEY,
+                      person_id VARCHAR NOT NULL REFERENCES persons(id),
+                      caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id),
+                      token_hash VARCHAR(64) NOT NULL UNIQUE,
+                      expires_at TIMESTAMPTZ NOT NULL,
+                      revoked_at TIMESTAMPTZ,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                   )
               """)
           conn.close()
@@ -120,7 +159,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261027_09_lcr_query_indexes":
+              if revision != "20261027_10_appt_workspace":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]

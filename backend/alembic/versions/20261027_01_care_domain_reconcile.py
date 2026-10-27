@@ -10,7 +10,8 @@ its evidence_id is the stable link to evidence, and content stores the original
 bytes while sha256 and size_bytes support integrity verification.
 """
 from alembic import op
-from sqlalchemy import inspect
+import sqlalchemy as sa
+from sqlalchemy import inspect, text
 
 from app.core.database import Base
 
@@ -27,6 +28,31 @@ def upgrade():
     # checkfirst creates only absent tables; it does not drop or rewrite existing
     # tables or their data.
     Base.metadata.create_all(bind=bind, checkfirst=True)
+
+    # Some deployed databases were stamped at the older revision while still
+    # carrying an empty legacy account-shaped caregivers table. Reconcile only
+    # an empty table; existing caregiver rows require an explicit identity map.
+    inspector = inspect(bind)
+    if inspector.has_table("caregivers"):
+        caregiver_columns = {column["name"] for column in inspector.get_columns("caregivers")}
+        required_caregiver_columns = {"name", "relationship", "person_id", "timezone"}
+        missing_caregiver_columns = sorted(required_caregiver_columns - caregiver_columns)
+        if missing_caregiver_columns:
+            existing_rows = bind.execute(text("SELECT COUNT(*) FROM caregivers")).scalar_one()
+            if existing_rows:
+                raise RuntimeError(
+                    "Caregiver schema reconciliation requires a reviewed identity mapping: "
+                    f"caregivers has {existing_rows} existing rows and is missing "
+                    f"{', '.join(missing_caregiver_columns)}. No columns were changed."
+                )
+            additions = {
+                "name": sa.Column("name", sa.String(), nullable=False),
+                "relationship": sa.Column("relationship", sa.String(), nullable=False),
+                "person_id": sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", name="fk_caregivers_person_id_persons"), nullable=False),
+                "timezone": sa.Column("timezone", sa.String(), nullable=False, server_default="UTC"),
+            }
+            for column_name in missing_caregiver_columns:
+                op.add_column("caregivers", additions[column_name])
 
     inspector = inspect(bind)
     required_tables = (

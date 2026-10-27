@@ -129,6 +129,7 @@ def database_schema_differences(bind=None):
 import app.models.qwen_background_job  # register Qwen jobs before local create_all
 import app.models.improvement_training_example  # register consent-gated improvement examples
 import app.models.privacy_delivery  # register privacy and handoff lifecycle tables
+import app.models.appointment_workspace  # register durable appointment workflow records before local schema bootstrap
 
 
 if not RAILWAY_RUNTIME:
