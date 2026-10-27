@@ -13,9 +13,9 @@ Status: engineering contract. This document is not evidence of clinical validati
 
 Each material item should carry:
 - source type/table and stable source ID;
-- event/effective time and recorded/updated time where available;
+- event/effective time, record-entered/updated time, and due time as separate fields where available;
 - author/reporter/observer and role where recorded;
-- epistemic status (observed, reported, professional finding, verified diagnosis, interpretation, uncertain, conflicting, missing);
+- epistemic status (observed, reported, professional finding, verified diagnosis, interpretation, uncertain, conflicting, missing), kept separate from workflow status;
 - freshness/stale indicator based on timestamps, never inferred from wording;
 - correction/version lineage where available.
 
@@ -46,7 +46,7 @@ Each action should have an owner, due time or condition, status, source, and out
 
 POST /api/v1/handoff-drafts/prepare is a read-only first vertical slice. It reads a fixed allowlist of care facts, care decisions, open questions, information gaps, timeline entries, care events, care transitions, and appointments. Action records are included only when their linked evidence belongs to the requesting caregiver; evidence from another caregiver is excluded unless a separately verified sharing adapter is implemented. Daily Care, document contents, medication/allergy data, routines/preferences, contacts, measurements, and professional identity are not to be represented as retrieved until their scoped adapters are implemented and tested. Community is not authorised. It does not create a handoff, deliver a share, or mutate the LCR.
 
-The current endpoint emits source references and source-availability states. Audience-specific template coverage is a checklist, not a clinical completeness score. The draft should not be treated as a transactionally consistent immutable snapshot until snapshot/version semantics are implemented and tested.
+The current endpoint emits source references, separate event/record/due times, allowlisted source metadata, and source-availability states. Active LCR facts may be included even when older than the requested event window; superseded historical facts are included only when their record timestamp falls inside that window and are labelled superseded. Audience-specific template coverage is a checklist, not a clinical completeness score. The draft should not be treated as a transactionally consistent immutable snapshot until snapshot/version semantics are implemented and tested.
 
 ## Required tests before release
 

@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
@@ -26,16 +26,25 @@ SOURCES = {
     "care_facts": {
         "label": "Living Care Record facts",
         "kind": "lcr_fact",
-        "fields": ("id", "fact_type", "fact_value", "epistemic_status", "effective_at", "created_at", "updated_at", "review_notes"),
+        "fields": ("id", "subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status", "effective_at", "recorded_at", "created_at", "updated_at", "superseded_by_fact_id", "review_notes"),
         "text_fields": ("fact_value", "review_notes"),
-        "time_fields": ("effective_at", "created_at", "updated_at"),
+        "time_fields": ("recorded_at", "created_at", "updated_at"),
+        "event_time_fields": ("effective_at",),
+        "recorded_time_fields": ("recorded_at", "created_at", "updated_at"),
+        "detail_fields": ("fact_type", "subject_type", "superseded_by_fact_id"),
+        "include_active_outside_window": True,
     },
     "care_decisions": {
         "label": "Care decisions",
         "kind": "care_decision",
-        "fields": ("id", "title", "decision_text", "decision_status", "decided_at", "created_at", "context"),
+        "fields": ("id", "title", "decision_text", "decision_status", "decided_at", "created_at", "updated_at", "context"),
         "text_fields": ("decision_text", "title", "context"),
-        "time_fields": ("decided_at", "created_at"),
+        "time_fields": ("created_at", "updated_at"),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("status",),
+        "event_time_fields": ("decided_at",),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("decision_status",),
     },
     "open_questions": {
         "label": "Open questions",
@@ -50,6 +59,8 @@ SOURCES = {
         "fields": ("id", "topic", "description", "priority", "status", "created_at", "updated_at"),
         "text_fields": ("topic", "description"),
         "time_fields": ("created_at", "updated_at"),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("priority", "status"),
     },
     "care_timeline_entries": {
         "label": "Care timeline",
@@ -57,6 +68,12 @@ SOURCES = {
         "fields": ("id", "entry_type", "title", "summary", "occurred_at", "epistemic_status", "created_at"),
         "text_fields": ("title", "summary", "entry_type"),
         "time_fields": ("occurred_at", "created_at"),
+        "event_time_fields": ("occurred_at",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("transition_type", "from_location", "to_location", "location_provenance"),
+        "event_time_fields": ("occurred_at",),
+        "recorded_time_fields": ("created_at",),
+        "detail_fields": ("entry_type",),
     },
     "care_events": {
         "label": "Recorded care events",
@@ -64,11 +81,14 @@ SOURCES = {
         "fields": ("id", "event_type", "status", "occurred_at", "recorded_at", "title", "description", "time_provenance", "confidence"),
         "text_fields": ("title", "description", "event_type", "time_provenance"),
         "time_fields": ("occurred_at", "recorded_at"),
+        "event_time_fields": ("occurred_at",),
+        "recorded_time_fields": ("recorded_at",),
+        "detail_fields": ("event_type", "confidence"),
     },
     "care_transitions": {
         "label": "Care transitions",
         "kind": "care_transition",
-        "fields": ("id", "from_location", "to_location", "transition_type", "occurred_at", "notes", "time_provenance", "location_provenance"),
+        "fields": ("id", "from_location", "to_location", "transition_type", "occurred_at", "created_at", "notes", "time_provenance", "location_provenance"),
         "text_fields": ("transition_type", "from_location", "to_location", "notes", "time_provenance", "location_provenance"),
         "time_fields": ("occurred_at", "created_at"),
     },
@@ -78,13 +98,20 @@ SOURCES = {
         "fields": ("id", "title", "scheduled_at", "scheduled_at_timezone", "location", "provider", "healthcare_org", "preparation_notes", "medication_questions", "travel_notes", "status", "time_provenance", "location_provenance", "created_at", "updated_at"),
         "text_fields": ("title", "provider", "healthcare_org", "location", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
         "time_fields": ("scheduled_at", "created_at", "updated_at"),
+        "event_time_fields": ("scheduled_at",),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "detail_fields": ("scheduled_at_timezone", "provider", "healthcare_org", "location", "status", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
     },
     "actions": {
         "label": "Recorded care actions",
         "kind": "care_action",
         "fields": ("id", "source_evidence_id", "source_passage", "source_authority", "actor_label", "subject_label", "action_type", "action_object", "normalized_action", "original_text", "modality", "condition_text", "trigger_text", "deadline", "start_time", "status", "provenance_notes", "created_at", "updated_at"),
         "text_fields": ("normalized_action", "original_text", "action_object", "actor_label", "subject_label", "condition_text", "trigger_text", "provenance_notes"),
-        "time_fields": ("created_at", "deadline", "start_time", "updated_at"),
+        "time_fields": ("created_at", "updated_at"),
+        "event_time_fields": ("start_time",),
+        "recorded_time_fields": ("created_at", "updated_at"),
+        "due_time_fields": ("deadline",),
+        "detail_fields": ("source_authority", "actor_label", "subject_label", "action_type", "modality", "condition_text", "trigger_text", "deadline", "status", "source_evidence_id"),
         "require_caregiver_owned_evidence": True,
     },
 }
@@ -158,6 +185,18 @@ def _iso(value):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     return value
+
+
+def _detail_value(value):
+    if value is None or isinstance(value, dict):
+        return None
+    if isinstance(value, (datetime, date)):
+        return _iso(value)
+    if isinstance(value, list):
+        scalar_values = [str(item).strip() for item in value if isinstance(item, (str, int, float, bool))]
+        return "; ".join(scalar_values)[:500] if scalar_values else None
+    text = str(value).strip()
+    return text[:500] if text else None
 
 
 def _display_text(row: dict, fields: tuple[str, ...]) -> str:
@@ -249,12 +288,19 @@ def prepare_handoff_draft(
                 evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
             )
         timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
-        timestamp_expression = (func.coalesce(*timestamp_columns) if len(timestamp_columns) > 1 else timestamp_columns[0]) if timestamp_columns else None
-        if timestamp_expression is not None:
-            # Use the first populated timestamp, not merely the first existing
-            # column, so a null effective_at cannot bypass the requested window.
-            query = query.where(or_(timestamp_expression.is_(None), timestamp_expression >= cutoff))
-            query = query.order_by(timestamp_expression.desc().nullslast())
+        if timestamp_columns:
+            # Include a row if any applicable time is within the window, or all
+            # its time fields are unknown. COALESCE would hide a recent update
+            # behind an older non-null creation timestamp.
+            in_window = or_(
+                *[column >= cutoff for column in timestamp_columns],
+                and_(*[column.is_(None) for column in timestamp_columns]),
+            )
+            if spec.get("include_active_outside_window") and "superseded_by_fact_id" in table.c:
+                query = query.where(or_(table.c.superseded_by_fact_id.is_(None), in_window))
+            else:
+                query = query.where(in_window)
+            query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
         query = query.limit(MAX_ROWS_PER_SOURCE)
         rows = [dict(row) for row in db.execute(query).mappings().all()]
         source_status = "available" if rows else "empty"
@@ -267,8 +313,15 @@ def prepare_handoff_draft(
             source_id = row.get("id")
             if not source_id:
                 continue
-            time_value = next((row.get(k) for k in spec["time_fields"] if row.get(k) is not None), None)
+            event_time = next((row.get(k) for k in spec.get("event_time_fields", ()) if row.get(k) is not None), None)
+            recorded_time = next((row.get(k) for k in spec.get("recorded_time_fields", spec["time_fields"]) if row.get(k) is not None), None)
+            due_time = next((row.get(k) for k in spec.get("due_time_fields", ()) if row.get(k) is not None), None)
             text = _display_text(row, spec["text_fields"])
+            details = {key: value for key in spec.get("detail_fields", ()) if (value := _detail_value(row.get(key))) is not None}
+            if row.get("superseded_by_fact_id"):
+                details["fact_lifecycle"] = "superseded"
+            elif table_name == "care_facts":
+                details["fact_lifecycle"] = "current_in_lcr"
             if not text:
                 continue
             epistemic_value = next((row.get(k) for k in ("epistemic_status", "assertion_status") if row.get(k) is not None), None)
@@ -277,11 +330,14 @@ def prepare_handoff_draft(
                 "source_type": spec["kind"],
                 "source_table": table_name,
                 "source_id": str(source_id),
-                "recorded_at": _iso(time_value),
+                "event_at": _iso(event_time),
+                "recorded_at": _iso(recorded_time),
+                "due_at": _iso(due_time),
+                "details": details,
                 "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
                 "record_status": str(record_status) if record_status is not None else "not_recorded",
                 "text": text,
-                "stale_warning": bool(time_value is not None and _iso(time_value) < (now - timedelta(days=30)).isoformat()),
+                "stale_warning": bool(recorded_time is not None and _iso(recorded_time) < (now - timedelta(days=30)).isoformat()),
             })
 
     # These modules are intentionally not represented as read when no verified
@@ -343,7 +399,7 @@ def prepare_handoff_draft(
         "source_statuses": statuses,
         "sections": sections,
         "source_references": [
-            {key: item[key] for key in ("source_type", "source_table", "source_id", "recorded_at", "epistemic_status", "record_status", "stale_warning")}
+            {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning")}
             for item in records
         ],
         "limitations": gaps,
