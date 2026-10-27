@@ -480,7 +480,7 @@ _CONTEXT_STOPWORDS = {
     "has", "have", "had", "you", "your", "about", "what", "when", "where",
     "which", "who", "how", "can", "could", "would", "should", "does", "did",
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
-    "they", "she", "his", "its", "our", "not", "but", "all", "any", "some",
+    "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
 }
 
