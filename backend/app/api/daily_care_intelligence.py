@@ -403,8 +403,8 @@ def review_daily_care_lcr_proposal(
     if not isinstance(proposals, list) or proposal_index < 0 or proposal_index >= len(proposals):
         raise HTTPException(status_code=404, detail="Proposal not found")
     proposal = proposals[proposal_index]
-    if proposal.get("review_status") != "pending_review":
-        raise HTTPException(status_code=409, detail="This proposal already has a review decision")
+    if proposal.get("review_status") not in {"pending_review", "corrected_pending_approval"}:
+        raise HTTPException(status_code=409, detail="This proposal already has a final review decision")
 
     original = dict(proposal)
     if payload.decision == "reject":
