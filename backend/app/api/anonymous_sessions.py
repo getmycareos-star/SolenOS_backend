@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Person
+from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 
 router = APIRouter(prefix="/sessions", tags=["anonymous sessions"])
 SESSION_TTL_DAYS = 365
@@ -46,6 +47,13 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
     )
     db.add(caregiver)
     db.flush()
+    caregiver_profile = ensure_caregiver_profile_for_session(
+        db,
+        person_id=person.id,
+        session_caregiver_id=caregiver.id,
+        name=caregiver_name,
+        relationship=caregiver.relationship,
+    )
 
     raw_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
@@ -69,6 +77,7 @@ def create_anonymous_session(payload: AnonymousSessionCreate, db: Session = Depe
         },
         "caregiver": {
             "id": caregiver.id,
+            "profile_id": caregiver_profile.id,
             "name": caregiver.name,
             "relationship": caregiver.relationship,
         },
@@ -93,6 +102,9 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
     )
     if not session:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid")
+    caregiver_profile = ensure_caregiver_profile_for_session(
+        db, person_id=session.person_id, session_caregiver_id=session.caregiver_id
+    )
     raw_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=SESSION_TTL_DAYS)
     session.token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
@@ -102,6 +114,7 @@ def refresh_anonymous_session(request: Request, db: Session = Depends(get_db)):
         "session_id": session.id,
         "person_id": session.person_id,
         "caregiver_id": session.caregiver_id,
+        "caregiver_profile_id": caregiver_profile.id,
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
