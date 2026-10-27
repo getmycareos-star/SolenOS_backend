@@ -144,7 +144,7 @@ jobs:
               "privacy_incident_events", "data_processing_records", "data_subject_requests",
               "sensitive_data_access_logs", "legal_holds", "audit_log_events", "audit_log_integrity_checks",
               "audit_log_access_records", "privileged_access_logs", "authorization_decisions",
-              "failed_access_attempts", "notifications", "notification_preferences",
+              "failed_access_attempts", "care_notifications", "care_notification_preferences",
               "notification_delivery_attempts", "notification_delivery_receipts", "notification_read_receipts",
               "care_reminders", "reminder_acknowledgements", "reminder_escalations", "handoff_records",
               "handoff_recipients", "handoff_access_logs", "handoff_acknowledgements", "delivery_failure_events",
