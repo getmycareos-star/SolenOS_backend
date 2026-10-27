@@ -11,10 +11,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
+from app.models.care import CareEvent
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
@@ -95,6 +97,99 @@ def create_appointment_workspace(payload: AppointmentWorkspaceCreate, request: R
         db.rollback()
         raise HTTPException(status_code=503, detail="Appointment workspace could not be persisted") from exc
     return _record_out(row)
+
+
+
+@router.get("/preparation-brief")
+def get_appointment_preparation_brief(request: Request, window_days: int = 90, db: Session = Depends(get_db)):
+    """Return a bounded, source-linked LCR preparation view without inferring clinical meaning."""
+    if window_days < 1 or window_days > 365:
+        raise HTTPException(status_code=422, detail="window_days must be between 1 and 365")
+    person_id, _ = _scope(request, db)
+    now = datetime.now(timezone.utc)
+    cutoff = now - __import__("datetime").timedelta(days=window_days)
+
+    try:
+        fact_rows = db.execute(text("""
+            SELECT id, fact_type, fact_value, epistemic_status, effective_at, created_at, updated_at
+            FROM care_facts
+            WHERE person_id = :person_id
+            ORDER BY COALESCE(updated_at, created_at) DESC
+            LIMIT 40
+        """), {"person_id": person_id}).mappings().all()
+    except Exception:
+        db.rollback()
+        fact_rows = None
+
+    events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.occurred_at >= cutoff,
+    ).order_by(CareEvent.occurred_at.desc()).limit(30).all()
+    appointments = db.query(Appointment).filter(
+        Appointment.person_id == person_id,
+    ).order_by(Appointment.scheduled_at.desc()).limit(15).all()
+
+    facts = []
+    if fact_rows is not None:
+        for row in fact_rows:
+            facts.append({
+                "source_table": "care_facts",
+                "source_id": str(row["id"]),
+                "fact_type": row["fact_type"],
+                "value": row["fact_value"],
+                "epistemic_status": row["epistemic_status"] or "unknown",
+                "effective_at": row["effective_at"].isoformat() if row["effective_at"] else None,
+                "recorded_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            })
+
+    event_items = [{
+        "source_table": "care_events",
+        "source_id": str(item.id),
+        "event_type": item.event_type,
+        "title": item.title,
+        "description": item.description,
+        "status": item.status,
+        "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
+        "recorded_at": item.recorded_at.isoformat() if item.recorded_at else None,
+        "evidence_ids": item.evidence_ids or [],
+    } for item in events]
+    appointment_items = [{
+        "source_table": "appointments",
+        "source_id": str(item.id),
+        "title": item.title,
+        "scheduled_at": item.scheduled_at.isoformat() if item.scheduled_at else None,
+        "provider": item.provider,
+        "healthcare_org": item.healthcare_org,
+        "location": item.location,
+        "status": item.status,
+        "preparation_notes": item.preparation_notes,
+        "evidence_ids": item.evidence_ids or [],
+    } for item in appointments]
+
+    return {
+        "person_scope_verified": True,
+        "snapshot_at": now.isoformat(),
+        "window_days": window_days,
+        "read_only": True,
+        "updates_lcr": False,
+        "facts": facts,
+        "events": event_items,
+        "appointments": appointment_items,
+        "source_coverage": {
+            "care_facts": "available" if fact_rows is not None else "unavailable",
+            "care_events": "available" if event_items else "no_records_returned",
+            "appointments": "available" if appointment_items else "no_records_returned",
+            "medications_and_allergies": "unavailable",
+            "documents": "unavailable",
+            "community": "not_authorized",
+        },
+        "limitations": [
+            "This is a source-linked preparation view, not a clinical assessment.",
+            "Caregiver reports remain reports; no diagnosis, cause, medication instruction, or clinician finding is inferred.",
+            "Missing or unavailable sources are not evidence that the information does not exist.",
+        ],
+    }
 
 
 @router.get("/{record_id}")
