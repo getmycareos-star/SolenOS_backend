@@ -132,6 +132,14 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     assert result["proposals"][0]["source_ids"] == [event_id]
     assert result["history_scope"]["records_sent_to_model"] >= 1
 
+    corrected = client.post(
+        f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
+        headers=auth,
+        json={"decision": "correct", "corrected_value": "Caregiver reported that sleep was poor last night."},
+    )
+    assert corrected.status_code == 200, corrected.text
+    assert corrected.json()["written_to_lcr"] is False
+
     approved = client.post(
         f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
         headers=auth,
@@ -144,12 +152,12 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     try:
         assertion = db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).one()
         assert assertion.source_event_id == event_id
-        assert assertion.asserted_value == "Caregiver reported poor sleep last night."
+        assert assertion.asserted_value == "Caregiver reported that sleep was poor last night."
         assert assertion.assertion_status == "caregiver_reviewed"
         assert assertion.created_by_caregiver_id == session["caregiver"]["id"]
         from app.models.capture_analysis import CaptureAnalysis
         analysis = db.query(CaptureAnalysis).filter_by(id=result["proposal_analysis_id"]).one()
-        assert analysis.review_history[0]["original_proposal"]["proposed_value"] == assertion.asserted_value
+        assert analysis.review_history[0]["original_proposal"]["proposed_value"] == "Caregiver reported poor sleep last night."
         assert analysis.review_history[0]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
         # Original care event remains unchanged; acceptance adds an assertion.
         event = db.query(CareEvent).filter_by(id=event_id).one()
