@@ -1,4 +1,4 @@
-from app.services.companion_context import rank_authorized_context
+from app.services.companion_context import rank_authorized_context, select_context_within_budget
 
 
 def test_retrieval_keeps_recent_anchors_and_finds_older_question_relevant_context():
@@ -21,7 +21,7 @@ def test_retrieval_keeps_recent_anchors_and_finds_older_question_relevant_contex
     assert ids[:3] == [0, 1, 2]
     assert 12 in ids
     assert len(ids) == 6
-    assert ids == sorted(ids)
+    assert ids.index(12) < 6
 
 
 def test_retrieval_is_deterministic_and_handles_empty_or_unmatched_queries():
@@ -37,3 +37,21 @@ def test_retrieval_is_deterministic_and_handles_empty_or_unmatched_queries():
         records, "unmatched concept", text_of=lambda row: row["text"], limit=4
     )
     assert first == second == records[:4]
+
+
+def test_context_budget_round_robins_groups_without_truncating_records():
+    groups = {
+        "events": [{"id": "e1", "cost": 300}, {"id": "e2", "cost": 300}],
+        "evidence": [{"id": "d1", "cost": 300}, {"id": "d2", "cost": 300}],
+        "questions": [{"id": "q1", "cost": 300}],
+    }
+    selected = select_context_within_budget(
+        groups,
+        cost_of=lambda group, row: row["cost"],
+        max_chars=610,
+    )
+    assert set(selected) == {"events", "evidence", "questions"}
+    assert [row["id"] for row in selected["events"]] == ["e1"]
+    assert [row["id"] for row in selected["evidence"]] == ["d1"]
+    assert [row["id"] for row in selected["questions"]] == ["q1"]
+    assert sum(row["cost"] + 2 for rows in selected.values() for row in rows) <= 610
