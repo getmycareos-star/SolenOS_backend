@@ -182,6 +182,7 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "care_uncertainty": "care_uncertainties", "uncertainty": "care_uncertainties",
         "care_conflict": "care_conflicts", "conflict": "care_conflicts",
         "care_action_outcome": "care_action_outcomes", "action_outcome": "care_action_outcomes",
+        "living_care_record": "living_care_records", "living_record": "living_care_records",
     }
     links = []
     if resource in ("follow-up-links", "relationships"):
