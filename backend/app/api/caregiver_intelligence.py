@@ -96,6 +96,32 @@ def _require_profile_in_person(db: Session, profile_id: str, person_id: str) -> 
     return profile
 
 
+def _resolve_profile_target(db: Session, target_id: str, person_id: str) -> CaregiverProfileModel:
+    profile = db.query(CaregiverProfileModel).filter(
+        CaregiverProfileModel.id == str(target_id),
+        CaregiverProfileModel.person_id == str(person_id),
+    ).first()
+    if profile is not None:
+        return profile
+    session_caregiver = db.query(SessionCaregiverModel).filter(
+        SessionCaregiverModel.id == str(target_id),
+        SessionCaregiverModel.person_id == str(person_id),
+    ).first()
+    if session_caregiver is not None:
+        try:
+            profile = ensure_caregiver_profile_for_session(
+                db,
+                person_id=str(person_id),
+                session_caregiver_id=str(session_caregiver.id),
+            )
+            db.commit()
+            return profile
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=403, detail="Caregiver identity is not linked to this care record") from exc
+    raise HTTPException(status_code=404, detail="Caregiver profile not found")
+
+
 def _assert_actor_id(claimed_id: Optional[str], profile_id: str, session_caregiver_id: str) -> None:
     if claimed_id and str(claimed_id) not in {str(profile_id), str(session_caregiver_id)}:
         raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
