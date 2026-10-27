@@ -110,3 +110,25 @@ def test_rejects_claim_that_assistant_will_change_the_record():
 def test_deterministic_routing_covers_all_enabled_workflows(workflow, task_text):
     assert workflow in ENABLED_WORKFLOWS
     assert _route_from_text(task_text) == workflow
+
+
+def test_allows_explicit_missing_medication_information_without_inventing_a_status():
+    assert _contains_unsupported_operational_claim(
+        "No medication details are recorded in the supplied context.",
+        "The supplied record does not contain medication information.",
+        [],
+    ) is False
+    assert _contains_unsupported_operational_claim(
+        "I cannot verify the medication dose because no medication record was supplied.",
+        "No matching care evidence was supplied.",
+        [],
+    ) is False
+
+
+def test_rejects_unsupported_medication_action_even_if_reply_also_mentions_missing_context():
+    reply = "No medication details are recorded, but the dose was increased yesterday."
+    assert _contains_unsupported_operational_claim(
+        reply,
+        "No matching care evidence was supplied.",
+        [],
+    ) is True
