@@ -56,6 +56,19 @@ def test_create_account_sign_in_and_delete_account():
     )
     assert created.status_code == 201, created.text
     assert created.json()["account"]["email"] == "caregiver@example.com"
+    assert created.json()["caregiver_profile_id"] == session["caregiver"]["profile_id"]
+
+    from app.models.caregiver_intelligence import CaregiverProfile
+    db = TestSessionLocal()
+    try:
+        linked_profile = db.query(CaregiverProfile).filter_by(
+            session_caregiver_id=session["caregiver"]["id"]
+        ).one()
+        assert linked_profile.id == session["caregiver"]["profile_id"]
+        assert linked_profile.email == "caregiver@example.com"
+        assert linked_profile.person_id == session["person"]["id"]
+    finally:
+        db.close()
 
     current = client.get("/api/v1/accounts/me", headers=headers)
     assert current.status_code == 200
@@ -68,6 +81,7 @@ def test_create_account_sign_in_and_delete_account():
     assert login.status_code == 200, login.text
     assert login.json()["person_id"] == session["person"]["id"]
     assert login.json()["caregiver_id"] == session["caregiver"]["id"]
+    assert login.json()["caregiver_profile_id"] == session["caregiver"]["profile_id"]
     assert login.json()["access_token"] != session["access_token"]
 
     wrong_password = client.request(
@@ -82,6 +96,13 @@ def test_create_account_sign_in_and_delete_account():
     assert deleted.json()["deleted"] is True
     assert deleted.json()["care_record_retained"] is True
     assert deleted.json()["other_sessions_revoked"] is True
+    db = TestSessionLocal()
+    try:
+        retained_profile = db.query(CaregiverProfile).filter_by(session_caregiver_id=session["caregiver"]["id"]).one()
+        assert retained_profile.email is None
+        assert retained_profile.session_caregiver_id == session["caregiver"]["id"]
+    finally:
+        db.close()
     assert client.get("/api/v1/accounts/me", headers=headers).json()["account"] is None
     revoked_login_session = client.get(
         f"/api/v1/evidence/{session['person']['id']}",
