@@ -270,7 +270,7 @@ def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
         action="handoff.recipients.list", target_type="handoff_directory",
         target_id=person_id, occurred_at=datetime.now(timezone.utc),
         outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
-        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items), "owner_consent_active": owner_consent_active},
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
     ))
     db.commit()
     return {"items": items, "count": len(items)}
@@ -361,7 +361,7 @@ def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
         action="handoff.outbox.list", target_type="handoff_outbox",
         target_id=caregiver_id, occurred_at=now, outcome="allowed",
         request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
-        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items), "owner_consent_active": owner_consent_active},
     ))
     db.commit()
     return {"items": items, "count": len(items)}
