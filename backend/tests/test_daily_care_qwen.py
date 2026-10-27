@@ -140,6 +140,8 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     )
     assert corrected.status_code == 200, corrected.text
     assert corrected.json()["written_to_lcr"] is False
+    assert corrected.json()["proposal"]["proposed_value"] == "Caregiver reported that sleep was poor last night."
+    assert corrected.json()["proposal"]["review_status"] == "corrected_pending_approval"
 
     approved = client.post(
         f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
