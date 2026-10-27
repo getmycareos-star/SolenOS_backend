@@ -8,6 +8,7 @@ from a caller-supplied person_id.
 from datetime import datetime, date
 from typing import Any
 import json
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import MetaData, Table, select, insert, desc
@@ -239,6 +240,10 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     _validate_links(db, person_id, resource, data)
     table = _table(db, RESOURCES[resource])
     data["person_id"] = person_id
+    # Migration-created continuity tables use UUID-shaped string primary keys
+    # without database-side generators; issue IDs server-side for every insert.
+    if "id" in table.c and "id" not in data:
+        data["id"] = str(uuid.uuid4())
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
     # Never trust client-supplied caregiver attribution.
