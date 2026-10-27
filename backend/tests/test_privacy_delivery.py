@@ -192,3 +192,79 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
         },
     )
     assert expired.status_code == 422
+
+
+
+def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
+
+    client = TestClient(app)
+    owner = create_session(client, "Notification recipient")
+    person_id = owner["person"]["id"]
+    caregiver_id = owner["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        notification = CareNotification(
+            id=str(uuid.uuid4()), person_id=person_id, caregiver_id=caregiver_id,
+            title="Care update", body="A caregiver recorded a new care event.",
+            category="care_update", priority="normal",
+        )
+        db.add(notification)
+        db.commit()
+        notification_id = notification.id
+    finally:
+        db.close()
+
+    listed = client.get("/api/v1/notifications?unread_only=true", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert any(item["id"] == notification_id and item["is_read"] is False for item in listed.json())
+
+    marked = client.patch(f"/api/v1/notifications/{notification_id}/read", headers=headers)
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["is_read"] is True
+
+    preferences_before = client.get("/api/v1/notifications/preferences", headers=headers)
+    assert preferences_before.status_code == 200
+    assert preferences_before.json()["configured"] is False
+    preferences_saved = client.put(
+        "/api/v1/notifications/preferences",
+        headers=headers,
+        json={"quiet_hours_enabled": True, "reminders_enabled": False},
+    )
+    assert preferences_saved.status_code == 200, preferences_saved.text
+    assert preferences_saved.json()["quiet_hours_enabled"] is True
+    assert preferences_saved.json()["reminders_enabled"] is False
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(NotificationReadReceipt).filter_by(notification_id=notification_id, reader_id=caregiver_id).count() == 1
+        assert db.query(CareNotificationPreference).filter_by(person_id=person_id, caregiver_id=caregiver_id).one().reminders_enabled is False
+        assert db.query(AuditLogEvent).filter_by(target_id=notification_id, action="notification.read").count() == 1
+        assert db.query(AuditLogEvent).filter_by(action="notification.preferences.update", person_id=person_id).count() == 1
+    finally:
+        db.close()
+
+
+def test_notification_read_isolated_between_caregiver_sessions():
+    client = TestClient(app)
+    first = create_session(client, "First recipient")
+    second = create_session(client, "Second recipient")
+    db = TestSessionLocal()
+    try:
+        notification = CareNotification(
+            id=str(uuid.uuid4()), person_id=first["person"]["id"],
+            caregiver_id=first["caregiver"]["id"], title="Private update",
+            body="Scoped notification.", category="care_update", priority="normal",
+        )
+        db.add(notification)
+        db.commit()
+        notification_id = notification.id
+    finally:
+        db.close()
+    response = client.patch(
+        f"/api/v1/notifications/{notification_id}/read",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert response.status_code == 404
