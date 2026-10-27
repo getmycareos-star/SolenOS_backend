@@ -254,6 +254,7 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
         assert db.query(NotificationReadReceipt).filter_by(notification_id=notification_id, reader_id=caregiver_id).count() == 1
         assert db.query(CareNotificationPreference).filter_by(person_id=person_id, caregiver_id=caregiver_id).one().reminders_enabled is False
         assert db.query(AuditLogEvent).filter_by(target_id=notification_id, action="notification.read").count() == 1
+        assert db.query(AuditLogEvent).filter_by(action="notification.list", person_id=person_id).count() >= 2
         assert db.query(AuditLogEvent).filter_by(action="notification.preferences.update", person_id=person_id).count() == 1
     finally:
         db.close()
