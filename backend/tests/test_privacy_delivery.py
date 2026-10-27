@@ -106,6 +106,12 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
 
+    before_accept = client.get(
+        f"/api/v1/handoffs/{handoff['id']}",
+        headers=recipient_headers,
+    )
+    assert before_accept.status_code == 404
+
     accepted = client.post(
         f"/api/v1/handoffs/{handoff['id']}/accept",
         headers=recipient_headers,
