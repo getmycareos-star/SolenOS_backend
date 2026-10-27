@@ -1,7 +1,7 @@
 """Add privacy, sharing, audit, notification, reminder and handoff lifecycle records.
 
 Revision ID: 20261027_03_privacy_delivery
-Revises: 20261027_02_continuity_lifecycle
+Revises: 20261027_03_lcr_history
 
 Additive and idempotent: existing tables are preserved. Domain-specific payloads are
 stored in JSON while frequently queried lifecycle/security fields remain typed.
