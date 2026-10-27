@@ -19,7 +19,7 @@ from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router, _ollama_url, _ollama_chat
 from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
-from app.api.care_continuity import router as care_continuity_router
+from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
@@ -876,9 +876,104 @@ def readiness_check(db: Session = Depends(get_db)):
     if differences:
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
+    migration_state = "not_checked"
+    migration_head = None
+    continuity_schema = "orm_verified"
+    # On PostgreSQL, also verify that Alembic has applied the same graph this
+    # image ships and that migration-created LCR/privacy tables actually exist.
+    # These reflected tables are not all represented in SQLAlchemy ORM metadata.
+    if db.get_bind().dialect.name == "postgresql":
+        try:
+            from pathlib import Path
+            from alembic.config import Config as AlembicConfig
+            from alembic.script import ScriptDirectory
+
+            alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+            script = ScriptDirectory.from_config(AlembicConfig(str(alembic_ini)))
+            expected_heads = set(script.get_heads())
+            applied_heads = {
+                str(row[0])
+                for row in db.execute(text("SELECT version_num FROM alembic_version")).all()
+            }
+            if not expected_heads or applied_heads != expected_heads:
+                raise HTTPException(status_code=503, detail="Database migrations are not current")
+
+            required_migration_tables = set([
+                "care_record_identifiers",
+                "care_record_sections",
+                "care_record_links",
+                "care_record_status_history",
+                "care_fact_revisions",
+                "care_assertion_revisions",
+                "care_decision_revisions",
+                "care_event_revisions",
+                "care_observation_revisions",
+                "care_change_revisions",
+                "care_situation_revisions",
+                "care_evidence_revisions",
+                "care_record_retractions",
+                "care_record_restorations",
+                "shared_summary_expirations",
+                "shared_summary_revocations",
+                "shared_summary_access_logs",
+                "shared_summary_downloads",
+                "shared_summary_generation_jobs",
+                "shared_summary_delivery_receipts",
+                "shared_summary_consent_records",
+                "shared_summary_disclosure_records",
+                "shared_summary_link_events",
+                "data_deletion_requests",
+                "data_deletion_jobs",
+                "data_export_requests",
+                "privacy_incidents",
+                "privacy_incident_events",
+                "data_processing_records",
+                "data_subject_requests",
+                "sensitive_data_access_logs",
+                "legal_holds",
+                "audit_log_events",
+                "audit_log_integrity_checks",
+                "audit_log_access_records",
+                "privileged_access_logs",
+                "authorization_decisions",
+                "failed_access_attempts",
+                "care_notifications",
+                "care_notification_preferences",
+                "notification_delivery_attempts",
+                "notification_delivery_receipts",
+                "notification_read_receipts",
+                "care_reminders",
+                "reminder_acknowledgements",
+                "reminder_escalations",
+                "handoff_records",
+                "handoff_recipients",
+                "handoff_access_logs",
+                "handoff_acknowledgements",
+                "delivery_failure_events",
+            ]) | set(CARE_CONTINUITY_RESOURCES.values())
+            missing_migration_tables = sorted(
+                name for name in required_migration_tables if not inspector.has_table(name)
+            )
+            if missing_migration_tables:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"message": "Migration-created continuity schema is incomplete",
+                            "missing_tables": missing_migration_tables},
+                )
+            migration_state = "current"
+            migration_head = sorted(applied_heads)[0]
+            continuity_schema = "verified"
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Database migration state could not be verified") from exc
+
     return {
         "status": "ready",
         "database": "reachable",
         "schema": "verified",
+        "migration_state": migration_state,
+        "migration_head": migration_head,
+        "continuity_schema": continuity_schema,
         "app": settings.app_name,
     }

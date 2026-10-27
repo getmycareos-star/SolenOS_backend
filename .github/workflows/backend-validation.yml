@@ -52,17 +52,29 @@ jobs:
           ready=0
           for attempt in $(seq 1 48); do
             health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
-            status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
+            ready_json=$(curl --silent --show-error --fail --max-time 20 "${base}/ready" 2>/dev/null || true)
+            status=0
+            migration_state=""
+            continuity_schema=""
+            migration_head=""
+            if [ -n "$ready_json" ]; then
+              status=200
+              migration_state=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_state",""))' 2>/dev/null || true)
+              continuity_schema=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("continuity_schema",""))' 2>/dev/null || true)
+              migration_head=$(printf '%s' "$ready_json" | python -c 'import json,sys; print(json.load(sys.stdin).get("migration_head",""))' 2>/dev/null || true)
+            else
+              status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
+            fi
             openapi=$(curl --silent --show-error --fail --max-time 20 "${base}/openapi.json" 2>/dev/null || true)
             has_lcr_routes=0
             if printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-versions' &&
                printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-snapshots'; then
               has_lcr_routes=1
             fi
-            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; LCR version routes present: ${has_lcr_routes}"
-            # A healthy previous deployment is not sufficient: wait until the
-            # deployment carrying the new LCR routes is actually serving traffic.
-            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$has_lcr_routes" = "1" ]; then ready=1; break; fi
+            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; migration_state=${migration_state}; migration_head=${migration_head}; continuity_schema=${continuity_schema}; LCR version routes present: ${has_lcr_routes}"
+            # Do not accept a healthy old deployment: readiness must report that
+            # the current image's migration graph and reflected continuity tables are present.
+            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$migration_state" = "current" ] && [ "$continuity_schema" = "verified" ] && [ -n "$migration_head" ] && [ "$has_lcr_routes" = "1" ]; then ready=1; break; fi
             sleep 20
           done
           test "$ready" = "1"
