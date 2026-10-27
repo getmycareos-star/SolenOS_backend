@@ -9,6 +9,9 @@ from sqlalchemy import inspect, select, update
 import uuid
 
 from app.core.database import Base
+from app.models import care as _care  # noqa: F401
+from app.models import qwen_background_job as _qwen  # noqa: F401
+from app.models import safety as _safety  # noqa: F401
 
 revision = "20261027_05_qwen_output_safety"
 down_revision = "20261027_04_caregiver_context"
