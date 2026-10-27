@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -535,6 +536,40 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
                 return True
     return False
 
+
+
+_COMPANION_STOPWORDS = {
+    "about", "after", "again", "also", "been", "being", "could", "does", "from",
+    "have", "has", "here", "into", "just", "like", "more", "most", "much", "only",
+    "other", "please", "should", "some", "such", "than", "that", "them", "then",
+    "there", "these", "they", "this", "those", "through", "what", "when", "where",
+    "which", "while", "with", "would", "your", "you", "mum", "mom", "dad", "care",
+    "record", "records", "solenos", "getting", "worse", "better", "tell", "show",
+}
+
+
+def _companion_query_terms(text: str) -> list[str]:
+    """Extract bounded search terms; this is retrieval only, never factual inference."""
+    terms = re.findall(r"[a-z0-9]{3,}", (text or "").casefold())
+    unique = []
+    for term in terms:
+        if term not in _COMPANION_STOPWORDS and term not in unique:
+            unique.append(term)
+        if len(unique) >= 8:
+            break
+    return unique
+
+
+def _companion_relevance_score(query: str, *fields: str | None) -> int:
+    """Score lexical overlap to rank candidate sources; never treats a match as proof."""
+    terms = set(_companion_query_terms(query))
+    if not terms:
+        return 0
+    title_terms = set(re.findall(r"[a-z0-9]{3,}", (fields[0] or "").casefold())) if fields else set()
+    body_terms = set()
+    for field in fields[1:]:
+        body_terms.update(re.findall(r"[a-z0-9]{3,}", (field or "").casefold()))
+    return 3 * len(terms & title_terms) + len(terms & body_terms)
 
 def _companion_message_needs_revision(text: str) -> bool:
     """Allow detail when warranted while rejecting empty, runaway, or internal output."""
@@ -1060,13 +1095,42 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        query_terms = _companion_query_terms(user_text)
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
             .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
-            .limit(20)
+            .limit(8)
             .all()
         )
+        # Retrieve older matching events separately from the recent baseline so a
+        # relevant event is not hidden merely because more recent records exist.
+        matching_event_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+        if query_terms:
+            matching_event_query = matching_event_query.filter(or_(
+                *[CareEvent.title.ilike(f"%{term}%") for term in query_terms],
+                *[CareEvent.description.ilike(f"%{term}%") for term in query_terms],
+            ))
+        matching_events = matching_event_query.order_by(
+            CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()
+        ).limit(40).all()
+        ranked_matching_events = sorted(
+            matching_events,
+            key=lambda event: _companion_relevance_score(
+                user_text, event.title, event.description, event.event_type, event.status
+            ),
+            reverse=True,
+        )
+        selected_events = []
+        selected_event_ids = set()
+        for event in [*ranked_matching_events[:8], *recent_events]:
+            event_id = str(event.id)
+            if event_id not in selected_event_ids:
+                selected_event_ids.add(event_id)
+                selected_events.append(event)
+            if len(selected_events) >= 12:
+                break
+        recent_events = selected_events
         for event in recent_events:
             source_event_ids.append(str(event.id))
             event_context.append(
