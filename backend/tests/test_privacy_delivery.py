@@ -82,12 +82,51 @@ def add_caregiver_session(person_id, relationship="family caregiver"):
     return caregiver_id, token
 
 
+def accept_required_consent(person_id, caregiver_id):
+    from app.models.collaboration import ConsentRecord
+
+    db = TestSessionLocal()
+    try:
+        consent = db.query(ConsentRecord).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id
+        ).first()
+        if consent is None:
+            consent = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
+            db.add(consent)
+        consent.medical_disclaimer_acknowledged = True
+        consent.privacy_model_acknowledged = True
+        consent.multi_caregiver_acknowledged = True
+        consent.no_advertising_acknowledged = True
+        consent.accepted_terms_version = "2026-10"
+        consent.accepted_at = datetime.now(timezone.utc)
+        consent.revoked_at = None
+        db.commit()
+    finally:
+        db.close()
+
+
+def revoke_required_consent(person_id, caregiver_id):
+    from app.models.collaboration import ConsentRecord
+
+    db = TestSessionLocal()
+    try:
+        consent = db.query(ConsentRecord).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id
+        ).one()
+        consent.revoked_at = datetime.now(timezone.utc)
+        db.commit()
+    finally:
+        db.close()
+
+
 def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     from app.models.privacy_delivery import AuditLogEvent, HandoffAcknowledgement, HandoffAccessLog
 
     client = TestClient(app)
     owner = create_session(client, "Recipient")
     recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
 
@@ -149,9 +188,42 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
         db.close()
 
 
+def test_handoff_requires_current_consent_for_creator_and_recipient():
+    client = TestClient(app)
+    owner = create_session(client, "Consent owner")
+    recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+    payload = {
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary"],
+    }
+
+    denied_create = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
+    assert denied_create.status_code == 403
+
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+
+    denied_accept = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert denied_accept.status_code == 404
+
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
+    assert accepted.status_code == 200, accepted.text
+
+    revoke_required_consent(owner["person"]["id"], recipient_id)
+    denied_read = client.get(f"/api/v1/handoffs/{handoff_id}", headers=recipient_headers)
+    assert denied_read.status_code == 404
+
+
 def test_handoff_rejects_recipient_from_another_person():
     client = TestClient(app)
     owner = create_session(client, "First person")
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     unrelated = create_session(client, "Second person")
     response = client.post(
         "/api/v1/handoffs",
@@ -180,6 +252,7 @@ def test_handoff_rejects_spoofed_person_scope_and_invalid_expiry():
         },
     )
     assert wrong_person.status_code == 403
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     recipient_id, _ = add_caregiver_session(owner["person"]["id"])
     expired = client.post(
         "/api/v1/handoffs",
