@@ -56,7 +56,7 @@ TABLES = {
     "reminder_acknowledgements": ["reminder_id", "acknowledged_by", "acknowledged_at", "acknowledgement", "note"],
     "reminder_escalations": ["reminder_id", "recipient_id", "escalation_level", "reason_code", "escalated_at", "resolved_at", "status"],
     # Care handoffs
-    "handoff_records": ["person_id", "created_by", "handoff_status", "scope_snapshot", "created_at", "expires_at", "revoked_at", "summary_id"],
+    "handoff_records": ["person_id", "created_by", "handoff_status", "scope_snapshot", "summary_snapshot", "created_at", "expires_at", "revoked_at", "summary_id"],
     "handoff_recipients": ["handoff_id", "recipient_id", "recipient_role", "access_status", "invited_at", "accepted_at", "revoked_at"],
     "handoff_access_logs": ["handoff_id", "recipient_id", "action", "decision", "reason_code", "occurred_at", "request_id"],
     "handoff_acknowledgements": ["handoff_id", "recipient_id", "acknowledged_at", "acknowledgement", "note"],
@@ -105,7 +105,7 @@ REQUIRED_COLUMNS = {
 def _column_type(name):
     if name.endswith(("_at", "_from", "_until", "_start", "_end")) or name in ("expires_at", "scheduled_at", "sent_at", "read_at", "due_at"):
         return sa.DateTime(timezone=True)
-    if name in ("scope_snapshot", "data_categories", "quiet_hours", "details", "verification_result"):
+    if name in ("scope_snapshot", "summary_snapshot", "data_categories", "quiet_hours", "details", "verification_result"):
         return sa.JSON()
     if name in ("enabled", "retryable") or name.endswith("_enabled"):
         return sa.Boolean()
