@@ -150,6 +150,17 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     if payload.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
     if not _has_required_consent(db, person_id, caregiver_id):
+        now = datetime.now(timezone.utc)
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id, action="handoff.create",
+            target_type="handoff_request", target_id=person_id, occurred_at=now,
+            outcome="denied",
+            request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            policy_version=POLICY_VERSION,
+            record_metadata={"reason_code": "required_consent_missing"},
+        ))
+        db.commit()
         raise HTTPException(
             status_code=403,
             detail="Required privacy and multi-caregiver consent must be accepted before creating a handoff",
