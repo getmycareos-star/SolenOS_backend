@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
+from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_account import CaregiverAccount
+from app.models.caregiver_intelligence import CaregiverProfile
 from app.models.identity_security import LoginAttemptLimit, AccountSecurityEvent
 
 router = APIRouter(prefix="/accounts", tags=["caregiver accounts"])
@@ -112,6 +114,13 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         if not session or session.person_id != person_id or session.caregiver_id != caregiver_id:
             db.rollback()
             raise HTTPException(status_code=401, detail="Your care-record session could not be confirmed.")
+        try:
+            caregiver_profile = ensure_caregiver_profile_for_session(
+                db, person_id=person_id, session_caregiver_id=caregiver_id, email=email
+            )
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
         session.account_id = account.id
         db.commit()
     except HTTPException:
@@ -121,7 +130,7 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         db.rollback()
         raise HTTPException(status_code=409, detail="We could not create this account. The email or care record may already be registered.")
     db.refresh(account)
-    return {"account": _account_json(account), "message": "Account created and linked to this care record."}
+    return {"account": _account_json(account), "caregiver_profile_id": caregiver_profile.id, "message": "Account created and linked to this care record."}
 
 
 @router.post("/login")
@@ -155,6 +164,16 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         db.add(AccountSecurityEvent(account_id=account.id if account else None, caregiver_id=account.caregiver_id if account else None, event_type="login_failed"))
         db.commit()
         raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    try:
+        caregiver_profile = ensure_caregiver_profile_for_session(
+            db,
+            person_id=account.person_id,
+            session_caregiver_id=account.caregiver_id,
+            email=account.email_normalized,
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
     limit.attempts = 0
     limit.blocked_until = None
     limit.updated_at = now
@@ -175,6 +194,7 @@ def login(payload: AccountLogin, request: Request, db: Session = Depends(get_db)
         "session_id": session.id,
         "person_id": account.person_id,
         "caregiver_id": account.caregiver_id,
+        "caregiver_profile_id": caregiver_profile.id,
         "access_token": raw_token,
         "token_type": "Bearer",
         "expires_at": expires_at.isoformat(),
@@ -204,6 +224,14 @@ def delete_my_account(payload: AccountDelete, request: Request, db: Session = De
             linked_session.account_id = None
         else:
             linked_session.revoked_at = now
+    # Account deletion removes the account email from the linked caregiver
+    # profile while retaining the anonymous care-record identity and history.
+    profile = db.query(CaregiverProfile).filter(
+        CaregiverProfile.person_id == person_id,
+        CaregiverProfile.session_caregiver_id == caregiver_id,
+    ).first()
+    if profile and profile.email and profile.email.casefold() == account.email_normalized.casefold():
+        profile.email = None
     db.delete(account)
     db.commit()
     return {
