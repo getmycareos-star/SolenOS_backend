@@ -169,6 +169,17 @@ def upgrade():
             if index_name not in existing_indexes:
                 op.create_index(index_name, table_name, [col])
                 existing_indexes.add(index_name)
+
+        # A notification can have only one durable read receipt per caregiver.
+        # This also protects idempotency when two read requests race.
+        if table_name == "notification_read_receipts":
+            unique_receipt_index = "uq_notification_read_receipt_reader"
+            if unique_receipt_index not in existing_indexes:
+                op.create_index(
+                    unique_receipt_index, table_name,
+                    ["notification_id", "reader_id"], unique=True,
+                )
+                existing_indexes.add(unique_receipt_index)
         inspector = inspect(bind)
 
 def downgrade():
