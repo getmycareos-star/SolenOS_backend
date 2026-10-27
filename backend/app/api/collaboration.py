@@ -542,6 +542,62 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     return False
 
 
+
+def _contains_unsupported_longitudinal_claim(reply: str, authorized_record_context: list[str]) -> bool:
+    """Reject positive care-trend claims unless supplied record evidence supports comparison.
+
+    Conversation text, open questions, and missing-information markers are not
+    comparison evidence. This guard is deliberately conservative; it does not
+    attempt to prove arbitrary semantic entailment.
+    """
+    text = (reply or "").casefold()
+    trend_terms = r"(?:getting worse|getting better|worsen\\w*|improv\\w*|declin\\w*|increas\\w*|decreas\\w*|deteriorat\\w*|progress\\w*|trend)"
+    if not re.search(r"\\b" + trend_terms + r"\\b", text):
+        return False
+
+    uncertainty_before_claim = re.search(
+        r"\\b(?:cannot|can't|can not|don't|do not|doesn't|does not|isn't|aren't|"
+        r"not|no evidence|not enough|insufficient|unknown|unclear|unable|can't tell|cannot tell)\\b"
+        r".{0,100}\\b" + trend_terms + r"\\b",
+        text,
+    )
+    if uncertainty_before_claim:
+        return False
+
+    positive_trend_claim = re.search(
+        r"\\b(?:has|have)\\s+been\\s+(?:getting\\s+)?(?:worse|better|worsen\\w*|improv\\w*|declin\\w*|increas\\w*|decreas\\w*)\\b"
+        r"|\\b(?:is|are|was|were)\\s+(?:getting\\s+)?(?:worse|better|worsen\\w*|improv\\w*|declin\\w*|increas\\w*|decreas\\w*)\\b"
+        r"|\\b(?:shows|indicates|confirms|demonstrates|establishes)\\b.{0,100}\\b" + trend_terms + r"\\b"
+        r"|\\b(?:worsened|improved|declined|increased|decreased|deteriorated|progressed)\\b",
+        text,
+    )
+    if not positive_trend_claim:
+        return False
+
+    source = "\\n".join(authorized_record_context or []).casefold()
+    if not source:
+        return True
+    comparison_basis = re.search(
+        r"\\b(?:worsen\\w*|improv\\w*|declin\\w*|increas\\w*|decreas\\w*|"
+        r"compared with|compared to|from .{0,60} to |over the (?:last|past)|"
+        r"more than before|less than before|trend)\\b",
+        source,
+    )
+    if not comparison_basis:
+        return True
+
+    ignored = {
+        "record", "current", "shows", "show", "indicates", "confirms", "demonstrates",
+        "establishes", "getting", "worse", "better", "worsen", "worsened", "worsening",
+        "improve", "improved", "improving", "decline", "declined", "declining", "increase",
+        "increased", "increasing", "decrease", "decreased", "decreasing", "trend", "pattern",
+        "this", "that", "week", "weeks", "month", "months", "day", "days", "over", "time",
+        "mum", "mother", "person", "care", "lcr", "has", "have", "been", "from", "with",
+    }
+    reply_terms = set(re.findall(r"\\b[a-z]{4,}\\b", text)) - ignored
+    source_terms = set(re.findall(r"\\b[a-z]{4,}\\b", source)) - ignored
+    return not bool(reply_terms & source_terms)
+
 def _companion_message_needs_revision(text: str) -> bool:
     """Allow detail when warranted while rejecting empty, runaway, or internal output."""
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
