@@ -1125,6 +1125,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
+        # Keep the conversation container durable even if model inference fails.
+        # This commit contains no care-record facts or conversation messages.
+        db.commit()
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
