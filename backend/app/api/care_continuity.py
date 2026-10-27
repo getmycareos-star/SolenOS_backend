@@ -203,7 +203,7 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
     elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"):
         if payload.get("target_id"):
             links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
-    strict_link_resources = {"record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
+    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
     for type_name, target_id, field_name in links:
         if not target_id:
             continue
