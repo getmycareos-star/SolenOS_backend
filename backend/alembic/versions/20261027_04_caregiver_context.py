@@ -97,18 +97,73 @@ def upgrade():
     if missing:
         raise RuntimeError("Caregiver-context schema verification failed; missing: " + ", ".join(missing))
 
-    # Fail migration if newly required attribution columns are absent. Existing
-    # same-named tables are preserved and are not rewritten by this migration.
-    required_columns = {
+    # Older SolenOS revisions may already have these tables with a different
+    # contract. Extend them additively, preserving rows. Nullable new columns
+    # avoid fabricating values for historical records; API writes must validate.
+    additive_columns = {
+        "caregiver_contexts": {
+            "person_id": sa.Column("person_id", s(36), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
+            "context_type": sa.Column("context_type", s(100), nullable=True),
+            "context_payload": sa.Column("context_payload", js, nullable=True),
+            "epistemic_status": sa.Column("epistemic_status", s(32), nullable=True, server_default="reported"),
+            "source_type": sa.Column("source_type", s(80), nullable=True),
+            "source_id": sa.Column("source_id", s(36), nullable=True),
+            "recorded_at": sa.Column("recorded_at", dt, nullable=True, server_default=now),
+            "effective_from": sa.Column("effective_from", dt, nullable=True),
+            "effective_to": sa.Column("effective_to", dt, nullable=True),
+            "notes": sa.Column("notes", txt, nullable=True),
+            "created_at": sa.Column("created_at", dt, nullable=True, server_default=now),
+            "updated_at": sa.Column("updated_at", dt, nullable=True, server_default=now),
+        },
+        "caregiver_perspectives": {
+            "person_id": sa.Column("person_id", s(36), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
+            "topic": sa.Column("topic", s(160), nullable=True),
+            "perspective_text": sa.Column("perspective_text", txt, nullable=True),
+            "epistemic_status": sa.Column("epistemic_status", s(32), nullable=True, server_default="reported"),
+            "evidence_ids": sa.Column("evidence_ids", js, nullable=True, server_default=sa.text("'[]'")),
+            "source_type": sa.Column("source_type", s(80), nullable=True),
+            "source_id": sa.Column("source_id", s(36), nullable=True),
+            "recorded_at": sa.Column("recorded_at", dt, nullable=True, server_default=now),
+            "effective_from": sa.Column("effective_from", dt, nullable=True),
+            "effective_to": sa.Column("effective_to", dt, nullable=True),
+            "supersedes_id": sa.Column("supersedes_id", s(36), nullable=True),
+            "created_at": sa.Column("created_at", dt, nullable=True, server_default=now),
+        },
+        "caregiver_observations": {
+            "person_id": sa.Column("person_id", s(36), nullable=True),
+            "caregiver_id": sa.Column("caregiver_id", s(36), nullable=True),
+            "observation_type": sa.Column("observation_type", s(100), nullable=True),
+            "description": sa.Column("description", txt, nullable=True),
+            "observed_value": sa.Column("observed_value", js, nullable=True),
+            "observed_at": sa.Column("observed_at", dt, nullable=True),
+            "recorded_at": sa.Column("recorded_at", dt, nullable=True, server_default=now),
+            "epistemic_status": sa.Column("epistemic_status", s(32), nullable=True, server_default="reported"),
+            "evidence_ids": sa.Column("evidence_ids", js, nullable=True, server_default=sa.text("'[]'")),
+            "source_type": sa.Column("source_type", s(80), nullable=True),
+            "source_id": sa.Column("source_id", s(36), nullable=True),
+            "created_at": sa.Column("created_at", dt, nullable=True, server_default=now),
+        },
+    }
+    for table, additions in additive_columns.items():
+        actual = {column["name"] for column in inspect(bind).get_columns(table)}
+        for name, column in additions.items():
+            if name not in actual:
+                op.add_column(table, column)
+                actual.add(name)
+
+    # Verify the final schema shape without backfilling fabricated history.
+    inspector = inspect(bind)
+    for table, expected in {
         "caregiver_contexts": {"person_id", "caregiver_id", "context_type", "context_payload", "epistemic_status", "recorded_at"},
         "caregiver_perspectives": {"person_id", "caregiver_id", "topic", "perspective_text", "epistemic_status", "recorded_at"},
         "caregiver_observations": {"person_id", "caregiver_id", "observation_type", "description", "epistemic_status", "recorded_at"},
-    }
-    for table, expected in required_columns.items():
+    }.items():
         actual = {column["name"] for column in inspector.get_columns(table)}
         missing_columns = sorted(expected - actual)
         if missing_columns:
-            raise RuntimeError(f"{table} lacks required columns: {', '.join(missing_columns)}")
+            raise RuntimeError(f"{table} schema verification failed after additive reconciliation: {', '.join(missing_columns)}")
 
 
 def downgrade():
