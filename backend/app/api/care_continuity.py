@@ -276,6 +276,54 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
 
+def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: str, data: dict):
+    target_type = str(data.get("target_type") or "").lower()
+    revision_specs = {
+        "care_fact": ("care_fact_revisions", "care_fact_id"),
+        "fact": ("care_fact_revisions", "care_fact_id"),
+        "care_assertion": ("care_assertion_revisions", "assertion_id"),
+        "assertion": ("care_assertion_revisions", "assertion_id"),
+        "care_decision": ("care_decision_revisions", "decision_id"),
+        "decision": ("care_decision_revisions", "decision_id"),
+        "care_event": ("care_event_revisions", "event_id"),
+        "event": ("care_event_revisions", "event_id"),
+        "caregiver_observation": ("care_observation_revisions", "observation_id"),
+        "observation": ("care_observation_revisions", "observation_id"),
+        "change": ("care_change_revisions", "change_id"),
+        "situation": ("care_situation_revisions", "situation_id"),
+        "evidence": ("care_evidence_revisions", "evidence_id"),
+    }
+    spec = revision_specs.get(target_type)
+    if spec is None:
+        return
+    revision_table_name, target_column = spec
+    revision_table = _table(db, revision_table_name)
+    target_id = data.get("target_id")
+    latest = db.execute(
+        select(revision_table.c.revision_number)
+        .where(revision_table.c[target_column] == target_id, revision_table.c.person_id == person_id)
+        .order_by(desc(revision_table.c.revision_number))
+        .limit(1)
+    ).scalar_one_or_none()
+    change_sets = _table(db, "care_record_change_sets")
+    change_set = db.execute(
+        select(change_sets.c.reason, change_sets.c.provenance_id)
+        .where(change_sets.c.id == data.get("change_set_id"), change_sets.c.person_id == person_id)
+    ).mappings().first()
+    db.execute(insert(revision_table).values(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        **{target_column: target_id},
+        revision_number=int(latest or 0) + 1,
+        previous_payload=data.get("before_value"),
+        current_payload=data.get("after_value"),
+        revision_reason=(change_set.get("reason") if change_set else None) or data.get("operation"),
+        provenance_id=data.get("provenance_id") or (change_set.get("provenance_id") if change_set else None),
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
+
+
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
