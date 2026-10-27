@@ -36,7 +36,7 @@ class CaregiverProfileBase(BaseModel):
     timezone: str = "UTC"
     is_primary_designated: bool = False
     primary_designation_source: Optional[str] = None
-    identity_match_confidence: IdentityMatchConfidence = IdentityMatchConfidence.CERTAIN
+    identity_match_confidence: IdentityMatchConfidence = IdentityMatchConfidence.UNKNOWN
     identity_notes: Optional[str] = None
 
 
