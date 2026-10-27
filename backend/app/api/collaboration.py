@@ -475,6 +475,61 @@ def _ollama_chat(
     return qwen_chat(messages, options=options)
 
 
+_CONTEXT_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "was", "were", "are",
+    "has", "have", "had", "you", "your", "about", "what", "when", "where",
+    "which", "who", "how", "can", "could", "would", "should", "does", "did",
+    "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
+    "they", "she", "his", "its", "our", "not", "but", "all", "any", "some",
+    "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+}
+
+
+def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
+    """Put query-relevant authorized records first without changing their meaning.
+
+    Recency is already represented by the input order and is only a tie-breaker;
+    keyword overlap selects context, never establishes truth or source authority.
+    """
+    if limit <= 0 or not lines:
+        return []
+    query_terms = {
+        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+    if not query_terms:
+        return lines[:limit]
+
+    scored = []
+    for index, line in enumerate(lines):
+        text = (line or "").casefold()
+        record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
+        overlap = query_terms & record_terms
+        score = len(overlap)
+        # A matched multiword phrase is stronger than incidental single words.
+        normalized_query = " ".join((query or "").casefold().split())
+        for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
+            if len(phrase) >= 8 and phrase in text:
+                score += 2
+        scored.append((score, index, line))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [line for _, _, line in scored[:limit]]
+
+
+def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
+    """Extract only IDs from records actually selected for the model context."""
+    identifiers = []
+    for line in lines:
+        try:
+            payload = json.loads(line[line.index("{"):])
+            value = payload.get(id_key)
+            if value is not None:
+                identifiers.append(str(value))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return list(dict.fromkeys(identifiers))
+
+
 def _is_casual_greeting(text: str) -> bool:
     normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
     normalized = " ".join(normalized.split())
