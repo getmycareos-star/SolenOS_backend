@@ -115,7 +115,7 @@ def test_deterministic_routing_covers_all_enabled_workflows(workflow, task_text)
 def test_allows_explicit_missing_medication_information_without_inventing_a_status():
     assert _contains_unsupported_operational_claim(
         "No medication details are recorded in the supplied context.",
-        "The supplied record does not contain medication information.",
+        "No matching care evidence was supplied.",
         [],
     ) is False
     assert _contains_unsupported_operational_claim(
