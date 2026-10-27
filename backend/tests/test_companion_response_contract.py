@@ -197,3 +197,53 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
             db.close()
     finally:
         teardown()
+
+
+def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
+    recent_irrelevant = (
+        'LCR event evidence: {"event_id":"meal-2","title":"Lunch observation",'
+        '"description":"The person ate lunch."}'
+    )
+    older_relevant = (
+        'LCR event evidence: {"event_id":"sleep-1","title":"Sleep observation",'
+        '"description":"Caregiver reports sleep was not improved."}'
+    )
+    ranked = collaboration._rank_context_lines(
+        "Has sleep improved or not?", [recent_irrelevant, older_relevant], limit=1
+    )
+    assert ranked == [older_relevant]
+    assert collaboration._context_record_ids(ranked, "event_id") == ["sleep-1"]
+
+
+def test_context_ranking_preserves_input_order_when_query_has_no_relevant_terms():
+    first = 'LCR event evidence: {"event_id":"newer","title":"Observation"}'
+    second = 'LCR event evidence: {"event_id":"older","title":"Observation"}'
+    assert collaboration._rank_context_lines("the and with", [first, second], limit=2) == [
+        first, second
+    ]
+
+
+def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_care_facts(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The record has one observation, so there is not enough information to establish a pattern."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Has this become a pattern?"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        assert "First answer the caregiver’s actual question" in prompt
+        assert "never treat chat history as proof" in prompt
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
