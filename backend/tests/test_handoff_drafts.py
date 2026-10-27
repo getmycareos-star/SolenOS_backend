@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text, inspect
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +8,9 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
+from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.action import Action
+from app.models.time_location import Appointment
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -136,6 +140,103 @@ def test_draft_is_read_only_and_only_includes_records_for_session_person(client)
             text("SELECT fact_value FROM care_facts WHERE id = 'owned-fact'")
         ).scalar_one()
     assert saved == "Breakfast was mostly uneaten"
+
+
+def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_current_caregivers_evidence(client):
+    test_client, session = client
+    token = session["access_token"]
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        other_caregiver = Caregiver(
+            id="other-caregiver-same-person",
+            name="Other caregiver",
+            relationship="family",
+            person_id=person_id,
+        )
+        db.add(other_caregiver)
+        db.flush()
+        own_evidence = Evidence(
+            id="own-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Current caregiver's source text",
+            uploaded_by_caregiver_id=caregiver_id,
+        )
+        other_evidence = Evidence(
+            id="other-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Private source text from another caregiver",
+            uploaded_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([own_evidence, other_evidence])
+        db.flush()
+        db.add_all([
+            Action(
+                id="own-action",
+                person_id=person_id,
+                source_evidence_id=own_evidence.id,
+                source_passage="Call the clinic this week",
+                source_authority="caregiver",
+                normalized_action="Call the clinic this week",
+                original_text="Call the clinic this week",
+                created_by_caregiver_id=caregiver_id,
+                status="pending_confirmation",
+            ),
+            Action(
+                id="other-action",
+                person_id=person_id,
+                source_evidence_id=other_evidence.id,
+                source_passage="Private instruction",
+                source_authority="caregiver",
+                normalized_action="PRIVATE OTHER CAREGIVER ACTION",
+                original_text="PRIVATE OTHER CAREGIVER ACTION",
+                created_by_caregiver_id=other_caregiver.id,
+                status="pending_confirmation",
+            ),
+        ])
+        db.add(CareEvent(
+            id="recent-event",
+            person_id=person_id,
+            event_type="care_observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            title="Recent recorded event",
+            description="Reported change to discuss",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.add(Appointment(
+            id="next-appointment",
+            person_id=person_id,
+            title="Clinic appointment",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=2),
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    references = {item["source_id"]: item for item in body["source_references"]}
+    assert "recent-event" in references
+    assert "next-appointment" in references
+    assert "own-action" in references
+    assert "other-action" not in references
+    assert "PRIVATE OTHER CAREGIVER ACTION" not in response.text
+    assert references["recent-event"]["epistemic_status"] == "not_recorded"
+    assert references["recent-event"]["record_status"] == "recorded"
+    assert body["source_statuses"]["appointments"]["status"] == "available"
+    assert body["source_statuses"]["care_events"]["status"] == "available"
+    assert body["source_statuses"]["actions"]["status"] == "available"
 
 
 @pytest.mark.parametrize("window_days", [0, -1, 91, 999])
