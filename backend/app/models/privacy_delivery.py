@@ -21,6 +21,7 @@ class HandoffRecord(Base):
     created_by = Column(String(255), nullable=False)
     handoff_status = Column(String(40), nullable=False, default="pending")
     scope_snapshot = Column(JSON, nullable=False, default=list)
+    summary_snapshot = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
     expires_at = Column(DateTime(timezone=True), nullable=True, index=True)
     revoked_at = Column(DateTime(timezone=True), nullable=True)
