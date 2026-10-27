@@ -86,6 +86,7 @@ def upgrade():
     ], [("ix_care_record_status_history_time", ["person_id", "care_record_id", "changed_at"], False)])
 
     revision_specs = [
+        ("care_fact_revisions", "care_fact_id", "care_facts"),
         ("care_assertion_revisions", "assertion_id", "care_assertions"),
         ("care_event_revisions", "event_id", "care_events"),
         ("care_observation_revisions", "observation_id", "caregiver_observations"),
