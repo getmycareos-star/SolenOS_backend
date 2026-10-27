@@ -1,7 +1,8 @@
-from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint
-from sqlalchemy import create_engine
+from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint, func
+from sqlalchemy import create_engine, select
+import os
+import tempfile
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_db
@@ -9,10 +10,12 @@ from app.main import app
 import app.main as main_module
 
 
+_test_db_file = tempfile.NamedTemporaryFile(prefix="solenos-care-continuity-", suffix=".sqlite", delete=False)
+_test_db_file.close()
+_test_db_path = _test_db_file.name
 engine = create_engine(
-    "sqlite:///:memory:",
+    f"sqlite:///{_test_db_path}",
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -86,6 +89,166 @@ def _ensure_test_tables():
             Column("relationship", String(40), nullable=False, default="originates"),
             Column("created_at", DateTime(timezone=True)),
         )
+    if "care_record_identifiers" not in metadata.tables:
+        Table(
+            "care_record_identifiers", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("identifier_type", String(80), nullable=False),
+            Column("identifier_fingerprint", String(128), nullable=False),
+            Column("masked_value", String(128)),
+            Column("source_type", String(80)),
+            Column("source_id", String(36)),
+            Column("status", String(32), nullable=False, server_default="active"),
+            Column("valid_from", DateTime(timezone=True)),
+            Column("valid_to", DateTime(timezone=True)),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("care_record_id", "identifier_type", "identifier_fingerprint"),
+        )
+    if "care_record_sections" not in metadata.tables:
+        Table(
+            "care_record_sections", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("section_key", String(100), nullable=False),
+            Column("section_payload", JSON, nullable=False),
+            Column("version_number", Integer, nullable=False, server_default="1"),
+            Column("updated_at", DateTime(timezone=True)),
+            Column("updated_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("care_record_id", "section_key"),
+        )
+    if "care_record_links" not in metadata.tables:
+        Table(
+            "care_record_links", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("source_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("target_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("relationship", String(60), nullable=False),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            UniqueConstraint("source_record_id", "target_record_id", "relationship"),
+        )
+    if "care_record_status_history" not in metadata.tables:
+        Table(
+            "care_record_status_history", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("previous_status", String(32)),
+            Column("new_status", String(32), nullable=False),
+            Column("reason", Text),
+            Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("changed_at", DateTime(timezone=True)),
+        )
+    if "care_facts" not in metadata.tables:
+        Table(
+            "care_facts", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("subject_type", String(80), nullable=False),
+            Column("subject_id", String(36)),
+            Column("fact_type", String(100), nullable=False),
+            Column("fact_value", Text, nullable=False),
+            Column("epistemic_status", String(32), nullable=False, server_default="reported"),
+            Column("effective_at", DateTime(timezone=True)),
+            Column("recorded_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("superseded_by_fact_id", String(36), ForeignKey("care_facts.id")),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("review_notes", Text),
+            Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            Column("updated_at", DateTime(timezone=True)),
+        )
+    for target_table in ("care_assertions", "care_decisions", "care_events", "caregiver_observations", "changes", "situations", "evidence"):
+        if target_table not in metadata.tables:
+            Table(
+                target_table, metadata,
+                Column("id", String(36), primary_key=True),
+                Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            )
+    if "care_record_change_sets" not in metadata.tables:
+        Table(
+            "care_record_change_sets", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id")),
+            Column("operation", String(60), nullable=False),
+            Column("status", String(32), nullable=False, server_default="committed"),
+            Column("reason", Text),
+            Column("author_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("created_at", DateTime(timezone=True)),
+        )
+    if "care_record_change_items" not in metadata.tables:
+        Table(
+            "care_record_change_items", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("change_set_id", String(36), ForeignKey("care_record_change_sets.id"), nullable=False),
+            Column("target_type", String(100), nullable=False),
+            Column("target_id", String(36), nullable=False),
+            Column("operation", String(32), nullable=False),
+            Column("before_value", JSON),
+            Column("after_value", JSON),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("created_at", DateTime(timezone=True)),
+        )
+    if "care_record_retractions" not in metadata.tables:
+        Table(
+            "care_record_retractions", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("target_type", String(100), nullable=False),
+            Column("target_id", String(36), nullable=False),
+            Column("reason", Text, nullable=False),
+            Column("status", String(32), nullable=False, server_default="retracted"),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("retracted_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("retracted_at", DateTime(timezone=True)),
+        )
+    if "care_record_restorations" not in metadata.tables:
+        Table(
+            "care_record_restorations", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("retraction_id", String(36), ForeignKey("care_record_retractions.id"), nullable=False),
+            Column("reason", Text, nullable=False),
+            Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+            Column("restored_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("restored_at", DateTime(timezone=True)),
+        )
+    revision_specs = (
+        ("care_fact_revisions", "care_fact_id", "care_facts"),
+        ("care_assertion_revisions", "assertion_id", "care_assertions"),
+        ("care_decision_revisions", "decision_id", "care_decisions"),
+        ("care_event_revisions", "event_id", "care_events"),
+        ("care_observation_revisions", "observation_id", "caregiver_observations"),
+        ("care_change_revisions", "change_id", "changes"),
+        ("care_situation_revisions", "situation_id", "situations"),
+        ("care_evidence_revisions", "evidence_id", "evidence"),
+    )
+    for revision_table, target_column, target_table in revision_specs:
+        if revision_table not in metadata.tables:
+            Table(
+                revision_table, metadata,
+                Column("id", String(36), primary_key=True),
+                Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+                Column(target_column, String(36), ForeignKey(f"{target_table}.id"), nullable=False),
+                Column("revision_number", Integer, nullable=False),
+                Column("previous_payload", JSON),
+                Column("current_payload", JSON),
+                Column("revision_reason", Text),
+                Column("provenance_id", String(36), ForeignKey("record_provenance.id")),
+                Column("changed_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+                Column("changed_at", DateTime(timezone=True)),
+                UniqueConstraint(target_column, "revision_number"),
+            )
     if "caregiver_contexts" not in metadata.tables:
         Table(
             "caregiver_contexts", metadata,
@@ -211,6 +374,11 @@ def setup_function():
 def teardown_function():
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    try:
+        os.unlink(_test_db_path)
+    except FileNotFoundError:
+        pass
 
 
 def _session(client, caregiver_name):
@@ -296,6 +464,14 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     )
     assert record_response.status_code == 201, record_response.text
     record_id = record_response.json()["id"]
+    db = TestingSessionLocal()
+    record_table = Base.metadata.tables["living_care_records"]
+    persisted_record = db.execute(
+        select(record_table.c.id, record_table.c.person_id).where(record_table.c.id == record_id)
+    ).first()
+    assert persisted_record is not None, "Living Care Record insert must persist across request sessions"
+    assert persisted_record.person_id == first["person"]["id"]
+    db.close()
 
     version_response = client.post(
         "/api/v1/care-continuity/record-versions",
@@ -355,5 +531,162 @@ def test_provenance_link_cannot_reference_another_persons_provenance():
             "target_id": record.json()["id"],
             "relationship": "supports",
         },
+    )
+    assert denied.status_code == 404, denied.text
+
+def test_change_item_appends_same_person_fact_revision():
+    client = TestClient(app)
+    session = _session(client, "Revision caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    fact = client.post(
+        "/api/v1/care-continuity/facts",
+        headers=headers,
+        json={"subject_type": "care_recipient", "subject_id": record.json()["id"],
+              "fact_type": "care_need", "fact_value": "needs support"},
+    )
+    assert fact.status_code == 201, fact.text
+    change_set = client.post(
+        "/api/v1/care-continuity/record-change-sets",
+        headers=headers,
+        json={"care_record_id": record.json()["id"], "operation": "update", "reason": "Correction review"},
+    )
+    assert change_set.status_code == 201, change_set.text
+
+    first = client.post(
+        "/api/v1/care-continuity/record-change-items",
+        headers=headers,
+        json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
+              "target_id": fact.json()["id"], "operation": "update",
+              "before_value": {"fact_value": "needs support"},
+              "after_value": {"fact_value": "needs daily support"}},
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/api/v1/care-continuity/record-change-items",
+        headers=headers,
+        json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
+              "target_id": fact.json()["id"], "operation": "update",
+              "before_value": {"fact_value": "needs daily support"},
+              "after_value": {"fact_value": "needs daily support with supervision"}},
+    )
+    assert second.status_code == 201, second.text
+    revisions = client.get("/api/v1/care-continuity/fact-revisions", headers=headers)
+    assert revisions.status_code == 200, revisions.text
+    assert [row["revision_number"] for row in revisions.json()] == [2, 1]
+    assert revisions.json()[0]["current_payload"]["fact_value"] == "needs daily support with supervision"
+    timeline = client.get("/api/v1/care-continuity/record-revisions", headers=headers)
+    assert timeline.status_code == 200, timeline.text
+    assert len(timeline.json()) == 2
+    assert timeline.json()[0]["revision_type"] == "care_fact_revisions"
+
+
+def test_lcr_sections_upsert_and_record_status_history_is_persisted():
+    client = TestClient(app)
+    session = _session(client, "Section caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    record_id = record.json()["id"]
+
+    first = client.post(
+        "/api/v1/care-continuity/record-sections",
+        headers=headers,
+        json={"care_record_id": record_id, "section_key": "current-situation",
+              "section_payload": {"summary": "Needs assistance"}},
+    )
+    assert first.status_code == 201, first.text
+    second = client.post(
+        "/api/v1/care-continuity/record-sections",
+        headers=headers,
+        json={"care_record_id": record_id, "section_key": "current-situation",
+              "section_payload": {"summary": "Needs daily assistance"}},
+    )
+    assert second.status_code == 201, second.text
+    assert second.json()["version_number"] == 2
+    history = client.get("/api/v1/care-continuity/record-status-history", headers=headers)
+    assert history.status_code == 200, history.text
+    assert len(history.json()) == 1
+    assert history.json()[0]["new_status"] == "active"
+
+
+def test_identifier_fingerprint_and_retraction_restoration_lifecycle():
+    client = TestClient(app)
+    session = _session(client, "Record governance caregiver")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    record_id = record.json()["id"]
+
+    invalid_identifier = client.post(
+        "/api/v1/care-continuity/record-identifiers",
+        headers=headers,
+        json={"care_record_id": record_id, "identifier_type": "external_reference",
+              "identifier_fingerprint": "raw-id-must-not-be-stored"},
+    )
+    assert invalid_identifier.status_code == 422, invalid_identifier.text
+    identifier = client.post(
+        "/api/v1/care-continuity/record-identifiers",
+        headers=headers,
+        json={"care_record_id": record_id, "identifier_type": "external_reference",
+              "identifier_fingerprint": "a" * 64, "masked_value": "…1234"},
+    )
+    assert identifier.status_code == 201, identifier.text
+
+    retraction = client.post(
+        "/api/v1/care-continuity/record-retractions",
+        headers=headers,
+        json={"care_record_id": record_id, "target_type": "living_care_record",
+              "target_id": record_id, "reason": "Test retraction"},
+    )
+    assert retraction.status_code == 201, retraction.text
+    restoration = client.post(
+        "/api/v1/care-continuity/record-restorations",
+        headers=headers,
+        json={"care_record_id": record_id, "retraction_id": retraction.json()["id"],
+              "reason": "Restored after review"},
+    )
+    assert restoration.status_code == 201, restoration.text
+    listed = client.get("/api/v1/care-continuity/record-retractions", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["status"] == "restored"
+
+
+def test_lcr_record_link_rejects_cross_person_target():
+    client = TestClient(app)
+    first = _session(client, "Record link first caregiver")
+    second = _session(client, "Record link second caregiver")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+    first_record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=first_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    second_record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=second_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert first_record.status_code == 201, first_record.text
+    assert second_record.status_code == 201, second_record.text
+    denied = client.post(
+        "/api/v1/care-continuity/record-links",
+        headers=first_headers,
+        json={"source_record_id": first_record.json()["id"],
+              "target_record_id": second_record.json()["id"], "relationship": "related_to"},
     )
     assert denied.status_code == 404, denied.text
