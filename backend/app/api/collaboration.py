@@ -1401,10 +1401,14 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
         db.refresh(record)
         return {"ok": True, **_consent_response(record)}
     if payload.action == "update_data_improvement":
-        if not _consent_is_verified(record):
-            raise HTTPException(status_code=409, detail="Accept the required privacy terms before changing improvement preferences")
         if payload.data_improvement_consent is None:
             raise HTTPException(status_code=422, detail="data_improvement_consent is required")
+        # This optional improvement preference is independent of the required
+        # privacy/safety acknowledgement. Saving it does not mark required terms
+        # as accepted; feedback submission still enforces its own consent checks.
+        if record is None:
+            record = ConsentRecord(person_id=person_id, caregiver_id=caregiver_id)
+            db.add(record)
         record.data_improvement_consent = payload.data_improvement_consent
         record.updated_at = now
         if payload.data_improvement_consent is False:
