@@ -1090,10 +1090,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "event_id": str(event.id),
                     "event_type": event.event_type,
                     "status": event.status,
-                    "title": (event.title or "")[:60],
-                    "description": (event.description or "")[:100],
+                    "title": (event.title or "")[:50],
+                    "description": (event.description or "")[:70],
                     "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                    "evidence_ids": event.evidence_ids or [],
                     "time_provenance": event.time_provenance,
                 })
         source_context.extend(event_context)
@@ -1127,9 +1126,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             assertion_context.append({
                     "assertion_id": str(assertion.id),
                     "field": assertion.field,
-                    "value": (assertion.asserted_value or "")[:60],
+                    "value": (assertion.asserted_value or "")[:50],
                     "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
-                    "source_text": (assertion.source_text or "")[:70],
+                    "source_text": (assertion.source_text or "")[:60],
                     "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
                     "status": assertion.assertion_status,
                 })
@@ -1246,17 +1245,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         context_payload = {
-            "care_recipient_name": person.name,
+            "person": person.name,
             "caregiver_relationship": caregiver.relationship,
             "events": event_context,
             "approved_assertions": assertion_context,
             "appointments": appointment_context,
             "evidence": evidence_context,
             "conversation_not_evidence": True,
-            "retrieval_contract": {
-                "bounded": True,
-                "selected_limits": {"events": len(event_context), "assertions": len(assertion_context), "appointments": len(appointment_context), "evidence": len(evidence_context)},
-            },
+            "retrieval_contract": {"bounded": True},
             "missing_rule": "Not retrieved is not proof of absence.",
         }
         # Fit structured context to the bundled small model. Whole records and
@@ -1287,12 +1283,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         break
             if not removed:
                 break
-        context_payload["retrieval_contract"]["selected_limits"] = {
-            "events": len(event_context),
-            "assertions": len(assertion_context),
-            "appointments": len(appointment_context),
-            "evidence": len(evidence_context),
-        }
         source_context = [json.dumps(item, ensure_ascii=False) for item in (event_context + assertion_context + appointment_context + evidence_context)]
         system_prompt = (
             "You are SolenOS Companion. Answer the caregiver's question first in plain, natural language. Use only authorized "
