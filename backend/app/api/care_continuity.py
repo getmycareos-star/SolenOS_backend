@@ -56,6 +56,19 @@ RESOURCES = {
     "caregiver-contexts": "caregiver_contexts",
     "caregiver-perspectives": "caregiver_perspectives",
     "caregiver-observations": "caregiver_observations",
+    "living-records": "living_care_records",
+    "record-provenance": "record_provenance",
+    "record-provenance-links": "record_provenance_links",
+    "record-change-sets": "care_record_change_sets",
+    "record-change-items": "care_record_change_items",
+    "corrections": "care_corrections",
+    "amendments": "record_amendments",
+    "amendment-items": "record_amendment_items",
+    "record-audit": "care_record_audit_log",
+    "uncertainties": "care_uncertainties",
+    "missing-information": "care_missing_information",
+    "conflicts": "care_conflicts",
+    "action-outcomes": "care_action_outcomes",
 }
 
 WRITABLE = {
@@ -83,6 +96,19 @@ WRITABLE = {
     "caregiver-contexts": {"context_type", "context_payload", "epistemic_status", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "notes"},
     "caregiver-perspectives": {"topic", "perspective_text", "epistemic_status", "evidence_ids", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "supersedes_id"},
     "caregiver-observations": {"observation_type", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
+    "living-records": {"record_status", "schema_version"},
+    "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
+    "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
+    "record-change-sets": {"care_record_id", "operation", "status", "reason", "provenance_id"},
+    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "provenance_id"},
+    "corrections": {"care_record_id", "target_type", "target_id", "original_value", "corrected_value", "correction_reason", "status", "provenance_id", "effective_at"},
+    "amendments": {"care_record_id", "amendment_type", "reason", "status", "provenance_id"},
+    "amendment-items": {"amendment_id", "target_type", "target_id", "field_name", "before_value", "after_value"},
+    "record-audit": {"care_record_id", "actor_type", "actor_id", "action", "target_type", "target_id", "outcome", "reason", "metadata", "occurred_at", "request_id"},
+    "uncertainties": {"care_record_id", "target_type", "target_id", "question", "uncertainty_type", "status", "source_ids", "resolved_at", "resolution"},
+    "missing-information": {"care_record_id", "field_name", "question", "importance", "status", "source_ids", "resolved_at", "resolution"},
+    "conflicts": {"care_record_id", "target_type", "target_id", "conflict_type", "status", "claim_ids", "resolution", "resolved_at"},
+    "action-outcomes": {"action_id", "action_type", "outcome_status", "notes", "correction_text", "evidence_ids"},
 }
 
 def _table(db: Session, name: str) -> Table:
@@ -233,6 +259,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         "caregiver-contexts": ("context_type", "context_payload"),
         "caregiver-perspectives": ("topic", "perspective_text"),
         "caregiver-observations": ("observation_type", "description"),
+        "living-records": (),
+        "record-provenance": ("source_type",),
+        "record-provenance-links": ("provenance_id", "target_type", "target_id"),
+        "record-change-sets": ("operation",),
+        "record-change-items": ("change_set_id", "target_type", "target_id", "operation"),
+        "corrections": ("target_type", "target_id", "corrected_value", "correction_reason"),
+        "amendments": ("amendment_type", "reason"),
+        "amendment-items": ("amendment_id", "target_type", "target_id"),
+        "record-audit": ("actor_type", "action"),
+        "uncertainties": ("question", "uncertainty_type"),
+        "missing-information": ("field_name", "question"),
+        "conflicts": ("target_type", "target_id", "conflict_type"),
+        "action-outcomes": ("action_id", "action_type", "outcome_status"),
     }[resource]
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
