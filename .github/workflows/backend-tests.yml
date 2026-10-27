@@ -389,6 +389,50 @@ jobs:
           fi
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
 
+          echo "QWEN_E2E: grounded Companion answer with missing trend baseline"
+          companion_event_payload=$(python -c 'import json,sys; print(json.dumps({
+            "person_id":sys.argv[1],
+            "event_type":"observation",
+            "status":"recorded",
+            "occurred_at":"2026-10-26T20:00:00Z",
+            "title":"CI Companion sleep observation",
+            "description":"Caregiver reported that Mum slept poorly last night.",
+            "created_by_caregiver_id":sys.argv[2],
+            "time_provenance":"caregiver_reported",
+            "tags":["companion_grounding","ci_qwen_e2e"]
+          }))' "$person_id" "$caregiver_id")
+          companion_event=$(curl --fail --silent --show-error \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "$companion_event_payload" \
+            http://127.0.0.1:8080/api/v1/events)
+          companion_event_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["id"])' "$companion_event")
+          companion_question=$(python -c 'import json,sys; print(json.dumps({
+            "person_id":sys.argv[1],
+            "text":"Has Mum's sleep been getting worse?"
+          }))' "$person_id")
+          companion_answer=""
+          companion_ready=0
+          for attempt in $(seq 1 5); do
+            companion_status=$(curl --silent --show-error --output /tmp/qwen-companion-grounding.json --write-out '%{http_code}' --max-time 90 \
+              -H "$auth_header" -H "Content-Type: application/json" \
+              -d "$companion_question" \
+              http://127.0.0.1:8080/api/v1/conversation/message || true)
+            if [ "$companion_status" = "200" ]; then
+              companion_answer=$(cat /tmp/qwen-companion-grounding.json)
+              if python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d.get("reply",""); assert d.get("ai_generated") is True, d; assert d.get("guard_verdict") == "passed", d; assert d.get("written_to_lcr") is False, d; assert sys.argv[2] in d.get("source_event_ids",[]), d; assert re.search(r"(?i)\bsleep\b", reply), reply; assert re.search(r"(?i)\b(cannot|can.t|unable|not enough|only one|no earlier|not recorded|don.t have|do not have|can.t tell|uncertain|insufficient)\b", reply), reply' "$companion_answer" "$companion_event_id" 2>/dev/null; then
+                companion_ready=1
+                break
+              fi
+            fi
+            echo "Companion grounding check failed (HTTP $companion_status, attempt $attempt/5)." >&2
+            cat /tmp/qwen-companion-grounding.json >&2 || true
+            sleep 2
+          done
+          if [ "$companion_ready" -ne 1 ]; then
+            echo "Actual Qwen Companion failed the missing-baseline grounding contract." >&2
+            exit 1
+          fi
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
