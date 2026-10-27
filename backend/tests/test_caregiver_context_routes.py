@@ -564,6 +564,10 @@ def test_change_item_appends_same_person_fact_revision():
     assert revisions.status_code == 200, revisions.text
     assert [row["revision_number"] for row in revisions.json()] == [2, 1]
     assert revisions.json()[0]["current_payload"]["fact_value"] == "needs daily support with supervision"
+    timeline = client.get("/api/v1/care-continuity/record-revisions", headers=headers)
+    assert timeline.status_code == 200, timeline.text
+    assert len(timeline.json()) == 2
+    assert timeline.json()[0]["revision_type"] == "care_fact_revisions"
 
 
 def test_lcr_sections_upsert_and_record_status_history_is_persisted():
