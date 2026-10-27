@@ -65,12 +65,19 @@ async def stop_qwen_background_worker():
 # default; additional origins must be explicitly listed in CORS_ORIGINS.
 # This is an origin allowlist, not a wildcard. Comma-separated values are
 # normalized and empty entries ignored.
-cors_origins_env = os.getenv("CORS_ORIGINS", "https://solenosai.netlify.app")
-cors_origins = [
-    origin.strip().rstrip("/")
-    for origin in cors_origins_env.split(",")
-    if origin.strip()
-]
+# Always retain the canonical production origin even when CORS_ORIGINS is
+# configured for additional environments. Previously, setting this variable
+# replaced the production default entirely and could cause browser preflights
+# from the live Netlify site to fail with HTTP 400.
+cors_origins_env = os.getenv("CORS_ORIGINS", "")
+cors_origins = list(dict.fromkeys([
+    "https://solenosai.netlify.app",
+    *[
+        origin.strip().rstrip("/")
+        for origin in cors_origins_env.split(",")
+        if origin.strip()
+    ],
+]))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
