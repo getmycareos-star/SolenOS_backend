@@ -1,7 +1,7 @@
 """Add privacy, sharing, audit, notification, reminder and handoff lifecycle records.
 
 Revision ID: 20261027_03_privacy_delivery
-Revises: 20261027_03_lcr_history
+Revises: 20261027_06_ai_output_governance
 
 Additive and idempotent: existing tables are preserved. Domain-specific payloads are
 stored in JSON while frequently queried lifecycle/security fields remain typed.
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261027_03_privacy_delivery"
-down_revision = "20261027_03_lcr_history"
+down_revision = "20261027_06_ai_output_governance"
 branch_labels = None
 depends_on = None
 
