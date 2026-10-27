@@ -190,9 +190,10 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
             (payload.get("source_type"), payload.get("source_id"), "source_id"),
             (payload.get("target_type"), payload.get("target_id"), "target_id"),
         ])
-    elif resource in ("review-decisions", "provenance"):
-        links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
-        if resource == "provenance" and payload.get("source_id"):
+    elif resource in ("review-decisions", "provenance", "record-provenance"):
+        if resource in ("review-decisions", "provenance"):
+            links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
+        if resource in ("provenance", "record-provenance") and payload.get("source_id"):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
     elif resource == "timeline":
         links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
