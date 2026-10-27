@@ -401,6 +401,10 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
         "record_provenance", "record_provenance_links", "care_record_change_sets",
         "care_record_change_items", "care_corrections", "record_amendments",
         "record_amendment_items", "care_record_audit_log",
+        "care_record_identifiers", "care_record_sections", "care_record_links", "care_record_status_history",
+        "care_fact_revisions", "care_assertion_revisions", "care_decision_revisions", "care_event_revisions",
+        "care_observation_revisions", "care_change_revisions", "care_situation_revisions", "care_evidence_revisions",
+        "care_record_retractions", "care_record_restorations",
         "caregiver_contexts", "caregiver_perspectives", "caregiver_observations",
     )
     tables_payload = {}
@@ -569,6 +573,50 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     # recorded_at is server receipt time, never a client-controlled timestamp.
     if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations", "record-provenance") and "recorded_at" in table.c:
         data["recorded_at"] = datetime.now(timezone.utc)
+    if resource == "record-identifiers":
+        fingerprint = str(data.get("identifier_fingerprint") or "")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}|[0-9a-fA-F]{128}", fingerprint):
+            raise HTTPException(status_code=422, detail="identifier_fingerprint must be a SHA-256 or SHA-512 hex digest")
+    if resource == "record-links" and data.get("source_record_id") == data.get("target_record_id"):
+        raise HTTPException(status_code=422, detail="A Living Care Record cannot link to itself")
+    if resource == "record-sections":
+        existing = db.execute(
+            select(table).where(
+                table.c.person_id == person_id,
+                table.c.care_record_id == data["care_record_id"],
+                table.c.section_key == data["section_key"],
+            )
+        ).mappings().first()
+        now = datetime.now(timezone.utc)
+        if existing:
+            db.execute(update(table).where(
+                table.c.id == existing["id"], table.c.person_id == person_id
+            ).values(
+                section_payload=data["section_payload"],
+                version_number=int(existing.get("version_number") or 1) + 1,
+                updated_at=now,
+                updated_by_caregiver_id=caregiver_id,
+            ))
+            updated = db.execute(select(table).where(table.c.id == existing["id"], table.c.person_id == person_id)).mappings().one()
+            db.commit()
+            return _jsonable(dict(updated))
+        data["version_number"] = 1
+        data["updated_at"] = now
+        data["updated_by_caregiver_id"] = caregiver_id
+    if resource == "record-retractions":
+        data["retracted_by_caregiver_id"] = caregiver_id
+        data["retracted_at"] = datetime.now(timezone.utc)
+    if resource == "record-restorations":
+        retractions = _table(db, "care_record_retractions")
+        prior = db.execute(
+            select(retractions.c.status).where(
+                retractions.c.id == data["retraction_id"], retractions.c.person_id == person_id
+            )
+        ).scalar_one_or_none()
+        if prior != "retracted":
+            raise HTTPException(status_code=409, detail="Only an active retraction can be restored")
+        data["restored_by_caregiver_id"] = caregiver_id
+        data["restored_at"] = datetime.now(timezone.utc)
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
@@ -588,6 +636,21 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     try:
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
+        if resource == "record-change-items":
+            _append_revision_for_change_item(db, person_id, caregiver_id, data)
+        if resource == "living-records" and inspect(db.get_bind()).has_table("care_record_status_history"):
+            status_history = _table(db, "care_record_status_history")
+            db.execute(insert(status_history).values(
+                id=str(uuid.uuid4()), person_id=person_id, care_record_id=row["id"],
+                previous_status=None, new_status=row.get("record_status") or "active",
+                reason="Living Care Record created", changed_by_caregiver_id=caregiver_id,
+                changed_at=datetime.now(timezone.utc),
+            ))
+        if resource == "record-restorations":
+            retractions = _table(db, "care_record_retractions")
+            db.execute(update(retractions).where(
+                retractions.c.id == data["retraction_id"], retractions.c.person_id == person_id
+            ).values(status="restored"))
         db.commit()
         return _jsonable(dict(row))
     except HTTPException:
