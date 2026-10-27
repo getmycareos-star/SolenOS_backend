@@ -335,6 +335,40 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
     assert creator_revoked_accept.status_code == 404
 
 
+def test_handoff_recipient_directory_is_scoped_and_consent_aware():
+    from app.models.privacy_delivery import AuditLogEvent
+
+    client = TestClient(app)
+    owner = create_session(client, "Directory owner")
+    recipient_id, _ = add_caregiver_session(owner["person"]["id"])
+    unrelated = create_session(client, "Unrelated person")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    denied = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert denied.status_code == 403
+
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    listed = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["count"] == 1
+    assert listed.json()["items"][0]["caregiver_id"] == recipient_id
+    assert listed.json()["items"][0]["can_receive_handoff"] is False
+    assert all(item["caregiver_id"] != unrelated["caregiver"]["id"] for item in listed.json()["items"])
+
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    listed_after_consent = client.get("/api/v1/handoffs/directory/recipients", headers=headers)
+    assert listed_after_consent.status_code == 200
+    assert listed_after_consent.json()["items"][0]["can_receive_handoff"] is True
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(AuditLogEvent).filter_by(
+            person_id=owner["person"]["id"], action="handoff.recipients.list"
+        ).count() == 3
+    finally:
+        db.close()
+
+
 def test_handoff_rejects_recipient_from_another_person():
     client = TestClient(app)
     owner = create_session(client, "First person")
