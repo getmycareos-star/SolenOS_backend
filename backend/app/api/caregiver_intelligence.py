@@ -1,12 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from app.core.database import get_db
+from app.models.care import Caregiver as SessionCaregiverModel
+from app.services.caregiver_profile_identity import ensure_caregiver_profile_for_session
 from app.models.caregiver_intelligence import (
+    CaregiverProfile as CaregiverProfileModel,
     CaregiverRole as CaregiverRoleModel,
+    CaregiverResponsibility as CaregiverResponsibilityModel,
+    CaregiverObservation as CaregiverObservationModel,
     CaregiverPerspective as CaregiverPerspectiveModel,
+    CaregiverHandoff as CaregiverHandoffModel,
+    CaregiverActivity as CaregiverActivityModel,
     CaregiverCommunication as CaregiverCommunicationModel,
+    CareNetworkRelationship as CareNetworkRelationshipModel,
 )
 from app.schemas.caregiver_intelligence import (
     CaregiverProfileCreate,
@@ -46,6 +54,50 @@ from app.core.caregiver_enums import (
 )
 
 router = APIRouter()
+
+
+def _session_profile(request: Request, db: Session) -> tuple[str, str, CaregiverProfileModel]:
+    person_id = getattr(request.state, "scoped_person_id", None)
+    session_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not session_caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    try:
+        profile = ensure_caregiver_profile_for_session(
+            db,
+            person_id=str(person_id),
+            session_caregiver_id=str(session_caregiver_id),
+        )
+        db.commit()
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=403, detail="Caregiver identity is not linked to this care record") from exc
+    request.state.scoped_caregiver_profile_id = profile.id
+    return str(person_id), str(session_caregiver_id), profile
+
+
+def _assert_person_scope(request: Request, person_id: str) -> tuple[str, str]:
+    scoped_person_id = getattr(request.state, "scoped_person_id", None)
+    scoped_caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not scoped_person_id or not scoped_caregiver_id:
+        raise HTTPException(status_code=401, detail="A valid care-record session is required")
+    if str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    return str(scoped_person_id), str(scoped_caregiver_id)
+
+
+def _require_profile_in_person(db: Session, profile_id: str, person_id: str) -> CaregiverProfileModel:
+    profile = db.query(CaregiverProfileModel).filter(
+        CaregiverProfileModel.id == str(profile_id),
+        CaregiverProfileModel.person_id == str(person_id),
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Caregiver profile not found")
+    return profile
+
+
+def _assert_actor_id(claimed_id: Optional[str], profile_id: str, session_caregiver_id: str) -> None:
+    if claimed_id and str(claimed_id) not in {str(profile_id), str(session_caregiver_id)}:
+        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
 
 
 def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, source_type: str, source_id: str = None, caregiver_id: str = None):
