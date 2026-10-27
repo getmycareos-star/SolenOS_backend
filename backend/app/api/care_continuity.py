@@ -573,6 +573,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     # recorded_at is server receipt time, never a client-controlled timestamp.
     if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations", "record-provenance") and "recorded_at" in table.c:
         data["recorded_at"] = datetime.now(timezone.utc)
+    if resource == "record-change-sets" and not data.get("status"):
+        data["status"] = "committed"
     if resource == "record-identifiers":
         fingerprint = str(data.get("identifier_fingerprint") or "")
         if not re.fullmatch(r"(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{128})", fingerprint):
