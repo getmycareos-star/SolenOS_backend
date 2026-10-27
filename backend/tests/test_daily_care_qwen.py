@@ -173,6 +173,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
         captured["messages"] = messages
         return "The caregiver-reviewed record says sleep was poor last night."
 
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_companion)
     # Keep this integration test independent of whether the CI runner has a
     # configured local Qwen endpoint; the dedicated ask path is tested separately.
