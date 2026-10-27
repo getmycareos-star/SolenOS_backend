@@ -68,7 +68,7 @@ def rank_context_rows(
         overlap = terms & row_terms
         lexical = len(overlap) / max(len(terms), 1)
         observed = _as_utc(timestamp(row))
-        age_days = max((now - observed).total_seconds() / 86400, 0) if observed else 3650
+        age_days = abs((now - observed).total_seconds()) / 86400 if observed else 3650
         recency = 0.12 / (1 + age_days / 30)
         # Lexical evidence dominates recency; ties retain the database's order.
         scored.append((lexical + recency, index, row))
