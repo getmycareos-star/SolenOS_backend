@@ -156,6 +156,17 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     )
     assert out_of_scope.status_code == 403
 
+    unreviewed = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "Draft not reviewed."},
+            "source_record_ids": ["record-1"],
+            "caregiver_reviewed": False,
+        },
+    )
+    assert unreviewed.status_code == 422
+
     attached = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
         headers=owner_headers,
@@ -170,6 +181,17 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     )
     assert attached.status_code == 200, attached.text
     assert len(attached.json()["content_sha256"]) == 64
+
+    duplicate_attach = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "A later replacement."},
+            "source_record_ids": ["evidence-2"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert duplicate_attach.status_code == 409
 
     before_accept = client.get(
         f"/api/v1/handoffs/{handoff['id']}/summary",
