@@ -1111,7 +1111,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(ConversationMessage)
             .filter_by(session_id=session.id)
             .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
+            .limit(6)
             .all()
         )
         prior_messages.reverse()
@@ -1122,13 +1122,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
             .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
-            .limit(80)
+            .limit(60)
             .all()
         )
         recent_events = _rank_companion_rows(
             retrieval_query, recent_events,
             ("event_type", "status", "title", "description", "time_provenance"),
-            12,
+            10,
         )
         for event in recent_events:
             source_event_ids.append(str(event.id))
@@ -1158,13 +1158,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 CareAssertion.assertion_status == "caregiver_reviewed",
             )
             .order_by(CareAssertion.recorded_at.desc())
-            .limit(40)
+            .limit(30)
             .all()
         )
         approved_assertions = _rank_companion_rows(
             retrieval_query, approved_assertions,
             ("field", "asserted_value", "assertion_kind", "source_label", "source_text"),
-            8,
+            6,
         )
         assertion_context: list[str] = []
         for assertion in approved_assertions:
@@ -1194,7 +1194,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         appointments = _rank_companion_rows(
-            retrieval_query, appointments, ("title", "status", "scheduled_at"), 6
+            retrieval_query, appointments, ("title", "status", "scheduled_at"), 4
         )
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
@@ -1248,12 +1248,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
                 evidence_rows.append(row)
-            if len(evidence_rows) >= 12:
+            if len(evidence_rows) >= 8:
                 break
 
         evidence_rows = _rank_companion_rows(
             retrieval_query, evidence_rows,
-            ("type", "source_text", "source_type", "evidence_status"), 10
+            ("type", "source_text", "source_type", "evidence_status", "extra_metadata"), 8
         )
 
         for evidence in evidence_rows:
@@ -1276,7 +1276,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "status": evidence.evidence_status,
                     "source_type": evidence.source_type,
                     "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
-                    "source_text": (evidence.source_text or "")[:1200],
+                    "source_text": (evidence.source_text or "")[:800],
                     "time_provenance": evidence.time_provenance,
                     "confidence": evidence.confidence,
                 }, ensure_ascii=False)
@@ -1293,12 +1293,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 Contradiction.resolution_status.in_(("unresolved", "open")),
             )
             .order_by(Contradiction.created_at.desc())
-            .limit(30)
+            .limit(20)
             .all()
         )
         contradiction_rows = _rank_companion_rows(
             retrieval_query, contradiction_rows,
-            ("subject_type", "field", "description", "resolution_status"), 5
+            ("subject_type", "field", "description", "resolution_status"), 3
         )
         contradiction_context = [{
             "source_id": str(row.id), "type": "unresolved_contradiction",
@@ -1311,7 +1311,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(InformationGap)
             .filter(InformationGap.person_id == person_id)
             .order_by(InformationGap.created_at.desc())
-            .limit(30)
+            .limit(20)
             .all()
         )
         gap_candidates = [
@@ -1322,7 +1322,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         gap_candidates = _rank_companion_rows(
             retrieval_query, gap_candidates,
             ("subject_type", "field", "description", "epistemic_state", "gap_reason", "priority"),
-            5,
+            3,
         )
         gap_context = [{
             "source_id": str(row.id), "type": "information_gap",
@@ -1339,11 +1339,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(OpenQuestion)
             .filter(OpenQuestion.person_id == person_id, OpenQuestion.status == "open")
             .order_by(OpenQuestion.asked_at.desc())
-            .limit(30)
+            .limit(20)
             .all()
         )
         open_question_rows = _rank_companion_rows(
-            retrieval_query, open_question_rows, ("question", "subject_type", "status", "priority"), 4
+            retrieval_query, open_question_rows, ("question", "subject_type", "status", "priority"), 2
         )
         open_question_context = [{
             "source_id": str(row.id), "type": "open_question",
@@ -1356,12 +1356,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(CareStateRevision)
             .filter(CareStateRevision.person_id == person_id)
             .order_by(CareStateRevision.changed_at.desc())
-            .limit(12)
+            .limit(10)
             .all()
         )
         revision_rows = _rank_companion_rows(
             retrieval_query, revision_rows,
-            ("target_type", "change_kind", "before_state", "after_state"), 5
+            ("target_type", "change_kind", "before_state", "after_state"), 3
         )
         revision_context = [{
             "source_id": str(row.id), "type": "care_state_revision",
@@ -1377,12 +1377,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(CareActionOutcome)
             .filter(CareActionOutcome.person_id == person_id)
             .order_by(CareActionOutcome.created_at.desc())
-            .limit(20)
+            .limit(15)
             .all()
         )
         outcome_rows = _rank_companion_rows(
             retrieval_query, outcome_rows,
-            ("action_type", "outcome_status", "notes", "correction_text"), 5
+            ("action_type", "outcome_status", "notes", "correction_text"), 3
         )
         outcome_context = [{
             "source_id": str(row.id), "type": "recorded_action_outcome",
@@ -1397,18 +1397,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(CareDeltaRun)
             .filter(CareDeltaRun.person_id == person_id)
             .order_by(CareDeltaRun.created_at.desc())
-            .limit(12)
+            .limit(8)
             .all()
         )
         delta_rows = _rank_companion_rows(
-            retrieval_query, delta_rows, ("source", "delta_json", "model_name"), 3
+            retrieval_query, delta_rows, ("source", "delta_json", "model_name"), 2
         )
         delta_context = [{
             "source_id": str(row.id), "type": "recorded_change_analysis",
             "source": row.source, "event_date": row.event_date.isoformat() if row.event_date else None,
             "source_event_id": str(row.source_event_id) if row.source_event_id else None,
             "evidence_ids": row.evidence_ids or [],
-            "recorded_analysis": (row.delta_json or "")[:1600],
+            "recorded_analysis": (row.delta_json or "")[:900],
             "analysis_model": row.model_name,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         } for row in delta_rows]
@@ -1480,7 +1480,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         model_messages = [{"role": "system", "content": system_prompt}]
         model_messages.extend(
-            {"role": row.role, "content": row.content}
+            {"role": row.role, "content": row.content[-600:]}
             for row in reversed(prior_messages)
             if row.role in {"user", "assistant"}
         )
