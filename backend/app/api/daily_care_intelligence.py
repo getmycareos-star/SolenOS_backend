@@ -397,7 +397,7 @@ def review_daily_care_lcr_proposal(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.caregiver_id == caregiver_id,
-    ).first()
+    ).with_for_update().first()
     if analysis is None or not isinstance(analysis.candidates, dict) or analysis.candidates.get("kind") != "daily_care_qwen_lcr_proposals":
         raise HTTPException(status_code=404, detail="Daily Care proposal not found")
     # Detach JSON-backed candidates before mutation; SQLAlchemy does not track
