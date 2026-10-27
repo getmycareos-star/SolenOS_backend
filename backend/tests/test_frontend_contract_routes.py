@@ -1,4 +1,5 @@
 import base64
+import json
 import importlib
 from io import BytesIO
 
@@ -192,12 +193,31 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         uploaded = client.post(
             "/api/v1/upload",
             headers=auth,
-            data={"person_id": person_id, "caregiver_id": caregiver_id},
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": "Text checked against the scan.",
+                "scan_review_status": "caregiver_reviewed",
+                "scan_rotation_degrees": "1.5",
+                "scan_crop_json": json.dumps({"top": 2, "right": 3, "bottom": 4, "left": 5}),
+                "scan_text_prepared": "true",
+            },
             files={"file": ("medication.png", original, "image/png")},
         )
         assert uploaded.status_code == 201, uploaded.text
         evidence_id = uploaded.json()["evidence_id"]
         assert uploaded.json()["persisted"] is True
+        db = TestingSessionLocal()
+        saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
+        assert saved_evidence is not None
+        scan_metadata = json.loads(saved_evidence.extra_metadata)["scan_processing"]
+        assert scan_metadata["client_declared_review_status"] == "caregiver_reviewed"
+        assert scan_metadata["rotation_degrees"] == 1.5
+        assert scan_metadata["crop_insets_percent"] == {"top": 2.0, "right": 3.0, "bottom": 4.0, "left": 5.0}
+        assert scan_metadata["text_prepared_by_client"] is True
+        assert scan_metadata["review_attestation"] == "client_declared_not_server_verified"
+        db.close()
 
         downloaded = client.get(f"/api/v1/upload/{evidence_id}", headers=auth)
         assert downloaded.status_code == 200
