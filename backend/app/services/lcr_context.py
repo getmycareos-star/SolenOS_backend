@@ -129,6 +129,19 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "supersedes_id", "reported_by_caregiver_id", "created_at"],
         "order": ["recorded_at", "created_at"],
     },
+    "corrections": {
+        "table": "corrections",
+        "required": False,
+        "fields": ["id", "target_type", "target_id", "original_text", "corrected_text", "reason",
+                   "caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
+    "appointments": {
+        "table": "appointments",
+        "required": False,
+        "fields": ["id", "title", "status", "scheduled_at", "description", "created_at", "updated_at"],
+        "order": ["scheduled_at", "created_at"],
+    },
 }
 
 SEARCH_FIELDS = {
@@ -147,6 +160,8 @@ SEARCH_FIELDS = {
     "caregiver_observations": ["observation_category", "description", "source_type"],
     "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
     "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
+    "corrections": ["target_type", "original_text", "corrected_text", "reason"],
+    "appointments": ["title", "status", "description"],
 }
 
 TEXT_FIELDS = {
