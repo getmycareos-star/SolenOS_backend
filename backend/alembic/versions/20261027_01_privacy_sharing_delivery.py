@@ -89,7 +89,7 @@ REQUIRED_COLUMNS = {
     "authorization_decisions": {"actor_id", "resource_type", "resource_id", "action", "decision", "decided_at"},
     "failed_access_attempts": {"action", "reason_code", "attempted_at"},
     "care_notifications": {"person_id", "caregiver_id", "title", "body"},
-    "care_notification_preferences": {"person_id", "caregiver_id"},
+    "care_notification_preferences": {"person_id", "caregiver_id", "quiet_hours_enabled", "reminders_enabled"},
     "notification_delivery_attempts": {"notification_id", "attempt_number", "channel", "attempted_at", "result"},
     "notification_delivery_receipts": {"notification_id", "receipt_status", "received_at"},
     "notification_read_receipts": {"notification_id", "reader_id", "read_at"},
@@ -107,7 +107,7 @@ def _column_type(name):
         return sa.DateTime(timezone=True)
     if name in ("scope_snapshot", "data_categories", "quiet_hours", "details", "verification_result"):
         return sa.JSON()
-    if name in ("enabled", "retryable"):
+    if name in ("enabled", "retryable") or name.endswith("_enabled"):
         return sa.Boolean()
     if name in ("attempt_number", "attempt_count", "escalation_level", "checked_count", "failure_count"):
         return sa.Integer()
@@ -121,6 +121,10 @@ def _column_definition(name, table_name=None):
         return sa.Column(name, sa.String(36), primary_key=True, nullable=False)
     if name == "metadata":
         return sa.Column(name, sa.JSON(), nullable=False, server_default=sa.text("'{}'"))
+    if name == "quiet_hours_enabled":
+        return sa.Column(name, sa.Boolean(), nullable=False, server_default=sa.false())
+    if name == "reminders_enabled":
+        return sa.Column(name, sa.Boolean(), nullable=False, server_default=sa.true())
     if name in ("created_at", "updated_at"):
         return sa.Column(name, sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
     if table_name and name in REQUIRED_COLUMNS.get(table_name, set()):
