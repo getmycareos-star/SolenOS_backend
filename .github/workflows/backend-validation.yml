@@ -53,8 +53,16 @@ jobs:
           for attempt in $(seq 1 48); do
             health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
             status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/ready" || true)
-            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}"
-            if [ "$health" = "200" ] && [ "$status" = "200" ]; then ready=1; break; fi
+            openapi=$(curl --silent --show-error --fail --max-time 20 "${base}/openapi.json" 2>/dev/null || true)
+            has_lcr_routes=0
+            if printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-versions' &&
+               printf '%s' "$openapi" | grep -q '/api/v1/care-continuity/record-snapshots'; then
+              has_lcr_routes=1
+            fi
+            echo "Attempt ${attempt}: /health HTTP ${health}; /ready HTTP ${status}; LCR version routes present: ${has_lcr_routes}"
+            # A healthy previous deployment is not sufficient: wait until the
+            # deployment carrying the new LCR routes is actually serving traffic.
+            if [ "$health" = "200" ] && [ "$status" = "200" ] && [ "$has_lcr_routes" = "1" ]; then ready=1; break; fi
             sleep 20
           done
           test "$ready" = "1"
