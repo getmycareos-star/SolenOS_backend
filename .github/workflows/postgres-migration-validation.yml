@@ -237,7 +237,7 @@ jobs:
               ('job-qwen-backfill', 'p-qwen-backfill', 'c-qwen-backfill', 'completed', 'Summarize the appointment note', '', '[]', 'appointment', 'Preserve this exact completed suggestion.', '[\"event-source-1\"]', '[\"evidence-source-1\"]', 1);
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_09_lcr_query_indexes"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_10_appt_workspace"
           test "$(psql "$PSQL_URL" -Atc "SELECT result_text IS NULL FROM qwen_background_jobs WHERE id='job-qwen-backfill'")" = "t"
           test "$(psql "$PSQL_URL" -Atc "SELECT output_text FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "Preserve this exact completed suggestion."
           test "$(psql "$PSQL_URL" -Atc "SELECT source_event_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["event-source-1"]'
