@@ -328,6 +328,10 @@ jobs:
           fi
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"]; assert not re.search(r"(?i)\bsaba\b", reply); assert not re.search(r"(?i)\bhow are you(?: doing)?\b", reply); assert len(re.findall(r"[^\W_]+", reply, flags=re.UNICODE)) <= 12, reply' "$greeting"
 
+          echo "QWEN_E2E: Companion grounding, history isolation, and conversational continuity"
+          COMPANION_BASE_URL=http://127.0.0.1:8080 COMPANION_TOKEN="$token" COMPANION_PERSON_ID="$person_id" \
+            python backend/scripts/companion_live_eval.py
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
