@@ -37,4 +37,4 @@ The Companion now supplements the recent event baseline with lexical matches fro
 
 ## Required follow-up
 
-The current retrieval is bounded and lexical. It is an incremental improvement, not a full Care Reality State/delta-engine retrieval architecture. The live Qwen suite and human-reviewed quality evaluation remain mandatory before claiming production conversational quality.
+The current retrieval is bounded and lexical. It is an incremental improvement, not a full Care Reality State/delta-engine retrieval architecture. The live Qwen suite and human-reviewed quality evaluation remain mandatory before claiming production conversational quality. This PR is intended to run the repository's Qwen-specific model-image and authenticated API smoke job.
