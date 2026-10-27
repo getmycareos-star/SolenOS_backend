@@ -494,6 +494,10 @@ def accept_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.accept", "denied", reason_code="not_a_recipient")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
+    if handoff.summary_snapshot is None:
+        _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.accept", "denied", reason_code="summary_missing")
+        db.commit()
+        raise HTTPException(status_code=409, detail="A caregiver-reviewed summary must be attached before accepting this handoff")
     if recipient.access_status != "accepted":
         recipient.access_status = "accepted"
         recipient.accepted_at = now
