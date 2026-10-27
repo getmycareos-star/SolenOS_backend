@@ -236,6 +236,46 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     return _view(db, handoff)
 
 
+@router.get("/directory/recipients")
+def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    if not _has_required_consent(db, person_id, caregiver_id):
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id,
+            action="handoff.recipients.list", target_type="handoff_directory",
+            target_id=person_id, occurred_at=datetime.now(timezone.utc),
+            outcome="denied", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            policy_version=POLICY_VERSION,
+            record_metadata={"reason_code": "required_consent_missing"},
+        ))
+        db.commit()
+        raise HTTPException(status_code=403, detail="Required consent is missing or revoked")
+    caregivers = db.query(Caregiver).filter(
+        Caregiver.person_id == person_id,
+        Caregiver.id != caregiver_id,
+    ).order_by(Caregiver.name.asc(), Caregiver.id.asc()).all()
+    items = [
+        {
+            "caregiver_id": row.id,
+            "name": row.name,
+            "relationship": row.relationship,
+            "can_receive_handoff": _has_required_consent(db, person_id, row.id),
+        }
+        for row in caregivers
+    ]
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id,
+        action="handoff.recipients.list", target_type="handoff_directory",
+        target_id=person_id, occurred_at=datetime.now(timezone.utc),
+        outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
+    ))
+    db.commit()
+    return {"items": items, "count": len(items)}
+
+
 @router.get("/{handoff_id}")
 def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
