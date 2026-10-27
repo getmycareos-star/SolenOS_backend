@@ -276,3 +276,49 @@ def test_companion_repairs_unsupported_operational_claim_before_returning(monkey
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_companion_retrieves_relevant_older_evidence_not_only_recent_uploads(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older document mentions waking overnight; it does not establish a trend by itself."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        older = __import__("app.models.care", fromlist=["Evidence"]).Evidence(
+            person_id=person_id, type="document",
+            source_text="Caregiver note from August: person woke several times overnight.",
+            uploaded_by_caregiver_id=caregiver_id, evidence_status="provided",
+            source_type="caregiver_document", time_provenance="document_date_reported",
+        )
+        db.add(older)
+        for index in range(14):
+            db.add(__import__("app.models.care", fromlist=["Evidence"]).Evidence(
+                person_id=person_id, type="note",
+                source_text=f"Unrelated recent household detail number {index}.",
+                uploaded_by_caregiver_id=caregiver_id, evidence_status="provided",
+                source_type="caregiver_report", time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did the document say about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_evidence_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "woke several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
