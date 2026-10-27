@@ -203,6 +203,7 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "care_conflict": "care_conflicts", "conflict": "care_conflicts",
         "care_action_outcome": "care_action_outcomes", "action_outcome": "care_action_outcomes",
         "living_care_record": "living_care_records", "living_record": "living_care_records",
+        "care_record_retraction": "care_record_retractions", "record_retraction": "care_record_retractions",
     }
     links = []
     if resource in ("follow-up-links", "relationships"):
@@ -220,10 +221,13 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
     elif resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
         if payload.get("source_id"):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
-    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"):
+    elif resource in ("record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts", "record-retractions"):
         if payload.get("target_id"):
             links.append((payload.get("target_type"), payload.get("target_id"), "target_id"))
-    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts"}
+    elif resource == "record-identifiers":
+        if payload.get("source_id"):
+            links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    strict_link_resources = {"record-provenance", "record-provenance-links", "record-change-items", "corrections", "amendment-items", "record-audit", "uncertainties", "conflicts", "record-retractions", "record-identifiers"}
     for type_name, target_id, field_name in links:
         if not target_id:
             continue
@@ -255,6 +259,11 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "uncertainties": (("living_care_records", "care_record_id"),),
         "missing-information": (("living_care_records", "care_record_id"),),
         "conflicts": (("living_care_records", "care_record_id"),),
+        "record-identifiers": (("living_care_records", "care_record_id"),),
+        "record-sections": (("living_care_records", "care_record_id"),),
+        "record-links": (("living_care_records", "source_record_id"), ("living_care_records", "target_record_id")),
+        "record-retractions": (("living_care_records", "care_record_id"), ("record_provenance", "provenance_id")),
+        "record-restorations": (("living_care_records", "care_record_id"), ("care_record_retractions", "retraction_id"), ("record_provenance", "provenance_id")),
     }
     for table_name, field in scoped_references.get(resource, ()):
         value = payload.get(field)
@@ -489,7 +498,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         if "observation_type" in table.c:
             data["observation_type"] = ObservationType.DIRECT.name
         if "information_visibility" in table.c:
-            data["information_visibility"] = InformationVisibility.PRIVATE
+            data["information_visibility"] = InformationVisibility.PRIVATE.name
         if "is_promoted_to_shared" in table.c:
             data["is_promoted_to_shared"] = False
         if "event_time" in table.c and data.get("observed_at"):
