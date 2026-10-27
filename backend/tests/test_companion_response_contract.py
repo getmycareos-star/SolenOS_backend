@@ -197,3 +197,82 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
             db.close()
     finally:
         teardown()
+
+
+def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I found an earlier sleep report, but the record does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        older = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=90), title="Sleep pattern report",
+            description="Caregiver reported waking several times overnight in August.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(12):
+            db.add(CareEvent(
+                person_id=person_id, event_type="observation", status="recorded",
+                occurred_at=now - timedelta(hours=index + 1), title=f"Unrelated household note {index}",
+                description="A household item was recorded with no sleep details.",
+                evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_repairs_unsupported_operational_claim_before_returning(monkeypatch):
+    client = setup_client(monkeypatch)
+    replies = iter([
+        "Your reminder was delivered successfully.",
+        "I can't verify whether the reminder was delivered because no delivery status was supplied.",
+    ])
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return next(replies)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Did my reminder get delivered?"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "I can't verify whether the reminder was delivered because no delivery status was supplied."
+        assert len(calls) == 2
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
