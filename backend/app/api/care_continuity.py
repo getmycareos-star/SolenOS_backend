@@ -509,8 +509,17 @@ def list_resource(resource: str, request: Request, limit: int = 50, db: Session 
     person_id, _ = _scoped_identity(request, db)
     table = _table(db, RESOURCES[resource])
     query = select(table).where(table.c.person_id == person_id)
+    ordering = []
     if "created_at" in table.c:
-        query = query.order_by(desc(table.c.created_at))
+        ordering.append(desc(table.c.created_at))
+    elif "changed_at" in table.c:
+        ordering.append(desc(table.c.changed_at))
+    elif "updated_at" in table.c:
+        ordering.append(desc(table.c.updated_at))
+    if "revision_number" in table.c:
+        ordering.append(desc(table.c.revision_number))
+    if ordering:
+        query = query.order_by(*ordering)
     rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
     return [_jsonable(dict(row)) for row in rows]
 
