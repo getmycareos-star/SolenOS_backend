@@ -276,6 +276,64 @@ def list_handoff_recipients(request: Request, db: Session = Depends(get_db)):
     return {"items": items, "count": len(items)}
 
 
+@router.get("/inbox")
+def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    if not _has_required_consent(db, person_id, caregiver_id):
+        db.add(AuditLogEvent(
+            id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+            person_id=person_id, caregiver_id=caregiver_id,
+            action="handoff.inbox.list", target_type="handoff_inbox",
+            target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
+            outcome="denied", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+            policy_version=POLICY_VERSION,
+            record_metadata={"reason_code": "required_consent_missing"},
+        ))
+        db.commit()
+        raise HTTPException(status_code=403, detail="Required consent is missing or revoked")
+
+    now = datetime.now(timezone.utc)
+    rows = db.query(HandoffRecord, HandoffRecipient, Caregiver).join(
+        HandoffRecipient, HandoffRecipient.handoff_id == HandoffRecord.id
+    ).join(
+        Caregiver, Caregiver.id == HandoffRecord.created_by
+    ).filter(
+        HandoffRecord.person_id == person_id,
+        HandoffRecipient.recipient_id == caregiver_id,
+        HandoffRecipient.access_status.in_(["pending", "accepted"]),
+        HandoffRecipient.revoked_at.is_(None),
+        HandoffRecord.handoff_status != "revoked",
+    ).order_by(HandoffRecord.created_at.desc(), HandoffRecord.id.desc()).all()
+
+    items = []
+    for handoff, recipient, creator in rows:
+        if _aware(handoff.expires_at) and _aware(handoff.expires_at) <= now:
+            continue
+        if not _has_required_consent(db, person_id, handoff.created_by):
+            continue
+        items.append({
+            "id": handoff.id,
+            "from_caregiver_id": creator.id,
+            "from_caregiver_name": creator.name,
+            "from_caregiver_relationship": creator.relationship,
+            "scope": handoff.scope_snapshot or [],
+            "status": recipient.access_status,
+            "created_at": handoff.created_at.isoformat() if handoff.created_at else None,
+            "expires_at": handoff.expires_at.isoformat() if handoff.expires_at else None,
+            "has_summary": handoff.summary_snapshot is not None,
+        })
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id,
+        action="handoff.inbox.list", target_type="handoff_inbox",
+        target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
+        outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
+    ))
+    db.commit()
+    return {"items": items, "count": len(items)}
+
+
 @router.get("/{handoff_id}")
 def get_handoff(handoff_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
