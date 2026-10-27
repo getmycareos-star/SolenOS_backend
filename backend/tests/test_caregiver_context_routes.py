@@ -1,7 +1,8 @@
 from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint, func
 from sqlalchemy import create_engine, select
+import os
+import tempfile
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from app.core.database import Base, get_db
@@ -9,10 +10,12 @@ from app.main import app
 import app.main as main_module
 
 
+_test_db_file = tempfile.NamedTemporaryFile(prefix="solenos-care-continuity-", suffix=".sqlite", delete=False)
+_test_db_file.close()
+_test_db_path = _test_db_file.name
 engine = create_engine(
-    "sqlite:///:memory:",
+    f"sqlite:///{_test_db_path}",
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -371,6 +374,11 @@ def setup_function():
 def teardown_function():
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    try:
+        os.unlink(_test_db_path)
+    except FileNotFoundError:
+        pass
 
 
 def _session(client, caregiver_name):
@@ -461,7 +469,8 @@ def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     persisted_record = db.execute(
         select(record_table.c.id, record_table.c.person_id).where(record_table.c.id == record_id)
     ).first()
-    print("LCR snapshot debug", record_id, first.get("person"), persisted_record)
+    assert persisted_record is not None, "Living Care Record insert must persist across request sessions"
+    assert persisted_record.person_id == first["person"]["id"]
     db.close()
 
     version_response = client.post(
