@@ -198,6 +198,12 @@ jobs:
               receipt_index = cur.fetchone()
               if not receipt_index or "CREATE UNIQUE INDEX" not in receipt_index[0].upper():
                   raise SystemExit("notification read receipt uniqueness index is missing")
+              cur.execute(
+                  "SELECT data_type FROM information_schema.columns WHERE table_schema='public' AND table_name='handoff_records' AND column_name='summary_snapshot'"
+              )
+              summary_column = cur.fetchone()
+              if not summary_column or summary_column[0] not in {"json", "jsonb"}:
+                  raise SystemExit("handoff summary_snapshot JSON column is missing or has the wrong type")
           conn.close()
           print(f"PostgreSQL verified {len(required_tables)} privacy/delivery tables and the unique read-receipt index.")
           PY
