@@ -329,10 +329,40 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             and claimed_caregiver_id
             and str(claimed_caregiver_id) != str(scoped_caregiver_id)
         ):
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Caregiver attribution does not match this session"},
+            # Legacy caregiver-intelligence APIs store profile IDs separately
+            # from session caregiver IDs. A same-person profile ID may be a
+            # legitimate target; the route must still validate actor ownership
+            # against request.state.scoped_caregiver_profile_id before writing.
+            profile_scoped_paths = (
+                "/api/v1/caregiver-profiles",
+                "/api/v1/caregiver-roles",
+                "/api/v1/caregiver-responsibilities",
+                "/api/v1/caregiver-observations",
+                "/api/v1/caregiver-perspectives",
+                "/api/v1/caregiver-handoffs",
+                "/api/v1/caregiver-activities",
+                "/api/v1/caregiver-communications",
+                "/api/v1/care-network-relationships",
+                "/api/v1/caregiver-contexts",
+                "/api/v1/responsibility-gaps",
+                "/api/v1/perspective-conflicts",
+                "/api/v1/duplicate-actions",
             )
+            profile_claim_allowed = False
+            if path.startswith(profile_scoped_paths):
+                try:
+                    from app.models.caregiver_intelligence import CaregiverProfile as CaregiverProfileModel
+                    profile_claim_allowed = db.query(CaregiverProfileModel.id).filter(
+                        CaregiverProfileModel.id == str(claimed_caregiver_id),
+                        CaregiverProfileModel.person_id == str(scoped_person_id),
+                    ).first() is not None
+                except Exception:
+                    profile_claim_allowed = False
+            if not profile_claim_allowed:
+                return JSONResponse(
+                    status_code=403,
+                    content={"detail": "Caregiver attribution does not match this session"},
+                )
 
         if not target_person_id:
             return JSONResponse(
