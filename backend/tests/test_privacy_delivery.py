@@ -230,6 +230,13 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
     assert marked.status_code == 200, marked.text
     assert marked.json()["is_read"] is True
 
+    # Marking the same notification read again must be idempotent.
+    marked_again = client.patch(f"/api/v1/notifications/{notification_id}/read", headers=headers)
+    assert marked_again.status_code == 200, marked_again.text
+    unread_after_read = client.get("/api/v1/notifications?unread_only=true", headers=headers)
+    assert unread_after_read.status_code == 200, unread_after_read.text
+    assert unread_after_read.json()["items"] == []
+
     preferences_before = client.get("/api/v1/notifications/preferences", headers=headers)
     assert preferences_before.status_code == 200
     assert preferences_before.json()["configured"] is False
