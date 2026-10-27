@@ -305,6 +305,15 @@ def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
         HandoffRecord.handoff_status != "revoked",
     ).order_by(HandoffRecord.created_at.desc(), HandoffRecord.id.desc()).all()
 
+    handoff_ids = [handoff.id for handoff, _, _ in rows]
+    acknowledged_ids = set()
+    if handoff_ids:
+        acknowledged_ids = {
+            row[0] for row in db.query(HandoffAcknowledgement.handoff_id).filter(
+                HandoffAcknowledgement.handoff_id.in_(handoff_ids),
+                HandoffAcknowledgement.recipient_id == caregiver_id,
+            ).distinct().all()
+        }
     items = []
     for handoff, recipient, creator in rows:
         if _aware(handoff.expires_at) and _aware(handoff.expires_at) <= now:
@@ -321,6 +330,7 @@ def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
             "created_at": handoff.created_at.isoformat() if handoff.created_at else None,
             "expires_at": handoff.expires_at.isoformat() if handoff.expires_at else None,
             "has_summary": handoff.summary_snapshot is not None,
+            "acknowledged": handoff.id in acknowledged_ids,
         })
     db.add(AuditLogEvent(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
@@ -522,11 +532,28 @@ def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: R
         HandoffRecipient.recipient_id == caregiver_id,
         HandoffRecipient.access_status == "accepted",
         HandoffRecipient.revoked_at.is_(None),
-    ).first()
+    ).with_for_update().first()
     if recipient is None or not _has_required_consent(db, person_id, caregiver_id) or not _has_required_consent(db, person_id, handoff.created_by) or handoff.handoff_status == "revoked" or (_aware(handoff.expires_at) and _aware(handoff.expires_at) <= now):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.acknowledge", "denied", reason_code="not_authorized_or_expired")
         db.commit()
         raise HTTPException(status_code=404, detail="Handoff not found")
+    existing_acknowledgement = db.query(HandoffAcknowledgement).filter(
+        HandoffAcknowledgement.handoff_id == handoff.id,
+        HandoffAcknowledgement.recipient_id == caregiver_id,
+    ).order_by(HandoffAcknowledgement.acknowledged_at.asc()).first()
+    if existing_acknowledgement is not None:
+        _audit(
+            db, request, person_id, caregiver_id, handoff.id,
+            "handoff.acknowledge", "allowed", recipient_id=caregiver_id,
+            reason_code="already_acknowledged",
+        )
+        db.commit()
+        return {
+            "handoff_id": handoff.id,
+            "acknowledged": True,
+            "acknowledged_at": existing_acknowledgement.acknowledged_at,
+            "already_acknowledged": True,
+        }
     acknowledgement = HandoffAcknowledgement(
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
         person_id=person_id, caregiver_id=caregiver_id, handoff_id=handoff.id,
@@ -538,7 +565,12 @@ def acknowledge_handoff(handoff_id: str, payload: HandoffAcknowledge, request: R
     db.add(acknowledgement)
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.acknowledge", "allowed", recipient_id=caregiver_id)
     db.commit()
-    return {"handoff_id": handoff.id, "acknowledged": True, "acknowledged_at": now}
+    return {
+        "handoff_id": handoff.id,
+        "acknowledged": True,
+        "acknowledged_at": now,
+        "already_acknowledged": False,
+    }
 
 
 @router.post("/{handoff_id}/revoke")
