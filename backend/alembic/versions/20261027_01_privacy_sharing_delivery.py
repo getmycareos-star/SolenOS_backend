@@ -52,7 +52,7 @@ TABLES = {
     "notification_delivery_attempts": ["notification_id", "attempt_number", "channel", "attempted_at", "result", "failure_code", "provider_reference"],
     "notification_delivery_receipts": ["notification_id", "provider_reference", "receipt_status", "received_at", "details"],
     "notification_read_receipts": ["notification_id", "reader_id", "read_at", "client"],
-    "reminders": ["person_id", "created_by", "title", "description", "due_at", "status", "priority", "acknowledged_at", "completed_at"],
+    "care_reminders": ["person_id", "created_by_caregiver_id", "title", "note", "due_at", "status", "completed_at", "completed_by_caregiver_id", "completion_note", "cancelled_at", "cancelled_by_caregiver_id"],
     "reminder_acknowledgements": ["reminder_id", "acknowledged_by", "acknowledged_at", "acknowledgement", "note"],
     "reminder_escalations": ["reminder_id", "recipient_id", "escalation_level", "reason_code", "escalated_at", "resolved_at", "status"],
     # Care handoffs
