@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Callable, Iterable, TypeVar
 
 T = TypeVar("T")
-_TOKEN_RE = re.compile(r"[^\\W_]+", re.UNICODE)
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 # These words carry little care-topic information. This is retrieval plumbing,
 # not a response map or a care-domain conclusion.
 _STOP_WORDS = {
@@ -73,14 +73,26 @@ def rank_context_rows(
         # Lexical evidence dominates recency; ties retain the database's order.
         scored.append((lexical + recency, index, row))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    chosen = [row for _, _, row in scored[:limit]]
-    # Include a small recent baseline even when a very old entry is the only
-    # lexical match; comparison questions need both topical evidence and context.
-    if terms and fallback_recent > 0:
-        recent = candidates[:fallback_recent]
-        ids = {id(row) for row in chosen}
-        for row in recent:
-            if id(row) not in ids and len(chosen) < limit:
+    if not terms or fallback_recent <= 0:
+        return [row for _, _, row in scored[:limit]]
+
+    # Reserve slots for a small recent baseline even when an older record is a
+    # strong lexical match. This supports comparison without allowing recency to
+    # crowd out query-relevant history.
+    baseline = candidates[:min(fallback_recent, limit)]
+    baseline_ids = {id(row) for row in baseline}
+    relevant_slots = max(limit - len(baseline), 0)
+    relevant = [
+        row for _, _, row in scored
+        if id(row) not in baseline_ids
+    ][:relevant_slots]
+    chosen = relevant + baseline
+    if len(chosen) < limit:
+        chosen_ids = {id(row) for row in chosen}
+        for _, _, row in scored:
+            if id(row) not in chosen_ids:
                 chosen.append(row)
-                ids.add(id(row))
+                chosen_ids.add(id(row))
+                if len(chosen) >= limit:
+                    break
     return chosen
