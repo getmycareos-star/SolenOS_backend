@@ -43,7 +43,7 @@ class CaregiverProfile(Base):
     timezone = Column(String, nullable=False, default="UTC")
     is_primary_designated = Column(Boolean, nullable=False, default=False)
     primary_designation_source = Column(String, nullable=True)
-    identity_match_confidence = Column(Enum(IdentityMatchConfidence), nullable=False, default=IdentityMatchConfidence.CERTAIN)
+    identity_match_confidence = Column(Enum(IdentityMatchConfidence), nullable=False, default=IdentityMatchConfidence.UNKNOWN)
     identity_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
