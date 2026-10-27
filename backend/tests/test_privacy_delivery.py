@@ -666,6 +666,13 @@ def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
     assert recipient_outbox.status_code == 200, recipient_outbox.text
     assert recipient_outbox.json()["count"] == 0
 
+    # Consent withdrawal must stop recipient access, but not trap the owner
+    # without a way to locate and revoke an already-created share.
+    revoke_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    after_consent_revoke = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert after_consent_revoke.status_code == 200, after_consent_revoke.text
+    assert after_consent_revoke.json()["count"] == 1
+
     revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
     assert revoked.status_code == 200, revoked.text
     refreshed = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
