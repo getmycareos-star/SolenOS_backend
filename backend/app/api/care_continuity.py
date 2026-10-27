@@ -510,14 +510,17 @@ def list_resource(resource: str, request: Request, limit: int = 50, db: Session 
     table = _table(db, RESOURCES[resource])
     query = select(table).where(table.c.person_id == person_id)
     ordering = []
+    # Revision sequence is the authoritative order for revisions of a given
+    # care item. Timestamps can tie or lose ordering precision across database
+    # backends, so use the monotonic revision number before timestamp fallback.
+    if "revision_number" in table.c:
+        ordering.append(desc(table.c.revision_number))
     if "created_at" in table.c:
         ordering.append(desc(table.c.created_at))
     elif "changed_at" in table.c:
         ordering.append(desc(table.c.changed_at))
     elif "updated_at" in table.c:
         ordering.append(desc(table.c.updated_at))
-    if "revision_number" in table.c:
-        ordering.append(desc(table.c.revision_number))
     if ordering:
         query = query.order_by(*ordering)
     rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
