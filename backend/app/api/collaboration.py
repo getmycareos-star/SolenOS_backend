@@ -27,7 +27,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
-from app.services.companion_context import rank_authorized_context
+from app.services.companion_context import rank_authorized_context, select_context_within_budget
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
@@ -1350,7 +1350,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         selected_context = select_context_within_budget(
             context_candidates,
             cost_of=lambda group, item: len(render_context_item(group, item)),
-            max_chars=2000,
+            max_chars=1400,
         )
         event_context = [render_context_item("lcr_events", item) for item in selected_context.get("lcr_events", [])]
         appointment_context = [render_context_item("appointments", item) for item in selected_context.get("appointments", [])]
@@ -1400,7 +1400,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "generated_or_prior_ai_output_is_not_authoritative": True,
             "context_selection": {
                 "method": "query_relevance_plus_recent_anchors_then_strict_character_budget",
-                "character_budget": 2000,
+                "character_budget": 1400,
                 "event_candidates_considered": event_candidates_considered,
                 "events_supplied": len(event_context),
                 "appointment_candidates_considered": appointment_candidates_considered,
@@ -1577,6 +1577,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_event_ids": source_event_ids,
         "source_evidence_ids": source_evidence_ids,
         "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_information_gap_ids": source_information_gap_ids,
+        "source_open_question_ids": source_open_question_ids,
+        "source_contradiction_ids": source_contradiction_ids,
+        "source_outcome_ids": source_outcome_ids,
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
