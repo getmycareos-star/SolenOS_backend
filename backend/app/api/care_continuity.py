@@ -430,6 +430,11 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     if resource == "record-audit":
         data["actor_type"] = "caregiver"
         data["actor_id"] = caregiver_id
+        if "occurred_at" in table.c:
+            data["occurred_at"] = datetime.now(timezone.utc)
+    # recorded_at is server receipt time, never a client-controlled timestamp.
+    if resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations", "record-provenance") and "recorded_at" in table.c:
+        data["recorded_at"] = datetime.now(timezone.utc)
     if "recorded_by_caregiver_id" in table.c:
         data["recorded_by_caregiver_id"] = caregiver_id
     if "reviewed_by_caregiver_id" in table.c and resource == "review-decisions":
