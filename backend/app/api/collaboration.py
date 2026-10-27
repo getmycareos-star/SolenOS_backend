@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
@@ -1472,7 +1473,24 @@ def mark_care_notification_read(notification_id: str, request: Request, db: Sess
             target_type="notification", target_id=item.id, occurred_at=now,
             outcome="allowed", request_id=request_id, policy_version="notification-access-v1",
         ))
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Concurrent read requests may race; the unique receipt makes the
+            # operation idempotent. Only swallow the conflict if the receipt exists.
+            db.rollback()
+            receipt = db.query(NotificationReadReceipt).filter_by(
+                notification_id=item.id, reader_id=caregiver_id
+            ).first()
+            if receipt is None:
+                raise
+            item = db.query(CareNotification).filter(
+                CareNotification.id == notification_id,
+                CareNotification.person_id == person_id,
+                CareNotification.caregiver_id == caregiver_id,
+            ).first()
+            if item is None:
+                raise HTTPException(status_code=404, detail="Notification not found")
         db.refresh(item)
     return _notification_json(item)
 
