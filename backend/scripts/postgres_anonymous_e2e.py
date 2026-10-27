@@ -143,10 +143,50 @@ def main():
         ]
         require(observation in raw_observations, "capture did not appear in persisted hydration")
 
+        # Authenticated UPDATE must persist in PostgreSQL and be visible on a fresh read.
+        updated_name = "PostgreSQL E2E person A updated"
+        status, updated = request(
+            "PATCH",
+            "/api/situation",
+            token=token_a,
+            body={
+                "person_id": person_a,
+                "caregiver_id": caregiver_a,
+                "display_name": updated_name,
+            },
+        )
+        require(status == 200, f"care-record update expected 200, got {status}: {updated}")
+        require(
+            updated.get("care_recipient_display_name") == updated_name,
+            f"update response did not confirm the new display name: {updated}",
+        )
+        status, reread = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"read after update expected 200, got {status}: {reread}")
+        require(
+            reread.get("care_recipient_display_name") == updated_name,
+            "authenticated update was not persisted to PostgreSQL",
+        )
+
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}")
         require(status == 401, f"unauthenticated evidence access must return 401, got {status}")
+
+        status, recovery_session = request(
+            "POST",
+            "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL E2E recovery person", "caregiver_name": "PostgreSQL E2E recovery caregiver"},
+        )
+        require(status == 201, f"recovery session creation expected 201, got {status}: {recovery_session}")
+        recovery_token = recovery_session["access_token"]
+        status, revoked = request("/api/v1/sessions/revoke", body={}, token=recovery_token)
+        require(status == 200 and revoked.get("revoked") is True,
+                f"session revocation expected success, got {status}: {revoked}")
+        status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
+        require(status == 401, f"revoked token must be rejected, got {status}")
+        # Revoking one capability must not break another caregiver's valid session.
+        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
+        require(status == 200, f"valid independent session failed after revocation, got {status}")
 
         status, cross_write = request(
             "POST",
