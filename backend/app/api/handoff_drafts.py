@@ -9,7 +9,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import MetaData, Table, inspect, select, func, or_
+from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
@@ -31,13 +31,13 @@ SOURCES = {
         "time_fields": ("recorded_at", "created_at", "updated_at"),
         "event_time_fields": ("effective_at",),
         "recorded_time_fields": ("recorded_at", "created_at", "updated_at"),
-        "detail_fields": ("fact_type", "subject_type", "subject_id", "superseded_by_fact_id"),
+        "detail_fields": ("fact_type", "subject_type", "superseded_by_fact_id"),
         "include_active_outside_window": True,
     },
     "care_decisions": {
         "label": "Care decisions",
         "kind": "care_decision",
-        "fields": ("id", "title", "decision_text", "decision_status", "decided_at", "created_at", "context"),
+        "fields": ("id", "title", "decision_text", "decision_status", "decided_at", "created_at", "updated_at", "context"),
         "text_fields": ("decision_text", "title", "context"),
         "time_fields": ("created_at", "updated_at"),
         "recorded_time_fields": ("created_at", "updated_at"),
@@ -88,7 +88,7 @@ SOURCES = {
     "care_transitions": {
         "label": "Care transitions",
         "kind": "care_transition",
-        "fields": ("id", "from_location", "to_location", "transition_type", "occurred_at", "notes", "time_provenance", "location_provenance"),
+        "fields": ("id", "from_location", "to_location", "transition_type", "occurred_at", "created_at", "notes", "time_provenance", "location_provenance"),
         "text_fields": ("transition_type", "from_location", "to_location", "notes", "time_provenance", "location_provenance"),
         "time_fields": ("occurred_at", "created_at"),
     },
@@ -97,7 +97,7 @@ SOURCES = {
         "kind": "appointment",
         "fields": ("id", "title", "scheduled_at", "scheduled_at_timezone", "location", "provider", "healthcare_org", "preparation_notes", "medication_questions", "travel_notes", "status", "time_provenance", "location_provenance", "created_at", "updated_at"),
         "text_fields": ("title", "provider", "healthcare_org", "location", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
-        "time_fields": ("created_at", "updated_at"),
+        "time_fields": ("scheduled_at", "created_at", "updated_at"),
         "event_time_fields": ("scheduled_at",),
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("scheduled_at_timezone", "provider", "healthcare_org", "location", "status", "preparation_notes", "medication_questions", "travel_notes", "time_provenance", "location_provenance"),
@@ -288,17 +288,19 @@ def prepare_handoff_draft(
                 evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
             )
         timestamp_columns = [table.c[name] for name in spec["time_fields"] if name in table.c]
-        timestamp_expression = (func.coalesce(*timestamp_columns) if len(timestamp_columns) > 1 else timestamp_columns[0]) if timestamp_columns else None
-        if timestamp_expression is not None:
-            # Active LCR facts can remain relevant even when originally recorded
-            # outside this event window. Superseded facts are retained only when
-            # their record timestamp falls inside the requested window.
-            in_window = or_(timestamp_expression.is_(None), timestamp_expression >= cutoff)
+        if timestamp_columns:
+            # Include a row if any applicable time is within the window, or all
+            # its time fields are unknown. COALESCE would hide a recent update
+            # behind an older non-null creation timestamp.
+            in_window = or_(
+                *[column >= cutoff for column in timestamp_columns],
+                and_(*[column.is_(None) for column in timestamp_columns]),
+            )
             if spec.get("include_active_outside_window") and "superseded_by_fact_id" in table.c:
                 query = query.where(or_(table.c.superseded_by_fact_id.is_(None), in_window))
             else:
                 query = query.where(in_window)
-            query = query.order_by(timestamp_expression.desc().nullslast())
+            query = query.order_by(*[column.desc().nullslast() for column in reversed(timestamp_columns)])
         query = query.limit(MAX_ROWS_PER_SOURCE)
         rows = [dict(row) for row in db.execute(query).mappings().all()]
         source_status = "available" if rows else "empty"
