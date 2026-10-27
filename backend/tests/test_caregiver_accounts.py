@@ -57,6 +57,18 @@ def test_create_account_sign_in_and_delete_account():
     assert created.status_code == 201, created.text
     assert created.json()["account"]["email"] == "caregiver@example.com"
 
+    from app.models.caregiver_intelligence import CaregiverProfile
+    db = TestSessionLocal()
+    try:
+        linked_profile = db.query(CaregiverProfile).filter_by(
+            session_caregiver_id=session["caregiver"]["id"]
+        ).one()
+        assert linked_profile.id == session["caregiver"]["profile_id"]
+        assert linked_profile.email == "caregiver@example.com"
+        assert linked_profile.person_id == session["person"]["id"]
+    finally:
+        db.close()
+
     current = client.get("/api/v1/accounts/me", headers=headers)
     assert current.status_code == 200
     assert current.json()["account"]["email"] == "caregiver@example.com"
