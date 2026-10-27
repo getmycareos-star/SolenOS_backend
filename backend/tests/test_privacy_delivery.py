@@ -220,9 +220,10 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
     listed = client.get("/api/v1/notifications?unread_only=true", headers=headers)
     assert listed.status_code == 200, listed.text
     listed_payload = listed.json()
-    assert set(listed_payload) == {"items", "count", "limit", "unread_only"}
-    assert listed_payload["count"] == len(listed_payload["items"])
+    assert set(listed_payload) == {"items", "total", "limit", "offset", "unread_only"}
+    assert listed_payload["total"] == len(listed_payload["items"])
     assert listed_payload["limit"] == 50
+    assert listed_payload["offset"] == 0
     assert listed_payload["unread_only"] is True
     assert any(item["id"] == notification_id and item["is_read"] is False for item in listed_payload["items"])
 
@@ -236,6 +237,7 @@ def test_notification_read_receipt_and_preferences_are_persisted_and_scoped():
     unread_after_read = client.get("/api/v1/notifications?unread_only=true", headers=headers)
     assert unread_after_read.status_code == 200, unread_after_read.text
     assert unread_after_read.json()["items"] == []
+    assert unread_after_read.json()["total"] == 0
 
     preferences_before = client.get("/api/v1/notifications/preferences", headers=headers)
     assert preferences_before.status_code == 200
