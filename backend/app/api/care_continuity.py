@@ -12,7 +12,7 @@ import uuid
 import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import MetaData, Table, select, insert, desc
+from sqlalchemy import MetaData, Table, select, insert, desc, inspect
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
