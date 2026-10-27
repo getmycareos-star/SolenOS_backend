@@ -1087,19 +1087,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         for event in recent_events:
             source_event_ids.append(str(event.id))
             event_context.append(
-                "Authorized care-event record (status and source provenance must be respected): "
+                "Care-event record: "
                 + json.dumps({
                     "event_id": str(event.id),
                     "event_type": event.event_type,
                     "status": event.status,
-                    "title": (event.title or "")[:120],
-                    "description": (event.description or "")[:280],
+                    "title": (event.title or "")[:80],
+                    "description": (event.description or "")[:160],
                     "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                    "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
                     "evidence_ids": event.evidence_ids or [],
                     "time_provenance": event.time_provenance,
                     "confidence": event.confidence,
-                    "recorded_by_caregiver_id": event.created_by_caregiver_id,
                 }, ensure_ascii=False)
             )
         source_context.extend(event_context)
@@ -1135,12 +1133,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 + json.dumps({
                     "assertion_id": str(assertion.id),
                     "field": assertion.field,
-                    "value": (assertion.asserted_value or "")[:180],
+                    "value": (assertion.asserted_value or "")[:100],
                     "assertion_kind": assertion.assertion_kind,
                     "source_label": (assertion.source_label or "")[:80],
                     "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
                     "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
-                    "source_text": (assertion.source_text or "")[:180],
+                    "source_text": (assertion.source_text or "")[:120],
                     "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
                     "status": assertion.assertion_status,
                 }, ensure_ascii=False)
@@ -1171,7 +1169,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "LCR appointment evidence: "
                 + json.dumps({
                     "appointment_id": str(appointment.id),
-                    "title": (appointment.title or "")[:120],
+                    "title": (appointment.title or "")[:80],
                     "status": appointment.status,
                     "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
                 }, ensure_ascii=False)
@@ -1244,12 +1242,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 + json.dumps({
                     "evidence_id": str(evidence.id),
                     "type": evidence.type,
-                    "filename": str(metadata.get("filename") or "")[:100],
+                    "filename": str(metadata.get("filename") or "")[:60],
                     "mime_type": metadata.get("mime_type"),
                     "status": evidence.evidence_status,
                     "source_type": evidence.source_type,
                     "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
-                    "source_text": (evidence.source_text or "")[:280],
+                    "source_text": (evidence.source_text or "")[:180],
                     "time_provenance": evidence.time_provenance,
                     "confidence": evidence.confidence,
                 }, ensure_ascii=False)
@@ -1274,23 +1272,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "caregiver_provided_evidence": evidence_context,
             "conversation_is_not_care_evidence": True,
             "retrieval_contract": {
-                "method": "Query-relevant authorized records plus nearest-time baseline; bounded, not exhaustive.",
-                "selected_limits": {"care_events": len(event_context), "caregiver_approved_assertions": len(assertion_context), "appointments": len(appointment_context), "evidence": len(evidence_context)},
+                "bounded": True,
+                "selected_limits": {"events": len(event_context), "assertions": len(assertion_context), "appointments": len(appointment_context), "evidence": len(evidence_context)},
             },
-            "missing_information_rule": "Not retrieved does not mean never happened; state important evidence gaps.",
+            "missing_information_rule": "Not retrieved is not proof of absence.",
         }
-        # The bundled 0.5B model runs with a small context window. Keep whole,
-        # query-ranked records and source IDs aligned instead of letting Ollama
-        # silently truncate the start of the prompt (which can remove the question
-        # or the grounding rules). The cap is on serialized context, not a claim
-        # that character count equals tokens.
+        # Fit structured context to the bundled small model. Whole records and
+        # their source IDs are removed together; the top-ranked event is kept
+        # ahead of older low-relevance candidates.
         record_groups = [
             (evidence_context, source_evidence_ids),
             (appointment_context, source_appointment_ids),
             (assertion_context, source_assertion_ids),
             (event_context, source_event_ids),
         ]
-        while len(json.dumps(context_payload, ensure_ascii=False)) > 1100:
+        while len(json.dumps(context_payload, ensure_ascii=False)) > 900:
             removed = False
             for records, ids in record_groups:
                 if len(records) > 1:
@@ -1299,7 +1295,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     removed = True
                     break
             if not removed:
-                for records, ids in record_groups:
+                # Preserve the best-ranked care event whenever possible; discard
+                # secondary context before dropping the primary event candidate.
+                for records, ids in record_groups[:-1]:
                     if records:
                         records.pop()
                         ids.pop()
@@ -1308,8 +1306,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if not removed:
                 break
         context_payload["retrieval_contract"]["selected_limits"] = {
-            "care_events": len(event_context),
-            "caregiver_approved_assertions": len(assertion_context),
+            "events": len(event_context),
+            "assertions": len(assertion_context),
             "appointments": len(appointment_context),
             "evidence": len(evidence_context),
         }
@@ -1326,7 +1324,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         model_messages = [{"role": "system", "content": system_prompt}]
         model_messages.extend(
-            {"role": row.role, "content": (row.content or "")[:180]}
+            {"role": row.role, "content": (row.content or "")[:140]}
             for row in reversed(prior_messages)
             if row.role in {"user", "assistant"}
         )
@@ -1337,44 +1335,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "authorized_record_context": context_payload,
             }, ensure_ascii=False),
         })
-        # Bound the entire prompt, not only the record JSON. The bundled model
-        # has a small context window; oversized prompts were silently truncated,
-        # removing the current question and grounding rules.
-        def refresh_context_message() -> None:
-            context_payload["retrieval_contract"]["selected_limits"] = {
-                "care_events": len(event_context),
-                "caregiver_approved_assertions": len(assertion_context),
-                "appointments": len(appointment_context),
-                "evidence": len(evidence_context),
-            }
-            model_messages[-1]["content"] = json.dumps({
-                "current_message": user_text,
-                "authorized_record_context": context_payload,
-            }, ensure_ascii=False)
-
-        refresh_context_message()
-        while sum(len(message.get("content", "")) for message in model_messages) > 1800:
-            if len(model_messages) > 2:
-                model_messages.pop(1)
-                continue
-            removed = False
-            for records, ids in record_groups:
-                if len(records) > 1:
-                    records.pop()
-                    ids.pop()
-                    removed = True
-                    break
-            if not removed:
-                for records, ids in record_groups:
-                    if records:
-                        records.pop()
-                        ids.pop()
-                        removed = True
-                        break
-            if not removed:
-                break
-            source_context = event_context + assertion_context + appointment_context + evidence_context
-            refresh_context_message()
         greeting_only = _is_casual_greeting(user_text)
         if greeting_only:
             model_messages[0]["content"] += (
