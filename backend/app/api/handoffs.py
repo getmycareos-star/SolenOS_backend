@@ -125,17 +125,25 @@ class HandoffAcknowledge(BaseModel):
 
 
 class HandoffSummaryInput(BaseModel):
-    summary_text: str = Field(min_length=1, max_length=20000)
+    sections: dict[str, str] = Field(min_length=1, max_length=4)
     source_record_ids: list[str] = Field(min_length=1, max_length=100)
     caregiver_reviewed: bool
     prepared_at: datetime | None = None
 
-    @field_validator("summary_text")
+    @field_validator("sections")
     @classmethod
-    def nonblank_summary(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("summary_text cannot be blank")
-        return value.strip()
+    def valid_summary_sections(cls, value: dict[str, str]) -> dict[str, str]:
+        allowed = {"lcr_summary", "open_loops", "appointments", "documents"}
+        if not value or not set(value).issubset(allowed):
+            raise ValueError("summary sections must use supported care scope names")
+        cleaned = {}
+        for key, text in value.items():
+            if not isinstance(text, str) or not text.strip() or len(text) > 20000:
+                raise ValueError("each summary section must contain nonblank text of at most 20000 characters")
+            cleaned[key] = text.strip()
+        if sum(len(text) for text in cleaned.values()) > 20000:
+            raise ValueError("combined summary text exceeds 20000 characters")
+        return cleaned
 
     @field_validator("source_record_ids")
     @classmethod
@@ -287,17 +295,18 @@ def attach_handoff_summary(
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="expired_or_revoked")
         db.commit()
         raise HTTPException(status_code=409, detail="This handoff has expired or been revoked")
-    if "lcr_summary" not in (handoff.scope_snapshot or []):
+    allowed_scopes = set(handoff.scope_snapshot or [])
+    if not payload.sections or not set(payload.sections).issubset(allowed_scopes):
         _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.summary.attach", "denied", reason_code="summary_outside_scope")
         db.commit()
-        raise HTTPException(status_code=403, detail="This handoff does not include the LCR summary scope")
+        raise HTTPException(status_code=403, detail="Summary sections must be within the handoff's approved scope")
     if not payload.caregiver_reviewed:
         raise HTTPException(status_code=422, detail="The caregiver must review the summary before attaching it")
     if handoff.summary_snapshot is not None:
         raise HTTPException(status_code=409, detail="A summary snapshot is already attached; create a new handoff to replace it")
 
     snapshot = {
-        "text": payload.summary_text,
+        "sections": payload.sections,
         "source_record_ids": payload.source_record_ids,
         "prepared_at": payload.prepared_at.isoformat() if payload.prepared_at else None,
         "stored_at": now.isoformat(),
