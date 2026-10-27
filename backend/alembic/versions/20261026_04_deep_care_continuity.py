@@ -70,6 +70,29 @@ def upgrade():
     ], [("ix_care_record_relationships_person_source", ["person_id", "source_type", "source_id"], False),
         ("ix_care_record_relationships_person_target", ["person_id", "target_type", "target_id"], False)])
 
+    # The legacy 20261023_04 Delta migration is not on every deployed
+    # Alembic ancestry. Create its canonical table here when absent, before
+    # adding care_delta_items' foreign key. Existing rows/tables are preserved.
+    if not inspect(bind).has_table("care_delta_runs"):
+        op.create_table(
+            "care_delta_runs",
+            sa.Column("id", sa.String(), primary_key=True, nullable=False),
+            sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id"), nullable=False),
+            sa.Column("source", sa.String(), nullable=False),
+            sa.Column("event_date", dt, nullable=False),
+            sa.Column("source_event_id", sa.String(), sa.ForeignKey("care_events.id"), nullable=True),
+            sa.Column("evidence_ids", js, nullable=False),
+            sa.Column("delta_json", txt, nullable=False),
+            sa.Column("model_name", sa.String(), nullable=False),
+            sa.Column("created_by_caregiver_id", sa.String(), nullable=True),
+            sa.Column("created_at", dt, nullable=False, server_default=NOW),
+        )
+    delta_indexes = {item["name"] for item in inspect(bind).get_indexes("care_delta_runs")}
+    if "ix_care_delta_runs_person_id" not in delta_indexes:
+        op.create_index("ix_care_delta_runs_person_id", "care_delta_runs", ["person_id"])
+    if "ix_care_delta_runs_person_created" not in delta_indexes:
+        op.create_index("ix_care_delta_runs_person_created", "care_delta_runs", ["person_id", "created_at"])
+
     _create(bind, "care_delta_items", [
         sa.Column("person_id", s(36), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
         sa.Column("delta_run_id", s(36), sa.ForeignKey("care_delta_runs.id", ondelete="CASCADE"), nullable=False),
