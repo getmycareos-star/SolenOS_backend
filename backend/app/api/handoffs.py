@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
 from app.models.collaboration import ConsentRecord
+from app.models.notifications import CareNotification
 from app.models.privacy_delivery import (
     AuditLogEvent,
     HandoffAccessLog,
@@ -230,6 +231,15 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             recipient_id=recipient.id, recipient_role=recipient.relationship,
             access_status="pending", invited_at=now, policy_version=POLICY_VERSION,
         ))
+        # In-app only: notify the linked recipient without including care details
+        # or the shared summary itself in the notification body.
+        db.add(CareNotification(
+            id=str(uuid.uuid4()), person_id=person_id, caregiver_id=recipient.id,
+            title="New care handoff",
+            body="A caregiver has shared a care summary with you. Open Care handoffs to review it.",
+            category="handoff", priority="normal", source_event_id=handoff.id,
+            created_at=now,
+        ))
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.created", "allowed")
     db.commit()
     db.refresh(handoff)
@@ -329,6 +339,57 @@ def list_handoff_inbox(request: Request, db: Session = Depends(get_db)):
         target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
         outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
         policy_version=POLICY_VERSION, record_metadata={"result_count": len(items)},
+    ))
+    db.commit()
+    return {"items": items, "count": len(items)}
+
+
+@router.get("/outbox")
+def list_handoff_outbox(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    # Owners must retain a narrow management path after consent is revoked so
+    # they can locate and revoke existing shares. The outbox never returns summary
+    # contents, and recipient access remains blocked by the read endpoints.
+    owner_consent_active = _has_required_consent(db, person_id, caregiver_id)
+    now = datetime.now(timezone.utc)
+    rows = db.query(HandoffRecord).filter(
+        HandoffRecord.person_id == person_id,
+        HandoffRecord.created_by == caregiver_id,
+    ).order_by(HandoffRecord.created_at.desc(), HandoffRecord.id.desc()).all()
+    items = []
+    for handoff in rows:
+        item = _view(db, handoff)
+        recipient_rows = db.query(HandoffRecipient, Caregiver).join(
+            Caregiver, Caregiver.id == HandoffRecipient.recipient_id
+        ).filter(
+            HandoffRecipient.handoff_id == handoff.id,
+            Caregiver.person_id == person_id,
+        ).order_by(HandoffRecipient.invited_at.asc()).all()
+        item["recipients"] = [
+            {
+                "caregiver_id": recipient.recipient_id,
+                "name": caregiver.name,
+                "role": recipient.recipient_role,
+                "status": recipient.access_status,
+                "invited_at": recipient.invited_at,
+                "accepted_at": recipient.accepted_at,
+                "revoked_at": recipient.revoked_at,
+            }
+            for recipient, caregiver in recipient_rows
+        ]
+        item["has_summary"] = handoff.summary_snapshot is not None
+        item["is_expired"] = bool(
+            _aware(handoff.expires_at) and _aware(handoff.expires_at) <= now
+        )
+        items.append(item)
+
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id,
+        action="handoff.outbox.list", target_type="handoff_outbox",
+        target_id=caregiver_id, occurred_at=now, outcome="allowed",
+        request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version=POLICY_VERSION, record_metadata={"result_count": len(items), "owner_consent_active": owner_consent_active},
     ))
     db.commit()
     return {"items": items, "count": len(items)}
@@ -560,6 +621,13 @@ def revoke_handoff(handoff_id: str, request: Request, db: Session = Depends(get_
         for recipient in db.query(HandoffRecipient).filter(HandoffRecipient.handoff_id == handoff.id).all():
             recipient.access_status = "revoked"
             recipient.revoked_at = now
+            db.add(CareNotification(
+                id=str(uuid.uuid4()), person_id=person_id, caregiver_id=recipient.recipient_id,
+                title="Care handoff access revoked",
+                body="Access to a shared care summary was revoked. The summary is no longer available.",
+                category="handoff", priority="normal", source_event_id=handoff.id,
+                created_at=now,
+            ))
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.revoke", "allowed")
     db.commit()
     db.refresh(handoff)

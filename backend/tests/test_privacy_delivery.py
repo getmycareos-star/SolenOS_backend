@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
+from app.models.notifications import CareNotification
 
 pytestmark = pytest.mark.session_security
 
@@ -144,6 +145,22 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert handoff["status"] == "pending"
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
+
+    # The recipient gets a durable in-app notification without care details.
+    from app.models.notifications import CareNotification
+    db = TestSessionLocal()
+    try:
+        notification = db.query(CareNotification).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=recipient_id,
+            source_event_id=handoff["id"],
+            category="handoff",
+        ).one()
+        assert notification.title == "New care handoff"
+        assert "summary" in notification.body.lower()
+        assert owner["caregiver"]["id"] != notification.caregiver_id
+    finally:
+        db.close()
 
     out_of_scope = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
@@ -629,3 +646,65 @@ def test_notification_read_isolated_between_caregiver_sessions():
         headers={"Authorization": f"Bearer {second['access_token']}"},
     )
     assert response.status_code == 404
+
+
+
+def test_handoff_outbox_is_owner_scoped_and_tracks_revocation():
+    client = TestClient(app)
+    owner = create_session(client, "Outbox recipient")
+    recipient_id, recipient_token = add_caregiver_session(owner["person"]["id"])
+    accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    accept_required_consent(owner["person"]["id"], recipient_id)
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+
+    created = client.post(
+        "/api/v1/handoffs",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "recipient_caregiver_ids": [recipient_id],
+            "scope": ["lcr_summary"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    handoff_id = created.json()["id"]
+
+    owner_outbox = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert owner_outbox.status_code == 200, owner_outbox.text
+    assert owner_outbox.json()["count"] == 1
+    item = owner_outbox.json()["items"][0]
+    assert item["id"] == handoff_id
+    assert item["has_summary"] is False
+    assert item["status"] == "pending"
+    assert item["recipients"][0]["caregiver_id"] == recipient_id
+    assert item["recipients"][0]["name"] == "Second caregiver"
+
+    recipient_outbox = client.get("/api/v1/handoffs/outbox", headers=recipient_headers)
+    assert recipient_outbox.status_code == 200, recipient_outbox.text
+    assert recipient_outbox.json()["count"] == 0
+
+    # Consent withdrawal must stop recipient access, but not trap the owner
+    # without a way to locate and revoke an already-created share.
+    revoke_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
+    after_consent_revoke = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert after_consent_revoke.status_code == 200, after_consent_revoke.text
+    assert after_consent_revoke.json()["count"] == 1
+
+    revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
+    assert revoked.status_code == 200, revoked.text
+    refreshed = client.get("/api/v1/handoffs/outbox", headers=owner_headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["items"][0]["status"] == "revoked"
+
+    db = TestSessionLocal()
+    try:
+        revoked_notice = db.query(CareNotification).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=recipient_id,
+            source_event_id=handoff_id,
+            title="Care handoff access revoked",
+        ).one()
+        assert "no longer available" in revoked_notice.body.lower()
+    finally:
+        db.close()
