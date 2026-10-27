@@ -503,6 +503,82 @@ def _companion_message_needs_revision(text: str) -> bool:
     return any(term in normalized for term in internal_terms)
 
 
+def _contains_unsupported_operational_claim(
+    reply: str,
+    source_text: str,
+    authorized_context: list[str],
+) -> bool:
+    """Fail closed on operational status or clinical details invented by a small model."""
+    text = (reply or "").casefold()
+    source = (source_text or "").casefold()
+    context = "\n".join(authorized_context or []).casefold()
+    state_claims = (
+        (r"\b(?:multi-factor|two-factor) authentication\s+(?:is|is not|isn't)\s+(?:enabled|disabled)\b",
+         r"\b(?:multi-factor|two-factor) authentication\s+(?:is|is not|isn't)\s+(?:enabled|disabled)\b"),
+        (r"\bmfa\s+(?:is|is not|isn't)\s+(?:enabled|disabled)\b",
+         r"\bmfa\s+(?:is|is not|isn't)\s+(?:enabled|disabled)\b"),
+        (r"\bno professional access\b|\b(?:has|have) professional access\b|\bprofessional access is (?:enabled|disabled)\b",
+         r"\b(?:role|access)\s*(?:status|level)?\s*[:=]\s*(?:professional|verified|granted|denied|none|no access)\b"),
+        (r"\b(?:is|has been|was)\s+(?:synced|synchronized|archived|deleted|restored|pinned)\b|\bnot synced\b",
+         r"\b(?:sync|synchronization|lifecycle)\s*(?:status)?\s*[:=]\s*(?:synced|synchronized|archived|deleted|restored|pinned|pending)\b"),
+        (r"\breminder\s+(?:was|has been)\s+(?:sent|delivered|completed|cancelled|canceled)\b",
+         r"\breminder\s+(?:delivery|status)\s*[:=]\s*(?:sent|delivered|completed|cancelled|canceled)\b"),
+        (r"\baccount\s+(?:is|has been|was)\s+(?:recovered|verified|locked|unlocked)\b",
+         r"\baccount\s+(?:status|verification)\s*[:=]\s*(?:recovered|verified|locked|unlocked)\b"),
+    )
+    uncertainty_phrases = r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|no matching status)\b"
+    for claim_pattern, context_pattern in state_claims:
+        if re.search(context_pattern, context):
+            continue
+        for match in re.finditer(claim_pattern, text):
+            # A claim embedded in a clause explicitly saying it cannot be
+            # verified is uncertainty, not an assertion about actual state.
+            left = max(text.rfind(".", 0, match.start()), text.rfind(";", 0, match.start()), text.rfind(",", 0, match.start())) + 1
+            ends = [p for p in (text.find(".", match.end()), text.find(";", match.end()), text.find(",", match.end())) if p >= 0]
+            right = min(ends) if ends else len(text)
+            clause = text[left:right]
+            if not re.search(uncertainty_phrases, clause):
+                return True
+    # Do not invent a person's uncertainty, intentions, feelings, or future events.
+    if re.search(r"\b(?:she|he|they|the caregiver|the person)\s+(?:is|was)\s+(?:unsure|worried|afraid|anxious|confused|upset)\b", text) and not re.search(
+        r"\b(?:unsure|worried|afraid|anxious|confused|upset)\b", source
+    ):
+        return True
+    future_time = r"\b(?:tonight|tomorrow|later today|this evening|next week|next month)\b"
+    if re.search(future_time, text) and not re.search(future_time, source):
+        return True
+    # Preserve who supplied information; a caregiver observing a person is not
+    # equivalent to the person reporting their own symptoms.
+    if re.search(r"\bcaregiver\s+(?:reports?|reported|says?|said|observed|noticed)\b", source) and re.search(
+        r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", text
+    ) and not re.search(r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", source):
+        return True
+    care_terms = r"\b(?:medication|medicine|prescription|dosage|dose)\b"
+    if re.search(care_terms, text) and not re.search(care_terms, source):
+        return True
+    weekdays = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
+    source_correction = re.search(
+        r"(?:recorded|entered|listed|noted)\s+as\s+" + weekdays
+        + r".{0,140}?(?:but|however|correct(?:ed)? to|now know it was)\s+" + weekdays,
+        source,
+    )
+    reply_correction = re.search(
+        r"(?:recorded|entered|listed|noted)\s+as\s+" + weekdays
+        + r".{0,140}?(?:but|however|correct(?:ed)? to|now know it was)\s+" + weekdays,
+        text,
+    )
+    if source_correction and reply_correction:
+        source_old, source_new = source_correction.group(1), source_correction.group(2)
+        reply_old, reply_new = reply_correction.group(1), reply_correction.group(2)
+        if reply_old == source_new and reply_new == source_old:
+            return True
+    if re.search(r"\b(?:i can|i will|let me)\s+(?:update|change|save|delete|archive|restore|send|share|export)\b", text):
+        return True
+    return False
+
+
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
@@ -821,6 +897,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         _companion_reply_needs_revision(reply)
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
+        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
     ):
         # Ask the same local model to repair style and source fidelity. A second
         # unsupported high-impact claim is rejected instead of shown to a caregiver.
@@ -859,6 +936,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         _companion_reply_needs_revision(reply)
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
+        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
     ):
         raise HTTPException(
             status_code=503,
