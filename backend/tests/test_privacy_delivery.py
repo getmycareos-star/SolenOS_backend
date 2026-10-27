@@ -193,6 +193,24 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert recipient_summary.json()["summary"]["review_attestation"] == "client_declared_not_server_verified"
     assert recipient_summary.json()["summary"]["source_id_validation"] == "not_server_verified"
 
+    from app.models.privacy_delivery import HandoffRecord
+    db = TestSessionLocal()
+    try:
+        stored_handoff = db.query(HandoffRecord).filter_by(id=handoff["id"]).one()
+        tampered_snapshot = dict(stored_handoff.summary_snapshot)
+        tampered_sections = dict(tampered_snapshot["sections"])
+        tampered_sections["lcr_summary"] = "Changed without a new caregiver review."
+        tampered_snapshot["sections"] = tampered_sections
+        stored_handoff.summary_snapshot = tampered_snapshot
+        db.commit()
+    finally:
+        db.close()
+    tampered_read = client.get(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=recipient_headers,
+    )
+    assert tampered_read.status_code == 409
+
     acknowledged = client.post(
         f"/api/v1/handoffs/{handoff['id']}/acknowledge",
         headers=recipient_headers,
