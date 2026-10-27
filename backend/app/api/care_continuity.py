@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
 
@@ -328,6 +329,13 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
+
+
+@router.get("/context")
+def read_lcr_context(request: Request, limit_per_source: int = 20, db: Session = Depends(get_db)):
+    """Read one bounded, permission-scoped context projection shared by LCR-facing modules."""
+    person_id, _ = _scoped_identity(request, db)
+    return build_lcr_context(db, person_id, limit_per_source=limit_per_source)
 
 
 @router.get("/summary")
