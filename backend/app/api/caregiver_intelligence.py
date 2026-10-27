@@ -113,7 +113,8 @@ def _log_and_learn(db: Session, person_id: str, event_type: str, detail: str, so
 
 
 @router.post("/caregiver-profiles", response_model=CaregiverProfile)
-def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depends(get_db)):
+def create_caregiver_profile(profile: CaregiverProfileCreate, request: Request, db: Session = Depends(get_db)):
+    _assert_person_scope(request, profile.person_id)
     service = CaregiverIntelligenceService(db)
     db_profile = service.create_caregiver_profile(profile)
     _log_and_learn(
@@ -129,22 +130,27 @@ def create_caregiver_profile(profile: CaregiverProfileCreate, db: Session = Depe
 
 
 @router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
-def list_caregiver_profiles(person_id: str, db: Session = Depends(get_db)):
+def list_caregiver_profiles(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _assert_person_scope(request, person_id)
     service = CaregiverIntelligenceService(db)
     return service.list_caregiver_profiles(person_id)
 
 
 @router.get("/caregiver-profiles/detail/{caregiver_id}", response_model=CaregiverProfile)
-def get_caregiver_profile(caregiver_id: str, db: Session = Depends(get_db)):
+def get_caregiver_profile(caregiver_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, _current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
     profile = service.get_caregiver_profile(caregiver_id)
-    if not profile:
+    if not profile or str(profile.person_id) != person_id:
         raise HTTPException(status_code=404, detail="Caregiver profile not found")
     return profile
 
 
 @router.patch("/caregiver-profiles/{caregiver_id}/involvement")
-def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = Depends(get_db)):
+def update_caregiver_involvement(caregiver_id: str, status: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _session_caregiver_id, current_profile = _session_profile(request, db)
+    if str(caregiver_id) != str(current_profile.id):
+        raise HTTPException(status_code=403, detail="Only the linked caregiver can update their own involvement status")
     service = CaregiverIntelligenceService(db)
     try:
         involvement_status = CaregiverInvolvementStatus(status)
@@ -157,7 +163,12 @@ def update_caregiver_involvement(caregiver_id: str, status: str, db: Session = D
 
 
 @router.post("/caregiver-roles", response_model=CaregiverRole)
-def create_caregiver_role(role: CaregiverRoleCreate, db: Session = Depends(get_db)):
+def create_caregiver_role(role: CaregiverRoleCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, role.person_id)
+    _assert_actor_id(role.caregiver_id, current_profile.id, session_caregiver_id)
+    _require_profile_in_person(db, role.caregiver_id if role.caregiver_id != session_caregiver_id else current_profile.id, person_id)
+    role = CaregiverRoleCreate(**{**role.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id})
     service = CaregiverIntelligenceService(db)
     db_role = service.create_caregiver_role(role)
     return db_role
@@ -176,7 +187,12 @@ def list_caregiver_roles(person_id: str, caregiver_id: Optional[str] = None, db:
 
 
 @router.post("/caregiver-responsibilities", response_model=CaregiverResponsibility)
-def create_responsibility(responsibility: CaregiverResponsibilityCreate, db: Session = Depends(get_db)):
+def create_responsibility(responsibility: CaregiverResponsibilityCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, responsibility.person_id)
+    _assert_actor_id(responsibility.caregiver_id, current_profile.id, session_caregiver_id)
+    _require_profile_in_person(db, responsibility.caregiver_id if responsibility.caregiver_id != session_caregiver_id else current_profile.id, person_id)
+    responsibility = CaregiverResponsibilityCreate(**{**responsibility.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id})
     service = CaregiverIntelligenceService(db)
     db_resp = service.assign_responsibility(responsibility)
     _log_and_learn(
@@ -204,7 +220,16 @@ def get_responsibility_history(caregiver_id: str, person_id: str, db: Session = 
 
 
 @router.post("/caregiver-observations", response_model=CaregiverObservation)
-def create_observation(observation: CaregiverObservationCreate, db: Session = Depends(get_db)):
+def create_observation(observation: CaregiverObservationCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, observation.person_id)
+    _assert_actor_id(observation.caregiver_id, current_profile.id, session_caregiver_id)
+    if observation.is_promoted_to_shared or observation.promoted_by_caregiver_id or observation.promoted_at:
+        raise HTTPException(status_code=422, detail="Observations must be explicitly promoted after creation")
+    from app.core.caregiver_enums import InformationVisibility
+    if observation.information_visibility != InformationVisibility.PRIVATE:
+        raise HTTPException(status_code=422, detail="New observations must start private and be explicitly shared")
+    observation = CaregiverObservationCreate(**{**observation.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id, "information_visibility": InformationVisibility.PRIVATE, "is_promoted_to_shared": False, "promoted_by_caregiver_id": None, "promoted_at": None})
     service = CaregiverIntelligenceService(db)
     db_obs = service.record_observation(observation)
     _log_and_learn(
