@@ -44,7 +44,7 @@ Each action should have an owner, due time or condition, status, source, and out
 
 ## Current endpoint boundary
 
-POST /api/v1/handoff-drafts/prepare is a read-only first vertical slice. It reads a fixed allowlist of care facts, care decisions, open questions, information gaps, and timeline entries. Daily Care, appointments, document contents, medication/allergy data, routines/preferences, contacts, measurements, and professional identity are not to be represented as retrieved until their scoped adapters are implemented and tested. Community is not authorised. It does not create a handoff, deliver a share, or mutate the LCR.
+POST /api/v1/handoff-drafts/prepare is a read-only first vertical slice. It reads a fixed allowlist of care facts, care decisions, open questions, information gaps, timeline entries, care events, care transitions, and appointments. Action records are included only when their linked evidence belongs to the requesting caregiver; evidence from another caregiver is excluded unless a separately verified sharing adapter is implemented. Daily Care, document contents, medication/allergy data, routines/preferences, contacts, measurements, and professional identity are not to be represented as retrieved until their scoped adapters are implemented and tested. Community is not authorised. It does not create a handoff, deliver a share, or mutate the LCR.
 
 The current endpoint emits source references and source-availability states. Audience-specific template coverage is a checklist, not a clinical completeness score. The draft should not be treated as a transactionally consistent immutable snapshot until snapshot/version semantics are implemented and tested.
 
