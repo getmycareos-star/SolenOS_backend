@@ -1,7 +1,7 @@
 """Add privacy, sharing, audit, notification, reminder and handoff lifecycle records.
 
 Revision ID: 20261027_01_privacy_sharing_delivery
-Revises: 20261026_02_improve_examples
+Revises: 20261027_02_continuity_lifecycle
 
 Additive and idempotent: existing tables are preserved. Domain-specific payloads are
 stored in JSON while frequently queried lifecycle/security fields remain typed.
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261027_01_privacy_sharing_delivery"
-down_revision = "20261026_02_improve_examples"
+down_revision = "20261027_02_continuity_lifecycle"
 branch_labels = None
 depends_on = None
 
@@ -75,7 +75,12 @@ def upgrade():
             sa.Column("person_id", sa.String(255), nullable=True),
             sa.Column("caregiver_id", sa.String(255), nullable=True),
         ]
+        existing_names = {column.name for column in columns}
         for name in extra_columns:
+            # Avoid duplicate definitions where a domain field is already provided
+            # by the shared event envelope (actor_id, subject_id, person_id, etc.).
+            if name in existing_names:
+                continue
             # Known timestamp fields are typed timestamps; JSON fields preserve exact
             # disclosure/scope snapshots without duplicating care facts into audit logs.
             if name.endswith(("_at", "_from", "_until", "_start", "_end")) or name in ("expires_at", "scheduled_at", "sent_at", "read_at", "due_at"):
@@ -89,14 +94,18 @@ def upgrade():
             else:
                 col_type = sa.Text()
             columns.append(sa.Column(name, col_type, nullable=True))
-        columns.extend([
-            sa.Column("request_id", sa.String(255), nullable=True),
-            sa.Column("correlation_id", sa.String(255), nullable=True),
-            sa.Column("policy_version", sa.String(100), nullable=True),
-            sa.Column("metadata", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
-            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        ])
+            existing_names.add(name)
+        for name, column_type, kwargs in [
+            ("request_id", sa.String(255), {"nullable": True}),
+            ("correlation_id", sa.String(255), {"nullable": True}),
+            ("policy_version", sa.String(100), {"nullable": True}),
+            ("metadata", sa.JSON(), {"nullable": False, "server_default": sa.text("'{}'")}),
+            ("created_at", sa.DateTime(timezone=True), {"nullable": False, "server_default": sa.func.now()}),
+            ("updated_at", sa.DateTime(timezone=True), {"nullable": False, "server_default": sa.func.now()}),
+        ]:
+            if name not in existing_names:
+                columns.append(sa.Column(name, column_type, **kwargs))
+                existing_names.add(name)
         op.create_table(table_name, *columns)
         op.create_index(f"ix_{table_name}_created_at", table_name, ["created_at"])
         for col in ("actor_id", "subject_id", "person_id", "caregiver_id", "request_id", "correlation_id"):
