@@ -7,10 +7,11 @@ the Living Care Record.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import MetaData, Table, desc, inspect, select
+from sqlalchemy import MetaData, Table, desc, inspect, or_, select
 from sqlalchemy.orm import Session
 
 
@@ -130,6 +131,24 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
+SEARCH_FIELDS = {
+    "living_record": ["record_status"],
+    "events": ["event_type", "title", "description"],
+    "evidence": ["type", "source_text", "source_type"],
+    "facts": ["subject_type", "fact_type", "fact_value", "review_notes"],
+    "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "assertion_status"],
+    "decisions": ["title", "decision_text", "context", "decision_status"],
+    "decision_outcomes": ["outcome_status", "description"],
+    "timeline": ["entry_type", "title", "summary", "epistemic_status"],
+    "uncertainties": ["question", "uncertainty_type", "status"],
+    "missing_information": ["topic", "description", "priority", "status"],
+    "conflicts": ["conflict_type", "description", "resolution", "status"],
+    "provenance": ["source_type", "author_label", "method", "reason"],
+    "caregiver_observations": ["observation_category", "description", "source_type"],
+    "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
+    "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
+}
+
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "topic", "perspective_text",
@@ -150,9 +169,14 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
     return value
 
 
-def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20) -> dict[str, Any]:
-    """Return a bounded, person-scoped LCR projection and explicit schema coverage."""
+def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20, query: str | None = None) -> dict[str, Any]:
+    """Return a bounded, person-scoped LCR projection and explicit schema coverage.
+
+    When query is provided, each source is searched with bounded text terms before
+    applying its per-source limit; unavailable sources remain explicitly marked.
+    """
     limit = max(1, min(int(limit_per_source), 50))
+    terms = list(dict.fromkeys(re.findall(r"[\\w-]{3,}", (query or "").casefold())))[:8]
     bind = db.get_bind()
     inspector = inspect(bind)
     available_tables = set(inspector.get_table_names())
@@ -196,13 +220,23 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
         if "id" in table.c and "id" not in field_names:
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
-        query = select(*selected_columns).where(table.c.person_id == str(person_id))
+        statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        search_columns = [
+            table.c[name] for name in SEARCH_FIELDS.get(source_name, [])
+            if name in table.c
+        ]
+        if terms and search_columns:
+            statement = statement.where(or_(*[
+                column.ilike(f"%{term}%")
+                for column in search_columns
+                for term in terms
+            ]))
         order_field = next((name for name in spec["order"] if name in table.c), None)
         if order_field:
             query = query.order_by(desc(table.c[order_field]))
         if "id" in table.c and order_field != "id":
             query = query.order_by(desc(table.c.id))
-        rows = db.execute(query.limit(limit + 1)).mappings().all()
+        rows = db.execute(statement.limit(limit + 1)).mappings().all()
         has_more = len(rows) > limit
         items = [
             {key: _safe_value(value, key) for key, value in dict(row).items()}
@@ -223,6 +257,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
         "as_of": datetime.now().astimezone().isoformat(),
         "read_only": True,
         "history_coverage": "bounded_subset",
+        "query_applied": bool(terms),
         "schema_status": schema_status,
         "missing_required_sources": missing_required,
         "missing_optional_sources": missing_optional,
