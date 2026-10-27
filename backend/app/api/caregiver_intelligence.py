@@ -51,6 +51,7 @@ from app.core.caregiver_enums import (
     CaregiverInvolvementStatus,
     HandoffAcceptanceStatus,
     CaregiverActivityType,
+    InformationVisibility,
 )
 
 router = APIRouter()
@@ -245,52 +246,74 @@ def create_observation(observation: CaregiverObservationCreate, request: Request
 
 
 @router.get("/caregiver-observations/{person_id}", response_model=List[CaregiverObservation])
-def list_observations(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_observations(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
-    if caregiver_id:
-        return service.get_observations_for_caregiver(person_id, caregiver_id)
-    return service.get_shared_observations(person_id)
+    # Private observations are visible only to their author. A stale/local
+    # caregiver query key must never select another caregiver's private rows.
+    if caregiver_id and str(caregiver_id) in {str(current_profile.id), str(session_caregiver_id)}:
+        return service.get_observations_for_caregiver(scoped_person_id, current_profile.id)
+    return service.get_shared_observations(scoped_person_id)
 
 
 @router.get("/caregiver-observations/{person_id}/caregiver/{caregiver_id}", response_model=List[CaregiverObservation])
-def list_caregiver_observations(person_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def list_caregiver_observations(person_id: str, caregiver_id: str, request: Request, db: Session = Depends(get_db)):
+    scoped_person_id, session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
+    if str(caregiver_id) not in {str(current_profile.id), str(session_caregiver_id)}:
+        raise HTTPException(status_code=403, detail="Private observations are only available to their caregiver")
     service = CaregiverIntelligenceService(db)
-    return service.get_observations_for_caregiver(person_id, caregiver_id)
+    return service.get_observations_for_caregiver(scoped_person_id, current_profile.id)
 
 
 @router.post("/caregiver-observations/{observation_id}/promote")
-def promote_observation(observation_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def promote_observation(observation_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
-    observation = service.promote_observation_to_shared(observation_id, caregiver_id)
+    observation = service.promote_observation_to_shared(observation_id, current_profile.id, person_id=person_id)
     if not observation:
         raise HTTPException(status_code=404, detail="Observation not found")
     return {"id": observation.id, "is_promoted_to_shared": observation.is_promoted_to_shared, "visibility": observation.information_visibility.value}
 
 
 @router.post("/caregiver-perspectives", response_model=CaregiverPerspective)
-def create_perspective(perspective: CaregiverPerspectiveCreate, db: Session = Depends(get_db)):
+def create_perspective(perspective: CaregiverPerspectiveCreate, request: Request, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_person_scope(request, perspective.person_id)
+    _assert_actor_id(perspective.caregiver_id, current_profile.id, session_caregiver_id)
+    if perspective.is_promoted_to_shared or perspective.promoted_by_caregiver_id or perspective.promoted_at:
+        raise HTTPException(status_code=422, detail="Perspectives must be explicitly promoted after creation")
+    if perspective.information_visibility != InformationVisibility.PRIVATE:
+        raise HTTPException(status_code=422, detail="New perspectives must start private and be explicitly shared")
+    perspective = CaregiverPerspectiveCreate(**{**perspective.model_dump(), "person_id": person_id, "caregiver_id": current_profile.id, "information_visibility": InformationVisibility.PRIVATE, "is_promoted_to_shared": False, "promoted_by_caregiver_id": None, "promoted_at": None})
     service = CaregiverIntelligenceService(db)
     db_persp = service.record_perspective(perspective)
     return db_persp
 
 
 @router.get("/caregiver-perspectives/{person_id}", response_model=List[CaregiverPerspective])
-def list_perspectives(person_id: str, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+def list_perspectives(person_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    scoped_person_id, session_caregiver_id = _assert_person_scope(request, person_id)
+    _scoped_person, _session_id, current_profile = _session_profile(request, db)
     service = CaregiverIntelligenceService(db)
-    if caregiver_id:
-        return service.get_perspectives_for_caregiver(person_id, caregiver_id)
+    if caregiver_id and str(caregiver_id) in {str(current_profile.id), str(session_caregiver_id)}:
+        return service.get_perspectives_for_caregiver(scoped_person_id, current_profile.id)
     return (
         db.query(CaregiverPerspectiveModel)
-        .filter(CaregiverPerspectiveModel.person_id == person_id, CaregiverPerspectiveModel.is_promoted_to_shared)
+        .filter(CaregiverPerspectiveModel.person_id == scoped_person_id, CaregiverPerspectiveModel.is_promoted_to_shared)
         .order_by(CaregiverPerspectiveModel.timestamp.desc())
         .all()
     )
 
 
 @router.post("/caregiver-perspectives/{perspective_id}/promote")
-def promote_perspective(perspective_id: str, caregiver_id: str, db: Session = Depends(get_db)):
+def promote_perspective(perspective_id: str, request: Request, caregiver_id: Optional[str] = None, db: Session = Depends(get_db)):
+    person_id, session_caregiver_id, current_profile = _session_profile(request, db)
+    _assert_actor_id(caregiver_id, current_profile.id, session_caregiver_id)
     service = CaregiverIntelligenceService(db)
-    perspective = service.promote_perspective_to_shared(perspective_id, caregiver_id)
+    perspective = service.promote_perspective_to_shared(perspective_id, current_profile.id, person_id=person_id)
     if not perspective:
         raise HTTPException(status_code=404, detail="Perspective not found")
     return {"id": perspective.id, "is_promoted_to_shared": perspective.is_promoted_to_shared, "visibility": perspective.information_visibility.value}
