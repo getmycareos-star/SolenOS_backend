@@ -167,6 +167,33 @@ def main():
             "authenticated update was not persisted to PostgreSQL",
         )
 
+        # Account login on a fresh client/session must recover the same care record.
+        # This models a second device without reusing browser localStorage.
+        account_email = "postgres-e2e-continuity@example.test"
+        account_password = "CI-only-strong-passphrase-2026!"
+        status, account_created = request(
+            "POST",
+            "/api/v1/accounts",
+            token=token_a,
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 201, f"account linking expected 201, got {status}: {account_created}")
+        status, second_device = request(
+            "POST",
+            "/api/v1/accounts/login",
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 200, f"second-device account login expected 200, got {status}: {second_device}")
+        require(second_device.get("person_id") == person_a,
+                "second-device login did not restore the same care-recipient identity")
+        require(second_device.get("caregiver_id") == caregiver_a,
+                "second-device login did not restore the same caregiver identity")
+        token_a = second_device["access_token"]
+        status, second_device_read = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"second-device read expected 200, got {status}: {second_device_read}")
+        require(second_device_read.get("care_recipient_display_name") == updated_name,
+                "second-device login did not retrieve the persisted updated care record")
+
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}")
