@@ -150,6 +150,12 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["written_to_lcr"] is True
+    repeated = client.post(
+        f"/api/v1/daily-care/intelligence/proposals/{result['proposal_analysis_id']}/0/review",
+        headers=auth,
+        json={"decision": "accept"},
+    )
+    assert repeated.status_code == 409, repeated.text
 
     db = TestSessionLocal()
     try:
