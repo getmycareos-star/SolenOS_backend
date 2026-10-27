@@ -136,6 +136,7 @@ jobs:
           createdb -h localhost -U postgres solenos_legacy_empty
           createdb -h localhost -U postgres solenos_legacy_populated
           createdb -h localhost -U postgres solenos_stamped_04
+          createdb -h localhost -U postgres solenos_qwen_backfill
 
       - name: Upgrade a production-like database already stamped at revision 20261024_04
         env:
@@ -157,6 +158,34 @@ jobs:
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             test "$found" = "$table"
           done
+
+      - name: Preserve completed Qwen outputs and source IDs during schema migration
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_qwen_backfill
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_qwen_backfill
+        working-directory: backend
+        run: |
+          # Upgrade to the pre-governance canonical head, then seed a completed legacy job.
+          python -m alembic upgrade 20261027_04_caregiver_context
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            INSERT INTO persons (id, name) VALUES ('p-qwen-backfill', 'Backfill test person');
+            INSERT INTO caregivers (id, name, email, relationship, person_id, timezone)
+              VALUES ('c-qwen-backfill', 'Backfill caregiver', 'qwen-backfill@example.invalid', 'family', 'p-qwen-backfill', 'UTC');
+            INSERT INTO qwen_background_jobs
+              (id, person_id, caregiver_id, status, task_text, context_text, evidence_ids_json, workflow, result_text, source_event_ids_json, source_evidence_ids_json, attempt_count)
+              VALUES
+              ('job-qwen-backfill', 'p-qwen-backfill', 'c-qwen-backfill', 'completed', 'Summarize the appointment note', '', '[]', 'appointment', 'Preserve this exact completed suggestion.', '[\"event-source-1\"]', '[\"evidence-source-1\"]', 1);
+          "
+          python -m alembic upgrade head
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261027_06_ai_output_governance"
+          test "$(psql "$PSQL_URL" -Atc "SELECT result_text IS NULL FROM qwen_background_jobs WHERE id='job-qwen-backfill'")" = "t"
+          test "$(psql "$PSQL_URL" -Atc "SELECT output_text FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "Preserve this exact completed suggestion."
+          test "$(psql "$PSQL_URL" -Atc "SELECT source_event_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["event-source-1"]'
+          test "$(psql "$PSQL_URL" -Atc "SELECT source_evidence_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["evidence-source-1"]'
+          test "$(psql "$PSQL_URL" -Atc "SELECT written_to_lcr FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "f"
+          test "$(psql "$PSQL_URL" -Atc "SELECT review_status FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "pending_review"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_safety_evaluations WHERE job_id='job-qwen-backfill' AND human_review_required")" = "1"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_job_events WHERE job_id='job-qwen-backfill' AND event_type='legacy_output_backfilled'")" = "1"
 
       - name: Test empty legacy caregivers table is reconciled on PostgreSQL
         env:
