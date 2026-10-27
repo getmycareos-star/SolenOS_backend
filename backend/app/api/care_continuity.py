@@ -461,4 +461,4 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=422, detail="Care-continuity record could not be saved; check linked IDs and field types") from exc
+        raise HTTPException(status_code=422, detail=f"Care-continuity record could not be saved ({type(exc).__name__}); check linked IDs and field types") from exc
