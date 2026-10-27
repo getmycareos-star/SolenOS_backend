@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text
+from sqlalchemy import Column, DateTime, ForeignKey, JSON, String, Table, Text, Integer, UniqueConstraint
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -19,6 +19,43 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 def _ensure_test_tables():
     metadata = Base.metadata
+    if "living_care_records" not in metadata.tables:
+        Table(
+            "living_care_records", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False, unique=True),
+            Column("record_status", String(32), nullable=False, default="active"),
+            Column("schema_version", String(40), nullable=False, default="lcr.v1"),
+            Column("created_at", DateTime(timezone=True)),
+            Column("updated_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        )
+    if "care_record_versions" not in metadata.tables:
+        Table(
+            "care_record_versions", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("version_number", Integer, nullable=False),
+            Column("change_set_id", String(36)),
+            Column("record_digest", String(128)),
+            Column("snapshot_payload", JSON, nullable=False),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+            Column("reason", Text),
+            UniqueConstraint("care_record_id", "version_number", name="uq_care_record_version"),
+        )
+    if "care_record_snapshots" not in metadata.tables:
+        Table(
+            "care_record_snapshots", metadata,
+            Column("id", String(36), primary_key=True),
+            Column("care_record_id", String(36), ForeignKey("living_care_records.id"), nullable=False),
+            Column("version_id", String(36), ForeignKey("care_record_versions.id")),
+            Column("as_of", DateTime(timezone=True), nullable=False),
+            Column("snapshot_payload", JSON, nullable=False),
+            Column("record_digest", String(128)),
+            Column("created_at", DateTime(timezone=True)),
+            Column("created_by_caregiver_id", String(36), ForeignKey("caregivers.id")),
+        )
     if "caregiver_contexts" not in metadata.tables:
         Table(
             "caregiver_contexts", metadata,
@@ -160,3 +197,45 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert observation.json()["caregiver_id"] == first["caregiver"]["id"]
     assert perspective.json()["person_id"] == first["person"]["id"]
     assert observation.json()["person_id"] == first["person"]["id"]
+
+def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
+    client = TestClient(app)
+    first = _session(client, "Primary caregiver")
+    second = _session(client, "Other caregiver")
+    first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+    second_headers = {"Authorization": f"Bearer {second['access_token']}"}
+
+    record_response = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=first_headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record_response.status_code == 201, record_response.text
+    record_id = record_response.json()["id"]
+
+    version_response = client.post(
+        "/api/v1/care-continuity/record-versions",
+        headers=first_headers,
+        json={"care_record_id": record_id, "reason": "test snapshot"},
+    )
+    assert version_response.status_code == 201, version_response.text
+    version = version_response.json()
+    assert version["version_number"] == 1
+    assert len(version["record_digest"]) == 64
+
+    versions = client.get("/api/v1/care-continuity/record-versions", headers=first_headers)
+    snapshots = client.get("/api/v1/care-continuity/record-snapshots", headers=first_headers)
+    hidden_versions = client.get("/api/v1/care-continuity/record-versions", headers=second_headers)
+    assert versions.status_code == 200, versions.text
+    assert snapshots.status_code == 200, snapshots.text
+    assert hidden_versions.status_code == 200, hidden_versions.text
+    assert len(versions.json()) == 1
+    assert len(snapshots.json()) == 1
+    assert hidden_versions.json() == []
+
+    denied = client.post(
+        "/api/v1/care-continuity/record-versions",
+        headers=second_headers,
+        json={"care_record_id": record_id},
+    )
+    assert denied.status_code == 404, denied.text
