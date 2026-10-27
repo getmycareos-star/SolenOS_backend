@@ -248,9 +248,9 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
             ]))
         order_field = next((name for name in spec["order"] if name in table.c), None)
         if order_field:
-            query = query.order_by(desc(table.c[order_field]))
+            statement = statement.order_by(desc(table.c[order_field]))
         if "id" in table.c and order_field != "id":
-            query = query.order_by(desc(table.c.id))
+            statement = statement.order_by(desc(table.c.id))
         rows = db.execute(statement.limit(limit + 1)).mappings().all()
         has_more = len(rows) > limit
         items = [
