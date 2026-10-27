@@ -326,7 +326,7 @@ async def ask_daily_care_qwen(
             "source_records": [],
             "proposal_analysis_id": None,
             "proposals": [],
-            "history_scope": bundle["counts"],
+            "history_scope": {**bundle["counts"], "lcr_context": bundle.get("lcr_context", {})},
             "review_required": True,
             "written_to_lcr": False,
         }
@@ -482,6 +482,7 @@ async def ask_daily_care_qwen(
         "proposals": proposals,
         "history_scope": {
             **bundle["counts"],
+            "lcr_context": bundle.get("lcr_context", {}),
             "records_sent_to_model": len(selected),
             "oldest_record_at": bundle["oldest_record_at"],
             "newest_record_at": bundle["newest_record_at"],
