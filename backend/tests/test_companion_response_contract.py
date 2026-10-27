@@ -260,6 +260,6 @@ def test_companion_retrieves_older_relevant_event_instead_of_only_recent_events(
         assert sum(len(message["content"]) for message in captured["messages"]) <= 1800
         assert relevant_id in context
         assert "retrieval_contract" in context
-        assert "bounded retrieval" in context
+        assert "Not retrieved is not proof of absence" in context
     finally:
         teardown()
