@@ -1,15 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
-import hashlib
 from app.core.database import get_db
-from app.services.qwen_gateway import extract_review_candidates
-from app.services.capture_review import persist_capture_analysis
-from app.models.anonymous_session import AnonymousSession
-from app.models.collaboration import ConsentRecord
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -89,7 +84,6 @@ from app.schemas.temporal import (
     SubjectTemporalView,
 )
 from app.services.learning import LearningEngine, SavePipelineEvent
-from app.services.improvement_learning import stage_consented_feedback
 from app.services.time_intelligence import (
     parse_natural_language_time,
     calculate_care_windows,
@@ -130,26 +124,6 @@ from app.services.temporal_intelligence import (
 from app.api.actions import router as actions_router
 
 router = APIRouter()
-
-
-def _require_session_scope(request: Request, db: Session, person_id: str, caregiver_id: Optional[str] = None) -> AnonymousSession:
-    authorization = request.headers.get("authorization", "")
-    scheme, _, raw_token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not raw_token.strip():
-        raise HTTPException(status_code=401, detail="A valid SolenOS anonymous session is required")
-    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
-    session = db.query(AnonymousSession).filter(
-        AnonymousSession.token_hash == token_hash,
-        AnonymousSession.revoked_at.is_(None),
-        AnonymousSession.expires_at > datetime.now(timezone.utc),
-    ).first()
-    if session is None:
-        raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
-    if str(session.person_id) != str(person_id):
-        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
-    if caregiver_id and str(session.caregiver_id) != str(caregiver_id):
-        raise HTTPException(status_code=403, detail="Caregiver attribution does not match this session")
-    return session
 
 
 def _require_person_and_linked_caregiver(
@@ -241,7 +215,7 @@ def create_caregiver(caregiver: CaregiverCreate, db: Session = Depends(get_db)):
     person = db.query(PersonModel).filter(PersonModel.id == caregiver.person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
-    existing = (db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first() if caregiver.email else None)
+    existing = db.query(CaregiverModel).filter(CaregiverModel.email == caregiver.email).first()
     if existing:
         raise HTTPException(status_code=409, detail="A caregiver with this email already exists")
     db_caregiver = CaregiverModel(**caregiver.model_dump())
@@ -298,12 +272,11 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
-def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, person_id)
+def list_evidence(person_id: str, db: Session = Depends(get_db)):
     return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
 
 
-def _save_daily_capture_event(payload: dict, event_type: str, title: str, request: Request, db: Session):
+def _save_daily_capture_event(payload: dict, event_type: str, title: str, db: Session):
     person_id = payload.get("person_id")
     caregiver_id = payload.get("caregiver_id") or payload.get("created_by_caregiver_id")
     if not isinstance(person_id, str) or not person_id.strip():
@@ -311,7 +284,6 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     if not isinstance(caregiver_id, str) or not caregiver_id.strip():
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
-    _require_session_scope(request, db, person_id, caregiver_id)
     person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
@@ -350,51 +322,17 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         source_id=event.id,
         caregiver_id=caregiver_id,
     )
-
-    # Analyze the saved capture through the shared Railway-local Qwen gateway.
-    # This response is a review aid only; candidate output is never written as
-    # an authoritative LCR fact. A Qwen outage cannot undo the saved capture.
-    source_text = json.dumps(detail, ensure_ascii=False, default=str)[:12_000]
-    qwen_status = "unavailable"
-    qwen_candidates = None
-    try:
-        qwen_candidates = extract_review_candidates(source_text, source_event_id=event.id)
-        qwen_status = "available"
-    except Exception:
-        qwen_status = "unavailable"
-
-    analysis = persist_capture_analysis(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        source_event_id=event.id,
-        source_evidence_id=None,
-        source_text=source_text,
-        extraction_status=qwen_status,
-        candidates=qwen_candidates if qwen_status == "available" else None,
-    )
-
-    return {
-        "success": True,
-        "id": event.id,
-        "event_type": event.event_type,
-        "recorded_at": event.recorded_at,
-        "qwen_extraction_status": qwen_status,
-        "qwen_candidates": qwen_candidates,
-        "qwen_analysis_id": analysis.id,
-        "qwen_review_required": True,
-        "qwen_written_to_lcr": False,
-    }
+    return {"success": True, "id": event.id, "event_type": event.event_type, "recorded_at": event.recorded_at}
 
 
 @router.post("/daily/log")
-def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
+def create_structured_daily_log(payload: dict, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", db)
 
 
 @router.post("/daily-care/entries")
-def create_daily_care_entry(payload: dict, request: Request, db: Session = Depends(get_db)):
-    return _save_daily_capture_event(payload, "daily_care_entry", "Daily care entry", request, db)
+def create_daily_care_entry(payload: dict, db: Session = Depends(get_db)):
+    return _save_daily_capture_event(payload, "daily_care_entry", "Daily care entry", db)
 
 
 @router.post("/events", response_model=CareEventSchema)
@@ -419,8 +357,7 @@ def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/events/{person_id}", response_model=List[CareEventSchema])
-def list_events(person_id: str, request: Request, db: Session = Depends(get_db)):
-    _require_session_scope(request, db, person_id)
+def list_events(person_id: str, db: Session = Depends(get_db)):
     return (
         db.query(CareEventModel)
         .filter(CareEventModel.person_id == person_id)
@@ -513,6 +450,40 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/observations", response_model=ObservationSchema)
 def create_observation(observation: ObservationCreate, db: Session = Depends(get_db)):
+    # Referential consistency checks are mandatory even before authentication
+    # is wired in: a caller must not attach an unrelated caregiver or evidence
+    # record to another person's observation.
+    person = db.query(PersonModel).filter(PersonModel.id == observation.person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Care recipient not found")
+
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(
+            CaregiverModel.id == observation.caregiver_id,
+            CaregiverModel.person_id == observation.person_id,
+        )
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+    evidence_ids = set(observation.evidence_ids or [])
+    if evidence_ids:
+        evidence = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.id.in_(evidence_ids),
+                EvidenceModel.person_id == observation.person_id,
+            )
+            .all()
+        )
+        if {item.id for item in evidence} != evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Evidence is missing or does not belong to this care record",
+            )
+
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
     db.commit()
@@ -586,55 +557,17 @@ def list_learning_events(person_id: str, limit: int = 50, db: Session = Depends(
 
 @router.post("/feedback", response_model=LearningEventSchema)
 def record_feedback(
-    request: Request,
-    person_id: str,
-    category: str,
-    detail: str,
-    caregiver_id: str,
-    db: Session = Depends(get_db),
+    person_id: str, category: str, detail: str, caregiver_id: str, db: Session = Depends(get_db)
 ):
-    # Feedback is an optional improvement route, not a general unauthenticated
-    # write endpoint. Resolve identity from the bearer session and require the
-    # caregiver's persisted opt-in before recording or learning from any detail.
-    session = _require_session_scope(request, db, person_id, caregiver_id)
-    consent = (
-        db.query(ConsentRecord)
-        .filter_by(person_id=session.person_id, caregiver_id=session.caregiver_id)
-        .first()
-    )
-    consent_verified = bool(
-        consent
-        and consent.revoked_at is None
-        and consent.medical_disclaimer_acknowledged
-        and consent.privacy_model_acknowledged
-        and consent.multi_caregiver_acknowledged
-        and consent.no_advertising_acknowledged
-    )
-    if not consent_verified or consent.data_improvement_consent is not True:
-        raise HTTPException(
-            status_code=403,
-            detail="Optional improvement feedback requires a verified privacy acknowledgement and an explicit opt-in.",
-        )
-
     engine = LearningEngine(db)
-    engine.record_feedback(session.person_id, category, detail, session.caregiver_id)
-    engine.after_save(session.person_id)
-    # Only explicitly submitted feedback is staged for product-improvement review.
-    # Personal learning memory above remains user-scoped regardless of this opt-in.
-    stage_consented_feedback(
-        db,
-        person_id=session.person_id,
-        caregiver_id=session.caregiver_id,
-        category=category,
-        detail=detail,
-        consent=consent,
-    )
+    engine.record_feedback(person_id, category, detail, caregiver_id)
+    engine.after_save(person_id)
     event = LearningEventModel(
-        person_id=session.person_id,
+        person_id=person_id,
         event_type="feedback",
         detail=f"{category}: {detail}",
         source_type="feedback",
-        caregiver_id=session.caregiver_id,
+        caregiver_id=caregiver_id,
     )
     db.add(event)
     db.commit()
@@ -1009,7 +942,7 @@ def create_temporal_relationship(
         event_b_id=event_b_id,
         relationship_type=relationship["relationship"],
         time_difference_seconds=str(relationship["time_difference_seconds"]),
-        confidence=None,
+        confidence="0.9",
     )
     db.add(db_rel)
     db.commit()
