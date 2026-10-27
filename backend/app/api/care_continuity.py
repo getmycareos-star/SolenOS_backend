@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
-from app.core.caregiver_enums import ClaimType, ObservationType
+from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
 
@@ -430,11 +430,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             data["claim_type"] = ClaimType.INTERPRETATION
         if "claim_content" in table.c:
             data["claim_content"] = data.get("perspective_text")
+        if "information_visibility" in table.c:
+            data["information_visibility"] = InformationVisibility.PRIVATE
+        if "is_promoted_to_shared" in table.c:
+            data["is_promoted_to_shared"] = False
     if resource == "caregiver-observations":
         if "observation_content" in table.c:
             data["observation_content"] = data.get("description")
         if "observation_type" in table.c:
             data["observation_type"] = ObservationType.DIRECT
+        if "information_visibility" in table.c:
+            data["information_visibility"] = InformationVisibility.PRIVATE
+        if "is_promoted_to_shared" in table.c:
+            data["is_promoted_to_shared"] = False
         if "event_time" in table.c and data.get("observed_at"):
             data["event_time"] = data["observed_at"]
     if resource == "record-provenance" and "author_caregiver_id" in table.c:
