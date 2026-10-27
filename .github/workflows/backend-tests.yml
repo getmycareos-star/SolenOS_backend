@@ -428,6 +428,13 @@ jobs:
             http://127.0.0.1:8080/api/v1/conversation/message)
           python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); target=sys.argv[2]; assert target in d["source_event_ids"], "Relevant historical event was not retrieved"; assert d["written_to_lcr"] is False; assert d["persistence"] == "conversation_only"; assert ("fall" in reply or "winter" in reply), reply; assert not re.search(r"\b(?:several falls|multiple falls|frequent falls|falls are getting worse)\b", reply), reply' "$companion_response" "$relevant_event_id"
 
+          companion_session_id=$(python -c 'import json,sys; print(json.loads(sys.argv[1])["session_id"])' "$companion_response")
+          followup_response=$(curl --fail --silent --show-error --max-time 90 \
+            -H "$auth_header" -H "Content-Type: application/json" \
+            -d "{\"person_id\":\"$person_id\",\"session_id\":\"$companion_session_id\",\"text\":\"What did I just ask you about?\"}" \
+            http://127.0.0.1:8080/api/v1/conversation/message)
+          python -c 'import json,sys; d=json.loads(sys.argv[1]); reply=d["reply"].casefold(); assert d["session_id"] == sys.argv[2]; assert "fall" in reply or "winter" in reply, reply; assert d["written_to_lcr"] is False' "$followup_response" "$companion_session_id"
+
           echo "QWEN_E2E: appointment assist"
           # Retry only transient/model-rejection responses, while retaining the
           # exact HTTP status and response body so a failure is diagnosable.
