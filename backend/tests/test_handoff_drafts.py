@@ -82,8 +82,11 @@ def test_draft_returns_audience_specific_template_and_explicit_unassessed_sectio
     sections = {section["key"]: section for section in body["template_sections"]}
     assert expected_sections.issubset(sections)
     assert all(section["required_fields"] for section in body["template_sections"])
-    # Medication and routine adapters are not part of this verified source slice.
-    assert sections["medication_reconciliation" if audience == "professional" else "health_medication"]["coverage_status"] == "not_assessed"
+    # Appointment records can support appointment details, but no medication adapter exists.
+    if audience == "professional":
+        assert sections["medication_reconciliation"]["coverage_status"] == "not_assessed"
+    else:
+        assert sections["health_medication"]["coverage_status"] == "no_records_returned"
     assert all("still requires review" in section["coverage_note"] for section in body["template_sections"])
 
 
