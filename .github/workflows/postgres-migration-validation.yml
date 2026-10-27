@@ -95,6 +95,8 @@ jobs:
               "care_evidence_revisions": {"person_id", "evidence_id", "revision_number", "current_payload", "changed_at"},
               "care_record_retractions": {"person_id", "care_record_id", "target_type", "target_id", "reason", "status"},
               "care_record_restorations": {"person_id", "care_record_id", "retraction_id", "reason", "restored_at"},
+              "appointment_workspace_records": {"person_id", "appointment_id", "status", "version_number", "payload", "updated_at"},
+              "appointment_workspace_revisions": {"record_id", "person_id", "revision_number", "payload", "changed_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -130,6 +132,8 @@ jobs:
               "care_evidence_revisions": "evidence_id",
               "care_record_retractions": "care_record_id",
               "care_record_restorations": "retraction_id",
+              "appointment_workspace_records": "person_id",
+              "appointment_workspace_revisions": "record_id",
           }
           for table, column in fks.items():
               foreign_keys = inspector.get_foreign_keys(table)
@@ -153,6 +157,7 @@ jobs:
               ("care_change_revisions", {"change_id", "revision_number"}),
               ("care_situation_revisions", {"situation_id", "revision_number"}),
               ("care_evidence_revisions", {"evidence_id", "revision_number"}),
+              ("appointment_workspace_revisions", {"record_id", "revision_number"}),
           ):
               constraints = inspector.get_unique_constraints(table)
               indexes = inspector.get_indexes(table)
