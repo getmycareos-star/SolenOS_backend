@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -247,3 +248,22 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="I can see one report of poor sleep, but no earlier comparison."),
+    ]
+    query = collaboration._context_query_with_history("What about that?", prior)
+    assert "sleep" in query.casefold()
+    assert "poor sleep" in query.casefold()
+    assert query.startswith("What about that?")
+
+
+def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
+    prior = [SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?")]
+    query = collaboration._context_query_with_history(
+        "What is the recorded emergency contact number for this person?", prior
+    )
+    assert query == "What is the recorded emergency contact number for this person?"
