@@ -575,35 +575,45 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["recorded_at"] = datetime.now(timezone.utc)
     if resource == "record-identifiers":
         fingerprint = str(data.get("identifier_fingerprint") or "")
-        if not re.fullmatch(r"[0-9a-fA-F]{64}|[0-9a-fA-F]{128}", fingerprint):
+        if not re.fullmatch(r"(?:[0-9a-fA-F]{64}|[0-9a-fA-F]{128})", fingerprint):
             raise HTTPException(status_code=422, detail="identifier_fingerprint must be a SHA-256 or SHA-512 hex digest")
+        if not data.get("status"):
+            data["status"] = "active"
     if resource == "record-links" and data.get("source_record_id") == data.get("target_record_id"):
         raise HTTPException(status_code=422, detail="A Living Care Record cannot link to itself")
     if resource == "record-sections":
-        existing = db.execute(
-            select(table).where(
-                table.c.person_id == person_id,
-                table.c.care_record_id == data["care_record_id"],
-                table.c.section_key == data["section_key"],
-            )
-        ).mappings().first()
-        now = datetime.now(timezone.utc)
-        if existing:
-            db.execute(update(table).where(
-                table.c.id == existing["id"], table.c.person_id == person_id
-            ).values(
-                section_payload=data["section_payload"],
-                version_number=int(existing.get("version_number") or 1) + 1,
-                updated_at=now,
-                updated_by_caregiver_id=caregiver_id,
-            ))
-            updated = db.execute(select(table).where(table.c.id == existing["id"], table.c.person_id == person_id)).mappings().one()
-            db.commit()
-            return _jsonable(dict(updated))
-        data["version_number"] = 1
-        data["updated_at"] = now
-        data["updated_by_caregiver_id"] = caregiver_id
+        try:
+            existing = db.execute(
+                select(table).where(
+                    table.c.person_id == person_id,
+                    table.c.care_record_id == data["care_record_id"],
+                    table.c.section_key == data["section_key"],
+                )
+            ).mappings().first()
+            now = datetime.now(timezone.utc)
+            if existing:
+                db.execute(update(table).where(
+                    table.c.id == existing["id"], table.c.person_id == person_id
+                ).values(
+                    section_payload=data["section_payload"],
+                    version_number=int(existing.get("version_number") or 1) + 1,
+                    updated_at=now,
+                    updated_by_caregiver_id=caregiver_id,
+                ))
+                updated = db.execute(select(table).where(table.c.id == existing["id"], table.c.person_id == person_id)).mappings().one()
+                db.commit()
+                return _jsonable(dict(updated))
+            data["version_number"] = 1
+            data["updated_at"] = now
+            data["updated_by_caregiver_id"] = caregiver_id
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Care record section could not be saved; refresh and retry") from exc
     if resource == "record-retractions":
+        data["status"] = "retracted"
         data["retracted_by_caregiver_id"] = caregiver_id
         data["retracted_at"] = datetime.now(timezone.utc)
     if resource == "record-restorations":
