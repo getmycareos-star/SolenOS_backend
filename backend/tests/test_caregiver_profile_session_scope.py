@@ -110,6 +110,7 @@ def test_anonymous_session_cannot_read_another_caregivers_private_observation():
 
     direct = client.get(
         f"/api/v1/caregiver-observations/{person_id}/caregiver/{other_profile_id}",
+        params={"person_id": person_id},
         headers=headers,
     )
     assert direct.status_code == 403, direct.text
@@ -154,7 +155,7 @@ def test_handoff_acceptance_is_limited_to_the_intended_recipient():
     response = client.post(
         f"/api/v1/caregiver-handoffs/{handoff_id}/accept",
         headers={"Authorization": f"Bearer {session['access_token']}"},
-        params={"acceptance_evidence": "accepted"},
+        params={"person_id": person_id, "acceptance_evidence": "accepted"},
     )
     assert response.status_code == 404, response.text
 
