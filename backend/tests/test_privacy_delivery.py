@@ -202,6 +202,14 @@ def test_handoff_requires_current_consent_for_creator_and_recipient():
 
     denied_create = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
     assert denied_create.status_code == 403
+    db = TestSessionLocal()
+    try:
+        denied_event = db.query(AuditLogEvent).filter_by(
+            person_id=owner["person"]["id"], action="handoff.create", outcome="denied"
+        ).one()
+        assert denied_event.record_metadata["reason_code"] == "required_consent_missing"
+    finally:
+        db.close()
 
     accept_required_consent(owner["person"]["id"], owner["caregiver"]["id"])
     created = client.post("/api/v1/handoffs", headers=owner_headers, json=payload)
