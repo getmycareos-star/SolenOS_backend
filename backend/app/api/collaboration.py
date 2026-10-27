@@ -1283,6 +1283,136 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(evidence_context)
 
+        # Bring in the current continuity state: unresolved conflicts, missing
+        # information, open questions, historical revisions, and recorded outcomes.
+        # These remain source-attributed context, not model-established facts.
+        contradiction_rows = (
+            db.query(Contradiction)
+            .filter(
+                Contradiction.person_id == person_id,
+                Contradiction.resolution_status.in_(("unresolved", "open")),
+            )
+            .order_by(Contradiction.created_at.desc())
+            .limit(30)
+            .all()
+        )
+        contradiction_rows = _rank_companion_rows(
+            retrieval_query, contradiction_rows,
+            ("subject_type", "field", "description", "resolution_status"), 5
+        )
+        contradiction_context = [{
+            "source_id": str(row.id), "type": "unresolved_contradiction",
+            "subject_type": row.subject_type, "field": row.field,
+            "description": row.description, "evidence_ids": row.evidence_ids or [],
+            "status": row.resolution_status,
+        } for row in contradiction_rows]
+
+        gap_candidates = (
+            db.query(InformationGap)
+            .filter(InformationGap.person_id == person_id)
+            .order_by(InformationGap.created_at.desc())
+            .limit(30)
+            .all()
+        )
+        gap_candidates = [
+            row for row in gap_candidates
+            if str(getattr(row.lifecycle_status, "value", row.lifecycle_status))
+            in {"open", "reopened", "partially_resolved"}
+        ]
+        gap_candidates = _rank_companion_rows(
+            retrieval_query, gap_candidates,
+            ("subject_type", "field", "description", "epistemic_state", "gap_reason", "priority"),
+            5,
+        )
+        gap_context = [{
+            "source_id": str(row.id), "type": "information_gap",
+            "subject_type": row.subject_type, "field": row.field,
+            "description": row.description,
+            "epistemic_state": str(getattr(row.epistemic_state, "value", row.epistemic_state)),
+            "gap_reason": str(getattr(row.gap_reason, "value", row.gap_reason)),
+            "priority": str(getattr(row.priority, "value", row.priority)),
+            "lifecycle_status": str(getattr(row.lifecycle_status, "value", row.lifecycle_status)),
+            "evidence_ids": row.evidence_ids or [],
+        } for row in gap_candidates]
+
+        open_question_rows = (
+            db.query(OpenQuestion)
+            .filter(OpenQuestion.person_id == person_id, OpenQuestion.status == "open")
+            .order_by(OpenQuestion.asked_at.desc())
+            .limit(30)
+            .all()
+        )
+        open_question_rows = _rank_companion_rows(
+            retrieval_query, open_question_rows, ("question", "subject_type", "status", "priority"), 4
+        )
+        open_question_context = [{
+            "source_id": str(row.id), "type": "open_question",
+            "question": row.question, "subject_type": row.subject_type,
+            "status": row.status, "priority": str(getattr(row.priority, "value", row.priority)),
+            "evidence_ids": row.evidence_ids or [],
+        } for row in open_question_rows]
+
+        revision_rows = (
+            db.query(CareStateRevision)
+            .filter(CareStateRevision.person_id == person_id)
+            .order_by(CareStateRevision.changed_at.desc())
+            .limit(12)
+            .all()
+        )
+        revision_rows = _rank_companion_rows(
+            retrieval_query, revision_rows,
+            ("target_type", "change_kind", "before_state", "after_state"), 5
+        )
+        revision_context = [{
+            "source_id": str(row.id), "type": "care_state_revision",
+            "target_type": row.target_type, "target_id": row.target_id,
+            "revision_number": row.revision_number, "change_kind": row.change_kind,
+            "before_state": (row.before_state or "")[:500],
+            "after_state": (row.after_state or "")[:500],
+            "evidence_ids": row.evidence_ids or [],
+            "changed_at": row.changed_at.isoformat() if row.changed_at else None,
+        } for row in revision_rows]
+
+        outcome_rows = (
+            db.query(CareActionOutcome)
+            .filter(CareActionOutcome.person_id == person_id)
+            .order_by(CareActionOutcome.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        outcome_rows = _rank_companion_rows(
+            retrieval_query, outcome_rows,
+            ("action_type", "outcome_status", "notes", "correction_text"), 5
+        )
+        outcome_context = [{
+            "source_id": str(row.id), "type": "recorded_action_outcome",
+            "action_id": row.action_id, "action_type": row.action_type,
+            "outcome_status": row.outcome_status, "notes": (row.notes or "")[:600],
+            "correction_text": (row.correction_text or "")[:400],
+            "evidence_ids": row.evidence_ids or [],
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        } for row in outcome_rows]
+
+        delta_rows = (
+            db.query(CareDeltaRun)
+            .filter(CareDeltaRun.person_id == person_id)
+            .order_by(CareDeltaRun.created_at.desc())
+            .limit(12)
+            .all()
+        )
+        delta_rows = _rank_companion_rows(
+            retrieval_query, delta_rows, ("source", "delta_json", "model_name"), 3
+        )
+        delta_context = [{
+            "source_id": str(row.id), "type": "recorded_change_analysis",
+            "source": row.source, "event_date": row.event_date.isoformat() if row.event_date else None,
+            "source_event_id": str(row.source_event_id) if row.source_event_id else None,
+            "evidence_ids": row.evidence_ids or [],
+            "recorded_analysis": (row.delta_json or "")[:1600],
+            "analysis_model": row.model_name,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        } for row in delta_rows]
+
         # Conversation can resolve references, but is never care evidence.
         context_payload = {
             "care_recipient_name": person.name,
