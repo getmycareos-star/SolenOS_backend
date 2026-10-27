@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, datetime
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import MetaData, Table, desc, inspect, or_, select
@@ -184,6 +185,27 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
     return value
 
 
+@lru_cache(maxsize=16)
+def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
+    """Reflect the care-source schema once per SQLAlchemy engine.
+
+    The API process is restarted after deployment migrations, so the cache is
+    naturally refreshed on schema rollout. Keeping inspection out of each request
+    avoids repeating database catalog queries and table reflection on hot paths.
+    The returned metadata is treated as immutable by callers.
+    """
+    available_tables = frozenset(inspect(bind).get_table_names())
+    metadata = MetaData()
+    present = [
+        spec["table"]
+        for spec in SOURCE_SPECS.values()
+        if spec["table"] in available_tables
+    ]
+    if present:
+        metadata.reflect(bind=bind, only=list(dict.fromkeys(present)))
+    return available_tables, metadata
+
+
 def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20, query: str | None = None) -> dict[str, Any]:
     """Return a bounded, person-scoped LCR projection and explicit schema coverage.
 
@@ -193,12 +215,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
     limit = max(1, min(int(limit_per_source), 50))
     terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())))[:8]
     bind = db.get_bind()
-    inspector = inspect(bind)
-    available_tables = set(inspector.get_table_names())
-    metadata = MetaData()
-    present = [spec["table"] for spec in SOURCE_SPECS.values() if spec["table"] in available_tables]
-    if present:
-        metadata.reflect(bind=bind, only=list(dict.fromkeys(present)))
+    available_tables, metadata = _load_source_schema(bind)
 
     sources: dict[str, dict[str, Any]] = {}
     missing_required: list[str] = []
