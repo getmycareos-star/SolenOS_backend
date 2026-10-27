@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver
 from app.models.collaboration import ConsentRecord
+from app.models.notifications import CareNotification
 from app.models.privacy_delivery import (
     AuditLogEvent,
     HandoffAccessLog,
@@ -229,6 +230,15 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
             person_id=person_id, caregiver_id=caregiver_id, handoff_id=handoff.id,
             recipient_id=recipient.id, recipient_role=recipient.relationship,
             access_status="pending", invited_at=now, policy_version=POLICY_VERSION,
+        ))
+        # In-app only: notify the linked recipient without including care details
+        # or the shared summary itself in the notification body.
+        db.add(CareNotification(
+            id=str(uuid.uuid4()), person_id=person_id, caregiver_id=recipient.id,
+            title="New care handoff",
+            body="A caregiver has shared a care summary with you. Open Care handoffs to review it.",
+            category="handoff", priority="normal", source_event_id=handoff.id,
+            created_at=now,
         ))
     _audit(db, request, person_id, caregiver_id, handoff.id, "handoff.created", "allowed")
     db.commit()
