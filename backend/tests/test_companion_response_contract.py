@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent
+from app.models.uncertainty import Contradiction, OpenQuestion
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -98,6 +99,23 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             time_provenance="caregiver_reported",
         )
         db.add(event)
+        db.add(Contradiction(
+            person_id=person_id,
+            subject_type="care",
+            subject_id=person_id,
+            field="sleep_pattern",
+            description="Reports disagree about the recent sleep pattern.",
+            evidence_ids=[],
+            resolution_status="unresolved",
+        ))
+        db.add(OpenQuestion(
+            person_id=person_id,
+            subject_type="care",
+            subject_id=person_id,
+            question="Has poor sleep repeated across several nights?",
+            status="open",
+            evidence_ids=[],
+        ))
         db.commit()
         event_id = event.id
         db.close()
@@ -125,6 +143,10 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert "slept poorly last night" in user_payload
         assert "conversation_is_not_care_evidence" in user_payload
         assert "reasoning_rules" in user_payload
+        assert "unresolved_contradictions" in user_payload
+        assert "Reports disagree about the recent sleep pattern" in user_payload
+        assert "open_questions" in user_payload
+        assert "Has poor sleep repeated across several nights" in user_payload
         assert captured["options"]["num_predict"] > 32
 
         db = TestingSessionLocal()
