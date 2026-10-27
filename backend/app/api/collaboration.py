@@ -652,7 +652,7 @@ def _contains_unsupported_operational_claim(
         (r"\baccount\s+(?:is|has been|was)\s+(?:recovered|verified|locked|unlocked)\b",
          r"\baccount\s+(?:status|verification)\s*[:=]\s*(?:recovered|verified|locked|unlocked)\b"),
     )
-    uncertainty_phrases = r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|no matching status)\b"
+    uncertainty_phrases = r"\b(?:cannot|can.t|unable to)\s+(?:verify|confirm|determine|tell)\b|\b(?:unknown|not supplied|not provided|not recorded|not documented|not available|no matching status|no record of|no server receipt)\b"
     for claim_pattern, context_pattern in state_claims:
         if re.search(context_pattern, context):
             continue
@@ -681,7 +681,17 @@ def _contains_unsupported_operational_claim(
         return True
     care_terms = r"\b(?:medication|medicine|prescription|dosage|dose)\b"
     if re.search(care_terms, text) and not re.search(care_terms, source):
-        return True
+        # Explicitly saying medication information is missing is grounded uncertainty,
+        # not an invented medication fact. Still reject affirmative actions/advice.
+        missing_medication = (
+            r"\b(?:no|not|unknown|missing|unavailable|unverified|cannot|can.t|unable to)\b.{0,100}\b(?:medication|medicine|prescription|dosage|dose)\b"
+            r"|\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:not recorded|not documented|not supplied|not provided|unknown|missing|unavailable|unverified)\b"
+        )
+        medication_action = (
+            r"\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:changed|increase(?:d)?|decrease(?:d)?|stop(?:ped)?|start(?:ed)?|missed|administered|taken|given|prescribed|recommended)\b"
+        )
+        if not re.search(missing_medication, text) or re.search(medication_action, text):
+            return True
     weekdays = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     source_correction = re.search(
         r"(?:recorded|entered|listed|noted)\s+as\s+" + weekdays
