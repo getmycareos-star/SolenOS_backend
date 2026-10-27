@@ -154,11 +154,13 @@ def test_caregiver_context_api_binds_identity_to_bearer_session():
             "context_type": "routine",
             "context_payload": {"reported": "prefers morning visits"},
             "epistemic_status": "reported",
+            "recorded_at": "2000-01-01T00:00:00+00:00",
         },
     )
     assert created.status_code == 201, created.text
     row = created.json()
     assert row["person_id"] == first["person"]["id"]
+    assert row["recorded_at"] != "2000-01-01T00:00:00+00:00"
     assert row["caregiver_id"] == first["caregiver"]["id"]
     assert row["context_payload"] == {"reported": "prefers morning visits"}
 
