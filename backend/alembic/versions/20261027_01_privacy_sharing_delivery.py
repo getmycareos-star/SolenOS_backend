@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261027_03_privacy_delivery"
-down_revision = "20261027_02_continuity_lifecycle"
+down_revision = "20261027_03_lcr_history"
 branch_labels = None
 depends_on = None
 
