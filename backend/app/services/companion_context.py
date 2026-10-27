@@ -40,12 +40,13 @@ def rank_authorized_context(
     limit: int,
     always_keep_recent: int = 3,
 ) -> list[T]:
-    """Keep recent anchors and rank the remaining authorized items by query fit.
+    """Keep recent anchors, then return query-relevant authorized records.
 
-    Input order must be newest/relevant-first according to the caller's trusted
-    database ordering. Selection is deterministic and ties preserve input order.
-    Returns selected items in their original order for temporal readability.
+    Input order must be newest-first according to the caller's trusted database
+    ordering. Selection is deterministic; recent anchors come first, followed by
+    older matches in relevance order, then remaining rows in original order.
     """
+
     rows = list(items)
     if limit <= 0 or not rows:
         return []
@@ -78,18 +79,54 @@ def rank_authorized_context(
                 score += 3.0
         scores.append((score, index))
 
-    selected = set(range(anchor_count))
+    selected_order = list(range(anchor_count))
+    selected = set(selected_order)
     ranked = sorted(
         (item for item in scores if item[1] not in selected and item[0] > 0),
         key=lambda item: (-item[0], item[1]),
     )
     for _, index in ranked:
-        if len(selected) >= limit:
+        if len(selected_order) >= limit:
             break
         selected.add(index)
+        selected_order.append(index)
     # Fill remaining slots by recency/order when the question has little overlap.
     for index in range(len(rows)):
-        if len(selected) >= limit:
+        if len(selected_order) >= limit:
             break
-        selected.add(index)
-    return [row for index, row in enumerate(rows) if index in selected]
+        if index not in selected:
+            selected.add(index)
+            selected_order.append(index)
+    return [rows[index] for index in selected_order]
+
+
+def select_context_within_budget(
+    groups: dict[str, list[T]],
+    *,
+    cost_of: Callable[[str, T], int],
+    max_chars: int,
+) -> dict[str, list[T]]:
+    """Select complete records across context groups within a strict char budget.
+
+    Round-robin selection prevents one high-volume domain from crowding out all
+    others. Items are never truncated or rewritten; over-budget items are skipped.
+    Candidate lists should already be relevance-ranked by the caller.
+    """
+    selected = {name: [] for name in groups}
+    positions = {name: 0 for name in groups}
+    remaining = max(max_chars, 0)
+    progress = True
+    while progress and remaining > 0:
+        progress = False
+        for name, items in groups.items():
+            index = positions[name]
+            if index >= len(items):
+                continue
+            positions[name] += 1
+            progress = True
+            item = items[index]
+            cost = max(int(cost_of(name, item)), 1) + 2
+            if cost <= remaining:
+                selected[name].append(item)
+                remaining -= cost
+    return {name: items for name, items in selected.items() if items}
