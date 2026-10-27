@@ -39,6 +39,12 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
+def _iso(value):
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
 def _record_out(record: AppointmentWorkspaceRecord) -> dict:
     return {
         "id": record.id,
@@ -138,9 +144,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "fact_type": row["fact_type"],
                 "value": row["fact_value"],
                 "epistemic_status": row["epistemic_status"] or "unknown",
-                "effective_at": row["effective_at"].isoformat() if row["effective_at"] else None,
-                "recorded_at": row["created_at"].isoformat() if row["created_at"] else None,
-                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                "effective_at": _iso(row["effective_at"]),
+                "recorded_at": _iso(row["created_at"]),
+                "updated_at": _iso(row["updated_at"]),
             })
 
     event_items = [{
