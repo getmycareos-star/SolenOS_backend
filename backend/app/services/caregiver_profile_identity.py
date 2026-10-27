@@ -4,6 +4,7 @@ CaregiverProfile IDs and caregivers IDs are separate tables and must never be
 assumed equal. This service creates/links a profile only from a validated
 server-side caregiver/person pair; callers must not supply the link ID.
 """
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.care import Caregiver
@@ -40,7 +41,7 @@ def ensure_caregiver_profile_for_session(
                 raise ValueError("Caregiver profile already has a different email identity")
             existing_email = (
                 db.query(CaregiverProfile)
-                .filter(CaregiverProfile.email == email, CaregiverProfile.id != profile.id)
+                .filter(func.lower(CaregiverProfile.email) == email.casefold(), CaregiverProfile.id != profile.id)
                 .first()
             )
             if existing_email is not None:
@@ -50,7 +51,7 @@ def ensure_caregiver_profile_for_session(
         return profile
 
     if email:
-        profile = db.query(CaregiverProfile).filter(CaregiverProfile.email == email).first()
+        profile = db.query(CaregiverProfile).filter(func.lower(CaregiverProfile.email) == email.casefold()).first()
         if profile is not None:
             if str(profile.person_id) != str(person_id):
                 raise ValueError("Email is already associated with another care record")
