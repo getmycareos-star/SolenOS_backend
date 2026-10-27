@@ -120,7 +120,7 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261027_07_lcr_revisions":
+              if revision != "20261027_08_privacy_delivery":
                   raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
@@ -128,6 +128,46 @@ jobs:
                   raise SystemExit(f"expected empty fixture table, got {count} rows")
           conn.close()
           print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
+          PY
+
+      - name: Verify privacy, sharing, audit, notification, reminder and handoff schema
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          required_tables = {
+              "shared_summary_expirations", "shared_summary_revocations", "shared_summary_access_logs",
+              "shared_summary_downloads", "shared_summary_generation_jobs", "shared_summary_delivery_receipts",
+              "shared_summary_consent_records", "shared_summary_disclosure_records", "shared_summary_link_events",
+              "data_deletion_requests", "data_deletion_jobs", "data_export_requests", "privacy_incidents",
+              "privacy_incident_events", "data_processing_records", "data_subject_requests",
+              "sensitive_data_access_logs", "legal_holds", "audit_log_events", "audit_log_integrity_checks",
+              "audit_log_access_records", "privileged_access_logs", "authorization_decisions",
+              "failed_access_attempts", "care_notifications", "care_notification_preferences",
+              "notification_delivery_attempts", "notification_delivery_receipts", "notification_read_receipts",
+              "care_reminders", "reminder_acknowledgements", "reminder_escalations", "handoff_records",
+              "handoff_recipients", "handoff_access_logs", "handoff_acknowledgements", "delivery_failure_events",
+          }
+          conn = psycopg2.connect(os.environ["DATABASE_URL"])
+          with conn.cursor() as cur:
+              cur.execute("SELECT table_name FROM information_schema.tables WHERE table_schema='public'")
+              existing = {row[0] for row in cur.fetchall()}
+              missing = required_tables - existing
+              if missing:
+                  raise SystemExit(f"missing privacy/delivery tables: {sorted(missing)}")
+              for table in sorted(required_tables):
+                  cur.execute(
+                      "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%s",
+                      (table,),
+                  )
+                  columns = {row[0] for row in cur.fetchall()}
+                  required_columns = {"actor_id", "subject_id", "person_id", "caregiver_id", "metadata", "created_at", "updated_at"}
+                  missing_columns = required_columns - columns
+                  if missing_columns:
+                      raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+          conn.close()
+          print(f"PostgreSQL verified {len(required_tables)} privacy/sharing/audit/notification/reminder/handoff tables and common columns.")
           PY
 
       - name: Run real HTTP + PostgreSQL identity and persistence E2E
