@@ -128,6 +128,7 @@ class DailyIntelligenceBase(BaseModel):
     upcoming_items: Optional[List[Dict[str, Any]]] = None
     active_windows: Optional[List[Dict[str, Any]]] = None
     expired_windows: Optional[List[Dict[str, Any]]] = None
+    proactive_items: Optional[List[Dict[str, Any]]] = None
     daily_summary: Optional[str] = None
     source_event_ids: Optional[List[str]] = None
     source_appointment_ids: Optional[List[str]] = None
