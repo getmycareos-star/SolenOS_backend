@@ -145,6 +145,22 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
 
+    # The recipient gets a durable in-app notification without care details.
+    from app.models.notifications import CareNotification
+    db = TestSessionLocal()
+    try:
+        notification = db.query(CareNotification).filter_by(
+            person_id=owner["person"]["id"],
+            caregiver_id=recipient_id,
+            source_event_id=handoff["id"],
+            category="handoff",
+        ).one()
+        assert notification.title == "New care handoff"
+        assert "summary" in notification.body.lower()
+        assert owner["caregiver"]["id"] != notification.caregiver_id
+    finally:
+        db.close()
+
     out_of_scope = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
         headers=owner_headers,
