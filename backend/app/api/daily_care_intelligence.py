@@ -323,7 +323,7 @@ async def ask_daily_care_qwen(
             "written_to_lcr": False,
         }
 
-    allowed_ids = {str(row["source_id"]) for row in selected}
+    allowed_ids = {str(row["source_id"]) for row in selected if row["source_type"] in {"care_event", "evidence"}}
     proposals = []
     if payload.prepare_lcr_proposals:
         for item in parsed["proposals"][:8]:
