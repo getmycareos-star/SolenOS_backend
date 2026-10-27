@@ -197,3 +197,69 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
             db.close()
     finally:
         teardown()
+
+
+def test_companion_retrieves_older_relevant_event_instead_of_only_recent_events(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The record includes a fall report from winter."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        unrelated_ids = []
+        for index in range(25):
+            event = CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index),
+                title=f"Routine note {index}",
+                description="Routine observation; no additional details supplied.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            )
+            db.add(event)
+            db.flush()
+            unrelated_ids.append(event.id)
+        relevant = CareEvent(
+            person_id=person_id,
+            event_type="incident",
+            status="recorded",
+            occurred_at=now - timedelta(days=240),
+            title="Fall at home",
+            description="Caregiver reported a fall during the winter.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(relevant)
+        db.commit()
+        relevant_id = relevant.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Did Mum fall last winter?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert relevant_id in data["source_event_ids"]
+        assert len(data["source_event_ids"]) <= 16
+        assert data["written_to_lcr"] is False
+        context = captured["messages"][-1]["content"]
+        assert relevant_id in context
+        assert "retrieval_contract" in context
+        assert "bounded retrieval" in context
+    finally:
+        teardown()
