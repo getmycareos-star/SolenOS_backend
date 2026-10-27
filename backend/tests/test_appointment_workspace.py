@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -30,6 +30,19 @@ def override_get_db():
 @pytest.fixture
 def client():
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS care_facts (
+                id VARCHAR(36) PRIMARY KEY,
+                person_id VARCHAR(255) NOT NULL,
+                fact_type VARCHAR(100),
+                fact_value TEXT,
+                epistemic_status VARCHAR(40),
+                effective_at DATETIME,
+                created_at DATETIME,
+                updated_at DATETIME
+            )
+        """))
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
     with TestClient(app) as test_client:
@@ -118,3 +131,34 @@ def test_appointment_workspace_cannot_be_read_or_changed_across_people(client):
     assert listed.status_code == 200
     assert record_id not in str(listed.json())
     assert "must not leak" not in listed.text
+
+
+def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
+    test_client, session, other = client
+    token = session["access_token"]
+    person_id = session["person"]["id"]
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES (:id, :person_id, :type, :value, :status, :created, :updated)
+        """), [
+            {"id": "appointment-fact-owned", "person_id": person_id, "type": "caregiver_observation",
+             "value": "Family reports sleep has changed", "status": "reported",
+             "created": "2026-10-26 08:00:00", "updated": "2026-10-26 08:00:00"},
+            {"id": "appointment-fact-private", "person_id": other["person"]["id"], "type": "private",
+             "value": "DO NOT LEAK THIS", "status": "reported",
+             "created": "2026-10-26 08:00:00", "updated": "2026-10-26 08:00:00"},
+        ])
+    response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief?window_days=90",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["read_only"] is True
+    assert body["updates_lcr"] is False
+    assert any(item["source_id"] == "appointment-fact-owned" for item in body["facts"])
+    assert "DO NOT LEAK THIS" not in response.text
+    assert body["source_coverage"]["community"] == "not_authorized"
+    assert body["source_coverage"]["medications_and_allergies"] == "unavailable"
+    assert "DO NOT LEAK THIS" not in response.text
