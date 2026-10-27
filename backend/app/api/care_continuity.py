@@ -288,14 +288,18 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         "care_event": ("care_event_revisions", "event_id"),
         "event": ("care_event_revisions", "event_id"),
         "caregiver_observation": ("care_observation_revisions", "observation_id"),
+        "care_observation": ("care_observation_revisions", "observation_id"),
         "observation": ("care_observation_revisions", "observation_id"),
+        "care_change": ("care_change_revisions", "change_id"),
         "change": ("care_change_revisions", "change_id"),
+        "care_situation": ("care_situation_revisions", "situation_id"),
         "situation": ("care_situation_revisions", "situation_id"),
+        "care_evidence": ("care_evidence_revisions", "evidence_id"),
         "evidence": ("care_evidence_revisions", "evidence_id"),
     }
     spec = revision_specs.get(target_type)
     if spec is None:
-        return
+        raise HTTPException(status_code=422, detail="This target type does not have an LCR revision schema")
     revision_table_name, target_column = spec
     revision_table = _table(db, revision_table_name)
     target_id = data.get("target_id")
