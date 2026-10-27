@@ -288,7 +288,7 @@ def test_companion_uses_canonical_assertions_gaps_questions_and_contradictions(m
         data = response.json()
         prompt_payload = captured["messages"][-1]["content"]
         assert "CareAssertion" not in prompt_payload
-        assert "Caregiver report" in prompt_payload
+        assert "caregiver report" in prompt_payload
         assert "No earlier sleep comparison is recorded" in prompt_payload
         assert "Has sleep worsened over time?" in prompt_payload
         assert "One note says poor sleep" in prompt_payload
