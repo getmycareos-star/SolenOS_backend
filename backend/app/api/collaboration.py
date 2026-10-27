@@ -1155,7 +1155,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 CareAssertion.assertion_status == "caregiver_reviewed",
             )
             .order_by(CareAssertion.recorded_at.desc())
-            .limit(12)
+            .limit(30)
             .all()
         )
         assertion_context: list[str] = []
@@ -1182,7 +1182,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.query(Appointment)
             .filter(Appointment.person_id == person_id)
             .order_by(Appointment.scheduled_at.asc())
-            .limit(8)
+            .limit(30)
             .all()
         )
         for appointment in appointments:
@@ -1237,7 +1237,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
                 evidence_rows.append(row)
-            if len(evidence_rows) >= 12:
+            if len(evidence_rows) >= 30:
                 break
 
         for evidence in evidence_rows:
