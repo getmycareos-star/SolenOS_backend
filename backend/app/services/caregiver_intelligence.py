@@ -189,8 +189,20 @@ class CaregiverIntelligenceService:
         self.db.refresh(db_handoff)
         return db_handoff
 
-    def accept_handoff(self, handoff_id: str, acceptance_evidence: Optional[str] = None) -> Optional[CaregiverHandoff]:
-        handoff = self.db.query(CaregiverHandoff).filter(CaregiverHandoff.id == handoff_id).first()
+    def accept_handoff(
+        self,
+        handoff_id: str,
+        acceptance_evidence: Optional[str] = None,
+        *,
+        person_id: Optional[str] = None,
+        accepting_caregiver_id: Optional[str] = None,
+    ) -> Optional[CaregiverHandoff]:
+        query = self.db.query(CaregiverHandoff).filter(CaregiverHandoff.id == handoff_id)
+        if person_id is not None:
+            query = query.filter(CaregiverHandoff.person_id == person_id)
+        if accepting_caregiver_id is not None:
+            query = query.filter(CaregiverHandoff.to_caregiver_id == accepting_caregiver_id)
+        handoff = query.first()
         if not handoff:
             return None
         handoff.acceptance_status = HandoffAcceptanceStatus.ACCEPTED
@@ -322,8 +334,20 @@ class CaregiverIntelligenceService:
             .all()
         )
 
-    def promote_observation_to_shared(self, observation_id: str, promoting_caregiver_id: str) -> Optional[CaregiverObservation]:
-        observation = self.db.query(CaregiverObservation).filter(CaregiverObservation.id == observation_id).first()
+    def promote_observation_to_shared(
+        self,
+        observation_id: str,
+        promoting_caregiver_id: str,
+        *,
+        person_id: Optional[str] = None,
+    ) -> Optional[CaregiverObservation]:
+        query = self.db.query(CaregiverObservation).filter(
+            CaregiverObservation.id == observation_id,
+            CaregiverObservation.caregiver_id == promoting_caregiver_id,
+        )
+        if person_id is not None:
+            query = query.filter(CaregiverObservation.person_id == person_id)
+        observation = query.first()
         if not observation:
             return None
         if observation.information_visibility == InformationVisibility.PRIVATE:
@@ -335,8 +359,20 @@ class CaregiverIntelligenceService:
         self.db.refresh(observation)
         return observation
 
-    def promote_perspective_to_shared(self, perspective_id: str, promoting_caregiver_id: str) -> Optional[CaregiverPerspective]:
-        perspective = self.db.query(CaregiverPerspective).filter(CaregiverPerspective.id == perspective_id).first()
+    def promote_perspective_to_shared(
+        self,
+        perspective_id: str,
+        promoting_caregiver_id: str,
+        *,
+        person_id: Optional[str] = None,
+    ) -> Optional[CaregiverPerspective]:
+        query = self.db.query(CaregiverPerspective).filter(
+            CaregiverPerspective.id == perspective_id,
+            CaregiverPerspective.caregiver_id == promoting_caregiver_id,
+        )
+        if person_id is not None:
+            query = query.filter(CaregiverPerspective.person_id == person_id)
+        perspective = query.first()
         if not perspective:
             return None
         if perspective.information_visibility == InformationVisibility.PRIVATE:
@@ -348,14 +384,43 @@ class CaregiverIntelligenceService:
         self.db.refresh(perspective)
         return perspective
 
-    def get_caregiver_summary(self, person_id: str, caregiver_id: str) -> CaregiverSummary:
+    def get_caregiver_summary(
+        self,
+        person_id: str,
+        caregiver_id: str,
+        *,
+        include_private: bool = True,
+    ) -> CaregiverSummary:
         profile = self.get_caregiver_profile(caregiver_id)
-        if not profile:
-            raise ValueError(f"Caregiver {caregiver_id} not found")
+        if not profile or str(profile.person_id) != str(person_id):
+            raise ValueError(f"Caregiver {caregiver_id} not found for this care record")
         roles = self.get_current_roles(caregiver_id, person_id)
         responsibilities = self.get_active_responsibilities(person_id, caregiver_id)
-        observations = self.get_observations_for_caregiver(person_id, caregiver_id, limit=10)
-        perspectives = self.get_perspectives_for_caregiver(person_id, caregiver_id)
+        if include_private:
+            observations = self.get_observations_for_caregiver(person_id, caregiver_id, limit=10)
+            perspectives = self.get_perspectives_for_caregiver(person_id, caregiver_id)
+        else:
+            observations = (
+                self.db.query(CaregiverObservation)
+                .filter(
+                    CaregiverObservation.person_id == person_id,
+                    CaregiverObservation.caregiver_id == caregiver_id,
+                    CaregiverObservation.is_promoted_to_shared.is_(True),
+                )
+                .order_by(CaregiverObservation.report_time.desc())
+                .limit(10)
+                .all()
+            )
+            perspectives = (
+                self.db.query(CaregiverPerspective)
+                .filter(
+                    CaregiverPerspective.person_id == person_id,
+                    CaregiverPerspective.caregiver_id == caregiver_id,
+                    CaregiverPerspective.is_promoted_to_shared.is_(True),
+                )
+                .order_by(CaregiverPerspective.timestamp.desc())
+                .all()
+            )
         activities = self.get_activity_history(person_id, caregiver_id, limit=10)
         return CaregiverSummary(
             caregiver_id=caregiver_id,
@@ -378,7 +443,7 @@ class CaregiverIntelligenceService:
         gaps = self.get_open_gaps(person_id)
         conflicts = self.get_conflicts(person_id)
         duplicates = self.get_duplicate_actions(person_id)
-        caregivers = [self.get_caregiver_summary(person_id, p.id) for p in profiles]
+        caregivers = [self.get_caregiver_summary(person_id, p.id, include_private=False) for p in profiles]
         return MultiCaregiverSummary(
             person_id=person_id,
             caregivers=caregivers,
@@ -525,8 +590,11 @@ class CaregiverIntelligenceService:
         )
         return self.record_activity(activity)
 
-    def get_caregiver_by_email(self, email: str) -> Optional[CaregiverProfile]:
-        return self.db.query(CaregiverProfile).filter(CaregiverProfile.email == email).first()
+    def get_caregiver_by_email(self, email: str, person_id: Optional[str] = None) -> Optional[CaregiverProfile]:
+        query = self.db.query(CaregiverProfile).filter(CaregiverProfile.email == email)
+        if person_id is not None:
+            query = query.filter(CaregiverProfile.person_id == person_id)
+        return query.first()
 
     def get_caregiver_by_name(self, person_id: str, name: str) -> List[CaregiverProfile]:
         return (
