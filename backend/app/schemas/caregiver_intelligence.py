@@ -27,7 +27,7 @@ from app.core.caregiver_enums import (
 class CaregiverProfileBase(BaseModel):
     person_id: str
     name: str
-    email: str
+    email: Optional[str] = None
     relationship: str
     participation_category: CaregiverParticipationCategory = CaregiverParticipationCategory.FAMILY
     involvement_status: CaregiverInvolvementStatus = CaregiverInvolvementStatus.ACTIVE
