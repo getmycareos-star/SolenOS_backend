@@ -62,62 +62,69 @@ TABLES = {
     "delivery_failure_events": ["delivery_type", "delivery_id", "recipient_id", "failure_code", "failure_detail_redacted", "occurred_at", "retryable", "resolved_at"],
 }
 
+def _column_type(name):
+    if name.endswith(("_at", "_from", "_until", "_start", "_end")) or name in ("expires_at", "scheduled_at", "sent_at", "read_at", "due_at"):
+        return sa.DateTime(timezone=True)
+    if name in ("scope_snapshot", "data_categories", "quiet_hours", "details", "verification_result"):
+        return sa.JSON()
+    if name in ("enabled", "retryable"):
+        return sa.Boolean()
+    if name in ("attempt_number", "attempt_count", "escalation_level", "checked_count", "failure_count"):
+        return sa.Integer()
+    if name in ("id", "actor_id", "subject_id", "person_id", "caregiver_id", "request_id", "correlation_id", "policy_version"):
+        return sa.String(255)
+    return sa.Text()
+
+
+def _column_definition(name):
+    if name == "id":
+        return sa.Column(name, sa.String(36), primary_key=True, nullable=False)
+    if name == "metadata":
+        return sa.Column(name, sa.JSON(), nullable=False, server_default=sa.text("'{}'"))
+    if name in ("created_at", "updated_at"):
+        return sa.Column(name, sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now())
+    return sa.Column(name, _column_type(name), nullable=True)
+
+
 def upgrade():
     bind = op.get_bind()
     inspector = inspect(bind)
+    envelope = ["id", "actor_id", "subject_id", "person_id", "caregiver_id"]
+    shared = ["request_id", "correlation_id", "policy_version", "metadata", "created_at", "updated_at"]
+
     for table_name, extra_columns in TABLES.items():
-        if inspector.has_table(table_name):
-            continue
-        columns = [
-            sa.Column("id", sa.String(36), primary_key=True, nullable=False),
-            sa.Column("actor_id", sa.String(255), nullable=True),
-            sa.Column("subject_id", sa.String(255), nullable=True),
-            sa.Column("person_id", sa.String(255), nullable=True),
-            sa.Column("caregiver_id", sa.String(255), nullable=True),
-        ]
-        existing_names = {column.name for column in columns}
-        for name in extra_columns:
-            # Avoid duplicate definitions where a domain field is already provided
-            # by the shared event envelope (actor_id, subject_id, person_id, etc.).
-            if name in existing_names:
-                continue
-            # Known timestamp fields are typed timestamps; JSON fields preserve exact
-            # disclosure/scope snapshots without duplicating care facts into audit logs.
-            if name.endswith(("_at", "_from", "_until", "_start", "_end")) or name in ("expires_at", "scheduled_at", "sent_at", "read_at", "due_at"):
-                col_type = sa.DateTime(timezone=True)
-            elif name in ("scope_snapshot", "data_categories", "quiet_hours", "details", "verification_result"):
-                col_type = sa.JSON()
-            elif name in ("enabled", "retryable"):
-                col_type = sa.Boolean()
-            elif name in ("attempt_number", "attempt_count", "escalation_level", "checked_count", "failure_count"):
-                col_type = sa.Integer()
-            else:
-                col_type = sa.Text()
-            columns.append(sa.Column(name, col_type, nullable=True))
-            existing_names.add(name)
-        for name, column_type, kwargs in [
-            ("request_id", sa.String(255), {"nullable": True}),
-            ("correlation_id", sa.String(255), {"nullable": True}),
-            ("policy_version", sa.String(100), {"nullable": True}),
-            ("metadata", sa.JSON(), {"nullable": False, "server_default": sa.text("'{}'")}),
-            ("created_at", sa.DateTime(timezone=True), {"nullable": False, "server_default": sa.func.now()}),
-            ("updated_at", sa.DateTime(timezone=True), {"nullable": False, "server_default": sa.func.now()}),
-        ]:
-            if name not in existing_names:
-                columns.append(sa.Column(name, column_type, **kwargs))
-                existing_names.add(name)
-        op.create_table(table_name, *columns)
-        op.create_index(f"ix_{table_name}_created_at", table_name, ["created_at"])
-        for col in ("actor_id", "subject_id", "person_id", "caregiver_id", "request_id", "correlation_id"):
-            if col in [c.name for c in columns]:
-                op.create_index(f"ix_{table_name}_{col}", table_name, [col])
-        # Every audit/event stream should support time-ordered review.
+        required = list(dict.fromkeys(envelope + extra_columns + shared))
+        if not inspector.has_table(table_name):
+            op.create_table(table_name, *[_column_definition(name) for name in required])
+            inspector = inspect(bind)
+        else:
+            # Reconcile an existing table in place instead of skipping it wholesale.
+            # Never rebuild or drop existing data. Add only missing nullable/defaulted columns.
+            existing = {col["name"] for col in inspector.get_columns(table_name)}
+            for name in required:
+                if name in existing or name == "id":
+                    continue
+                definition = _column_definition(name)
+                if name in ("created_at", "updated_at", "metadata"):
+                    op.add_column(table_name, definition)
+                else:
+                    op.add_column(table_name, sa.Column(name, definition.type, nullable=True))
+                existing.add(name)
+            inspector = inspect(bind)
+
+        existing_indexes = {idx["name"] for idx in inspector.get_indexes(table_name)}
+        index_columns = ["created_at", "actor_id", "subject_id", "person_id", "caregiver_id", "request_id", "correlation_id"]
         if any(x in table_name for x in ("logs", "events", "receipts", "attempts", "acknowledgements", "revocations", "downloads")):
-            # created_at already has an index above; do not create it twice.
-            for candidate in ("occurred_at", "attempted_at", "acknowledged_at", "revoked_at", "downloaded_at", "disclosed_at", "received_at", "read_at"):
-                if candidate in [c.name for c in columns]:
-                    op.create_index(f"ix_{table_name}_{candidate}", table_name, [candidate])
-                    break
+            index_columns += ["occurred_at", "attempted_at", "acknowledged_at", "revoked_at", "downloaded_at", "disclosed_at", "received_at", "read_at"]
+        actual_columns = {col["name"] for col in inspector.get_columns(table_name)}
+        for col in dict.fromkeys(index_columns):
+            if col not in actual_columns:
+                continue
+            index_name = f"ix_{table_name}_{col}"
+            if index_name not in existing_indexes:
+                op.create_index(index_name, table_name, [col])
+                existing_indexes.add(index_name)
+        inspector = inspect(bind)
 
 def downgrade():
     # Intentionally non-destructive. Some tables may have pre-existed and were
