@@ -21,6 +21,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceModel
+from app.models.care_continuity import CareAssertion, CareActionOutcome
+from app.models.uncertainty import InformationGap, OpenQuestion, Contradiction
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
