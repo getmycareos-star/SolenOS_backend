@@ -155,6 +155,9 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
             links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
     elif resource == "timeline":
         links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
+    elif resource in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
+        if payload.get("source_id"):
+            links.append((payload.get("source_type"), payload.get("source_id"), "source_id"))
     for type_name, target_id, field_name in links:
         table_name = typed_tables.get(str(type_name or "").lower())
         if table_name is None or not target_id:
