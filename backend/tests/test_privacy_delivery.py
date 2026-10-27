@@ -448,6 +448,33 @@ def test_handoff_inbox_is_scoped_and_requires_summary_before_acceptance():
     assert accepted.status_code == 200, accepted.text
     accepted_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
     assert accepted_inbox.json()["items"][0]["status"] == "accepted"
+    assert accepted_inbox.json()["items"][0]["acknowledged"] is False
+
+    first_ack = client.post(
+        f"/api/v1/handoffs/{handoff_id}/acknowledge",
+        headers=recipient_headers,
+        json={"acknowledgement": "I reviewed and received this handoff."},
+    )
+    assert first_ack.status_code == 200, first_ack.text
+    assert first_ack.json()["already_acknowledged"] is False
+    second_ack = client.post(
+        f"/api/v1/handoffs/{handoff_id}/acknowledge",
+        headers=recipient_headers,
+        json={"acknowledgement": "Repeated request."},
+    )
+    assert second_ack.status_code == 200, second_ack.text
+    assert second_ack.json()["already_acknowledged"] is True
+    acknowledged_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
+    assert acknowledged_inbox.json()["items"][0]["acknowledged"] is True
+
+    from app.models.privacy_delivery import HandoffAcknowledgement
+    db = TestSessionLocal()
+    try:
+        assert db.query(HandoffAcknowledgement).filter_by(
+            handoff_id=handoff_id, recipient_id=recipient_id
+        ).count() == 1
+    finally:
+        db.close()
 
     revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
     assert revoked.status_code == 200, revoked.text
