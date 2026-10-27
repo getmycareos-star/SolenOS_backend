@@ -47,6 +47,7 @@ def create_session(client, person_name):
     body = response.json()
     assert body["person"]["id"]
     assert body["caregiver"]["id"]
+    assert body["caregiver"]["profile_id"]
     assert body["access_token"]
     return body
 
@@ -57,6 +58,7 @@ def test_anonymous_session_bootstrap_creates_scoped_record_without_email():
     assert created["token_type"] == "Bearer"
 
     from app.models.care import Caregiver, Person
+    from app.models.caregiver_intelligence import CaregiverProfile
     from app.models.anonymous_session import AnonymousSession
     import hashlib
 
@@ -67,6 +69,10 @@ def test_anonymous_session_bootstrap_creates_scoped_record_without_email():
             token_hash=hashlib.sha256(created["access_token"].encode()).hexdigest()
         ).one()
         person = db.query(Person).filter_by(id=created["person"]["id"]).one()
+        profile = db.query(CaregiverProfile).filter_by(id=created["caregiver"]["profile_id"]).one()
+        assert profile.person_id == person.id
+        assert profile.session_caregiver_id == caregiver.id
+        assert profile.email is None
         assert caregiver.email is None
         assert caregiver.person_id == person.id
         assert session.person_id == person.id
