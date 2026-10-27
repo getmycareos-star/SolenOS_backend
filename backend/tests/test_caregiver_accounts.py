@@ -96,6 +96,13 @@ def test_create_account_sign_in_and_delete_account():
     assert deleted.json()["deleted"] is True
     assert deleted.json()["care_record_retained"] is True
     assert deleted.json()["other_sessions_revoked"] is True
+    db = TestSessionLocal()
+    try:
+        retained_profile = db.query(CaregiverProfile).filter_by(session_caregiver_id=session["caregiver"]["id"]).one()
+        assert retained_profile.email is None
+        assert retained_profile.session_caregiver_id == session["caregiver"]["id"]
+    finally:
+        db.close()
     assert client.get("/api/v1/accounts/me", headers=headers).json()["account"] is None
     revoked_login_session = client.get(
         f"/api/v1/evidence/{session['person']['id']}",
