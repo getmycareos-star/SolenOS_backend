@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261028_02_companion_response_metadata"
+revision = "20261028_02_resp_meta"
 down_revision = "20261028_01_profile_link"
 branch_labels = None
 depends_on = None
