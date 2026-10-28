@@ -144,9 +144,34 @@ def _create_change(
         explanation += (
             f" Relative change: {comparison['relative_change_percent']:.1f}%."
         )
-    evidence_ids = [e.id for e in events]
-    if baseline_id and baseline_id not in evidence_ids:
-        evidence_ids.append(baseline_id)
+    # Source observations and the baseline are separate provenance objects.
+    # Keep only actual care-event IDs in evidence_ids; baseline_id already has its
+    # own foreign-key field. This also makes repeated assessments idempotent.
+    evidence_ids = sorted({e.id for e in events if e.id})
+    existing = (
+        db.query(Change)
+        .filter(
+            Change.person_id == person_id,
+            Change.subject_type == subject_type,
+            Change.subject_id == subject_id,
+            Change.change_type == change_type,
+            Change.current_count == current_count,
+            Change.is_active.is_(True),
+        )
+        .order_by(Change.created_at.desc())
+        .all()
+    )
+    evidence_signature = set(evidence_ids)
+    for candidate in existing:
+        if set(candidate.evidence_ids or []) == evidence_signature:
+            # Repeated reconciliation over the same persisted source observations
+            # returns the existing assessment instead of creating duplicate history.
+            return candidate
+        if not evidence_signature and candidate.created_at is not None:
+            created_at = _ensure_utc(candidate.created_at)
+            if created_at is not None and (now - created_at).days < 1:
+                return candidate
+
     magnitude = comparison.get("relative_change_percent")
     if magnitude is not None and magnitude == float('inf'):
         magnitude = 1000.0
