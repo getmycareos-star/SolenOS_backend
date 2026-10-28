@@ -42,6 +42,8 @@ REVIEW_CRITERIA = {
     "source attribution": {"present", "incomplete", "unverified", "not_assessed"},
     "independent corroboration": {"independent_source_linked", "copied_or_same_origin", "none_linked", "not_assessed"},
     "temporal context": {"specified", "partial", "missing", "conflicting", "not_assessed"},
+    "evidence freshness": {"current", "stale", "historical", "undetermined", "not_assessed"},
+    "record completeness": {"complete", "partial", "missing", "undetermined", "not_assessed"},
 }
 
 
@@ -90,7 +92,7 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
             raise HTTPException(status_code=422, detail=f"Unsupported result for evidence review criterion: {criterion}")
         seen_criteria.add(criterion)
     if seen_criteria != set(REVIEW_CRITERIA):
-        raise HTTPException(status_code=422, detail="Source attribution, independent corroboration, and temporal context must all be reviewed")
+        raise HTTPException(status_code=422, detail="All versioned evidence review criteria must be supplied")
 
     attribution = {
         "evidence_id": evidence.id,
