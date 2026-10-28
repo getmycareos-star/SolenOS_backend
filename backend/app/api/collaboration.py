@@ -573,9 +573,25 @@ _COMPANION_QUERY_STOPWORDS = {
     "record", "records", "solenos", "getting", "worse", "better", "tell", "show",
 }
 
+# Small, transparent vocabulary bridges for common caregiver paraphrases. These
+# improve retrieval recall only; a lexical match is never treated as evidence of
+# a clinical fact and source authority/provenance remains unchanged.
+_COMPANION_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
 
-def _companion_query_terms(text: str) -> list[str]:
-    """Extract bounded lexical search terms; matches never establish factual truth."""
+
+def _companion_base_terms(text: str) -> list[str]:
     terms = re.findall(r"[a-z0-9]{3,}", (text or "").casefold())
     unique = []
     for term in terms:
@@ -586,16 +602,37 @@ def _companion_query_terms(text: str) -> list[str]:
     return unique
 
 
+def _companion_query_terms(text: str) -> list[str]:
+    """Return bounded direct + synonym terms; matches never establish factual truth."""
+    direct = _companion_base_terms(text)
+    expanded = list(direct)
+    direct_set = set(direct)
+    for group in _COMPANION_SYNONYM_GROUPS:
+        if direct_set.intersection(group):
+            for term in sorted(group):
+                if term not in expanded:
+                    expanded.append(term)
+                if len(expanded) >= 24:
+                    return expanded
+    return expanded
+
+
 def _companion_relevance_score(query: str, *fields: str | None) -> int:
-    """Rank candidate records by query overlap without changing source authority."""
-    terms = set(_companion_query_terms(query))
-    if not terms:
+    """Prefer direct matches over synonym matches without changing source authority."""
+    direct = set(_companion_base_terms(query))
+    expanded = set(_companion_query_terms(query)) - direct
+    if not direct and not expanded:
         return 0
     title_terms = set(re.findall(r"[a-z0-9]{3,}", (fields[0] or "").casefold())) if fields else set()
     body_terms = set()
     for field in fields[1:]:
         body_terms.update(re.findall(r"[a-z0-9]{3,}", (field or "").casefold()))
-    return 3 * len(terms & title_terms) + len(terms & body_terms)
+    return (
+        4 * len(direct & title_terms)
+        + 2 * len(direct & body_terms)
+        + 2 * len(expanded & title_terms)
+        + len(expanded & body_terms)
+    )
 
 
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
@@ -1358,9 +1395,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        # Conversation history can resolve an implicit reference like "what about
+        # that?" for retrieval, but remains untrusted dialogue rather than evidence.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
-        query_terms = _companion_query_terms(user_text)
+        query_terms = _companion_query_terms(retrieval_query)
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1540,15 +1587,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Prior conversation can resolve a follow-up reference, but it remains
         # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
-
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
         shared_lcr_lines: list[str] = []
