@@ -212,7 +212,14 @@ def analyze_and_persist_uncertainty(
     records, persists the assessment, and never emits a calibrated probability.
     Session scope is derived by get_engine from the server-validated bearer token.
     """
-    requested_conflict_ids = list(dict.fromkeys(request.conflict_ids))
+    if engine.person_id is None or str(request.person_id) != str(engine.person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if len(set(request.conflict_ids)) != len(request.conflict_ids):
+        raise HTTPException(status_code=422, detail="Duplicate conflict IDs are not allowed")
+    if len(set(request.evidence_ids)) != len(request.evidence_ids):
+        raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
+
+    requested_conflict_ids = list(request.conflict_ids)
     if requested_conflict_ids:
         conflict_rows = (
             engine.db.query(Contradiction)
@@ -230,7 +237,7 @@ def analyze_and_persist_uncertainty(
     else:
         conflict_rows = []
 
-    requested_evidence_ids = list(dict.fromkeys(request.evidence_ids))
+    requested_evidence_ids = list(request.evidence_ids)
     if requested_evidence_ids:
         evidence_rows = (
             engine.db.query(Evidence)
