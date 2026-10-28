@@ -44,10 +44,21 @@ import uuid
 router = APIRouter()
 
 
+def _sanitize_client_review_flags(input_data: SafetyContractInput) -> SafetyContractInput:
+    # A request payload cannot certify its own evidence. Only server-persisted,
+    # authorized review state may establish support; this endpoint currently
+    # treats submitted support flags as unverified candidates.
+    evidence = [
+        item.model_copy(update={"supports_claim": False, "reviewed_support": None})
+        for item in input_data.evidence_references
+    ]
+    return input_data.model_copy(update={"evidence_references": evidence})
+
+
 @router.post("/evaluate", response_model=SafetyContractOutput)
 def evaluate_safety(input_data: SafetyContractInput, db: Session = Depends(get_db)):
     engine = SafetyEngine()
-    output = engine.evaluate(input_data)
+    output = engine.evaluate(_sanitize_client_review_flags(input_data))
     return output
 
 
@@ -67,7 +78,7 @@ def validate_response(
 @router.post("/audit", response_model=SafetyAuditRecord)
 def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, final_output: Optional[str] = None, db: Session = Depends(get_db)):
     engine = SafetyEngine()
-    audit_data = engine.create_safety_audit(input_data, output, final_output)
+    audit_data = engine.create_safety_audit(_sanitize_client_review_flags(input_data), output, final_output)
     db_audit = SafetyAuditRecordModel(**audit_data)
     db.add(db_audit)
     db.commit()
