@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models.uncertainty import (
@@ -206,28 +207,35 @@ class UncertaintyEngine:
     def create_uncertainty_assessment(
         self, assessment: UncertaintyAssessmentCreate
     ) -> UncertaintyAssessmentModel:
-        existing = (
-            self.db.query(UncertaintyAssessmentModel)
-            .filter(
-                UncertaintyAssessmentModel.person_id == assessment.person_id,
-                UncertaintyAssessmentModel.subject_type == assessment.subject_type,
-                UncertaintyAssessmentModel.subject_id == assessment.subject_id,
-                UncertaintyAssessmentModel.field == assessment.field,
-                UncertaintyAssessmentModel.is_active,
+        payload = self._scoped_payload(assessment.model_dump())
+        scoped_person_id = self.person_id or payload["person_id"]
+        payload["person_id"] = scoped_person_id
+        new_id = str(uuid.uuid4())
+        try:
+            existing = (
+                self.db.query(UncertaintyAssessmentModel)
+                .filter(
+                    UncertaintyAssessmentModel.person_id == scoped_person_id,
+                    UncertaintyAssessmentModel.subject_type == payload["subject_type"],
+                    UncertaintyAssessmentModel.subject_id == payload["subject_id"],
+                    UncertaintyAssessmentModel.field == payload["field"],
+                    UncertaintyAssessmentModel.is_active,
+                )
+                .first()
             )
-            .first()
-        )
+            if existing:
+                existing.is_active = False
+                existing.superseded_by_assessment_id = new_id
 
-        if existing:
-            existing.is_active = False
-            existing.superseded_by_assessment_id = None
+            db_assessment = UncertaintyAssessmentModel(id=new_id, **payload)
+            self.db.add(db_assessment)
+            # Old assessment supersession and new assessment creation are atomic.
             self.db.commit()
-
-        db_assessment = UncertaintyAssessmentModel(**self._scoped_payload(assessment.model_dump()))
-        self.db.add(db_assessment)
-        self.db.commit()
-        self.db.refresh(db_assessment)
-        return db_assessment
+            self.db.refresh(db_assessment)
+            return db_assessment
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list_assessments(
         self,
