@@ -454,6 +454,21 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeyp
         teardown()
 
 
+def test_context_ranking_uses_synonyms_for_appointments_and_documents():
+    appointment_line = (
+        'LCR appointment evidence: {"appointment_id":"visit-older",'
+        '"title":"Neurology consultation","scheduled_at":"2026-07-12T10:00:00"}'
+    )
+    unrelated_line = (
+        'LCR appointment evidence: {"appointment_id":"meal-1",'
+        '"title":"Lunch planning","scheduled_at":"2026-07-13T10:00:00"}'
+    )
+    ranked = collaboration._rank_context_lines(
+        "Tell me about the clinic visit", [unrelated_line, appointment_line], limit=1
+    )
+    assert ranked == [appointment_line]
+
+
 def test_companion_query_terms_expand_common_caregiving_paraphrases():
     sleep_terms = collaboration._companion_query_terms("What happened with her rest?")
     assert "rest" in sleep_terms
