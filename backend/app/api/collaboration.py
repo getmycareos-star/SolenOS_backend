@@ -171,6 +171,7 @@ def _replay_companion_turn(
         "persistence": "conversation_only",
         "idempotent_replay": True,
         "messages": [{
+            "id": row.id,
             "role": row.role,
             "text": row.content,
             "created_at": row.created_at.isoformat() if row.created_at else None,
