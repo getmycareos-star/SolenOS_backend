@@ -102,6 +102,30 @@ def build_baseline(
         frequency_per_period = 0.0
         confidence = BaselineConfidence.LOW
     observation_density = event_count / max(window_days, 1)
+    evidence_ids = sorted({e.id for e in baseline_events if e.id})
+    existing_baselines = (
+        db.query(Baseline)
+        .filter(
+            Baseline.person_id == person_id,
+            Baseline.subject_type == event_type,
+            Baseline.subject_id == (subject_id or ""),
+            Baseline.baseline_type == BaselineType.PERSONAL_HISTORICAL,
+            Baseline.is_active.is_(True),
+            Baseline.event_count == event_count,
+        )
+        .order_by(Baseline.created_at.desc())
+        .all()
+    )
+    for existing in existing_baselines:
+        if evidence_ids and set(existing.evidence_ids or []) == set(evidence_ids):
+            return existing
+        if (
+            not evidence_ids
+            and _ensure_utc(existing.window_start) == _ensure_utc(window_start)
+            and _ensure_utc(existing.window_end) == _ensure_utc(window_end)
+        ):
+            return existing
+
     baseline = Baseline(
         person_id=person_id,
         subject_type=event_type,
@@ -116,7 +140,7 @@ def build_baseline(
         is_stable=True,
         observation_density=observation_density,
         documentation_bias_flag=False,
-        evidence_ids=[e.id for e in baseline_events],
+        evidence_ids=evidence_ids,
     )
     db.add(baseline)
     db.flush()
