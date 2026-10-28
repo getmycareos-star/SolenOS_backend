@@ -66,6 +66,10 @@ class Contradiction(Base):
     field = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     evidence_ids = Column(JSONList, nullable=True)
+    # Source assertion IDs are part of the persisted conflict provenance.
+    # The existing migration defines this column as TEXT; JSONList preserves
+    # the same storage representation while providing structured Python values.
+    source_assertion_ids = Column(JSONList, nullable=True)
     resolution_status = Column(String, nullable=False, default="unresolved")
     resolution_notes = Column(Text, nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
