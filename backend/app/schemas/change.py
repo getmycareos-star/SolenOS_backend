@@ -70,6 +70,7 @@ class ChangeBase(BaseModel):
     significance_verdict: Optional[SignificanceVerdict] = None
     attention_candidate: bool = False
     follow_up_candidate: bool = False
+    confirmation_status: str = "detected"
 
 
 class ChangeCreate(ChangeBase):
@@ -195,4 +196,18 @@ class ChangeEvidenceResponse(BaseModel):
 class ChangeDetailResponse(BaseModel):
     change: Change
     evidence: List[ChangeEvidenceResponse]
+
+class ChangeConfirmationRequest(BaseModel):
+    status: str
+    reason: Optional[str] = None
+    evidence_ids: List[str] = Field(default_factory=list)
+
+
+class ChangeConfirmationTransitionResponse(BaseModel):
+    change: Change
+    transition_id: str
+    previous_status: str
+    new_status: str
+    actor_caregiver_id: str
+    created_at: datetime
 
