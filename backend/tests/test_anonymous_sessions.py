@@ -605,3 +605,45 @@ def test_clients_cannot_write_unsupported_baseline_values():
     )
     assert response.status_code == 405, response.text
 
+def test_change_reassessment_persists_results_from_real_care_events_and_is_idempotent():
+    client = TestClient(app)
+    created = create_session(client, "Change reassessment recipient")
+    from datetime import datetime, timedelta, timezone
+    from app.models.care import CareEvent
+    from app.models.change import Baseline, Change
+
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=created["person"]["id"],
+                    event_type="mobility_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 7),
+                    title=f"Persisted mobility observation {index + 1}",
+                    created_by_caregiver_id=created["caregiver"]["id"],
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    path = f"/api/v1/change/changes/reassess?person_id={created['person']['id']}"
+    first = client.post(path, headers=headers, json={})
+    assert first.status_code == 200, first.text
+    assert first.json()
+
+    second = client.post(path, headers=headers, json={})
+    assert second.status_code == 200, second.text
+    assert [item["id"] for item in second.json()] == [item["id"] for item in first.json()]
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(Change).filter_by(person_id=created["person"]["id"], is_active=True).count() == 1
+        assert db.query(Baseline).filter_by(person_id=created["person"]["id"], is_active=True).count() == 1
+    finally:
+        db.close()
+
