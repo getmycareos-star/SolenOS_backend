@@ -382,7 +382,7 @@ def current_care_projection(
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
         occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
-        recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at")
+        recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at") or row.get("asked_at")
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
