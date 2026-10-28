@@ -10,7 +10,7 @@ import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
 from app.models.anonymous_session import AnonymousSession
-from app.models.change import Baseline, Change
+from app.models.change import Baseline, Change, ChangeConfirmationEvent
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -742,6 +742,84 @@ def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert forbidden.status_code == 403
+    finally:
+        teardown_db()
+
+def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-confirmation", name="Confirmation recipient")
+        caregiver = Caregiver(
+            id="caregiver-confirmation",
+            name="Confirmation caregiver",
+            email="confirmation@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="fall",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 7),
+                    title=f"Persisted fall evidence {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        db.commit()
+        assert changes
+        change_id = changes[0].id
+        evidence_id = changes[0].evidence_ids[0]
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        url = f"/api/v1/change/changes/{person.id}/{change_id}/confirmation"
+        response = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Caregiver reviewed the linked observations.", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["previous_status"] == "detected"
+        assert payload["new_status"] == "confirmed"
+        assert payload["actor_caregiver_id"] == caregiver.id
+        assert payload["change"]["confirmation_status"] == "confirmed"
+
+        db = TestingSessionLocal()
+        saved = db.query(Change).filter(Change.id == change_id, Change.person_id == person.id).one()
+        transitions = db.query(ChangeConfirmationEvent).filter(ChangeConfirmationEvent.change_id == change_id).all()
+        assert saved.confirmation_status == "confirmed"
+        assert len(transitions) == 1
+        assert transitions[0].actor_caregiver_id == caregiver.id
+        assert transitions[0].reason == "Caregiver reviewed the linked observations."
+        assert transitions[0].evidence_ids == [evidence_id]
+        db.close()
+
+        invalid_repeat = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Repeated confirmation.", "evidence_ids": []},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert invalid_repeat.status_code == 409
+
+        missing_reason = client.post(
+            url,
+            json={"status": "rejected", "evidence_ids": []},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert missing_reason.status_code == 422
     finally:
         teardown_db()
 
