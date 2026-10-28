@@ -149,6 +149,12 @@ def _replay_companion_turn(
             evidence_ids = []
     except (TypeError, ValueError):
         evidence_ids = []
+    try:
+        response_metadata = json.loads(assistant_row.response_metadata_json or "{}")
+        if not isinstance(response_metadata, dict):
+            response_metadata = {}
+    except (TypeError, ValueError, AttributeError):
+        response_metadata = {}
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
@@ -163,13 +169,15 @@ def _replay_companion_turn(
         "safety_note": assistant_row.safety_note,
         "confidence": None,
         "evidence_ids": evidence_ids,
-        "source_event_ids": [],
-        "source_evidence_ids": evidence_ids,
-        "source_appointment_ids": [],
-        "source_assertion_ids": [],
-        "source_lcr_context_ids": [],
-        "lcr_context_coverage": {"status": "idempotent_replay_context_not_recomputed"},
-        "ai_generated": assistant_row.guard_verdict == "passed",
+        "source_event_ids": response_metadata.get("source_event_ids", []),
+        "source_evidence_ids": response_metadata.get("source_evidence_ids", evidence_ids),
+        "source_appointment_ids": response_metadata.get("source_appointment_ids", []),
+        "source_assertion_ids": response_metadata.get("source_assertion_ids", []),
+        "source_lcr_context_ids": response_metadata.get("source_lcr_context_ids", []),
+        "lcr_context_coverage": response_metadata.get(
+            "lcr_context_coverage", {"status": "legacy_replay_metadata_unavailable"}
+        ),
+        "ai_generated": response_metadata.get("ai_generated", assistant_row.guard_verdict == "passed"),
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "idempotent_replay": True,
@@ -1759,6 +1767,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        response_metadata_json=json.dumps({
+            "source_event_ids": source_event_ids,
+            "source_evidence_ids": source_evidence_ids,
+            "source_appointment_ids": source_appointment_ids,
+            "source_assertion_ids": source_assertion_ids,
+            "source_lcr_context_ids": source_lcr_context_ids,
+            "lcr_context_coverage": lcr_context_coverage,
+            "ai_generated": ai_generated,
+            "written_to_lcr": False,
+            "persistence": "conversation_only",
+        }, ensure_ascii=False),
         created_at=assistant_message_time,
     )
     db.add(assistant_row)
