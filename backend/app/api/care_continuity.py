@@ -37,6 +37,13 @@ REVIEW_TYPES = {
     "completeness": {"complete", "partial", "missing", "undetermined"},
 }
 
+REVIEW_POLICY_VERSION = "evidence-review-v1"
+REVIEW_CRITERIA = {
+    "source attribution": {"present", "incomplete", "unverified", "not_assessed"},
+    "independent corroboration": {"independent_source_linked", "copied_or_same_origin", "none_linked", "not_assessed"},
+    "temporal context": {"specified", "partial", "missing", "conflicting", "not_assessed"},
+}
+
 
 @router.post("/evidence/{evidence_id}/reviews", status_code=201)
 def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
@@ -62,10 +69,11 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         raise HTTPException(status_code=422, detail="Outcome is not valid for this review type")
     if not rationale:
         raise HTTPException(status_code=422, detail="Review rationale is required")
-    if not policy_version or len(policy_version) > 64:
-        raise HTTPException(status_code=422, detail="A bounded policy version is required")
-    if not isinstance(criteria, list) or not criteria:
-        raise HTTPException(status_code=422, detail="Structured review criteria are required")
+    if policy_version != REVIEW_POLICY_VERSION:
+        raise HTTPException(status_code=422, detail=f"Unsupported review policy version; use {REVIEW_POLICY_VERSION}")
+    if not isinstance(criteria, list) or len(criteria) != len(REVIEW_CRITERIA):
+        raise HTTPException(status_code=422, detail="All versioned evidence review criteria must be supplied exactly once")
+    seen_criteria = set()
     for item in criteria:
         if not isinstance(item, dict) or not all(
             isinstance(item.get(key), str) and item[key].strip()
@@ -75,6 +83,14 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
                 status_code=422,
                 detail="Each criterion must include criterion, result, and rationale text",
             )
+        criterion = item["criterion"].strip()
+        if criterion not in REVIEW_CRITERIA or criterion in seen_criteria:
+            raise HTTPException(status_code=422, detail="Unsupported or duplicate evidence review criterion")
+        if item["result"].strip() not in REVIEW_CRITERIA[criterion]:
+            raise HTTPException(status_code=422, detail=f"Unsupported result for evidence review criterion: {criterion}")
+        seen_criteria.add(criterion)
+    if seen_criteria != set(REVIEW_CRITERIA):
+        raise HTTPException(status_code=422, detail="Source attribution, independent corroboration, and temporal context must all be reviewed")
 
     attribution = {
         "evidence_id": evidence.id,
