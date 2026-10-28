@@ -316,9 +316,12 @@ def download_evidence(evidence_id: str, request: Request, db: Session = Depends(
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
+    content = bytes(blob.content)
+    if len(content) != blob.size_bytes or not hashlib.sha256(content).hexdigest() == blob.sha256:
+        raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
     safe_filename = blob.filename.replace("\r", "").replace("\n", "").replace('"', "")
     return Response(
-        content=blob.content,
+        content=content,
         media_type=blob.mime_type,
         headers={"Content-Disposition": f'attachment; filename="{safe_filename}"', "X-Content-Type-Options": "nosniff"},
     )
