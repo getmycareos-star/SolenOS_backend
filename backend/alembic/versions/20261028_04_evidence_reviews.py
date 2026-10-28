@@ -27,7 +27,7 @@ def upgrade() -> None:
             sa.Column("review_type", sa.String(length=32), nullable=False),
             sa.Column("outcome", sa.String(length=32), nullable=False),
             sa.Column("rationale", sa.Text(), nullable=False),
-            sa.Column("criteria", sa.JSON(), nullable=False),
+            sa.Column("criteria", sa.Text(), nullable=False),
             sa.Column("policy_version", sa.String(length=64), nullable=False),
             sa.Column("source_attribution_snapshot", sa.Text(), nullable=False),
             sa.Column("reviewed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=True),
