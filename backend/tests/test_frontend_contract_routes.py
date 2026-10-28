@@ -332,6 +332,8 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
             description="This event must only appear in its owner's LCR context.",
             evidence_ids=[],
             created_by_caregiver_id=caregiver_id,
+            attention_candidate=True,
+            follow_up_candidate=False,
         ))
         db.commit()
         db.close()
@@ -350,6 +352,21 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         own_events = payload["sources"]["events"]["items"]
         assert any(item.get("id") == event_id for item in own_events)
         assert payload["sources"]["events"]["returned_count"] <= 1
+
+        current = client.get(
+            "/api/v1/care-continuity/current-care?limit_per_source=1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert current.status_code == 200, current.text
+        current_payload = current.json()
+        assert current_payload["projection_type"] == "bounded_evidence_derived_current_care"
+        assert current_payload["read_only"] is True
+        assert current_payload["history_coverage"] == "bounded_subset"
+        projected = next(item for item in current_payload["items"] if item["id"] == event_id)
+        assert projected["kind"] == "Care event needing attention"
+        assert projected["source_type"] == "events"
+        assert projected["source_label"] == caregiver_id
+        assert projected["description"] == "This event must only appear in its owner's LCR context."
 
         other = client.get(
             "/api/v1/care-continuity/context?limit_per_source=1",
