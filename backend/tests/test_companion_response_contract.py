@@ -250,6 +250,52 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_companion_prior_turns_are_bounded_json_context_not_model_roles(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = []
+
+    def fake_qwen(base, model, messages, options=None):
+        captured.append(messages)
+        return "I can't establish a trend from the available record."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "Has Mum's sleep been getting worse?"},
+        )
+        assert first.status_code == 200, first.text
+        session_id = first.json()["session_id"]
+
+        second = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "session_id": session_id,
+                "text": "What about that?",
+            },
+        )
+        assert second.status_code == 200, second.text
+
+        messages = captured[-1]
+        assert [message["role"] for message in messages] == ["system", "user"]
+        payload = __import__("json").loads(messages[-1]["content"])
+        history = payload["recent_conversation_history"]
+        assert [item["role"] for item in history] == ["user", "assistant"]
+        assert history[0]["content"] == "Has Mum's sleep been getting worse?"
+        assert history[1]["content"] == "I can't establish a trend from the available record."
+        assert payload["current_message"] == "What about that?"
+        assert len(history[0]["content"]) <= 2000
+        assert second.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
