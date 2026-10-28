@@ -21,6 +21,12 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     if not person:
         raise ValueError("Person not found")
 
+    # Defense in depth: a caregiver must be linked to the target care recipient.
+    # Request middleware also binds IDs to the bearer session, but the service
+    # must remain safe when called from another route or internal workflow.
+    if caregiver.person_id != person.id:
+        raise ValueError("Caregiver is not linked to this person")
+
     timestamp = payload.timestamp
     if timestamp:
         try:
