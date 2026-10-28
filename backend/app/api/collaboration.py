@@ -502,7 +502,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:is|was|has been|remains|is currently)\s+(?:currently\s+)?"
         r"(?:unavailable|available|saved|synced|verified|retained|deleted|archived|accepted|completed|enabled|disabled|sent|delivered|confirmed)\b",
         r"\b(?:yes|no),?\s+(?:an?\s+)?(?:archived|deleted|pinned|restored|exported|shared|synced|saved|verified|accepted|completed)\s+"
-        r"(?:note|record|data|change|setting|reminder)\s+(?:is|was|has been|remains|still)\s+"
+        r"(?:note|record|data|change|setting|reminder)\s+(?:is|was|has been|remains)(?:\s+still)?\s+"
         r"(?:retained|available|saved|synced|verified|accepted|completed|deleted|archived)\b",
     )
     if missing_state and any(re.search(pattern, text) for pattern in unsupported_state_claims):
