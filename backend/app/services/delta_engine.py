@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 import os
 from datetime import datetime, timezone
 from typing import Any
@@ -643,7 +644,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     UncertaintyAssessment.field == finding_field,
                     UncertaintyAssessment.is_active.is_(True),
                 ).first()
-                assessment_id = str(__import__("uuid").uuid4())
+                assessment_id = str(uuid.uuid4())
                 if active_assessment is not None:
                     active_assessment.is_active = False
                     active_assessment.superseded_by_assessment_id = assessment_id
@@ -719,6 +720,23 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
             db.add(run)
             db.flush()
             result["provenance"]["delta_run_id"] = run.id
+            assessment_ids = [
+                item.get("assessment_id") for item in result.get("uncertainty_assessments", [])
+                if item.get("assessment_id")
+            ]
+            if assessment_ids:
+                saved_assessments = db.query(UncertaintyAssessment).filter(
+                    UncertaintyAssessment.person_id == person_id,
+                    UncertaintyAssessment.id.in_(assessment_ids),
+                ).all()
+                for saved in saved_assessments:
+                    saved_context = list(saved.context or [])
+                    if saved_context and isinstance(saved_context[0], dict):
+                        saved_context[0]["delta_run_pending"] = False
+                        saved_context[0]["delta_run_id"] = run.id
+                        saved.context = saved_context
+                for assessment in result.get("uncertainty_assessments", []):
+                    assessment["delta_run_id"] = run.id
             run.delta_json = json.dumps(result, ensure_ascii=False, default=str)
             db.commit()
         except Exception:
