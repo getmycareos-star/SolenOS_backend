@@ -1323,7 +1323,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     if resource == "fact-evidence":
         fact_evidence = _table(db, "care_fact_evidence")
         duplicate = db.execute(
-            select(fact_evidence.c.id).where(
+            select(fact_evidence.c.fact_id).where(
                 fact_evidence.c.fact_id == data["fact_id"],
                 fact_evidence.c.evidence_id == data["evidence_id"],
                 fact_evidence.c.evidence_role == data.get("evidence_role", "supports"),
