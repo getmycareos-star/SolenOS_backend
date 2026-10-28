@@ -124,3 +124,36 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
+
+
+  container-build-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production Docker image
+        run: docker build --tag solenos-backend-ci:latest .
+      - name: Verify core API starts without network or model download
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker run --detach --name solenos-backend-ci --network none \
+            --publish 127.0.0.1:18080:8080 \
+            --env APP_ENV=development \
+            --env DATABASE_URL=sqlite:////tmp/solenos-ci.db \
+            --env SECRET_KEY=ci-only-not-for-production \
+            solenos-backend-ci:latest
+          cleanup() {
+            docker logs solenos-backend-ci || true
+            docker rm --force solenos-backend-ci >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 45); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:18080/health >/dev/null; then
+              echo "PASS: production image serves /health without external network access."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "FAIL: production image did not start the core API without network access." >&2
+          exit 1
