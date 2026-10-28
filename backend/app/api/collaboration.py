@@ -123,8 +123,11 @@ def _replay_companion_turn(
     person_id: str,
     caregiver_id: str,
     requested_session_id: str | None = None,
+    expected_text: str | None = None,
 ) -> dict | None:
     """Return a previously committed turn only within its original authorized session."""
+    if expected_text is not None and user_row.content != expected_text:
+        return None
     session = db.query(ConversationSession).filter_by(
         id=user_row.session_id,
         person_id=person_id,
@@ -1290,7 +1293,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ).first()
         if prior_user_row:
             replay = _replay_companion_turn(
-                db, prior_user_row, person_id, caregiver_id, payload.session_id
+                db, prior_user_row, person_id, caregiver_id, payload.session_id, user_text
             )
             if replay is None:
                 # Do not reveal whether a colliding key belongs to another
@@ -1781,7 +1784,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         db.delete(duplicate_session)
                         db.commit()
                 replay = _replay_companion_turn(
-                    db, prior_user_row, person_id, caregiver_id, payload.session_id
+                    db, prior_user_row, person_id, caregiver_id, payload.session_id, user_text
                 )
                 if replay is not None:
                     return replay
