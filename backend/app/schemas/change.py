@@ -175,3 +175,24 @@ class SituationResponse(BaseModel):
     context: Optional[dict[str, Any]] = None
     temporal_start: datetime
     temporal_end: datetime
+
+class ChangeEvidenceResponse(BaseModel):
+    id: str
+    event_type: str
+    status: str
+    occurred_at: datetime
+    occurred_at_timezone: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    title: str
+    description: Optional[str] = None
+    time_provenance: Optional[str] = None
+    location_provenance: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChangeDetailResponse(BaseModel):
+    change: Change
+    evidence: List[ChangeEvidenceResponse]
+
