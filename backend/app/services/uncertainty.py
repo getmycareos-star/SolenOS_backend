@@ -158,11 +158,77 @@ class UncertaintyEngine:
         return query.order_by(OpenQuestionModel.asked_at.desc()).all()
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
-        db_contradiction = ContradictionModel(**self._scoped_payload(contradiction.model_dump()))
-        self.db.add(db_contradiction)
-        self.db.commit()
-        self.db.refresh(db_contradiction)
-        return db_contradiction
+        from app.models.care import CareEvent, Evidence
+
+        payload = self._scoped_payload(contradiction.model_dump())
+        scoped_person_id = self.person_id or payload["person_id"]
+        payload["person_id"] = scoped_person_id
+        payload["matching_candidate_ids"] = []
+        start = payload.get("effective_from")
+        end = payload.get("effective_to")
+        if start and end:
+            start_utc = start.replace(tzinfo=timezone.utc) if start.tzinfo is None else start.astimezone(timezone.utc)
+            end_utc = end.replace(tzinfo=timezone.utc) if end.tzinfo is None else end.astimezone(timezone.utc)
+            if end_utc < start_utc:
+                raise ValueError("Conflict effective_to cannot precede effective_from")
+
+        event_id = payload.get("event_id")
+        if event_id and not self.db.query(CareEvent.id).filter(
+            CareEvent.id == event_id, CareEvent.person_id == scoped_person_id
+        ).first():
+            raise ValueError("Conflict event must belong to the same care record")
+
+        evidence_ids = payload.get("evidence_ids") or []
+        if len(evidence_ids) != len(set(evidence_ids)):
+            raise ValueError("Duplicate evidence IDs are not allowed")
+        if evidence_ids:
+            evidence_count = self.db.query(Evidence.id).filter(
+                Evidence.person_id == scoped_person_id,
+                Evidence.id.in_(evidence_ids),
+            ).count()
+            if evidence_count != len(evidence_ids):
+                raise ValueError("Every conflict evidence reference must belong to the same care record")
+
+        query = self.db.query(ContradictionModel).filter(
+            ContradictionModel.person_id == scoped_person_id,
+            ContradictionModel.subject_type == payload["subject_type"],
+            ContradictionModel.subject_id == payload["subject_id"],
+            ContradictionModel.field == payload["field"],
+            ContradictionModel.resolution_status.in_(("unresolved", "reopened", "qualified", "partially_resolved")),
+        )
+        candidates = []
+        for existing in query.all():
+            if event_id and existing.event_id and str(event_id) != str(existing.event_id):
+                continue
+            new_context = (payload.get("context_key") or "").strip().casefold()
+            old_context = (existing.context_key or "").strip().casefold()
+            if new_context and old_context and new_context != old_context:
+                continue
+
+            old_start, old_end = existing.effective_from, existing.effective_to
+            new_start, new_end = start, end
+            def utc(value):
+                if value is None:
+                    return None
+                return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+            old_start, old_end, new_start, new_end = map(utc, (old_start, old_end, new_start, new_end))
+            # Exclude only when explicit bounds prove the intervals disjoint.
+            if old_end and new_start and old_end < new_start:
+                continue
+            if new_end and old_start and new_end < old_start:
+                continue
+            candidates.append(str(existing.id))
+
+        payload["matching_candidate_ids"] = sorted(set(candidates))
+        db_contradiction = ContradictionModel(**payload)
+        try:
+            self.db.add(db_contradiction)
+            self.db.commit()
+            self.db.refresh(db_contradiction)
+            return db_contradiction
+        except Exception:
+            self.db.rollback()
+            raise
 
     def update_contradiction(
         self, contradiction_id: str, update: ContradictionUpdate
