@@ -411,3 +411,63 @@ def test_api_detect_situations():
         assert len(data) >= 1
     finally:
         teardown_db()
+
+def test_change_detection_is_idempotent_for_unchanged_persisted_evidence():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-idempotency", name="Persisted Person")
+        caregiver = Caregiver(
+            id="caregiver-idempotency",
+            name="Persisted Caregiver",
+            email="idempotency@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        now = datetime.now(timezone.utc)
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="fall",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 7),
+                    title=f"Persisted event {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+
+        first = detect_event_changes(db, person.id, "fall", None, now)
+        db.commit()
+        first_ids = [change.id for change in first]
+        assert len(first_ids) == 1
+
+        second = detect_event_changes(db, person.id, "fall", None, now)
+        db.commit()
+        second_ids = [change.id for change in second]
+        stored = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person.id,
+                Change.subject_type == "fall",
+                Change.is_active.is_(True),
+            )
+            .all()
+        )
+
+        assert second_ids == first_ids
+        assert len(stored) == 1
+        assert set(stored[0].evidence_ids) == {
+            event.id
+            for event in db.query(CareEvent).filter(CareEvent.person_id == person.id).all()
+        }
+        db.close()
+    finally:
+        teardown_db()
+
