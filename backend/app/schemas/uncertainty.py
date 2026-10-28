@@ -201,3 +201,27 @@ class SubjectUncertaintySummary(BaseModel):
     open_gaps_count: int
     open_questions_count: int
     contradictions_count: int
+
+
+class UncertaintyAnalysisRequest(BaseModel):
+    """Actual claim and evidence metadata retrieved by the calling workflow."""
+    person_id: str
+    subject_type: str
+    subject_id: str
+    field: str
+    claim: str = Field(..., min_length=1, max_length=12000)
+    task: str = Field(..., min_length=1, max_length=80)
+    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    required_fields: List[str] = Field(default_factory=list)
+    unresolved_conflicts: List[Dict[str, Any]] = Field(default_factory=list)
+    source_access: str = Field(default="available", pattern="^(available|unavailable|failed|restricted)$")
+    assessed_by_caregiver_id: Optional[str] = None
+
+
+class UncertaintyAnalysisResponse(BaseModel):
+    assessment_id: str
+    person_id: str
+    subject_type: str
+    subject_id: str
+    field: str
+    analysis: Dict[str, Any]
