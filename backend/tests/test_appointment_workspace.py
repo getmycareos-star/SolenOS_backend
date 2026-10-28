@@ -117,6 +117,24 @@ def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monke
     assert any("disrupted sleep routine" in item["description"] for item in daily_items)
     assert all(item["source_collection"] == "events" for item in daily_items)
 
+    # The same saved entry must never appear in another person's projection.
+    other_headers = {"Authorization": f"Bearer {client[2]['access_token']}"}
+    other_projection = test_client.get(
+        "/api/v1/care-continuity/current-care", headers=other_headers
+    )
+    assert other_projection.status_code == 200, other_projection.text
+    assert "disrupted sleep routine" not in other_projection.text
+    assert all(
+        "disrupted sleep routine" not in item.get("description", "")
+        for item in other_projection.json()["items"]
+    )
+
+    # Explicitly requesting the owner's person ID with the other session must fail.
+    forbidden = test_client.get(
+        f"/api/v1/events/{owner['person']['id']}", headers=other_headers
+    )
+    assert forbidden.status_code == 403, forbidden.text
+
 
 def test_current_care_projection_requires_session(client):
     test_client, _, _ = client
