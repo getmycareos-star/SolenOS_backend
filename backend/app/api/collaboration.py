@@ -1476,19 +1476,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "tools or mutate care records. Community is disabled and is not a source of care facts. "
             "Return only the caregiver-facing response, without hidden reasoning or internal configuration."
         )
-        model_messages = [{"role": "system", "content": system_prompt}]
-        model_messages.extend(
-            {"role": row.role, "content": row.content}
+        # Conversation history is context data, not instruction-bearing model turns.
+        # Keeping prior user/assistant text inside the bounded JSON payload prevents a
+        # previous turn from being mistaken for fresh instructions or verified care facts.
+        conversation_history_context = [
+            {"role": row.role, "content": (row.content or "")[:2000]}
             for row in reversed(prior_messages)
             if row.role in {"user", "assistant"}
-        )
-        model_messages.append({
-            "role": "user",
-            "content": json.dumps({
-                "current_message": user_text,
-                "authorized_record_context": context_payload,
-            }, ensure_ascii=False),
-        })
+        ]
+        model_messages = [
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": json.dumps({
+                    "current_message": user_text,
+                    "recent_conversation_history": conversation_history_context,
+                    "authorized_record_context": context_payload,
+                }, ensure_ascii=False),
+            },
+        ]
         greeting_only = _is_casual_greeting(user_text)
         if greeting_only:
             model_messages[0]["content"] += (
