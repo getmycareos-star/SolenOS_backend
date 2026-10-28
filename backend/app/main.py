@@ -262,6 +262,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
         if path.startswith("/api/v1/accounts") or path.startswith("/api/v1/identity") or path == "/api/v1/sessions/revoke":
             target_person_id = scoped_person_id
+        if path.startswith("/api/v1/change/"):
+            # Change endpoints validate their own requested person scope using
+            # the same bearer session. If this middleware cannot resolve a
+            # path parameter, bind the middleware scope to the session; the
+            # route-level check still rejects a mismatched requested person.
+            target_person_id = path_params.get("person_id") or request.query_params.get("person_id") or scoped_person_id
         if (
             path.startswith("/api/v1/community")
             or path == "/api/v1/upload"
