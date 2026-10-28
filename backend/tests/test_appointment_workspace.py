@@ -80,7 +80,7 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
     assert body["projection_type"] == "bounded_evidence_derived_current_care"
     assert any(item["id"] == "owner-fact" for item in body["items"])
     assert all(item["id"] != "other-fact" for item in body["items"])
-    assert "Other person's private care detail" not in response.text
+    assert "Other person private care detail" not in response.text
     # SQLite fixture intentionally omits the full migration schema; the API must
     # report incomplete coverage rather than pretending this is the full LCR.
     assert body["schema_status"] != "complete"
