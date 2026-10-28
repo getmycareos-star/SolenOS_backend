@@ -596,3 +596,82 @@ def test_no_recent_events_do_not_create_a_cessation_claim_without_coverage():
     finally:
         teardown_db()
 
+def test_new_evidence_supersedes_prior_active_change_without_erasing_history():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-supersession", name="Supersession recipient")
+        caregiver = Caregiver(
+            id="caregiver-supersession",
+            name="Supersession caregiver",
+            email="supersession@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="mobility_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 7),
+                    title=f"Recorded mobility observation {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+
+        initial = detect_event_changes(db, person.id, "mobility_observation", None, now)
+        db.commit()
+        assert initial
+        old_ids = {change.id for change in initial}
+
+        db.add(
+            CareEvent(
+                person_id=person.id,
+                event_type="mobility_observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=1),
+                title="Additional recorded mobility observation",
+                created_by_caregiver_id=caregiver.id,
+            )
+        )
+        db.commit()
+
+        updated = detect_event_changes(db, person.id, "mobility_observation", None, now)
+        db.commit()
+        assert updated
+        active = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person.id,
+                Change.subject_type == "mobility_observation",
+                Change.is_active.is_(True),
+            )
+            .all()
+        )
+        historical = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person.id,
+                Change.id.in_(old_ids),
+            )
+            .all()
+        )
+
+        assert len(active) == 1
+        assert active[0].id not in old_ids
+        assert historical
+        assert all(not item.is_active for item in historical)
+        assert all(item.superseded_by_change_id == active[0].id for item in historical)
+        assert len(set(active[0].evidence_ids)) == len(active[0].evidence_ids)
+        db.close()
+    finally:
+        teardown_db()
+
