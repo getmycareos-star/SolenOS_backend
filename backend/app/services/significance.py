@@ -194,8 +194,6 @@ def assess_change(
         magnitude_score = min(relative_change / 100.0, 1.0)
         if math.isinf(relative_change) and current_count > 0:
             magnitude_score = 1.0
-    elif change.change_type.value in ("onset",) and current_count > 0:
-        magnitude_score = 1.0
 
     novelty = 1.0 if baseline_event_count == 0 else 0.0
     recurrence = 1.0 if current_count >= 2 else 0.0
@@ -232,7 +230,7 @@ def assess_change(
         {"name": "persistence", "score": round(persistence_score, 3),
          "label": f"{persistence_days} days observed", "evidence_ids": [e.id for e in events]},
         {"name": "novelty", "score": round(novelty, 3),
-         "label": "absent from baseline" if novelty else "present in baseline",
+         "label": "no prior event recorded in baseline window" if novelty else "events recorded in baseline window",
          "evidence_ids": [] if novelty else list(evidence_ids)},
         {"name": "recurrence", "score": round(recurrence, 3),
          "label": f"{current_count} events in window", "evidence_ids": [e.id for e in events]},
