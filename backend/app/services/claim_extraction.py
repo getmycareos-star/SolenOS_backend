@@ -18,7 +18,8 @@ from app.core.safety_enums import (
 class ClaimCandidate:
     text: str
     claim_type: ClaimType
-    confidence: float = 1.0
+    # Extraction does not establish truth or calibrated confidence. Leave unknown unless a validated extractor supplies it.
+    confidence: Optional[float] = None
     source_span: Optional[str] = None
     context: Optional[str] = None
 
@@ -48,11 +49,9 @@ class ClaimExtractionEngine:
             if not sentence.strip():
                 continue
             claim_type = self._detect_claim_type(sentence)
-            confidence = self._estimate_confidence(sentence)
             claims.append(ClaimCandidate(
                 text=sentence.strip(),
                 claim_type=claim_type,
-                confidence=confidence,
                 source_span=sentence.strip(),
             ))
 
@@ -74,21 +73,6 @@ class ClaimExtractionEngine:
             return ClaimType.INTERPRETATION
 
         return ClaimType.FACTUAL
-
-    def _estimate_confidence(self, text: str) -> float:
-        text_lower = text.lower()
-        definitive = ["definitely", "certainly", "always", "never", "must", "confirmed"]
-        uncertain = ["possibly", "might", "could", "may", "perhaps", "unclear", "unknown"]
-
-        for marker in definitive:
-            if marker in text_lower:
-                return 0.9
-        for marker in uncertain:
-            if marker in text_lower:
-                return 0.4
-
-        return 0.7
-
 
 class EvidenceMatcher:
     def match_claim_to_evidence(self, claim_text: str, evidence_refs: List[EvidenceReference]) -> List[EvidenceReference]:
@@ -138,63 +122,120 @@ class EvidenceMatcher:
 
 
 class SourceQualityEvaluator:
-    AUTHORITY_SCORES = {
-        SourceAuthority.CLINICIAN: 0.95,
-        SourceAuthority.LABORATORY: 0.95,
-        SourceAuthority.MEDICATION_RECORD: 0.9,
-        SourceAuthority.DISCHARGE_INSTRUCTION: 0.9,
-        SourceAuthority.EXTERNAL_GUIDELINE: 0.85,
-        SourceAuthority.CAREGIVER_REPORT: 0.7,
-        SourceAuthority.PATIENT_REPORT: 0.7,
-        SourceAuthority.DOCUMENT: 0.6,
-        SourceAuthority.SYSTEM_INFERENCE: 0.4,
-        SourceAuthority.UNKNOWN: 0.3,
-    }
+    """Explainable evidence-quality rules.
 
-    QUALITY_THRESHOLDS = {
-        SourceQuality.HIGH: 0.8,
-        SourceQuality.MODERATE: 0.5,
-        SourceQuality.LOW: 0.3,
-        SourceQuality.UNVERIFIED: 0.0,
-    }
+    Source authority, temporal relevance, evidence quality, and truth are separate
+    concepts. This evaluator never treats source role as a numeric truth score.
+    """
 
-    def evaluate(self, authority: SourceAuthority, currentness: CurrentnessStatus, is_contradictory: bool = False) -> SourceQuality:
-        if is_contradictory:
-            return SourceQuality.LOW
+    RULE_VERSION = "evidence-quality-rules-v2"
 
-        base_score = self.AUTHORITY_SCORES.get(authority, 0.3)
-
-        if currentness == CurrentnessStatus.STALE:
-            base_score *= 0.6
+    def assess(
+        self,
+        authority: SourceAuthority,
+        currentness: CurrentnessStatus,
+        *,
+        source_text: Optional[str] = None,
+        source_identity_verified: Optional[bool] = None,
+        directness: Optional[str] = None,
+        context_present: Optional[bool] = None,
+        supporting_material_present: Optional[bool] = None,
+        ambiguity_present: Optional[bool] = None,
+    ) -> dict:
+        criteria = {
+            "source_identity_verified": source_identity_verified,
+            "source_text_present": bool(source_text and source_text.strip()) if source_text is not None else None,
+            "directness": directness,
+            "context_present": context_present,
+            "supporting_material_present": supporting_material_present,
+            "ambiguity_present": ambiguity_present,
+        }
+        rationale = []
+        if authority == SourceAuthority.UNKNOWN or source_identity_verified is not True:
+            rationale.append("Source identity or attribution is not verified.")
+        if source_text is None or not source_text.strip():
+            rationale.append("Original evidence text is missing.")
+        if directness is None:
+            rationale.append("Directness of the source to the event is unknown.")
+        if context_present is not True:
+            rationale.append("Relevant context has not been established.")
+        if ambiguity_present is True:
+            rationale.append("The evidence is explicitly marked ambiguous.")
+        if supporting_material_present is False:
+            rationale.append("No supporting material was supplied.")
+        if currentness == CurrentnessStatus.UNKNOWN_CURRENCY:
+            rationale.append("Temporal relevance is unknown; this is not a judgment of truth.")
+        elif currentness == CurrentnessStatus.STALE:
+            rationale.append("Evidence may be stale for a current-state question.")
         elif currentness == CurrentnessStatus.HISTORICAL:
-            base_score *= 0.3
-        elif currentness == CurrentnessStatus.UNKNOWN_CURRENCY:
-            base_score *= 0.5
+            rationale.append("Evidence is historical and may remain valid for historical questions.")
 
-        for quality, threshold in sorted(self.QUALITY_THRESHOLDS.items(), key=lambda x: x[1], reverse=True):
-            if base_score >= threshold:
-                return quality
+        # No role-only promotion: high quality requires observed, explicit criteria.
+        if authority == SourceAuthority.UNKNOWN or source_identity_verified is not True:
+            quality = SourceQuality.UNVERIFIED
+        elif ambiguity_present is True:
+            quality = SourceQuality.LOW
+        elif source_text is None or not source_text.strip() or directness is None or context_present is not True:
+            quality = SourceQuality.UNVERIFIED
+        elif directness == "direct" and context_present is True and supporting_material_present is True and ambiguity_present is False:
+            quality = SourceQuality.HIGH
+        elif directness in {"direct", "reported", "documented"} and context_present is True and ambiguity_present is False:
+            quality = SourceQuality.MODERATE
+        else:
+            quality = SourceQuality.UNVERIFIED
 
-        return SourceQuality.UNVERIFIED
+        return {
+            "quality": quality.value,
+            "rule_version": self.RULE_VERSION,
+            "criteria": criteria,
+            "rationale": rationale,
+            "limitations": [
+                "Evidence quality is not truth, authenticity, or source reliability.",
+                "Temporal relevance depends on the question being asked.",
+                "No calibrated numeric score is produced.",
+            ],
+        }
 
-    def get_currentness_status(self, document_time: Optional[datetime], uploaded_at: Optional[datetime], reference_time: Optional[datetime] = None) -> CurrentnessStatus:
+    def evaluate(
+        self,
+        authority: SourceAuthority,
+        currentness: CurrentnessStatus,
+        is_contradictory: bool = False,
+        **evidence_context,
+    ) -> SourceQuality:
+        # Contradiction is a relationship between items, not evidence-quality grade.
+        # Preserve the argument for callers during migration, but do not use it to
+        # downgrade evidence or resolve the conflict.
+        return SourceQuality(self.assess(authority, currentness, **evidence_context)["quality"])
+
+    def get_currentness_status(
+        self,
+        document_time: Optional[datetime],
+        uploaded_at: Optional[datetime],
+        reference_time: Optional[datetime] = None,
+        *,
+        max_age_days: Optional[int] = None,
+    ) -> CurrentnessStatus:
+        """Assess freshness only when the caller supplies a domain-specific policy.
+
+        No universal seven/thirty/365-day expiry is defensible across all evidence
+        types. Missing timestamps or missing policy therefore remain unknown.
+        """
         if reference_time is None:
             reference_time = datetime.now(timezone.utc)
-
-        if document_time is None and uploaded_at is None:
-            return CurrentnessStatus.UNKNOWN_CURRENCY
-
         effective_time = document_time or uploaded_at
-        age_days = (reference_time - effective_time).days
-
-        if age_days <= 7:
+        if effective_time is None or max_age_days is None or max_age_days < 0:
+            return CurrentnessStatus.UNKNOWN_CURRENCY
+        if effective_time.tzinfo is None:
+            effective_time = effective_time.replace(tzinfo=timezone.utc)
+        if reference_time.tzinfo is None:
+            reference_time = reference_time.replace(tzinfo=timezone.utc)
+        age_seconds = (reference_time - effective_time).total_seconds()
+        if age_seconds < 0:
+            return CurrentnessStatus.UNKNOWN_CURRENCY
+        if age_seconds <= max_age_days * 86400:
             return CurrentnessStatus.CURRENT
-        elif age_days <= 30:
-            return CurrentnessStatus.RECENT
-        elif age_days <= 365:
-            return CurrentnessStatus.STALE
-        else:
-            return CurrentnessStatus.HISTORICAL
+        return CurrentnessStatus.STALE
 
 
 class ClaimStrengthMatcher:
