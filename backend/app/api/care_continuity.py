@@ -386,7 +386,8 @@ def current_care_projection(
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
-        source_label = row.get("source_label") or row.get("source_type") or row.get("author_label") or row.get("created_by_caregiver_id")
+        source_label = row.get("source_label") or row.get("author_label")
+        origin_type = row.get("source_type") or "not_recorded"
         current_items.append({
             "id": source_id,
             "kind": kind,
@@ -394,9 +395,10 @@ def current_care_projection(
             "title": title[:240],
             "description": description[:1600],
             "status": status,
-            "epistemic_status": row.get("epistemic_status") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
-            "source_type": source_name,
-            "source_label": str(source_label)[:160] if source_label else "Source not recorded",
+            "epistemic_status": row.get("epistemic_status") or row.get("epistemic_state") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
+            "source_collection": source_name,
+            "source_type": str(origin_type)[:80],
+            "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "occurred_at": occurred_at,
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
