@@ -1431,7 +1431,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ranked_matching_events = sorted(
             matching_events,
             key=lambda event: _companion_relevance_score(
-                user_text, event.title, event.description, event.event_type, event.status
+                retrieval_query, event.title, event.description, event.event_type, event.status
             ),
             reverse=True,
         )
