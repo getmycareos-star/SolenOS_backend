@@ -1,13 +1,13 @@
 """Persist immutable contradiction resolution and reopening history.
 
-Revision ID: 20261028_03_conflict_resolution_history
+Revision ID: 20261028_03_conflict_hist
 Revises: 20261028_02_change_confirmation
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261028_03_conflict_resolution_history"
+revision = "20261028_03_conflict_hist"
 down_revision = "20261028_02_change_confirmation"
 branch_labels = None
 depends_on = None
