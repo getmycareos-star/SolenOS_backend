@@ -142,12 +142,36 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     # The share receiver stores a short-lived, random one-time capability, not
     # a care record. Only these two routes bypass caregiver bearer auth.
     if path == "/api/v1/share-intake" and method == "POST":
+        # This is a short-lived capability bootstrap, not an authenticated care
+        # endpoint. Enforce the body limit while streaming as well as checking
+        # Content-Length: clients can omit or lie about that header.
+        max_share_request_bytes = 8 * 1024 * 1024
         try:
             content_length = int(request.headers.get("content-length", "0"))
         except ValueError:
             content_length = 0
-        if content_length > 8 * 1024 * 1024:
+        if content_length < 0 or content_length > max_share_request_bytes:
             return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
+
+        chunks = []
+        received_bytes = 0
+        async for chunk in request.stream():
+            received_bytes += len(chunk)
+            if received_bytes > max_share_request_bytes:
+                return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
+            chunks.append(chunk)
+        body = b"".join(chunks)
+        sent = False
+
+        async def receive_share_body():
+            nonlocal sent
+            if sent:
+                return {"type": "http.request", "body": b"", "more_body": False}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._body = body
+        request._receive = receive_share_body
         return await call_next(request)
     if path.startswith("/api/v1/share-intake/") and method == "GET":
         return await call_next(request)
