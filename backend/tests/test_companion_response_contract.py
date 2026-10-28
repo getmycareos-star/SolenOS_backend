@@ -425,19 +425,48 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeyp
         older_id = older.id
         db.close()
 
-        response = client.post(
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(
             "/api/v1/conversation/message",
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
             json={"person_id": person_id, "text": "What did we record about sleep?"},
         )
-        assert response.status_code == 200, response.text
-        data = response.json()
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert older_id in first_data["source_event_ids"]
+
+        follow_up = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "session_id": first_data["session_id"],
+                "text": "What about that?",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        data = follow_up.json()
         assert older_id in data["source_event_ids"]
         assert older_id in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
         assert data["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_companion_query_terms_expand_common_caregiving_paraphrases():
+    sleep_terms = collaboration._companion_query_terms("What happened with her rest?")
+    assert "rest" in sleep_terms
+    assert "sleep" in sleep_terms
+    assert "waking" in sleep_terms
+
+    appointment_terms = collaboration._companion_query_terms("Tell me about the clinic visit")
+    assert "clinic" in appointment_terms
+    assert "appointment" in appointment_terms
+
+    medication_terms = collaboration._companion_query_terms("Was the pill recorded?")
+    assert "pill" in medication_terms
+    assert "medication" in medication_terms
 
 
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
