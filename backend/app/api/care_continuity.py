@@ -378,7 +378,7 @@ def current_care_projection(
         title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "follow_up_kind", "target_type",
                         "observation_category", "decision_text", "description", "event_type")
         description_fields = ("description", "question", "notes", "fact_value", "asserted_value",
-                              "perspective_text", "observed_value", "decision_text", "summary", "resolution")
+                              "perspective_text", "observed_value", "decision_text", "summary", "resolution", "decision_notes")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
         occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
@@ -388,7 +388,7 @@ def current_care_projection(
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
         source_label = row.get("source_label") or row.get("author_label")
         origin_type = row.get("source_type") or "not_recorded"
-        claim_refs = row.get("claim_refs")
+        claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
             try:
                 claim_refs = json.loads(claim_refs)
@@ -418,6 +418,8 @@ def current_care_projection(
 
     # Highest priority first: unresolved disagreement, then explicit unknowns,
     # missing information and open questions. These are never auto-resolved.
+    for row in (sources.get("reconciliations") or {}).get("items", []):
+        add("reconciliations", row, "Reconciliation review", 0, require_open=True)
     for row in (sources.get("conflicts") or {}).get("items", []):
         add("conflicts", row, "Conflict", 0, require_open=True)
     for row in (sources.get("uncertainties") or {}).get("items", []):
