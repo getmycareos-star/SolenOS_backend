@@ -632,8 +632,19 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
             table.c.source == "situation_understanding_assessment",
         ).order_by(desc(table.c.created_at)).limit(1)
     ).mappings().first()
-    if latest and latest.get("delta_json") == serialized:
-        return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": assessment}
+    if latest:
+        try:
+            previous_assessment = json.loads(latest.get("delta_json") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            previous_assessment = {}
+        previous_comparison = dict(previous_assessment) if isinstance(previous_assessment, dict) else {}
+        current_comparison = dict(assessment)
+        # The assessment timestamp is metadata, not a semantic change. Compare
+        # the evidence-derived projection without it to avoid duplicate snapshots.
+        previous_comparison.pop("as_of", None)
+        current_comparison.pop("as_of", None)
+        if previous_comparison == current_comparison:
+            return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": previous_assessment}
     evidence_ids = sorted({
         str(evidence_id)
         for domain in assessment.get("current_care_reality", {}).get("records", [])
