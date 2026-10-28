@@ -40,6 +40,7 @@ class SituationEvent(BaseModel):
     title: str
     description: Optional[str] = None
     occurred_at: datetime
+    time_provenance: Optional[Literal["caregiver_reported_event_time", "entry_time_defaulted"]] = None
     evidence_ids: Optional[List[str]] = None
 
 
