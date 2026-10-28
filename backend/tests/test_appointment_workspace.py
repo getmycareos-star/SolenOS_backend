@@ -69,7 +69,7 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
             INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
             VALUES
               ('owner-fact', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-              ('other-fact', :other_id, 'private_detail', 'Other person's private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+              ('other-fact', :other_id, 'private_detail', 'Other person private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
