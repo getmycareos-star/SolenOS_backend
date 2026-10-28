@@ -335,8 +335,8 @@ def _resolve_reporters(db: Session, events: List[CareEvent]) -> List[str]:
 
 def _magnitude_label(change: Change, relative_change: Optional[float]) -> str:
     if relative_change is None:
-        if change.change_type.value == "onset":
-            return "new (absent -> present)"
+        if change.change_type.value == "emergence":
+            return "first observed in available records; prior absence is not established"
         return "unquantified"
     if math.isinf(relative_change):
         return "infinite (absent -> present)"
