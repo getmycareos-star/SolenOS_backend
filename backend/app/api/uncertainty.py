@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence
-from app.models.uncertainty import Contradiction
+from app.models.uncertainty import Contradiction as ContradictionModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -139,7 +139,7 @@ def list_contradiction_resolution_history(
     contradiction_id: str,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
-    conflict = engine._target_query(Contradiction, contradiction_id).first()
+    conflict = engine._target_query(ContradictionModel, contradiction_id).first()
     if not conflict:
         raise HTTPException(status_code=404, detail="Contradiction not found")
     return engine.list_contradiction_resolution_events(contradiction_id)
@@ -236,13 +236,13 @@ def analyze_and_persist_uncertainty(
     requested_conflict_ids = list(request.conflict_ids)
     if requested_conflict_ids:
         conflict_rows = (
-            engine.db.query(Contradiction)
+            engine.db.query(ContradictionModel)
             .filter(
-                Contradiction.person_id == request.person_id,
-                Contradiction.subject_type == request.subject_type,
-                Contradiction.subject_id == request.subject_id,
-                Contradiction.field == request.field,
-                Contradiction.id.in_(requested_conflict_ids),
+                ContradictionModel.person_id == request.person_id,
+                ContradictionModel.subject_type == request.subject_type,
+                ContradictionModel.subject_id == request.subject_id,
+                ContradictionModel.field == request.field,
+                ContradictionModel.id.in_(requested_conflict_ids),
             )
             .all()
         )
