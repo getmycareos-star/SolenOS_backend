@@ -155,6 +155,7 @@ def detect_patterns_endpoint(
     from app.services.pattern_detection import detect_patterns as _detect_patterns
     ref_time = _parse_reference_time(reference_time)
     patterns = _detect_patterns(db, person_id, event_type, subject_id, ref_time)
+    db.commit()
     return patterns
 
 
@@ -177,6 +178,7 @@ def detect_situations_endpoint(
     _require_person_scope(request, db, person_id)
     ref_time = _parse_reference_time(reference_time)
     situations = detect_situations(db, person_id, ref_time)
+    db.commit()
     result = []
     for s in situations:
         changes = db.query(Change).filter(Change.id.in_(s.change_ids or [])).all() if s.change_ids else []
@@ -248,4 +250,5 @@ def update_situations_endpoint(
         raise HTTPException(status_code=404, detail="Event not found")
     ref_time = _parse_reference_time(reference_time)
     updated = update_situations(db, person_id, event, ref_time)
+    db.commit()
     return updated
