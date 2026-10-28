@@ -135,6 +135,33 @@ def update_contradiction(
 def create_assessment(
     assessment: UncertaintyAssessmentCreate, engine: UncertaintyEngine = Depends(get_engine)
 ):
+    if assessment.confidence is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Numeric confidence is unavailable until a calibrated assessment method is configured.",
+        )
+    if assessment.epistemic_state == EpistemicState.KNOWN:
+        evidence_ids = list(dict.fromkeys(assessment.evidence_ids or []))
+        if not evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="A known assessment requires linked evidence; a populated form alone is insufficient.",
+            )
+        if len(evidence_ids) != len(assessment.evidence_ids or []):
+            raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed.")
+        count = (
+            engine.db.query(Evidence)
+            .filter(
+                Evidence.person_id == engine.person_id,
+                Evidence.id.in_(evidence_ids),
+            )
+            .count()
+        )
+        if count != len(evidence_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Every evidence reference must exist and belong to the authenticated care record.",
+            )
     return engine.create_uncertainty_assessment(assessment)
 
 
