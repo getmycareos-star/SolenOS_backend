@@ -875,3 +875,34 @@ def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_witho
     assert result["evidence"][0]["source_independence"] == "independent_source_linked"
     assert len(result["duplicate_content_candidates"]) == 1
     assert set(result["duplicate_content_candidates"][0]["evidence_ids"]) == {"duplicate-evidence-a", "duplicate-evidence-b"}
+
+    db = TestingSessionLocal()
+    try:
+        db.add_all([
+            Evidence(id="independent-evidence-c", person_id=person_id, type="caregiver_report", source_text="A separate observation about the same care question.", uploaded_by_caregiver_id=caregiver_id, source_type="caregiver_report"),
+            Evidence(id="independent-evidence-d", person_id=person_id, type="document", source_text="A distinct dated document describing the care question.", uploaded_by_caregiver_id=caregiver_id, source_type="document"),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    for evidence_id in ("independent-evidence-c", "independent-evidence-d"):
+        link = client.post(
+            "/api/v1/care-continuity/fact-evidence",
+            headers=headers,
+            json={"fact_id": fact_id, "evidence_id": evidence_id, "evidence_role": "supports"},
+        )
+        assert link.status_code == 201, link.text
+        reviewed = client.post(
+            f"/api/v1/care-continuity/evidence/{evidence_id}/reviews",
+            headers=headers,
+            json={**review_payload, "rationale": "A reviewer explicitly assessed this distinct source record."},
+        )
+        assert reviewed.status_code == 201, reviewed.text
+
+    reviewed_integrity = client.get(
+        f"/api/v1/care-continuity/facts/{fact_id}/evidence-integrity",
+        headers=headers,
+    )
+    assert reviewed_integrity.status_code == 200, reviewed_integrity.text
+    assert reviewed_integrity.json()["independent_corroboration_status"] == "reviewed_multiple_distinct_sources_candidate"
