@@ -215,16 +215,20 @@ class SourceQualityEvaluator:
         reference_time: Optional[datetime] = None,
         *,
         max_age_days: Optional[int] = None,
+        historical_after_days: Optional[int] = None,
     ) -> CurrentnessStatus:
-        """Assess freshness only when the caller supplies a domain-specific policy.
+        """Assess freshness only with an explicit evidence-domain policy.
 
-        No universal seven/thirty/365-day expiry is defensible across all evidence
-        types. Missing timestamps or missing policy therefore remain unknown.
+        No universal seven/thirty/365-day expiry is applied. The caller may set
+        a freshness window and, separately, the point at which evidence should
+        be classified as historical for the question being asked.
         """
         if reference_time is None:
             reference_time = datetime.now(timezone.utc)
         effective_time = document_time or uploaded_at
         if effective_time is None or max_age_days is None or max_age_days < 0:
+            return CurrentnessStatus.UNKNOWN_CURRENCY
+        if historical_after_days is not None and historical_after_days < max_age_days:
             return CurrentnessStatus.UNKNOWN_CURRENCY
         if effective_time.tzinfo is None:
             effective_time = effective_time.replace(tzinfo=timezone.utc)
@@ -233,8 +237,11 @@ class SourceQualityEvaluator:
         age_seconds = (reference_time - effective_time).total_seconds()
         if age_seconds < 0:
             return CurrentnessStatus.UNKNOWN_CURRENCY
-        if age_seconds <= max_age_days * 86400:
+        age_days = age_seconds / 86400
+        if age_days <= max_age_days:
             return CurrentnessStatus.CURRENT
+        if historical_after_days is not None and age_days > historical_after_days:
+            return CurrentnessStatus.HISTORICAL
         return CurrentnessStatus.STALE
 
 
