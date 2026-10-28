@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
+from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
 from app.schemas.change import (
@@ -18,7 +19,7 @@ from app.schemas.change import (
     ChangeConfirmationRequest,
     ChangeConfirmationTransitionResponse,
 )
-from app.services.change_detection import detect_event_changes
+from app.services.change_detection import detect_event_changes, detect_assertion_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
 
@@ -120,6 +121,7 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
     try:
         for event_type in event_types:
             detect_event_changes(db, person_id, event_type, None)
+        detect_assertion_changes(db, person_id)
         db.commit()
     except Exception as exc:
         db.rollback()
@@ -251,7 +253,18 @@ def get_change_detail(
             .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
             .all()
         )
-    # Do not return arbitrary event records referenced by stale or corrupt IDs.
+    assertion_evidence = []
+    if evidence_ids:
+        assertion_evidence = (
+            db.query(CareAssertion)
+            .filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.id.in_(evidence_ids),
+            )
+            .order_by(CareAssertion.observed_at.asc(), CareAssertion.recorded_at.asc(), CareAssertion.id.asc())
+            .all()
+        )
+    # Do not return arbitrary source records referenced by stale or corrupt IDs.
     history = (
         db.query(ChangeConfirmationEvent)
         .filter(
@@ -261,7 +274,12 @@ def get_change_detail(
         .order_by(ChangeConfirmationEvent.created_at.asc(), ChangeConfirmationEvent.id.asc())
         .all()
     )
-    return ChangeDetailResponse(change=change, evidence=evidence, confirmation_history=history)
+    return ChangeDetailResponse(
+        change=change,
+        evidence=evidence,
+        assertions=assertion_evidence,
+        confirmation_history=history,
+    )
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
