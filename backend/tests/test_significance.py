@@ -138,7 +138,8 @@ def test_single_tired_today_is_not_meaningful_no_alert():
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "fatigue", None, now)
         assert len(changes) == 1
-        assert changes[0].change_type.value == "onset"
+        assert changes[0].change_type.value == "emergence"
+        assert "No comparable prior events" in changes[0].previous_state
         # A single unverified report must NOT be a meaningful-change candidate
         assert changes[0].significance_verdict == SignificanceVerdict.INSUFFICIENT_EVIDENCE
         assert changes[0].attention_candidate is False
