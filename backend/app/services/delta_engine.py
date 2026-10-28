@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun
-from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion
+from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
+from app.services.uncertainty_intelligence import analyze_uncertainty
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -581,6 +582,100 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     question_text = str(item.get("next_question") or f"What is known about {gap}?").strip()
                     add_open_loop("care_gap", gap, "missing_information",
                         str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM)
+            # Persist a per-finding epistemic assessment alongside the care loops.
+            # Evidence is loaded from the authenticated person's persisted evidence rows;
+            # model-generated prose alone is never treated as proof.
+            persisted_evidence = []
+            if evidence_ids:
+                evidence_rows = db.query(Evidence).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(evidence_ids),
+                ).all()
+                persisted_evidence = [{
+                    "id": row.id,
+                    "source_type": row.source_type or row.type,
+                    "text": row.source_text,
+                    "verified": str(row.evidence_status or "").lower() == "verified",
+                    "observed_at": row.time_provenance,
+                } for row in evidence_rows]
+
+            for finding in computed:
+                finding_name = str(finding.get("name") or "").strip()
+                if not finding_name:
+                    continue
+                finding_domain = str(finding.get("domain") or "")
+                finding_field = str(next((
+                    item.get("field") for item in result.get(finding_domain, [])
+                    if _normalise(item.get("name")) == _normalise(finding_name)
+                ), "reported_state"))
+                finding_subject_type = {
+                    "medications": "medication",
+                    "conditions": "condition",
+                    "symptoms": "symptom",
+                }.get(finding_domain, "care_finding")
+                analysis = analyze_uncertainty(
+                    claim=(str(finding.get("current") or "") or str(finding.get("change_type") or "Change not established")),
+                    task="identify_change",
+                    evidence=persisted_evidence,
+                    unresolved_conflicts=([{
+                        "field": finding_field,
+                        "description": finding.get("comparison_warning") or "Competing state values were found.",
+                        "evidence_ids": evidence_ids,
+                    }] if finding.get("change_type") == "conflicting" else []),
+                )
+                if finding.get("change_type") == "conflicting":
+                    epistemic_state = EpistemicState.CONFLICTING
+                    gap_reason = GapReason.CONFLICTING
+                elif not persisted_evidence:
+                    epistemic_state = EpistemicState.UNKNOWN
+                    gap_reason = GapReason.INSUFFICIENT_EVIDENCE
+                elif finding.get("certainty") != "supported" or finding.get("historical_only"):
+                    epistemic_state = EpistemicState.PARTIALLY_KNOWN
+                    gap_reason = GapReason.MISSING_CONTEXT if finding.get("historical_only") else GapReason.LOW_QUALITY
+                else:
+                    # Supported provenance permits a qualified state, not certainty.
+                    epistemic_state = EpistemicState.PARTIALLY_KNOWN
+                    gap_reason = None
+                active_assessment = db.query(UncertaintyAssessment).filter(
+                    UncertaintyAssessment.person_id == person_id,
+                    UncertaintyAssessment.subject_type == finding_subject_type,
+                    UncertaintyAssessment.subject_id == finding_name,
+                    UncertaintyAssessment.field == finding_field,
+                    UncertaintyAssessment.is_active.is_(True),
+                ).first()
+                assessment_id = str(__import__("uuid").uuid4())
+                if active_assessment is not None:
+                    active_assessment.is_active = False
+                    active_assessment.superseded_by_assessment_id = assessment_id
+                db.add(UncertaintyAssessment(
+                    id=assessment_id,
+                    person_id=person_id,
+                    subject_type=finding_subject_type,
+                    subject_id=finding_name,
+                    field=finding_field,
+                    epistemic_state=epistemic_state,
+                    confidence=None,
+                    known_value=None,
+                    gap_reason=gap_reason,
+                    context=[{
+                        "origin": "delta_engine",
+                        "delta_run_pending": True,
+                        "analysis": analysis,
+                        "finding": finding,
+                    }],
+                    evidence_ids=evidence_ids or None,
+                    assessed_by_caregiver_id=created_by_caregiver_id,
+                    is_active=True,
+                ))
+                result.setdefault("uncertainty_assessments", []).append({
+                    "assessment_id": assessment_id,
+                    "subject_type": finding_subject_type,
+                    "subject_id": finding_name,
+                    "field": finding_field,
+                    "epistemic_state": epistemic_state.value,
+                    "confidence": None,
+                    "analysis": analysis,
+                })
             db.flush()
         except Exception:
             db.rollback()
