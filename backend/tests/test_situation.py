@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -85,8 +86,46 @@ def test_post_situation_creates_evidence_and_event():
         assert data["analysis_warning"] is None
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
+        assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
         assert data["evidence_id"] is not None
         assert data["care_event_id"] is not None
+    finally:
+        teardown_db()
+
+
+
+@pytest.mark.session_security
+def test_post_situation_preserves_caregiver_reported_event_time_provenance():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Reported Event Time Person")
+        event_time = "2026-10-20T08:30:00+00:00"
+        response = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
+                "raw_input": "Caregiver reports restless sleep.",
+                "timestamp": event_time,
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
+        assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
+
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+            assert saved.time_provenance == "caregiver_reported_event_time"
+            assert saved.occurred_at.isoformat().startswith("2026-10-20T08:30:00")
+        finally:
+            db.close()
     finally:
         teardown_db()
 
@@ -343,3 +382,211 @@ def test_lcr_interaction_only_classifier_includes_insults_without_response_templ
     assert main_module._is_casual_conversation_only("You never get anything right")
     assert main_module._is_casual_conversation_only("You are dumb")
     assert not main_module._is_casual_conversation_only("Mom fell last night")
+
+
+def test_quick_capture_persists_category_and_caregiver_reported_event_time():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        with TestClient(app) as client:
+            created, headers = create_authenticated_session(client, "Quick Capture Reported Time")
+            event_time = "2026-10-20T08:30:00+00:00"
+            original_report = "Caregiver observed restless sleep."
+            response = client.post(
+                "/api/situation",
+                headers=headers,
+                json={
+                    "caregiver_id": created["caregiver"]["id"],
+                    "person_id": created["person"]["id"],
+                    "raw_input": original_report,
+                    "capture_category": "sleep",
+                    "timestamp": event_time,
+                    "provenance": {
+                        "input_type": "caregiver_observation",
+                        "entry_method": "quick_entry",
+                        "captured_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                },
+            )
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
+            assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
+            with TestingSessionLocal() as db:
+                event = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+                evidence = db.query(Evidence).filter_by(id=data["evidence_id"]).one()
+                assert "capture_category:sleep" in event.tags
+                assert event.time_provenance == "caregiver_reported_event_time"
+                assert evidence.source_text == original_report
+    finally:
+        teardown_db()
+
+
+def test_quick_capture_without_event_time_marks_entry_time_fallback():
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="default-time-person", name="Default Time Person")
+        caregiver = Caregiver(
+            id="default-time-caregiver",
+            name="Default Time Caregiver",
+            email="default-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                raw_input="Ate breakfast.",
+                capture_category="meal",
+            ),
+        )
+        assert response.events[0].time_provenance == "entry_time_defaulted"
+        event = db.query(CareEvent).filter_by(id=response.care_event_id).one()
+        assert "capture_category:meal" in event.tags
+    finally:
+        db.close()
+        teardown_db()
+
+
+def test_quick_capture_rejects_invalid_event_timestamp_without_saving():
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="bad-time-person", name="Bad Time Person")
+        caregiver = Caregiver(
+            id="bad-time-caregiver",
+            name="Bad Time Caregiver",
+            email="bad-time@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        with pytest.raises(ValueError, match="Invalid timestamp"):
+            process_situation_input(
+                db,
+                SituationInput(
+                    caregiver_id=caregiver.id,
+                    person_id=person.id,
+                    raw_input="A reported care observation.",
+                    capture_category="symptom",
+                    timestamp="yesterday morning",
+                ),
+            )
+        assert db.query(Evidence).filter_by(person_id=person.id).count() == 0
+        assert db.query(CareEvent).filter_by(person_id=person.id).count() == 0
+    finally:
+        db.close()
+        teardown_db()
+
+
+def test_quick_capture_rejects_unsupported_category():
+    with pytest.raises(ValidationError):
+        SituationInput(
+            caregiver_id="caregiver",
+            person_id="person",
+            raw_input="Observed a change.",
+            capture_category="unsupported-category",
+        )
+
+
+def test_document_evidence_preserves_extraction_provenance_without_inventing_confidence():
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="document-provenance-person", name="Document Provenance Person")
+        caregiver = Caregiver(
+            id="document-provenance-caregiver",
+            name="Document Provenance Caregiver",
+            email="document-provenance@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                documents=[
+                    {
+                        "id": "scan-1",
+                        "name": "discharge-scan.png",
+                        "extracted_text": "Follow up with cardiology in two weeks.",
+                        "mime_type": "image/png",
+                        "extraction_source": "ocr",
+                        "ocr_confidence": 0.87,
+                    }
+                ],
+                provenance={
+                    "input_type": "document",
+                    "entry_method": "upload",
+                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                },
+            ),
+        )
+
+        evidence = db.query(Evidence).filter_by(id=response.evidence_id).one()
+        metadata = __import__("json").loads(evidence.extra_metadata)
+        assert evidence.source_type == "document_ocr"
+        assert evidence.confidence == 0.87
+        assert metadata["extraction_source"] == "ocr"
+        assert metadata["mime_type"] == "image/png"
+        assert metadata["document_time_status"] == "not_extracted"
+        assert metadata["document_id"] == "scan-1"
+    finally:
+        db.close()
+        teardown_db()
+
+
+def test_document_without_ocr_score_keeps_confidence_unknown():
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="document-unknown-confidence-person", name="Document Unknown Confidence")
+        caregiver = Caregiver(
+            id="document-unknown-confidence-caregiver",
+            name="Document Unknown Confidence Caregiver",
+            email="document-unknown-confidence@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        response = process_situation_input(
+            db,
+            SituationInput(
+                caregiver_id=caregiver.id,
+                person_id=person.id,
+                documents=[
+                    {
+                        "id": "pdf-1",
+                        "name": "discharge.pdf",
+                        "extracted_text": "Follow up in two weeks.",
+                        "mime_type": "application/pdf",
+                        "extraction_source": "tika",
+                    }
+                ],
+            ),
+        )
+        evidence = db.query(Evidence).filter_by(id=response.evidence_id).one()
+        metadata = __import__("json").loads(evidence.extra_metadata)
+        assert evidence.source_type == "document_text_extraction"
+        assert evidence.confidence is None
+        assert metadata["ocr_confidence"] is None
+        assert metadata["document_time_status"] == "not_extracted"
+    finally:
+        db.close()
+        teardown_db()

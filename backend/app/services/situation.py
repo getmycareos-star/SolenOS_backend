@@ -33,22 +33,32 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             occurred_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             if occurred_at.tzinfo is None:
                 occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-        except ValueError as exc:
+            time_provenance = "caregiver_reported_event_time"
+        except (TypeError, ValueError) as exc:
             raise ValueError(
                 "Invalid timestamp; provide a valid ISO-8601 timestamp or omit it."
             ) from exc
     else:
         occurred_at = _utc_now()
+        time_provenance = "entry_time_defaulted"
 
     evidence_ids: List[str] = []
     event_ids: List[str] = []
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
+            # Preserve the extractor's actual provenance. Unknown confidence stays
+            # unknown; upload time is not evidence of a document's effective date.
             metadata = {
-                "ocr_confidence": doc.ocr_confidence,
+                "document_id": doc.id,
+                "document_name": doc.name,
                 "mime_type": doc.mime_type,
+                "extraction_source": doc.extraction_source,
+                "ocr_confidence": doc.ocr_confidence,
+                "document_time_status": "not_extracted",
+                "captured_at": payload.provenance.captured_at if payload.provenance else None,
+                "entry_method": payload.provenance.entry_method if payload.provenance else None,
             }
         evidence = Evidence(
             person_id=payload.person_id,
@@ -60,7 +70,15 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             uploaded_by_caregiver_id=payload.caregiver_id,
             confidence=doc.ocr_confidence if doc else None,
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type=(
+                "caregiver_observation"
+                if not doc
+                else "document_ocr"
+                if doc.extraction_source == "ocr"
+                else "document_text_extraction"
+                if doc.extraction_source in ("text", "tika")
+                else "document_extraction_method_unknown"
+            ),
         )
         db.add(evidence)
         db.flush()
@@ -103,9 +121,11 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         status="recorded",
         occurred_at=occurred_at,
         occurred_at_timezone=caregiver.timezone,
+        time_provenance=time_provenance,
         title=payload.raw_input.strip()[:200] if payload.raw_input and payload.raw_input.strip() else "Document observation",
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        tags=[f"capture_category:{payload.capture_category}"] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
     )
     db.add(care_event)
@@ -176,6 +196,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             title=e.title,
             description=e.description,
             occurred_at=e.occurred_at,
+            time_provenance=e.time_provenance,
             evidence_ids=e.evidence_ids or [],
         )
         for e in db.query(CareEvent).filter(CareEvent.id.in_(event_ids)).all()
