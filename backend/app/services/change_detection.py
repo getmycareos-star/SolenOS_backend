@@ -126,12 +126,19 @@ def _create_change(
                  events: List[CareEvent],
                  now: datetime,
 ) -> Change:
-    explanation = (
-        f"{subject_type} changed from {previous_state} to {current_state} "
-        f"compared to the baseline window. "
-        f"Current count: {current_count}. "
-        f"Baseline count: {comparison.get('baseline_event_count', 'unknown')}."
-    )
+    if change_type == ChangeType.EMERGENCE:
+        explanation = (
+            f"{subject_type} was first observed in the available records. "
+            f"{current_state}. {previous_state}. "
+            "This does not establish that the event was absent before the baseline window."
+        )
+    else:
+        explanation = (
+            f"{subject_type} was assessed against its recorded baseline. "
+            f"Previous state: {previous_state}. Current state: {current_state}. "
+            f"Current count: {current_count}. "
+            f"Baseline count: {comparison.get('baseline_event_count', 'unknown')}."
+        )
     if comparison.get("relative_change_percent") is not None:
         explanation += (
             f" Relative change: {comparison['relative_change_percent']:.1f}%."
@@ -165,8 +172,9 @@ def _create_change(
                 return candidate
 
     magnitude = comparison.get("relative_change_percent")
-    if magnitude is not None and magnitude == float('inf'):
-        magnitude = 1000.0
+    if magnitude is not None and magnitude == float("inf"):
+        # An unbounded relative change is not a measured finite magnitude.
+        magnitude = None
     change = Change(
         person_id=person_id,
         subject_type=subject_type,
