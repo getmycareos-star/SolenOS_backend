@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
+from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -29,6 +31,21 @@ def override_get_db():
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+
+
+def issue_scoped_session(db, person, caregiver):
+    token = f"change-api-token-{person.id}"
+    db.add(
+        AnonymousSession(
+            id=f"session-{person.id}",
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+    )
+    db.commit()
+    return token
 
 
 def teardown_db():
@@ -355,12 +372,14 @@ def test_api_detect_changes():
             db.add(event)
         db.commit()
         person_id = person.id
+        token = issue_scoped_session(db, person, caregiver)
         db.close()
 
         client = TestClient(app)
         response = client.get(
             "/api/v1/change/changes/detect",
             params={"person_id": person_id, "event_type": "fall"},
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
         data = response.json()
@@ -399,12 +418,14 @@ def test_api_detect_situations():
             db.add(event)
         db.commit()
         person_id = person.id
+        token = issue_scoped_session(db, person, caregiver)
         db.close()
 
         client = TestClient(app)
         response = client.get(
             "/api/v1/change/situations/detect",
             params={"person_id": person_id},
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
         data = response.json()
