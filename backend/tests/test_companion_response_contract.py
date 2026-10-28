@@ -302,6 +302,56 @@ def test_companion_prior_turns_are_bounded_json_context_not_model_roles(monkeypa
         teardown()
 
 
+def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I found an earlier sleep report, but the record does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        older = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=90), title="Sleep pattern report",
+            description="Caregiver reported waking several times overnight in August.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id, event_type="observation", status="recorded",
+                occurred_at=now - timedelta(hours=index + 1), title=f"Unrelated household note {index}",
+                description="A household item was recorded with no sleep details.",
+                evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
