@@ -171,7 +171,7 @@ async def upload_evidence(
         "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "rtf": "application/rtf",
+        "rtf": "application/rtf", "eml": "message/rfc822", "msg": "application/vnd.ms-outlook",
     }
     if mime_type in {"", "application/octet-stream"} and suffix in mime_by_extension:
         mime_type = mime_by_extension[suffix]
@@ -206,9 +206,12 @@ async def upload_evidence(
         "image/webp": lambda blob: len(blob) >= 12 and blob[:4] == b"RIFF" and blob[8:12] == b"WEBP",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": lambda blob: blob.startswith(b"PK\x03\x04"),
         "application/msword": lambda blob: blob.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"),
+        "application/vnd.ms-outlook": lambda blob: blob.startswith(b"\\xd0\\xcf\\x11\\xe0\\xa1\\xb1\\x1a\\xe1"),
         "application/rtf": lambda blob: blob.lstrip().startswith(b"{\\rtf"),
         "text/rtf": lambda blob: blob.lstrip().startswith(b"{\\rtf"),
     }
+    if mime_type == "message/rfc822" and not re.search(rb"(?im)^(?:from|to|subject|date|message-id|mime-version|content-type):[^\\r\\n]*", data):
+        raise HTTPException(status_code=422, detail="The file contents do not look like an email message")
     signature_check = signatures.get(mime_type)
     if signature_check is not None and not signature_check(data):
         raise HTTPException(status_code=422, detail="The file contents do not match the declared file type")
