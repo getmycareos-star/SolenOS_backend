@@ -85,6 +85,14 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "status", "source_ids", "created_by_caregiver_id", "created_at", "resolved_at"],
         "order": ["created_at"],
     },
+    "uncertainty_assessments": {
+        "table": "uncertainty_assessments",
+        "required": False,
+        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "confidence",
+                   "known_value", "gap_reason", "context", "evidence_ids", "temporal_precision",
+                   "assessed_at", "assessed_by_caregiver_id", "superseded_by_assessment_id", "is_active"],
+        "order": ["assessed_at"],
+    },
     "missing_information": {
         "table": "care_missing_information",
         "required": False,
@@ -179,6 +187,7 @@ SEARCH_FIELDS = {
     "decision_outcomes": ["outcome_status", "description"],
     "timeline": ["entry_type", "title", "summary", "epistemic_status"],
     "uncertainties": ["question", "uncertainty_type", "status"],
+    "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
     "missing_information": ["topic", "description", "priority", "status"],
     "conflicts": ["conflict_type", "description", "resolution", "status"],
     "provenance": ["source_type", "author_label", "method", "reason"],
@@ -277,6 +286,8 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if source_name == "uncertainty_assessments" and "is_active" in table.c:
+            statement = statement.where(table.c.is_active.is_(True))
         search_columns = [
             table.c[name] for name in SEARCH_FIELDS.get(source_name, [])
             if name in table.c
