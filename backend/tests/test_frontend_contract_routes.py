@@ -1257,3 +1257,41 @@ def test_qwen_community_experience_is_disabled_without_inference_or_lcr_write(mo
         assert after.json() == before.json()
     finally:
         teardown()
+
+
+
+def test_request_body_limit_rejects_chunked_share_intake_without_content_length():
+    import asyncio
+    from app.main import RequestBodySizeLimitMiddleware
+
+    statuses = []
+
+    async def downstream(scope, receive, send):
+        raise AssertionError("oversized request must be rejected before downstream parsing")
+
+    middleware = RequestBodySizeLimitMiddleware(downstream)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/share-intake",
+        "headers": [(b"content-type", b"application/json")],
+    }
+    emitted = False
+
+    async def receive():
+        nonlocal emitted
+        if not emitted:
+            emitted = True
+            return {
+                "type": "http.request",
+                "body": b"x" * (8 * 1024 * 1024 + 1),
+                "more_body": False,
+            }
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if message["type"] == "http.response.start":
+            statuses.append(message["status"])
+
+    asyncio.run(middleware(scope, receive, send))
+    assert statuses == [413]
