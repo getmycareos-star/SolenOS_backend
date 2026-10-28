@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.care import CareEvent
 from app.models.change import Baseline, Change
+from app.models.care_continuity import CareAssertion
 from app.services.baseline import (
     build_baseline,
     compare_to_baseline,
@@ -217,3 +218,148 @@ def _create_change(
 def _calculate_change_confidence(comparison: Dict[str, Any], event_count: int) -> Optional[float]:
     # Heuristic weights are not a calibrated probability; keep confidence unknown.
     return None
+
+def detect_assertion_changes(
+    db: Session,
+    person_id: str,
+    reference_time: Optional[datetime] = None,
+) -> List[Change]:
+    """Detect transitions between source-attributed, time-bound structured assertions.
+
+    This deliberately compares persisted assertion values, not free-text keywords.
+    It does not infer direction, severity, cause, or clinical significance from
+    arbitrary categorical strings.
+    """
+    now = _ensure_utc(reference_time) or datetime.now(timezone.utc)
+    assertions = (
+        db.query(CareAssertion)
+        .filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_kind == "time_bound_observation",
+            CareAssertion.observed_at.is_not(None),
+            CareAssertion.assertion_status.in_(("reported", "review_required", "accepted")),
+        )
+        .order_by(CareAssertion.observed_at.asc(), CareAssertion.recorded_at.asc(), CareAssertion.id.asc())
+        .all()
+    )
+
+    grouped: Dict[tuple[str, str, str], List[CareAssertion]] = {}
+    seen_source_events: set[tuple[str, str, str, str, str]] = set()
+    for assertion in assertions:
+        observed_at = _ensure_utc(assertion.observed_at)
+        if observed_at is None or observed_at > now:
+            continue
+        if assertion.source_event_id:
+            dedupe_key = (
+                assertion.source_event_id,
+                assertion.subject_type,
+                assertion.subject_id,
+                assertion.field,
+                assertion.asserted_value.strip(),
+            )
+            if dedupe_key in seen_source_events:
+                continue
+            seen_source_events.add(dedupe_key)
+        key = (assertion.subject_type, assertion.subject_id, assertion.field)
+        grouped.setdefault(key, []).append(assertion)
+
+    results: List[Change] = []
+    for (subject_type, subject_id, field), items in grouped.items():
+        # Multiple incompatible values at the same observed instant are not ordered
+        # evidence of change. Leave that case to the contradiction workflow.
+        by_time: Dict[datetime, List[CareAssertion]] = {}
+        for item in items:
+            observed_at = _ensure_utc(item.observed_at)
+            if observed_at is not None:
+                by_time.setdefault(observed_at, []).append(item)
+        ordered: List[CareAssertion] = []
+        for observed_at in sorted(by_time):
+            at_time = by_time[observed_at]
+            distinct_values = {item.asserted_value.strip() for item in at_time}
+            if len(distinct_values) == 1:
+                ordered.append(at_time[-1])
+        if len(ordered) < 2:
+            continue
+
+        latest_value = ordered[-1].asserted_value.strip()
+        run_start = len(ordered) - 1
+        while run_start > 0 and ordered[run_start - 1].asserted_value.strip() == latest_value:
+            run_start -= 1
+        if run_start == 0:
+            continue
+        prior = ordered[run_start - 1]
+        current_run = ordered[run_start:]
+        if prior.asserted_value.strip() == latest_value:
+            continue
+
+        # Keep the prior state and every distinct persisted observation in the
+        # latest contiguous state run as explicit provenance for this transition.
+        evidence_ids = list(dict.fromkeys([prior.id] + [item.id for item in current_run]))
+        source_subject_type = f"assertion:{subject_type}.{field}"
+        existing = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person_id,
+                Change.subject_type == source_subject_type,
+                Change.subject_id == subject_id,
+                Change.change_type == ChangeType.TRANSITION,
+                Change.is_active.is_(True),
+            )
+            .with_for_update()
+            .order_by(Change.created_at.desc())
+            .all()
+        )
+        matching = next(
+            (candidate for candidate in existing if set(candidate.evidence_ids or []) == set(evidence_ids)),
+            None,
+        )
+        if matching is not None:
+            results.append(matching)
+            continue
+
+        prior_at = _ensure_utc(prior.observed_at)
+        current_at = _ensure_utc(current_run[0].observed_at)
+        if prior_at is None or current_at is None:
+            continue
+        change = Change(
+            person_id=person_id,
+            subject_type=source_subject_type,
+            subject_id=subject_id,
+            change_type=ChangeType.TRANSITION,
+            change_direction=ChangeDirection.UNKNOWN,
+            previous_state=prior.asserted_value,
+            current_state=latest_value,
+            magnitude=None,
+            previous_count=None,
+            current_count=None,
+            baseline_id=None,
+            comparison_window_start=prior_at,
+            comparison_window_end=_ensure_utc(current_run[-1].observed_at),
+            persistence_days=max((now - current_at).days, 0),
+            is_persistent=None,
+            confidence=None,
+            evidence_ids=evidence_ids,
+            explanation=(
+                f"Structured field '{field}' for {subject_type} was reported as "
+                f"'{prior.asserted_value}' at {prior_at.isoformat()} and later as "
+                f"'{latest_value}' at {current_at.isoformat()}. This records a "
+                "difference between source-attributed observations; it does not "
+                "establish cause, direction of clinical change, or severity."
+            ),
+            time_provenance="observed_at_from_source_assertions",
+            significance_verdict=SignificanceVerdict.INSUFFICIENT_EVIDENCE,
+            attention_candidate=False,
+            follow_up_candidate=False,
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.flush()
+        for candidate in existing:
+            candidate.is_active = False
+            candidate.superseded_by_change_id = change.id
+        if existing:
+            db.flush()
+        results.append(change)
+    return results
+
