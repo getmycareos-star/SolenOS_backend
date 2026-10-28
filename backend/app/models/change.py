@@ -120,3 +120,16 @@ class Situation(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     superseded_by_situation_id = Column(String, ForeignKey("situations.id"), nullable=True)
     is_active = Column(Boolean, default=True)
+
+class ChangeConfirmationEvent(Base):
+    __tablename__ = "change_confirmation_events"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    change_id = Column(String, ForeignKey("changes.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    previous_status = Column(String, nullable=False)
+    new_status = Column(String, nullable=False)
+    reason = Column(Text, nullable=True)
+    evidence_ids = Column(JSONList, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
