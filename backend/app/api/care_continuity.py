@@ -1395,8 +1395,18 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             data["information_visibility"] = InformationVisibility.PRIVATE.name
         if "is_promoted_to_shared" in table.c:
             data["is_promoted_to_shared"] = False
-        if "event_time" in table.c and data.get("observed_at"):
-            data["event_time"] = data["observed_at"]
+        if data.get("observed_at"):
+            try:
+                observed_at = data["observed_at"]
+                if isinstance(observed_at, str):
+                    observed_at = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+                if not isinstance(observed_at, datetime):
+                    raise ValueError("observed_at must be an ISO-8601 datetime")
+                data["observed_at"] = observed_at
+                if "event_time" in table.c:
+                    data["event_time"] = observed_at
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="observed_at must be a valid ISO-8601 datetime") from exc
     if resource == "record-provenance" and "author_caregiver_id" in table.c:
         data["author_caregiver_id"] = caregiver_id
     if resource == "record-provenance" and "method" in table.c and not data.get("method"):
