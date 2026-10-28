@@ -25,11 +25,29 @@ from app.core.uncertainty_enums import (
 
 
 class UncertaintyEngine:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, person_id: Optional[str] = None, caregiver_id: Optional[str] = None):
         self.db = db
+        self.person_id = person_id
+        self.caregiver_id = caregiver_id
+
+    def _scoped_payload(self, payload: dict) -> dict:
+        data = dict(payload)
+        if self.person_id is not None and "person_id" in data:
+            data["person_id"] = self.person_id
+        if self.caregiver_id is not None:
+            for field in ("created_by_caregiver_id", "updated_by_caregiver_id", "assessed_by_caregiver_id", "resolved_by_caregiver_id"):
+                if field in data:
+                    data[field] = self.caregiver_id
+        return data
+
+    def _target_query(self, model, record_id: str):
+        query = self.db.query(model).filter(model.id == record_id)
+        if self.person_id is not None:
+            query = query.filter(model.person_id == self.person_id)
+        return query
 
     def create_information_gap(self, gap: InformationGapCreate) -> InformationGapModel:
-        db_gap = InformationGapModel(**gap.model_dump())
+        db_gap = InformationGapModel(**self._scoped_payload(gap.model_dump()))
         self.db.add(db_gap)
         self.db.commit()
         self.db.refresh(db_gap)
@@ -39,14 +57,12 @@ class UncertaintyEngine:
         self, gap_id: str, update: InformationGapUpdate
     ) -> Optional[InformationGapModel]:
         db_gap = (
-            self.db.query(InformationGapModel)
-            .filter(InformationGapModel.id == gap_id)
-            .first()
+            self._target_query(InformationGapModel, gap_id).first()
         )
         if not db_gap:
             return None
 
-        update_data = update.model_dump(exclude_unset=True)
+        update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         if "lifecycle_status" in update_data:
             new_status = update_data["lifecycle_status"]
             if new_status == GapLifecycleStatus.RESOLVED:
@@ -70,8 +86,11 @@ class UncertaintyEngine:
         subject_id: Optional[str] = None,
         status: Optional[GapLifecycleStatus] = None,
     ) -> List[InformationGapModel]:
+        if self.person_id is not None and person_id != self.person_id:
+            return []
+        scoped_person_id = self.person_id or person_id
         query = self.db.query(InformationGapModel).filter(
-            InformationGapModel.person_id == person_id
+            InformationGapModel.person_id == scoped_person_id
         )
         if subject_type:
             query = query.filter(InformationGapModel.subject_type == subject_type)
@@ -82,7 +101,7 @@ class UncertaintyEngine:
         return query.order_by(InformationGapModel.created_at.desc()).all()
 
     def create_open_question(self, question: OpenQuestionCreate) -> OpenQuestionModel:
-        db_question = OpenQuestionModel(**question.model_dump())
+        db_question = OpenQuestionModel(**self._scoped_payload(question.model_dump()))
         self.db.add(db_question)
         self.db.commit()
         self.db.refresh(db_question)
@@ -92,14 +111,12 @@ class UncertaintyEngine:
         self, question_id: str, update: OpenQuestionUpdate
     ) -> Optional[OpenQuestionModel]:
         db_question = (
-            self.db.query(OpenQuestionModel)
-            .filter(OpenQuestionModel.id == question_id)
-            .first()
+            self._target_query(OpenQuestionModel, question_id).first()
         )
         if not db_question:
             return None
 
-        update_data = update.model_dump(exclude_unset=True)
+        update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         if "status" in update_data:
             new_status = update_data["status"]
             if new_status == "closed":
@@ -124,8 +141,11 @@ class UncertaintyEngine:
         subject_id: Optional[str] = None,
         status: Optional[str] = None,
     ) -> List[OpenQuestionModel]:
+        if self.person_id is not None and person_id != self.person_id:
+            return []
+        scoped_person_id = self.person_id or person_id
         query = self.db.query(OpenQuestionModel).filter(
-            OpenQuestionModel.person_id == person_id
+            OpenQuestionModel.person_id == scoped_person_id
         )
         if subject_type:
             query = query.filter(OpenQuestionModel.subject_type == subject_type)
@@ -136,7 +156,7 @@ class UncertaintyEngine:
         return query.order_by(OpenQuestionModel.asked_at.desc()).all()
 
     def create_contradiction(self, contradiction: ContradictionCreate) -> ContradictionModel:
-        db_contradiction = ContradictionModel(**contradiction.model_dump())
+        db_contradiction = ContradictionModel(**self._scoped_payload(contradiction.model_dump()))
         self.db.add(db_contradiction)
         self.db.commit()
         self.db.refresh(db_contradiction)
@@ -146,14 +166,12 @@ class UncertaintyEngine:
         self, contradiction_id: str, update: ContradictionUpdate
     ) -> Optional[ContradictionModel]:
         db_contradiction = (
-            self.db.query(ContradictionModel)
-            .filter(ContradictionModel.id == contradiction_id)
-            .first()
+            self._target_query(ContradictionModel, contradiction_id).first()
         )
         if not db_contradiction:
             return None
 
-        update_data = update.model_dump(exclude_unset=True)
+        update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         if "resolution_status" in update_data and update_data["resolution_status"] == "resolved":
             db_contradiction.resolved_at = datetime.now(timezone.utc)
 
@@ -171,8 +189,11 @@ class UncertaintyEngine:
         subject_id: Optional[str] = None,
         resolution_status: Optional[str] = None,
     ) -> List[ContradictionModel]:
+        if self.person_id is not None and person_id != self.person_id:
+            return []
+        scoped_person_id = self.person_id or person_id
         query = self.db.query(ContradictionModel).filter(
-            ContradictionModel.person_id == person_id
+            ContradictionModel.person_id == scoped_person_id
         )
         if subject_type:
             query = query.filter(ContradictionModel.subject_type == subject_type)
@@ -202,7 +223,7 @@ class UncertaintyEngine:
             existing.superseded_by_assessment_id = None
             self.db.commit()
 
-        db_assessment = UncertaintyAssessmentModel(**assessment.model_dump())
+        db_assessment = UncertaintyAssessmentModel(**self._scoped_payload(assessment.model_dump()))
         self.db.add(db_assessment)
         self.db.commit()
         self.db.refresh(db_assessment)
@@ -215,8 +236,11 @@ class UncertaintyEngine:
         subject_id: Optional[str] = None,
         epistemic_state: Optional[EpistemicState] = None,
     ) -> List[UncertaintyAssessmentModel]:
+        if self.person_id is not None and person_id != self.person_id:
+            return []
+        scoped_person_id = self.person_id or person_id
         query = self.db.query(UncertaintyAssessmentModel).filter(
-            UncertaintyAssessmentModel.person_id == person_id,
+            UncertaintyAssessmentModel.person_id == scoped_person_id,
             UncertaintyAssessmentModel.is_active,
         )
         if subject_type:
