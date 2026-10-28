@@ -28,9 +28,12 @@ class EvidenceReference(BaseModel):
     currentness: CurrentnessStatus
     document_time: Optional[datetime] = None
     uploaded_at: Optional[datetime] = None
-    confidence: float = Field(ge=0.0, le=1.0)
-    supports_claim: bool = True
+    # Optional, externally calibrated estimate only; absent means unknown.
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    supports_claim: bool = False
     contradicts_claim: bool = False
+    # Only an authorized reviewer/process should set this after examining the source.
+    reviewed_support: Optional[bool] = None
     notes: Optional[str] = None
 
 
@@ -40,7 +43,8 @@ class ClaimVerification(BaseModel):
     claim_strength: ClaimStrength
     evidence_references: List[EvidenceReference] = []
     contradictions: List[EvidenceReference] = []
-    confidence: float = Field(ge=0.0, le=1.0)
+    # Never synthesized from word overlap or source-supplied uncalibrated scores.
+    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     epistemic_state: str
     is_supported: bool
     strength_mismatch: bool = False
