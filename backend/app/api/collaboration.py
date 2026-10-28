@@ -677,12 +677,15 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # Short questions are not automatically follow-ups. Only explicit
+    # referential language inherits dialogue, preventing a brief new topic
+    # (for example, "What blood pressure?") from retrieving the previous topic.
+    if not referential:
         return current
     recent = [
         f"{message.role}: {(message.content or '')[:500]}"
