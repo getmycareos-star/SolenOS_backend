@@ -365,7 +365,7 @@ def current_care_projection(
         source_id = str(row.get("id") or "")
         if not source_id or (source_name, source_id) in seen:
             return
-        raw_status = row.get("status") or row.get("lifecycle_status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
+        raw_status = row.get("status") or row.get("lifecycle_status") or row.get("reconciliation_status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
         status = str(raw_status).strip().lower() if raw_status is not None else "status_unknown"
         closed_statuses = {"resolved", "completed", "closed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}
         if require_open and status in closed_statuses:
