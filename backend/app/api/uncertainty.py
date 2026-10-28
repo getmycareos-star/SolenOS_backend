@@ -125,10 +125,24 @@ def update_contradiction(
     update: ContradictionUpdate,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
-    result = engine.update_contradiction(contradiction_id, update)
+    try:
+        result = engine.update_contradiction(contradiction_id, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Contradiction not found")
     return result
+
+
+@router.get("/contradictions/{contradiction_id}/history")
+def list_contradiction_resolution_history(
+    contradiction_id: str,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    conflict = engine._target_query(Contradiction, contradiction_id).first()
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Contradiction not found")
+    return engine.list_contradiction_resolution_events(contradiction_id)
 
 
 @router.post("/assessments", response_model=UncertaintyAssessment)
