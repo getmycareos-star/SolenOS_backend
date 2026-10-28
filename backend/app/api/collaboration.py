@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -484,6 +485,40 @@ _CONTEXT_STOPWORDS = {
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
 }
+
+
+_COMPANION_QUERY_STOPWORDS = {
+    "about", "after", "again", "also", "been", "being", "could", "does", "from",
+    "have", "has", "here", "into", "just", "like", "more", "most", "much", "only",
+    "other", "please", "should", "some", "such", "than", "that", "them", "then",
+    "there", "these", "they", "this", "those", "through", "what", "when", "where",
+    "which", "while", "with", "would", "your", "you", "mum", "mom", "dad", "care",
+    "record", "records", "solenos", "getting", "worse", "better", "tell", "show",
+}
+
+
+def _companion_query_terms(text: str) -> list[str]:
+    """Extract bounded lexical search terms; matches never establish factual truth."""
+    terms = re.findall(r"[a-z0-9]{3,}", (text or "").casefold())
+    unique = []
+    for term in terms:
+        if term not in _COMPANION_QUERY_STOPWORDS and term not in unique:
+            unique.append(term)
+        if len(unique) >= 8:
+            break
+    return unique
+
+
+def _companion_relevance_score(query: str, *fields: str | None) -> int:
+    """Rank candidate records by query overlap without changing source authority."""
+    terms = set(_companion_query_terms(query))
+    if not terms:
+        return 0
+    title_terms = set(re.findall(r"[a-z0-9]{3,}", (fields[0] or "").casefold())) if fields else set()
+    body_terms = set()
+    for field in fields[1:]:
+        body_terms.update(re.findall(r"[a-z0-9]{3,}", (field or "").casefold()))
+    return 3 * len(terms & title_terms) + len(terms & body_terms)
 
 
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
@@ -1230,6 +1265,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        query_terms = _companion_query_terms(user_text)
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1237,6 +1273,36 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
+        # Search query-matching history independently of the recent baseline.
+        # Without this second query, a relevant older event disappears once more
+        # than 40 newer events exist, even though the caregiver asks about it.
+        matching_events = []
+        if query_terms:
+            matching_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+            matching_query = matching_query.filter(or_(
+                *[CareEvent.title.ilike(f"%{term}%") for term in query_terms],
+                *[CareEvent.description.ilike(f"%{term}%") for term in query_terms],
+            ))
+            matching_events = matching_query.order_by(
+                CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()
+            ).limit(40).all()
+        ranked_matching_events = sorted(
+            matching_events,
+            key=lambda event: _companion_relevance_score(
+                user_text, event.title, event.description, event.event_type, event.status
+            ),
+            reverse=True,
+        )
+        selected_events = []
+        selected_event_ids = set()
+        for event in [*ranked_matching_events[:8], *recent_events]:
+            event_id = str(event.id)
+            if event_id not in selected_event_ids:
+                selected_event_ids.add(event_id)
+                selected_events.append(event)
+            if len(selected_events) >= 48:
+                break
+        recent_events = selected_events
         for event in recent_events:
             source_event_ids.append(str(event.id))
             event_context.append(
