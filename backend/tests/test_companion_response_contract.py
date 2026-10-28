@@ -340,6 +340,19 @@ def test_companion_retry_replays_same_turn_without_duplicate_messages_or_cross_p
         assert len(retry_data["messages"]) == 2
         assert len(calls) == 1
 
+        changed_payload = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": "What is recorded about medication?",
+                "client_turn_id": turn_id,
+            },
+        )
+        assert changed_payload.status_code == 409
+        assert "reply" not in changed_payload.json()
+        assert len(calls) == 1
+
         cross_person = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {other_token}"},
