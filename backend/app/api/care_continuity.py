@@ -550,6 +550,38 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             attention_items.append(summary_item)
         elif source == "follow_up_links" and status in open_statuses:
             attention_items.append(summary_item)
+    capability_specs = {
+        "situation_understanding": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "information_gaps", "conflicts"],
+        "current_care_reality": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts"],
+        "care_context_reconstruction": ["assertions", "evidence", "provenance", "events", "facts"],
+        "whole_situation_reasoning": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "appointments", "conflicts", "reconciliations"],
+        "longitudinal_care_understanding": ["timeline", "events", "facts", "decisions", "decision_outcomes"],
+        "cross_domain_care_reasoning": ["facts", "caregiver_observations", "caregiver_contexts", "reconciliations"],
+        "care_context_awareness": ["living_record", "appointments", "caregiver_contexts", "caregiver_perspectives"],
+        "functional_status_understanding": ["caregiver_observations", "facts", "assertions", "events"],
+        "care_needs_understanding": ["information_gaps", "missing_information", "open_questions", "facts", "caregiver_observations"],
+        "caregiver_capacity_understanding": ["caregiver_contexts", "caregiver_perspectives", "follow_up_links"],
+        "dependency_understanding": ["facts", "caregiver_contexts", "caregiver_observations", "follow_up_links"],
+        "environmental_context_understanding": ["caregiver_contexts", "caregiver_observations", "facts", "events"],
+        "baseline_establishment": ["facts", "assertions", "caregiver_observations", "events"],
+        "current_state_reconstruction": ["events", "facts", "assertions", "caregiver_observations"],
+        "historical_state_reconstruction": ["timeline", "events", "decisions", "decision_outcomes", "corrections"],
+        "situation_summarisation": ["events", "facts", "assertions", "decisions", "decision_outcomes", "uncertainties", "conflicts"],
+        "situation_prioritisation": ["conflicts", "reconciliations", "uncertainties", "information_gaps", "missing_information", "open_questions", "follow_up_links", "events"],
+        "situation_reassessment": ["follow_up_links", "appointments", "information_gaps", "uncertainties", "events"],
+        "situation_evolution_tracking": ["events", "facts", "decisions", "decision_outcomes", "timeline"],
+        "situation_confidence_assessment": ["evidence", "provenance", "uncertainties", "conflicts", "reconciliations", "assertions"],
+    }
+    capabilities = {}
+    for capability, source_names in capability_specs.items():
+        records = sum(len((sources.get(source_name) or {}).get("items") or []) for source_name in source_names)
+        unavailable = [source_name for source_name in source_names if (sources.get(source_name) or {}).get("status") == "unavailable_schema"]
+        capabilities[capability] = {
+            "source_names": source_names,
+            "record_count": records,
+            "evidence_state": "supported_by_persisted_records" if records else "insufficient_evidence",
+            "unavailable_sources": unavailable,
+        }
     required_missing = context.get("missing_required_sources") or []
     optional_missing = context.get("missing_optional_sources") or []
     return {
@@ -570,6 +602,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "is_complete": not required_missing and not optional_missing and not any(value.get("has_more") for value in sources.values()),
         },
         "domains": domain_sources,
+        "capabilities": capabilities,
         "current_care_reality": {
             "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "caregiver_observations", "caregiver_contexts"}][:100],
             "notice": "Records are reported with their source status. A record or missing record is not, by itself, proof of clinical truth or absence.",
