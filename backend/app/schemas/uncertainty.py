@@ -100,6 +100,11 @@ class ContradictionBase(BaseModel):
     subject_id: str
     field: str
     description: str
+    event_id: Optional[str] = None
+    context_key: Optional[str] = Field(None, max_length=160)
+    effective_from: Optional[datetime] = None
+    effective_to: Optional[datetime] = None
+    matching_candidate_ids: Optional[List[str]] = None
     resolution_status: str = "unresolved"
     resolution_notes: Optional[str] = None
     resolved_by_caregiver_id: Optional[str] = None
@@ -119,6 +124,7 @@ class ContradictionUpdate(BaseModel):
 
 class Contradiction(ContradictionBase):
     id: str
+    matching_candidate_ids: List[str] = Field(default_factory=list)
     created_at: datetime
     updated_at: Optional[datetime] = None
     resolved_at: Optional[datetime] = None
