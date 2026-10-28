@@ -121,8 +121,8 @@ def build_baseline(
             return existing
         if (
             not evidence_ids
-            and _ensure_utc(existing.window_start) == _ensure_utc(window_start)
-            and _ensure_utc(existing.window_end) == _ensure_utc(window_end)
+            and _ensure_utc(existing.window_start).date() == _ensure_utc(window_start).date()
+            and _ensure_utc(existing.window_end).date() == _ensure_utc(window_end).date()
         ):
             return existing
 
