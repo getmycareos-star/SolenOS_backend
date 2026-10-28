@@ -617,3 +617,8 @@ def test_public_safety_input_cannot_self_certify_reviewed_evidence():
     sanitized = _sanitize_client_review_flags(supplied)
     assert sanitized.evidence_references[0].supports_claim is False
     assert sanitized.evidence_references[0].reviewed_support is None
+    assert sanitized.evidence_references[0].contradicts_claim is False
+    assert sanitized.evidence_references[0].authority == SourceAuthority.UNKNOWN
+    assert sanitized.evidence_references[0].quality == SourceQuality.UNVERIFIED
+    assert sanitized.evidence_references[0].currentness == CurrentnessStatus.UNKNOWN_CURRENCY
+    assert sanitized.evidence_references[0].confidence is None
