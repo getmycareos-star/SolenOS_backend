@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
-from app.models.change import Change
+from app.models.change import Baseline, Change
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -463,6 +463,16 @@ def test_change_detection_is_idempotent_for_unchanged_persisted_evidence():
 
         assert second_ids == first_ids
         assert len(stored) == 1
+        assert (
+            db.query(Baseline)
+            .filter(
+                Baseline.person_id == person.id,
+                Baseline.subject_type == "fall",
+                Baseline.is_active.is_(True),
+            )
+            .count()
+            == 1
+        )
         assert set(stored[0].evidence_ids) == {
             event.id
             for event in db.query(CareEvent).filter(CareEvent.person_id == person.id).all()
