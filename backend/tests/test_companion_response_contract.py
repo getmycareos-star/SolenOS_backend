@@ -313,8 +313,25 @@ def test_companion_retry_replays_same_turn_without_duplicate_messages_or_cross_p
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
-        token, person_id, _ = create_session(client)
+        token, person_id, caregiver_id = create_session(client)
         other_token, other_person_id, _ = create_session(client)
+        db = TestingSessionLocal()
+        from datetime import datetime
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported waking several times overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
         turn_id = "11111111-1111-4111-8111-111111111111"
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
@@ -327,6 +344,7 @@ def test_companion_retry_replays_same_turn_without_duplicate_messages_or_cross_p
         assert first.status_code == 200, first.text
         first_data = first.json()
         assert first_data["idempotent_replay"] is False
+        assert event_id in first_data["source_event_ids"]
         assert len(first_data["messages"]) == 2
 
         # Simulate an ambiguous network outcome: the client retries without
@@ -337,6 +355,9 @@ def test_companion_retry_replays_same_turn_without_duplicate_messages_or_cross_p
         assert retry_data["idempotent_replay"] is True
         assert retry_data["session_id"] == first_data["session_id"]
         assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert retry_data["source_evidence_ids"] == first_data["source_evidence_ids"]
+        assert retry_data["lcr_context_coverage"] == first_data["lcr_context_coverage"]
         assert len(retry_data["messages"]) == 2
         assert len(calls) == 1
 
