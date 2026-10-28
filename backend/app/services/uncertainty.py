@@ -163,6 +163,10 @@ class UncertaintyEngine:
         payload = self._scoped_payload(contradiction.model_dump())
         scoped_person_id = self.person_id or payload["person_id"]
         payload["person_id"] = scoped_person_id
+        if payload.get("resolution_status", "unresolved") != "unresolved":
+            raise ValueError("A new conflict must start unresolved; status changes require a separate audited transition")
+        payload["resolution_status"] = "unresolved"
+        payload["resolved_by_caregiver_id"] = None
         payload["matching_candidate_ids"] = []
         start = payload.get("effective_from")
         end = payload.get("effective_to")
