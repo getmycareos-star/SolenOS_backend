@@ -26,7 +26,6 @@ def detect_event_changes(
         return []
     counts = get_longitudinal_event_counts(db, person_id, event_type, subject_id, now)
     current_count = counts["current_window_count"]
-    historical_count = counts["historical_count"]
     comparison = compare_to_baseline(baseline, current_count, 42)
     changes = []
     if baseline.event_count == 0 and current_count > 0:
@@ -35,10 +34,10 @@ def detect_event_changes(
             person_id=person_id,
             subject_type=event_type,
             subject_id=subject_id or "",
-            change_type=ChangeType.ONSET,
+            change_type=ChangeType.EMERGENCE,
             change_direction=ChangeDirection.INCREASING,
-            previous_state="absent",
-            current_state="present",
+            previous_state="No comparable prior events were recorded in the baseline window",
+            current_state=f"{current_count} event(s) recorded in the current observation window",
             previous_count=0,
             current_count=current_count,
             baseline_id=baseline.id,
@@ -48,47 +47,40 @@ def detect_event_changes(
             now=now,
         )
         changes.append(change)
-    elif baseline.event_count > 0 and current_count > baseline.event_count:
-        relative_change = comparison.get("relative_change_percent")
-        if relative_change is not None and relative_change >= 50:
-            change = _create_change(
-                db=db,
-                person_id=person_id,
-                subject_type=event_type,
-                subject_id=subject_id or "",
-                change_type=ChangeType.INCREASE,
-                change_direction=ChangeDirection.INCREASING,
-                previous_state=f"{baseline.event_count} events per baseline window",
-                current_state=f"{current_count} events in current window",
-                previous_count=baseline.event_count,
-                current_count=current_count,
-                baseline_id=baseline.id,
-                baseline=baseline,
-                comparison=comparison,
-                events=counts["recent_events"],
-                now=now,
-            )
-            changes.append(change)
-    elif baseline.event_count > 0 and current_count == 0:
-        if historical_count > 0:
-            change = _create_change(
-                db=db,
-                person_id=person_id,
-                subject_type=event_type,
-                subject_id=subject_id or "",
-                change_type=ChangeType.CESSATION,
-                change_direction=ChangeDirection.DECREASING,
-                previous_state="present",
-                current_state="absent",
-                previous_count=historical_count,
-                current_count=0,
-                baseline_id=baseline.id,
-                baseline=baseline,
-                comparison=comparison,
-                events=[],
-                now=now,
-            )
-            changes.append(change)
+    elif (
+        baseline.event_count > 0
+        and comparison.get("frequency_delta") is not None
+        and comparison["frequency_delta"] > 0
+    ):
+        # Create an evidence-backed candidate for a higher normalized rate.
+        # Significance assessment determines whether it merits attention; there
+        # is no universal percentage threshold embedded in the detector.
+        change = _create_change(
+            db=db,
+            person_id=person_id,
+            subject_type=event_type,
+            subject_id=subject_id or "",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state=(
+                f"{comparison['baseline_frequency_per_period']:.3f} events per 30 days "
+                f"over {comparison['baseline_window_days']} observed days"
+            ),
+            current_state=(
+                f"{current_count} events over {comparison['current_window_days']} observed days "
+                f"({(current_count / (comparison['current_window_days'] / 30.0)):.3f} per 30 days)"
+            ),
+            previous_count=baseline.event_count,
+            current_count=current_count,
+            baseline_id=baseline.id,
+            baseline=baseline,
+            comparison=comparison,
+            events=counts["recent_events"],
+            now=now,
+        )
+        changes.append(change)
+    # An empty current window is not evidence that a previously observed event
+    # stopped. Without explicit observation-coverage data, do not infer cessation.
     if not changes and current_count >= 2:
         recent_events = counts["recent_events"]
         if len(recent_events) >= 2:
