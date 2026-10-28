@@ -193,6 +193,25 @@ class ChangeEvidenceResponse(BaseModel):
         from_attributes = True
 
 
+class ChangeAssertionEvidenceResponse(BaseModel):
+    id: str
+    subject_type: str
+    subject_id: str
+    field: str
+    assertion_kind: str
+    asserted_value: str
+    source_event_id: Optional[str] = None
+    source_label: str
+    source_text: Optional[str] = None
+    assertion_status: str
+    observed_at: Optional[datetime] = None
+    recorded_at: datetime
+    evidence_ids: List[str] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
 class ChangeConfirmationHistoryItem(BaseModel):
     id: str
     previous_status: str
@@ -209,6 +228,7 @@ class ChangeConfirmationHistoryItem(BaseModel):
 class ChangeDetailResponse(BaseModel):
     change: Change
     evidence: List[ChangeEvidenceResponse]
+    assertions: List[ChangeAssertionEvidenceResponse] = Field(default_factory=list)
     confirmation_history: List[ChangeConfirmationHistoryItem] = Field(default_factory=list)
 
 class ChangeConfirmationRequest(BaseModel):
