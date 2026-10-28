@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.database import Base, get_db
 from app.main import app
 from app.services.safety import SafetyEngine
 from app.services.claim_extraction import ClaimExtractionEngine, EvidenceMatcher, SourceQualityEvaluator
@@ -517,15 +517,20 @@ class TestClaimStrengthMatcher:
 class TestSafetyAPI:
     def setup_method(self):
         setup_db()
-        app.dependency_overrides[override_get_db] = override_get_db
+        app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
 
     def teardown_method(self):
         teardown_db()
 
     def test_evaluate_endpoint(self):
+        session = self.client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Safety API caregiver"})
+        assert session.status_code == 201, session.text
+        person_id = session.json()["person"]["id"]
+        headers = {"Authorization": f"Bearer {session.json()['access_token']}"}
         response = self.client.post(
             "/api/v1/evaluate",
+            headers=headers,
             json={
                 "user_intent": "The blood pressure was 145/90.",
                 "candidate_claims": [],
@@ -533,7 +538,7 @@ class TestSafetyAPI:
                 "risk_classification": "informational",
                 "proposed_action_level": "informational",
                 "user_role": "caregiver",
-                "person_id": "test_person",
+                "person_id": person_id,
             },
         )
         assert response.status_code == 200
