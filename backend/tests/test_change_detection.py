@@ -506,3 +506,93 @@ def test_change_detection_is_idempotent_for_unchanged_persisted_evidence():
     finally:
         teardown_db()
 
+def test_higher_normalized_rate_is_detected_even_when_raw_counts_are_lower():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-normalized-rate", name="Rate comparison recipient")
+        caregiver = Caregiver(
+            id="caregiver-normalized-rate",
+            name="Rate comparison caregiver",
+            email="rate-comparison@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        now = datetime.now(timezone.utc)
+        for index in range(6):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="mobility_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=70 + index * 20),
+                    title=f"Historical mobility event {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="mobility_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 10),
+                    title=f"Recent mobility event {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+
+        changes = detect_event_changes(db, person.id, "mobility_observation", None, now)
+        assert any(change.change_type.value == "increase" for change in changes)
+        increase = next(change for change in changes if change.change_type.value == "increase")
+        assert increase.previous_count == 6
+        assert increase.current_count == 3
+        assert "per 30 days" in increase.previous_state
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_no_recent_events_do_not_create_a_cessation_claim_without_coverage():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-no-coverage", name="Observation coverage recipient")
+        caregiver = Caregiver(
+            id="caregiver-no-coverage",
+            name="Observation coverage caregiver",
+            email="coverage@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+
+        now = datetime.now(timezone.utc)
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="routine_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=70 + index * 20),
+                    title=f"Historical routine observation {index + 1}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+
+        changes = detect_event_changes(db, person.id, "routine_observation", None, now)
+        assert all(change.change_type.value != "cessation" for change in changes)
+        db.close()
+    finally:
+        teardown_db()
+
