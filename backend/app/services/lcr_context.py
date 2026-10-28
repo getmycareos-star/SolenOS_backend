@@ -91,6 +91,18 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "care_record_id", "topic", "description", "priority", "status", "created_at", "resolved_at"],
         "order": ["created_at"],
     },
+    "open_questions": {
+        "table": "open_questions",
+        "required": False,
+        "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
+        "order": ["asked_at"],
+    },
+    "follow_up_links": {
+        "table": "care_follow_up_links",
+        "required": False,
+        "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "created_by_caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
     "conflicts": {
         "table": "care_conflicts",
         "required": False,
