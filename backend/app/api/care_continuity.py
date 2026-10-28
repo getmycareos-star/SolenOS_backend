@@ -1160,6 +1160,73 @@ def list_resource(resource: str, request: Request, limit: int = 50, db: Session 
     rows = db.execute(query.limit(max(1, min(limit, 100)))).mappings().all()
     return [_jsonable(dict(row)) for row in rows]
 
+@router.get("/facts/{fact_id}/evidence-integrity")
+def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return persisted claim links and duplicate-content candidates without claiming independence."""
+    person_id, _ = _scoped_identity(request, db)
+    facts = _table(db, "care_facts")
+    fact = db.execute(
+        select(facts.c.id).where(facts.c.id == fact_id, facts.c.person_id == person_id)
+    ).first()
+    if fact is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    links = _table(db, "care_fact_evidence")
+    link_rows = db.execute(
+        select(links.c.evidence_id, links.c.evidence_role, links.c.source_span)
+        .where(links.c.person_id == person_id, links.c.fact_id == fact_id)
+        .order_by(links.c.evidence_id.asc())
+    ).all()
+    evidence_ids = [str(row.evidence_id) for row in link_rows]
+    evidence_rows = db.query(Evidence).filter(
+        Evidence.person_id == person_id,
+        Evidence.id.in_(evidence_ids or ["__no_evidence__"]),
+    ).all()
+    evidence_by_id = {str(row.id): row for row in evidence_rows}
+    groups: dict[str, list[str]] = {}
+    records = []
+    for link in link_rows:
+        evidence = evidence_by_id.get(str(link.evidence_id))
+        if evidence is None:
+            records.append({
+                "evidence_id": str(link.evidence_id),
+                "link_role": link.evidence_role,
+                "integrity_status": "linked_evidence_missing",
+                "source_independence": "not_established",
+            })
+            continue
+        normalized = re.sub(r"\s+", " ", (evidence.source_text or "").strip().casefold())
+        fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else None
+        if fingerprint:
+            groups.setdefault(fingerprint, []).append(str(evidence.id))
+        records.append({
+            "evidence_id": evidence.id,
+            "link_role": link.evidence_role,
+            "source_type": evidence.source_type or evidence.type,
+            "uploaded_by_caregiver_id": evidence.uploaded_by_caregiver_id,
+            "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+            "time_provenance": evidence.time_provenance,
+            "source_span": link.source_span,
+            "content_fingerprint": fingerprint,
+            "integrity_status": "available",
+            "source_independence": "not_established",
+        })
+    duplicate_content_groups = [
+        {"fingerprint": fingerprint, "evidence_ids": ids, "interpretation": "Same normalized source text; do not count these records as independent corroboration without source review."}
+        for fingerprint, ids in groups.items() if len(ids) > 1
+    ]
+    return {
+        "person_id": person_id,
+        "fact_id": fact_id,
+        "linked_evidence_count": len(records),
+        "distinct_nonempty_content_count": len(groups),
+        "duplicate_content_candidates": duplicate_content_groups,
+        "independent_corroboration_status": "not_established",
+        "interpretation_limit": "Different text does not prove independent origin. Identical normalized text is a duplicate-content candidate, not proof of copying. Source independence requires explicit provenance review.",
+        "evidence": records,
+    }
+
+
 @router.post("/{resource}", status_code=201)
 def create_resource(resource: str, payload: dict, request: Request, db: Session = Depends(get_db)):
     if resource not in WRITABLE:
