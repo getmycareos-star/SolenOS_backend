@@ -364,8 +364,9 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         assert current_payload["history_coverage"] == "bounded_subset"
         projected = next(item for item in current_payload["items"] if item["id"] == event_id)
         assert projected["kind"] == "Care event needing attention"
-        assert projected["source_type"] == "events"
-        assert projected["source_label"] == caregiver_id
+        assert projected["source_collection"] == "events"
+        assert projected["source_label"] == "Source label not recorded"
+        assert projected["source_type"] == "not_recorded"
         assert projected["description"] == "This event must only appear in its owner's LCR context."
 
         other = client.get(
