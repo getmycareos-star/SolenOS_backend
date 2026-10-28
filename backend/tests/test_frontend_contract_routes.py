@@ -1094,6 +1094,42 @@ def test_qwen_grounding_guard_rejects_unsupported_care_status_claims():
     )
 
 
+def test_qwen_account_recovery_fails_closed_on_credential_solicitation_without_lcr_write(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        generated = []
+        unsafe_reply = "Please provide the user's account details or a verification code to proceed."
+
+        def qwen_response(messages, **kwargs):
+            generated.append(messages)
+            return unsafe_reply
+
+        monkeypatch.setattr(collaboration, "qwen_chat", qwen_response)
+        headers = {"Authorization": f"Bearer {token}"}
+        before = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert before.status_code == 200, before.text
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers=headers,
+            json={
+                "workflow": "account_recovery",
+                "text": "I cannot access my account. No authoritative account recovery state is available.",
+            },
+        )
+        assert response.status_code == 503, response.text
+        assert "grounded" in response.json()["detail"].lower()
+        assert len(generated) == 2, "Unsafe credential solicitation should get one repair attempt then fail closed."
+
+        after = client.get(f"/api/v1/events/{person_id}", headers=headers)
+        assert after.status_code == 200, after.text
+        assert after.json() == before.json(), "Rejected Qwen output must not write to the Living Care Record."
+    finally:
+        teardown()
+
+
 def test_qwen_support_fails_closed_after_repeated_unsupported_clinical_claim(monkeypatch):
     import app.api.collaboration as collaboration
 
@@ -1127,6 +1163,39 @@ def test_qwen_support_fails_closed_after_repeated_unsupported_clinical_claim(mon
         assert after.json() == before.json(), "Qwen assistance must not write to the Living Care Record."
     finally:
         teardown()
+
+
+def test_qwen_grounding_guard_rejects_credential_requests_and_unsupported_system_state():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    assert _contains_unsupported_care_claim(
+        "Please provide the user's account details or a verification code to proceed.",
+        "The user cannot access their account. No verification or account status is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Yes, an archived note is still retained.",
+        "The user asks whether an archived note is still retained. No current record state is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "The Qwen system is unavailable. Please try again later.",
+        "A prior assistant request failed once. No current service status is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "No reminder was delivered. Please check the delivery status of the reminder.",
+        "The caregiver asks how to check whether a reminder was delivered. No reminder record or delivery receipt is available in this request.",
+    )
+    assert not _contains_unsupported_care_claim(
+        "The current account status was not supplied. Use the official recovery process.",
+        "The user cannot access their account. No verification or account status is supplied.",
+    )
+    assert _contains_unsupported_care_claim(
+        "No breakfast intake reported today.",
+        "The only supplied information is a note from today about breakfast intake.",
+    )
+    assert _contains_unsupported_care_claim(
+        "Professional-reported information.",
+        "The caregiver reports dizziness this morning. No professional note is supplied.",
+    )
 
 
 def test_qwen_grounding_guard_rejects_unsupported_dementia_inference_and_handoff_assignment():
