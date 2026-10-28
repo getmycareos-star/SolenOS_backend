@@ -135,13 +135,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
-    if not path.startswith("/api/v1/") and path != "/api/situation":
-        return await call_next(request)
-    if path == "/api/v1/sessions/anonymous" and method == "POST":
-        return await call_next(request)
-    # The share receiver stores a short-lived, random one-time capability, not
-    # a care record. Only these two routes bypass caregiver bearer auth.
-    if path == "/api/v1/share-intake" and method == "POST":
+    if path.endswith("/share-intake") and method == "POST":
         # This is a short-lived capability bootstrap, not an authenticated care
         # endpoint. Enforce the body limit while streaming as well as checking
         # Content-Length: clients can omit or lie about that header.
@@ -172,6 +166,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 
         request._body = body
         request._receive = receive_share_body
+        return await call_next(request)
+    if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
     if path.startswith("/api/v1/share-intake/") and method == "GET":
         return await call_next(request)
