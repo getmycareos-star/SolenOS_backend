@@ -97,6 +97,12 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
         "order": ["asked_at"],
     },
+    "information_gaps": {
+        "table": "information_gaps",
+        "required": False,
+        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "priority", "lifecycle_status", "description", "expected_by", "resolution_date", "resolution_notes", "evidence_ids", "created_at", "updated_at", "created_by_caregiver_id"],
+        "order": ["created_at"],
+    },
     "follow_up_links": {
         "table": "care_follow_up_links",
         "required": False,
