@@ -68,7 +68,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=doc.ocr_confidence if doc else 1.0,
+            confidence=doc.ocr_confidence if doc else None,
             evidence_status="reported",
             source_type=(
                 "caregiver_observation"
