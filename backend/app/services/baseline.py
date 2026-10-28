@@ -53,6 +53,7 @@ def get_longitudinal_event_counts(
     query = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
         CareEvent.event_type == event_type,
+        CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
     )
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
