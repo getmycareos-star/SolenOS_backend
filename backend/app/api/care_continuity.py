@@ -8,6 +8,7 @@ from a caller-supplied person_id.
 from datetime import datetime, date, timezone
 from typing import Any
 import json
+import logging
 import uuid
 import hashlib
 import re
@@ -20,6 +21,8 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
 
@@ -802,6 +805,7 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         db.commit()
     except Exception as exc:
         db.rollback()
+        logger.exception("Situation assessment persistence failed for session-scoped person %s", person_id)
         raise HTTPException(status_code=503, detail="Situation assessment could not be persisted") from exc
     return {"person_id": person_id, "status": "created", "assessment_id": row["id"], "assessment": assessment}
 
