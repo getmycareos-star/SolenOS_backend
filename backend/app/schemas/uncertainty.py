@@ -139,7 +139,6 @@ class UncertaintyAssessmentBase(BaseModel):
     context: Optional[List[Dict[str, Any]]] = None
     evidence_ids: Optional[List[str]] = None
     temporal_precision: Optional[str] = None
-    assessed_by_caregiver_id: Optional[str] = None
     superseded_by_assessment_id: Optional[str] = None
     is_active: bool = True
 
@@ -213,7 +212,7 @@ class UncertaintyAnalysisRequest(BaseModel):
     task: str = Field(..., min_length=1, max_length=80)
     evidence_ids: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
-    unresolved_conflicts: List[Dict[str, Any]] = Field(default_factory=list)
+    conflict_ids: List[str] = Field(default_factory=list)
     source_access: str = Field(default="available", pattern="^(available|unavailable|failed|restricted)$")
     assessed_by_caregiver_id: Optional[str] = None
 
