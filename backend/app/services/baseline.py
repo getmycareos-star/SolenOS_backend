@@ -86,22 +86,25 @@ def build_baseline(
     events = counts["all_events"]
     if not events:
         return None
-    six_weeks_ago = now - timedelta(days=42)
-    baseline_events = [e for e in events if _ensure_utc(e.occurred_at) < six_weeks_ago]
-    if baseline_events:
-        window_start = baseline_events[0].occurred_at
-        window_end = baseline_events[-1].occurred_at
-        event_count = len(baseline_events)
-        window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
-        frequency_per_period = event_count / (window_days / 30.0)
-        confidence = BaselineConfidence.HIGH if event_count >= 5 else (BaselineConfidence.MODERATE if event_count >= 2 else BaselineConfidence.LOW)
-    else:
-        window_start = now - timedelta(days=180)
-        window_end = six_weeks_ago
-        event_count = 0
-        window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
-        frequency_per_period = 0.0
-        confidence = BaselineConfidence.LOW
+    baseline_window_start = now - timedelta(days=180)
+    baseline_window_end = now - timedelta(days=42)
+    baseline_events = [
+        event
+        for event in events
+        if baseline_window_start <= _ensure_utc(event.occurred_at) < baseline_window_end
+    ]
+    window_start = baseline_window_start
+    window_end = baseline_window_end
+    event_count = len(baseline_events)
+    window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
+    frequency_per_period = event_count / (window_days / 30.0) if event_count else 0.0
+    confidence = (
+        BaselineConfidence.HIGH
+        if event_count >= 5
+        else BaselineConfidence.MODERATE
+        if event_count >= 2
+        else BaselineConfidence.LOW
+    )
     observation_density = event_count / max(window_days, 1)
     evidence_ids = sorted({e.id for e in baseline_events if e.id})
     existing_baselines = (
