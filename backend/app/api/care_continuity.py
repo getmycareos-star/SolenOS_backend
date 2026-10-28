@@ -388,6 +388,14 @@ def current_care_projection(
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
         source_label = row.get("source_label") or row.get("author_label")
         origin_type = row.get("source_type") or "not_recorded"
+        claim_refs = row.get("claim_refs")
+        if isinstance(claim_refs, str):
+            try:
+                claim_refs = json.loads(claim_refs)
+            except (TypeError, json.JSONDecodeError):
+                claim_refs = []
+        if not isinstance(claim_refs, list):
+            claim_refs = []
         current_items.append({
             "id": source_id,
             "kind": kind,
@@ -403,6 +411,8 @@ def current_care_projection(
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
+            "claim_refs": claim_refs[:20],
+            "claim_count": len(claim_refs),
         })
         seen.add((source_name, source_id))
 
