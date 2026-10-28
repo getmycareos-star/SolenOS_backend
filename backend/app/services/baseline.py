@@ -86,15 +86,20 @@ def build_baseline(
     events = counts["all_events"]
     if not events:
         return None
-    baseline_window_start = now - timedelta(days=180)
     baseline_window_end = now - timedelta(days=42)
     baseline_events = [
-        event
-        for event in events
-        if baseline_window_start <= _ensure_utc(event.occurred_at) < baseline_window_end
+        event for event in events
+        if _ensure_utc(event.occurred_at) < baseline_window_end
     ]
-    window_start = baseline_window_start
-    window_end = baseline_window_end
+    if baseline_events:
+        # Use the full available historical span, ending before the comparison
+        # window. This preserves older longitudinal evidence without pretending
+        # that events outside an arbitrary lookback never happened.
+        window_start = min(_ensure_utc(event.occurred_at) for event in baseline_events)
+        window_end = baseline_window_end
+    else:
+        window_start = now - timedelta(days=180)
+        window_end = baseline_window_end
     event_count = len(baseline_events)
     window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
     frequency_per_period = event_count / (window_days / 30.0) if event_count else 0.0
