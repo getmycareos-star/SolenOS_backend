@@ -719,13 +719,15 @@ def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person
         db.commit()
         assert changes
         change_id = changes[0].id
+        person_id = person.id
+        other_person_id = other_person.id
         token = issue_scoped_session(db, person, caregiver)
         other_token = issue_scoped_session(db, other_person, other_caregiver)
         db.close()
 
         client = TestClient(app)
         response = client.get(
-            f"/api/v1/change/changes/{person.id}/{change_id}",
+            f"/api/v1/change/changes/{person_id}/{change_id}",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
@@ -737,7 +739,7 @@ def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person
         assert all(item["title"].startswith("Persisted fall observation") for item in payload["evidence"])
 
         forbidden = client.get(
-            f"/api/v1/change/changes/{person.id}/{change_id}",
+            f"/api/v1/change/changes/{person_id}/{change_id}",
             headers={"Authorization": f"Bearer {other_token}"},
         )
         assert forbidden.status_code == 403
