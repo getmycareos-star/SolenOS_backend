@@ -165,6 +165,17 @@ def _ensure_test_tables():
             Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
             Column("updated_at", DateTime(timezone=True)),
         )
+    if "care_fact_evidence" not in metadata.tables:
+        Table(
+            "care_fact_evidence", metadata,
+            Column("person_id", String(36), ForeignKey("persons.id"), nullable=False),
+            Column("fact_id", String(36), ForeignKey("care_facts.id"), nullable=False),
+            Column("evidence_id", String(36), ForeignKey("evidence.id"), nullable=False),
+            Column("evidence_role", String(24), nullable=False, default="supports"),
+            Column("source_span", Text),
+            Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+            UniqueConstraint("fact_id", "evidence_id", "evidence_role", name="uq_test_care_fact_evidence_link"),
+        )
     for target_table in ("care_assertions", "care_decisions", "care_events", "caregiver_observations", "changes", "situations", "evidence"):
         if target_table not in metadata.tables:
             Table(
@@ -785,3 +796,60 @@ def test_shared_lcr_context_is_bounded_and_person_scoped():
 
     denied = client.get("/api/v1/care-continuity/context")
     assert denied.status_code == 401
+
+
+def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_without_claiming_corroboration():
+    client = TestClient(app)
+    session = _session(client, "Evidence reviewer")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+
+    fact_response = client.post(
+        "/api/v1/care-continuity/facts",
+        headers=headers,
+        json={"subject_type": "daily_care", "subject_id": "sleep-1", "fact_type": "sleep_pattern", "fact_value": "Sleep timing is disputed."},
+    )
+    assert fact_response.status_code == 201, fact_response.text
+    fact_id = fact_response.json()["id"]
+
+    db = TestingSessionLocal()
+    try:
+        db.add_all([
+            Evidence(id="duplicate-evidence-a", person_id=person_id, type="caregiver_report", source_text="The same copied source note.", uploaded_by_caregiver_id=caregiver_id, source_type="caregiver_report"),
+            Evidence(id="duplicate-evidence-b", person_id=person_id, type="caregiver_report", source_text="The same copied source note.", uploaded_by_caregiver_id=caregiver_id, source_type="caregiver_report"),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    first_link = client.post(
+        "/api/v1/care-continuity/fact-evidence",
+        headers=headers,
+        json={"fact_id": fact_id, "evidence_id": "duplicate-evidence-a", "evidence_role": "supports"},
+    )
+    assert first_link.status_code == 201, first_link.text
+    duplicate_link = client.post(
+        "/api/v1/care-continuity/fact-evidence",
+        headers=headers,
+        json={"fact_id": fact_id, "evidence_id": "duplicate-evidence-a", "evidence_role": "supports"},
+    )
+    assert duplicate_link.status_code == 409
+
+    second_link = client.post(
+        "/api/v1/care-continuity/fact-evidence",
+        headers=headers,
+        json={"fact_id": fact_id, "evidence_id": "duplicate-evidence-b", "evidence_role": "supports"},
+    )
+    assert second_link.status_code == 201, second_link.text
+
+    integrity = client.get(
+        f"/api/v1/care-continuity/facts/{fact_id}/evidence-integrity",
+        headers=headers,
+    )
+    assert integrity.status_code == 200, integrity.text
+    result = integrity.json()
+    assert result["linked_evidence_count"] == 2
+    assert result["independent_corroboration_status"] == "not_established"
+    assert len(result["duplicate_content_candidates"]) == 1
+    assert set(result["duplicate_content_candidates"][0]["evidence_ids"]) == {"duplicate-evidence-a", "duplicate-evidence-b"}
