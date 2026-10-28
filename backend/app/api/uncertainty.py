@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
+from app.models.care import Evidence
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -183,11 +184,35 @@ def analyze_and_persist_uncertainty(
     a calibrated probability. Evidence retrieval and person authorization must be
     performed by the authenticated calling workflow before invoking this route.
     """
+    requested_evidence_ids = list(dict.fromkeys(request.evidence_ids))
+    if requested_evidence_ids:
+        evidence_rows = (
+            engine.db.query(Evidence)
+            .filter(
+                Evidence.person_id == request.person_id,
+                Evidence.id.in_(requested_evidence_ids),
+            )
+            .all()
+        )
+        if len(evidence_rows) != len(requested_evidence_ids):
+            raise HTTPException(status_code=404, detail="One or more evidence records were not found for this person")
+    else:
+        evidence_rows = []
+
     try:
         analysis = analyze_uncertainty(
             claim=request.claim,
             task=request.task,
-            evidence=request.evidence,
+            evidence=[
+                {
+                    "id": row.id,
+                    "source_type": row.source_type or row.type,
+                    "text": row.source_text,
+                    "verified": str(row.evidence_status or "").lower() == "verified",
+                    "observed_at": row.time_provenance,
+                }
+                for row in evidence_rows
+            ],
             required_fields=request.required_fields,
             unresolved_conflicts=request.unresolved_conflicts,
             source_access=request.source_access,
@@ -214,10 +239,7 @@ def analyze_and_persist_uncertainty(
         (reason_by_classification[item] for item in analysis["classifications"] if item in reason_by_classification),
         None,
     )
-    evidence_ids = [
-        str(item["id"]) for item in request.evidence
-        if isinstance(item, dict) and item.get("id") is not None
-    ]
+    evidence_ids = [row.id for row in evidence_rows]
     persisted = engine.create_uncertainty_assessment(
         UncertaintyAssessmentCreate(
             person_id=request.person_id,
