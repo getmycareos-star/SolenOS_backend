@@ -319,8 +319,14 @@ def detect_assertion_changes(
 
         prior_at = _ensure_utc(prior.observed_at)
         current_at = _ensure_utc(current_run[0].observed_at)
-        if prior_at is None or current_at is None:
+        current_last_at = _ensure_utc(current_run[-1].observed_at)
+        if prior_at is None or current_at is None or current_last_at is None:
             continue
+        observed_span_days = (
+            max((current_last_at - current_at).days, 0)
+            if len({ _ensure_utc(item.observed_at) for item in current_run }) >= 2
+            else None
+        )
         change = Change(
             person_id=person_id,
             subject_type=source_subject_type,
@@ -334,15 +340,17 @@ def detect_assertion_changes(
             current_count=None,
             baseline_id=None,
             comparison_window_start=prior_at,
-            comparison_window_end=_ensure_utc(current_run[-1].observed_at),
-            persistence_days=max((now - current_at).days, 0),
+            comparison_window_end=current_last_at,
+            persistence_days=observed_span_days,
             is_persistent=None,
             confidence=None,
             evidence_ids=evidence_ids,
             explanation=(
                 f"Structured field '{field}' for {subject_type} was reported as "
                 f"'{prior.asserted_value}' at {prior_at.isoformat()} and later as "
-                f"'{latest_value}' at {current_at.isoformat()}. This records a "
+                f"'{latest_value}' at {current_at.isoformat()}. The latest value appears in "
+                f"{len(current_run)} source observation(s) through {current_last_at.isoformat()}. "
+                "This records a "
                 "difference between source-attributed observations; it does not "
                 "establish cause, direction of clinical change, or severity."
             ),
