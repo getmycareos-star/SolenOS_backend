@@ -372,7 +372,7 @@ def _decide_verdict(change, baseline_count, current_count, magnitude, recurrence
             return SignificanceVerdict.MEANINGFUL_CANDIDATE, round(sig, 3)
         return SignificanceVerdict.NOT_MEANINGFUL, round(0.3 * evidence_confidence, 3)
 
-    if ctype in ("onset", "increase", "recurrence"):
+    if ctype in ("emergence", "onset", "increase", "recurrence"):
         is_novel = novelty == 1.0
         is_recurrent = recurrence == 1.0
         strong_signal = magnitude >= 0.5
