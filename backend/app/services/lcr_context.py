@@ -109,6 +109,12 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "created_by_caregiver_id", "created_at"],
         "order": ["created_at"],
     },
+    "reconciliations": {
+        "table": "care_reconciliation_records",
+        "required": False,
+        "fields": ["id", "target_type", "target_id", "reconciliation_status", "competing_claim_ids", "evidence_ids", "decision_notes", "reviewed_by_caregiver_id", "reviewed_at", "created_at"],
+        "order": ["created_at"],
+    },
     "conflicts": {
         "table": "care_conflicts",
         "required": False,
