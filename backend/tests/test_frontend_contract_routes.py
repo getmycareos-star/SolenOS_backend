@@ -293,7 +293,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
                 "evidence_type": "document",
                 "extracted_text": text_bytes.decode("utf-8"),
             },
-            files={"file": ("care-note.txt", text_bytes, "text/plain")},
+            files={"file": (r"C:\\fakepath\\care-note.txt", text_bytes, "text/plain")},
         )
         assert text_upload.status_code == 201, text_upload.text
         assert text_upload.json()["persisted"] is True
@@ -303,6 +303,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert text_download.status_code == 200
         assert text_download.content == text_bytes
         assert text_download.headers["content-type"].startswith("text/plain")
+        assert 'filename="care-note.txt"' in text_download.headers["content-disposition"]
         text_denied = client.get(
             f"/api/v1/upload/{text_id}",
             headers={"Authorization": f"Bearer {other_token}"},
