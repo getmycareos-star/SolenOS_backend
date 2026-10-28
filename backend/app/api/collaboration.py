@@ -643,10 +643,12 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """
     if limit <= 0 or not lines:
         return []
+    direct_query_terms = set(_companion_base_terms(query))
+    expanded_query_terms = set(_companion_query_terms(query)) - direct_query_terms
     query_terms = {
         token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
         if token not in _CONTEXT_STOPWORDS
-    }
+    } | direct_query_terms | expanded_query_terms
     if not query_terms:
         return lines[:limit]
 
@@ -654,8 +656,10 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     for index, line in enumerate(lines):
         text = (line or "").casefold()
         record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
+        direct_overlap = direct_query_terms & record_terms
+        synonym_overlap = expanded_query_terms & record_terms
+        ordinary_overlap = query_terms & record_terms
+        score = 2 * len(direct_overlap) + len(synonym_overlap) + len(ordinary_overlap - direct_overlap - synonym_overlap)
         # A matched multiword phrase is stronger than incidental single words.
         normalized_query = " ".join((query or "").casefold().split())
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
