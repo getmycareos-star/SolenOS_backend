@@ -323,19 +323,21 @@ class SafetyEngine:
             if ev.contradicts_claim:
                 contradictions.append(ev)
 
-        is_supported = len(evidence_refs) > 0
-        confidence = self._calculate_claim_confidence(evidence_refs, claim)
+        # Text overlap only nominates candidate evidence. It does not prove support.
+        # A supported status requires an explicit reviewed_support decision.
+        reviewed_support = [
+            ev for ev in evidence_refs
+            if ev.supports_claim and ev.reviewed_support is True
+        ]
+        is_supported = bool(reviewed_support) and not contradictions
+        confidence = None
 
-        epistemic_state = "unknown"
-        if is_supported:
-            if contradictions:
-                epistemic_state = "conflicting"
-            elif confidence >= 0.8:
-                epistemic_state = "known"
-            elif confidence >= 0.5:
-                epistemic_state = "partially_known"
-            else:
-                epistemic_state = "ambiguous"
+        if contradictions:
+            epistemic_state = "conflicting"
+        elif is_supported:
+            epistemic_state = "supported_by_review"
+        elif evidence_refs:
+            epistemic_state = "unverified_candidate_evidence"
         else:
             epistemic_state = "not_documented"
 
@@ -368,11 +370,10 @@ class SafetyEngine:
         overlap = claim_words & evidence_words
         return len(overlap) >= max(1, len(claim_words) * 0.3)
 
-    def _calculate_claim_confidence(self, evidence_refs: List[EvidenceReference], claim: ClaimCandidate) -> float:
-        if not evidence_refs:
-            return 0.0
-        confidences = [ev.confidence for ev in evidence_refs]
-        return sum(confidences) / len(confidences)
+    def _calculate_claim_confidence(self, evidence_refs: List[EvidenceReference], claim: ClaimCandidate) -> Optional[float]:
+        # No calibrated estimator is configured. Returning None is safer than
+        # averaging arbitrary source-provided values and presenting it as truth.
+        return None
 
     def _assess_claim_strength(self, claim_text: str) -> ClaimStrength:
         text_lower = claim_text.lower()
@@ -442,7 +443,9 @@ class SafetyEngine:
     def _detect_diagnostic_overreach(self, claim: ClaimCandidate, verification: ClaimVerification) -> bool:
         if claim.claim_type != ClaimType.DIAGNOSTIC:
             return False
-        if verification.is_supported and verification.confidence >= 0.8:
+        # Diagnostic claims still require qualified human/professional review;
+        # lexical overlap or an uncalibrated confidence value cannot clear this gate.
+        if verification.is_supported:
             return False
         return True
 
@@ -487,7 +490,7 @@ class SafetyEngine:
             if ev.currentness == CurrentnessStatus.STALE:
                 if verification.claim_type == ClaimType.CURRENT_STATE:
                     return True
-                if ev.confidence >= 0.7:
+                if ev.confidence is not None and ev.confidence >= 0.7:
                     return True
         return False
 
