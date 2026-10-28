@@ -387,7 +387,9 @@ class TestSourceQualityEvaluator:
         now = datetime(2026, 10, 28, tzinfo=timezone.utc)
         assert self.evaluator.get_currentness_status(now, None, now) == CurrentnessStatus.UNKNOWN_CURRENCY
         assert self.evaluator.get_currentness_status(now, None, now, max_age_days=30) == CurrentnessStatus.CURRENT
-        assert self.evaluator.get_currentness_status(datetime(2026, 1, 1, tzinfo=timezone.utc), None, now, max_age_days=30) == CurrentnessStatus.STALE
+        old_date = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        assert self.evaluator.get_currentness_status(old_date, None, now, max_age_days=30) == CurrentnessStatus.STALE
+        assert self.evaluator.get_currentness_status(old_date, None, now, max_age_days=30, historical_after_days=180) == CurrentnessStatus.HISTORICAL
 
     def test_claim_extraction_does_not_invent_confidence(self):
         claims = ClaimExtractionEngine().extract("The medication definitely caused the falls.")
