@@ -78,7 +78,11 @@ def validate_response(
 @router.post("/audit", response_model=SafetyAuditRecord)
 def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, final_output: Optional[str] = None, db: Session = Depends(get_db)):
     engine = SafetyEngine()
-    audit_data = engine.create_safety_audit(_sanitize_client_review_flags(input_data), output, final_output)
+    # Recompute the audit decision server-side. The caller-supplied output is
+    # accepted only for API compatibility and is never treated as proof.
+    sanitized_input = _sanitize_client_review_flags(input_data)
+    verified_output = engine.evaluate(sanitized_input)
+    audit_data = engine.create_safety_audit(sanitized_input, verified_output, final_output)
     db_audit = SafetyAuditRecordModel(**audit_data)
     db.add(db_audit)
     db.commit()
