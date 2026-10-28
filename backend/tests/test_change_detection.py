@@ -720,7 +720,6 @@ def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person
         assert changes
         change_id = changes[0].id
         person_id = person.id
-        other_person_id = other_person.id
         token = issue_scoped_session(db, person, caregiver)
         other_token = issue_scoped_session(db, other_person, other_caregiver)
         db.close()
@@ -733,7 +732,7 @@ def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person
         assert response.status_code == 200
         payload = response.json()
         assert payload["change"]["id"] == change_id
-        assert payload["change"]["person_id"] == person.id
+        assert payload["change"]["person_id"] == person_id
         assert payload["evidence"]
         assert all(item["id"] in payload["change"]["evidence_ids"] for item in payload["evidence"])
         assert all(item["title"].startswith("Persisted fall observation") for item in payload["evidence"])
