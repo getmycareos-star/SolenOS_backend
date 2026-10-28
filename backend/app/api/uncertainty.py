@@ -181,9 +181,9 @@ def analyze_and_persist_uncertainty(
 ):
     """Analyze a real workflow claim and persist the epistemic result.
 
-    The endpoint does not treat supplied prose as verified evidence and never emits
-    a calibrated probability. Evidence retrieval and person authorization must be
-    performed by the authenticated calling workflow before invoking this route.
+    The endpoint resolves evidence and conflict IDs from person-scoped persisted
+    records, persists the assessment, and never emits a calibrated probability.
+    Session scope is derived by get_engine from the server-validated bearer token.
     """
     requested_conflict_ids = list(dict.fromkeys(request.conflict_ids))
     if requested_conflict_ids:
@@ -191,6 +191,9 @@ def analyze_and_persist_uncertainty(
             engine.db.query(Contradiction)
             .filter(
                 Contradiction.person_id == request.person_id,
+                Contradiction.subject_type == request.subject_type,
+                Contradiction.subject_id == request.subject_id,
+                Contradiction.field == request.field,
                 Contradiction.id.in_(requested_conflict_ids),
             )
             .all()
