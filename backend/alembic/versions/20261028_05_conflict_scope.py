@@ -29,12 +29,17 @@ def upgrade() -> None:
         op.add_column("contradictions", sa.Column("effective_to", sa.DateTime(timezone=True), nullable=True))
     if "matching_candidate_ids" not in columns:
         op.add_column("contradictions", sa.Column("matching_candidate_ids", sa.Text(), nullable=False, server_default="[]"))
-    for table, cols, name in (
-        ("contradictions", ["person_id", "subject_type", "subject_id", "field"], "ix_contradictions_match_scope"),
-        ("contradictions", ["event_id"], "ix_contradictions_event_scope"),
+    columns = {column["name"] for column in inspect(bind).get_columns("contradictions")}
+    for cols, name in (
+        (["person_id", "subject_type", "subject_id", "field"], "ix_contradictions_match_scope"),
+        (["event_id"], "ix_contradictions_event_scope"),
     ):
-        if not any(index.get("name") == name for index in inspect(bind).get_indexes(table)):
-            op.create_index(name, table, cols, unique=False)
+        # Some historical stamped fixtures only contain the referenced primary
+        # key. Add indexes only where the corresponding legacy columns exist.
+        if not set(cols).issubset(columns):
+            continue
+        if not any(index.get("name") == name for index in inspect(bind).get_indexes("contradictions")):
+            op.create_index(name, "contradictions", cols, unique=False)
 
 
 def downgrade() -> None:
