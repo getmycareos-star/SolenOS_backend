@@ -1,4 +1,6 @@
 from fastapi.testclient import TestClient
+import hashlib
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -6,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver
+from app.models.anonymous_session import AnonymousSession
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -24,6 +27,27 @@ def override_get_db():
     finally:
         db.close()
 
+
+
+def authorized_client(person_id: str) -> TestClient:
+    """Issue a real test bearer capability scoped to an existing test person."""
+    db = TestingSessionLocal()
+    try:
+        caregiver = db.query(Caregiver).filter(Caregiver.person_id == person_id).first()
+        assert caregiver is not None, f"test caregiver missing for {person_id}"
+        token = f"test-token-for-{person_id}"
+        db.add(AnonymousSession(
+            person_id=person_id,
+            caregiver_id=caregiver.id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+    client = TestClient(app)
+    client.headers.update({"Authorization": f"Bearer {token}"})
+    return client
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
@@ -53,7 +77,7 @@ def test_create_information_gap():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-1")
         response = client.post(
             "/api/v1/uncertainty/gaps",
             json={
@@ -97,7 +121,7 @@ def test_unknown_vs_false():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-2")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -144,7 +168,7 @@ def test_contradiction_not_collapsed_to_unknown():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-3")
         
         response = client.post(
             "/api/v1/uncertainty/contradictions",
@@ -190,7 +214,7 @@ def test_ambiguous_not_silently_resolved():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-4")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -232,7 +256,7 @@ def test_open_question_lifecycle():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-5")
         
         response = client.post(
             "/api/v1/uncertainty/questions",
@@ -286,7 +310,7 @@ def test_partial_knowledge_representation():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-6")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -335,7 +359,7 @@ def test_epistemic_view_summary():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-7")
         
         client.post(
             "/api/v1/uncertainty/assessments",
@@ -418,7 +442,7 @@ def test_case_b_explicit_negative_not_unknown():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-b")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -459,7 +483,7 @@ def test_case_f_missing_outcome():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-f")
         
         response = client.post(
             "/api/v1/uncertainty/gaps",
@@ -501,7 +525,7 @@ def test_case_g_missing_date_with_partial_temporal():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-g")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -544,7 +568,7 @@ def test_case_h_missing_context():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-h")
         
         response = client.post(
             "/api/v1/uncertainty/assessments",
@@ -592,7 +616,7 @@ def test_case_i_incomplete_record():
         db.commit()
         db.close()
 
-        client = TestClient(app)
+        client = authorized_client("person-i")
         
         response = client.post(
             "/api/v1/uncertainty/gaps",
