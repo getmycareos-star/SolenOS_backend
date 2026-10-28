@@ -11,7 +11,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
 from app.models.anonymous_session import AnonymousSession
 from app.models.care_continuity import CareAssertion
-from app.models.change import Baseline, Change, ChangeConfirmationEvent
+from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -137,7 +137,7 @@ def test_change_detection_onset():
         teardown_db()
 
 
-def test_pattern_detection_recurrence():
+def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
     setup_db()
     try:
         from app.core.database import get_db
@@ -157,27 +157,61 @@ def test_pattern_detection_recurrence():
         now = datetime.now(timezone.utc)
         from app.core.change_enums import ChangeType, ChangeDirection
         from app.services.pattern_detection import detect_patterns
+        event_ids = []
         for i in range(2):
-            change = Change(
+            event = CareEvent(
                 person_id=person.id,
-                subject_type="fall",
-                subject_id="",
-                change_type=ChangeType.INCREASE,
-                change_direction=ChangeDirection.INCREASING,
-                previous_state="low",
-                current_state="high",
-                previous_count=1,
-                current_count=2 + i,
-                confidence=0.7,
-                evidence_ids=[],
-                created_at=now - timedelta(days=30 + i * 30),
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=30 + i * 30),
+                title=f"Persisted fall event {i + 1}",
+                created_by_caregiver_id=caregiver.id,
             )
-            db.add(change)
+            db.add(event)
+            db.flush()
+            event_ids.append(event.id)
+            db.add(
+                Change(
+                    person_id=person.id,
+                    subject_type="fall",
+                    subject_id="",
+                    change_type=ChangeType.INCREASE,
+                    change_direction=ChangeDirection.INCREASING,
+                    previous_state="Recorded rate before comparison",
+                    current_state="Recorded rate after comparison",
+                    previous_count=1,
+                    current_count=2 + i,
+                    confidence=None,
+                    evidence_ids=[event.id],
+                    created_at=now - timedelta(days=30 + i * 30),
+                )
+            )
         db.commit()
+
         patterns = detect_patterns(db, person.id, "fall", None, now)
-        assert len(patterns) >= 1
-        pattern_types = [p.pattern_type.value for p in patterns]
-        assert "frequency_increase" in pattern_types or "recurrence" in pattern_types
+        db.commit()
+        assert len(patterns) == 1
+        pattern = patterns[0]
+        assert pattern.pattern_type.value == "recurrence"
+        assert set(pattern.event_ids) == set(event_ids)
+        assert pattern.evidence_count == 2
+        assert pattern.confidence is None
+        assert pattern.rate_per_period is not None
+        assert "observation coverage is not measured" in pattern.alternative_interpretations[0].lower()
+
+        repeated = detect_patterns(db, person.id, "fall", None, now)
+        db.commit()
+        assert [item.id for item in repeated] == [pattern.id]
+        assert (
+            db.query(Pattern)
+            .filter(
+                Pattern.person_id == person.id,
+                Pattern.subject_type == "fall",
+                Pattern.is_active.is_(True),
+            )
+            .count()
+            == 1
+        )
         db.close()
     finally:
         teardown_db()
