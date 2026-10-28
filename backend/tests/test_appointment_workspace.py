@@ -359,8 +359,19 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert history.json()["count"] == 2
     assert history.json()["items"][0]["assessment_id"] == changed_body["assessment_id"]
     assert history.json()["items"][1]["assessment_id"] == body["assessment_id"]
+    historical = test_client.get(
+        f"/api/v1/care-continuity/situation-understanding/history/{body['assessment_id']}",
+        headers=headers,
+    )
+    assert historical.status_code == 200, historical.text
+    assert historical.json()["assessment_id"] == body["assessment_id"]
 
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    cross_person_snapshot = test_client.get(
+        f"/api/v1/care-continuity/situation-understanding/history/{body['assessment_id']}",
+        headers=other_headers,
+    )
+    assert cross_person_snapshot.status_code == 404, cross_person_snapshot.text
     other_view = test_client.get("/api/v1/care-continuity/situation-understanding", headers=other_headers)
     assert other_view.status_code == 200, other_view.text
     assert other_view.json()["status"] == "not_assessed"
