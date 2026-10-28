@@ -1198,7 +1198,9 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
         normalized = re.sub(r"\s+", " ", (evidence.source_text or "").strip().casefold())
         fingerprint = hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else None
         if fingerprint:
-            groups.setdefault(fingerprint, []).append(str(evidence.id))
+            ids_for_fingerprint = groups.setdefault(fingerprint, [])
+            if str(evidence.id) not in ids_for_fingerprint:
+                ids_for_fingerprint.append(str(evidence.id))
         records.append({
             "evidence_id": evidence.id,
             "link_role": link.evidence_role,
