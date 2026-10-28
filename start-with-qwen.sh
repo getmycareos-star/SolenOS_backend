@@ -11,7 +11,7 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 
-ollama serve >/tmp/ollama-runtime.log 2>&1 &
+ollama serve > >(tee -a /tmp/ollama-runtime.log) 2>&1 &
 OLLAMA_PID=$!
 UVICORN_PID=""
 
@@ -36,14 +36,28 @@ for attempt in $(seq 1 10); do
   sleep 1
 done
 
+if [[ "$OLLAMA_READY" == "1" ]]; then
+  echo "Optional Ollama sidecar is responding; configured model is $OLLAMA_MODEL."
+else
+  echo "Optional Ollama sidecar did not become ready within 10 seconds; core APIs will start, but Qwen inference may return 503 until the runtime is available." >&2
+fi
+
 # Model pull is deliberately asynchronous. A missing model may make Companion
 # inference unavailable temporarily, but must not block care-record operations.
+# Mirror both runtime and pull output to Railway logs so model-download failures
+# are diagnosable instead of being trapped only in ephemeral /tmp files.
 if [[ "$OLLAMA_READY" == "1" ]]; then
   (
-    if ! ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
-      ollama pull "$OLLAMA_MODEL" || echo "Optional model pull failed; core APIs remain available." >&2
+    if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+      echo "Configured Qwen model $OLLAMA_MODEL is already installed."
+    elif ollama pull "$OLLAMA_MODEL"; then
+      echo "Configured Qwen model $OLLAMA_MODEL was installed successfully."
+    else
+      echo "Optional model pull failed for $OLLAMA_MODEL; core APIs remain available, but Qwen inference is unavailable." >&2
     fi
-  ) >/tmp/qwen-model-pull.log 2>&1 &
+  ) > >(tee -a /tmp/qwen-model-pull.log) 2>&1 &
+else
+  echo "Configured Qwen model pull was not started because Ollama did not become ready." >&2
 fi
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &

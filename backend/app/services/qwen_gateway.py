@@ -116,11 +116,26 @@ def qwen_chat(
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
-            result = json.loads(response.read().decode("utf-8"))
+            raw_body = response.read()
     except TimeoutError as exc:
         raise HTTPException(
             status_code=504,
             detail="SolenOS local Qwen timed out; no model response was generated.",
+        ) from exc
+    except urllib.error.HTTPError as exc:
+        if exc.code in {408, 504}:
+            raise HTTPException(
+                status_code=504,
+                detail="SolenOS local Qwen timed out; no model response was generated.",
+            ) from exc
+        if exc.code == 404:
+            raise HTTPException(
+                status_code=503,
+                detail="Ollama returned 404 for the configured model/chat endpoint; verify that the model is installed and the native chat route is available.",
+            ) from exc
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ollama rejected the inference request with HTTP {exc.code}; no model response was generated.",
         ) from exc
     except urllib.error.URLError as exc:
         if isinstance(getattr(exc, "reason", None), TimeoutError):
@@ -130,14 +145,33 @@ def qwen_chat(
             ) from exc
         raise HTTPException(
             status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            detail="SolenOS local Qwen could not be reached; no model response was generated.",
         ) from exc
-    except (ValueError, OSError) as exc:
+    except OSError as exc:
         raise HTTPException(
             status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            detail="SolenOS local Qwen could not be reached; no model response was generated.",
         ) from exc
-    content = result.get("message", {}).get("content")
+
+    try:
+        result = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama returned malformed JSON; no model response was generated.",
+        ) from exc
+    if not isinstance(result, dict):
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama returned an invalid response object; no model response was generated.",
+        )
+    message = result.get("message")
+    if not isinstance(message, dict):
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama returned a response without a valid message object.",
+        )
+    content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(
             status_code=503,
@@ -240,8 +274,13 @@ def qwen_runtime_status() -> dict:
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="SolenOS local Qwen runtime is not responding.",
+            detail="SolenOS local Qwen runtime is not responding or returned malformed status JSON.",
         ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama returned an invalid runtime status object.",
+        )
     models = payload.get("models")
     if not isinstance(models, list):
         raise HTTPException(status_code=503, detail="Ollama returned an invalid model inventory.")

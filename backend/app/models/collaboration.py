@@ -50,6 +50,7 @@ class ConversationMessage(Base):
     guard_verdict = Column(String, nullable=True)
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
+    response_metadata_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
