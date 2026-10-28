@@ -85,8 +85,46 @@ def test_post_situation_creates_evidence_and_event():
         assert data["analysis_warning"] is None
         assert len(data["events"]) == 1
         assert data["events"][0]["title"] == "Patient seemed more confused than usual today."
+        assert data["events"][0]["time_provenance"] == "entry_time_defaulted"
         assert data["evidence_id"] is not None
         assert data["care_event_id"] is not None
+    finally:
+        teardown_db()
+
+
+
+@pytest.mark.session_security
+def test_post_situation_preserves_caregiver_reported_event_time_provenance():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Reported Event Time Person")
+        event_time = "2026-10-20T08:30:00+00:00"
+        response = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": created["caregiver"]["id"],
+                "person_id": created["person"]["id"],
+                "raw_input": "Caregiver reports restless sleep.",
+                "timestamp": event_time,
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
+        assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
+
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(CareEvent).filter_by(id=data["care_event_id"]).one()
+            assert saved.time_provenance == "caregiver_reported_event_time"
+            assert saved.occurred_at.isoformat().startswith("2026-10-20T08:30:00")
+        finally:
+            db.close()
     finally:
         teardown_db()
 
