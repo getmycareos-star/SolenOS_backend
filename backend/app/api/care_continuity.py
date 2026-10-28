@@ -409,6 +409,8 @@ def current_care_projection(
         add("conflicts", row, "Conflict", 0, require_open=True)
     for row in (sources.get("uncertainties") or {}).get("items", []):
         add("uncertainties", row, "Needs clarification", 1, require_open=True)
+    for row in (sources.get("information_gaps") or {}).get("items", []):
+        add("information_gaps", row, "Information missing", 2, require_open=True)
     for row in (sources.get("missing_information") or {}).get("items", []):
         add("missing_information", row, "Information missing", 2, require_open=True)
     for row in (sources.get("open_questions") or {}).get("items", []):
