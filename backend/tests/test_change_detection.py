@@ -778,13 +778,15 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
         changes = detect_event_changes(db, person.id, "fall", None, now)
         db.commit()
         assert changes
+        person_id = person.id
+        caregiver_id = caregiver.id
         change_id = changes[0].id
         evidence_id = changes[0].evidence_ids[0]
         token = issue_scoped_session(db, person, caregiver)
         db.close()
 
         client = TestClient(app)
-        url = f"/api/v1/change/changes/{person.id}/{change_id}/confirmation"
+        url = f"/api/v1/change/changes/{person_id}/{change_id}/confirmation"
         response = client.post(
             url,
             json={"status": "confirmed", "reason": "Caregiver reviewed the linked observations.", "evidence_ids": [evidence_id]},
@@ -794,15 +796,15 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
         payload = response.json()
         assert payload["previous_status"] == "detected"
         assert payload["new_status"] == "confirmed"
-        assert payload["actor_caregiver_id"] == caregiver.id
+        assert payload["actor_caregiver_id"] == caregiver_id
         assert payload["change"]["confirmation_status"] == "confirmed"
 
         db = TestingSessionLocal()
-        saved = db.query(Change).filter(Change.id == change_id, Change.person_id == person.id).one()
+        saved = db.query(Change).filter(Change.id == change_id, Change.person_id == person_id).one()
         transitions = db.query(ChangeConfirmationEvent).filter(ChangeConfirmationEvent.change_id == change_id).all()
         assert saved.confirmation_status == "confirmed"
         assert len(transitions) == 1
-        assert transitions[0].actor_caregiver_id == caregiver.id
+        assert transitions[0].actor_caregiver_id == caregiver_id
         assert transitions[0].reason == "Caregiver reviewed the linked observations."
         assert transitions[0].evidence_ids == [evidence_id]
         db.close()
