@@ -252,7 +252,16 @@ def get_change_detail(
             .all()
         )
     # Do not return arbitrary event records referenced by stale or corrupt IDs.
-    return ChangeDetailResponse(change=change, evidence=evidence)
+    history = (
+        db.query(ChangeConfirmationEvent)
+        .filter(
+            ChangeConfirmationEvent.change_id == change.id,
+            ChangeConfirmationEvent.person_id == person_id,
+        )
+        .order_by(ChangeConfirmationEvent.created_at.asc(), ChangeConfirmationEvent.id.asc())
+        .all()
+    )
+    return ChangeDetailResponse(change=change, evidence=evidence, confirmation_history=history)
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
