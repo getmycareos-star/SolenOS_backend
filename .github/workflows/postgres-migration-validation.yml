@@ -98,6 +98,8 @@ jobs:
               "care_record_restorations": {"person_id", "care_record_id", "retraction_id", "reason", "restored_at"},
               "appointment_workspace_records": {"person_id", "appointment_id", "status", "version_number", "payload", "updated_at"},
               "appointment_workspace_revisions": {"record_id", "person_id", "revision_number", "payload", "changed_at"},
+              "contradictions": {"event_id", "context_key", "effective_from", "effective_to", "matching_candidate_ids"},
+              "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
