@@ -7,6 +7,7 @@ from app.models.uncertainty import (
     OpenQuestion as OpenQuestionModel,
     Contradiction as ContradictionModel,
     UncertaintyAssessment as UncertaintyAssessmentModel,
+    ContradictionResolutionEvent as ContradictionResolutionEventModel,
 )
 from app.schemas.uncertainty import (
     InformationGapCreate,
@@ -166,22 +167,74 @@ class UncertaintyEngine:
     def update_contradiction(
         self, contradiction_id: str, update: ContradictionUpdate
     ) -> Optional[ContradictionModel]:
-        db_contradiction = (
-            self._target_query(ContradictionModel, contradiction_id).first()
-        )
+        db_contradiction = self._target_query(ContradictionModel, contradiction_id).first()
         if not db_contradiction:
             return None
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
-        if "resolution_status" in update_data and update_data["resolution_status"] == "resolved":
-            db_contradiction.resolved_at = datetime.now(timezone.utc)
+        requested_status = update_data.get("resolution_status", db_contradiction.resolution_status)
+        status_changed = requested_status != db_contradiction.resolution_status
+        resolution_statuses = {"resolved", "partially_resolved", "reopened", "unresolved"}
+        if requested_status not in resolution_statuses:
+            raise ValueError("Unsupported conflict resolution status")
+        rationale = (update_data.get("resolution_notes") or "").strip()
+        if status_changed and requested_status in {"resolved", "partially_resolved", "reopened"} and not rationale:
+            raise ValueError("A non-empty rationale is required to resolve, partially resolve, or reopen a conflict")
 
-        for field, value in update_data.items():
-            setattr(db_contradiction, field, value)
+        evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
+        if len(evidence_ids) != len(set(evidence_ids)):
+            raise ValueError("Duplicate evidence IDs are not allowed in conflict resolution")
+        if status_changed:
+            from app.models.care import Evidence
+            if evidence_ids:
+                evidence_count = (
+                    self.db.query(Evidence)
+                    .filter(Evidence.person_id == db_contradiction.person_id, Evidence.id.in_(evidence_ids))
+                    .count()
+                )
+                if evidence_count != len(evidence_ids):
+                    raise ValueError("Resolution evidence must belong to the same care record")
 
-        self.db.commit()
-        self.db.refresh(db_contradiction)
-        return db_contradiction
+        try:
+            if status_changed:
+                event = ContradictionResolutionEventModel(
+                    contradiction_id=db_contradiction.id,
+                    person_id=db_contradiction.person_id,
+                    actor_caregiver_id=self.caregiver_id,
+                    previous_status=db_contradiction.resolution_status,
+                    new_status=requested_status,
+                    rationale=rationale,
+                    evidence_ids=list(evidence_ids),
+                )
+                self.db.add(event)
+
+            for field, value in update_data.items():
+                if field == "resolved_by_caregiver_id":
+                    # Actor identity comes only from the validated session.
+                    continue
+                setattr(db_contradiction, field, value)
+
+            if status_changed and requested_status == "resolved":
+                db_contradiction.resolved_at = datetime.now(timezone.utc)
+                db_contradiction.resolved_by_caregiver_id = self.caregiver_id
+            elif status_changed and requested_status in {"reopened", "unresolved", "partially_resolved"}:
+                db_contradiction.resolved_at = None
+                db_contradiction.resolved_by_caregiver_id = None
+
+            self.db.commit()
+            self.db.refresh(db_contradiction)
+            return db_contradiction
+        except Exception:
+            self.db.rollback()
+            raise
+
+    def list_contradiction_resolution_events(self, contradiction_id: str):
+        query = self.db.query(ContradictionResolutionEventModel).filter(
+            ContradictionResolutionEventModel.contradiction_id == contradiction_id
+        )
+        if self.person_id is not None:
+            query = query.filter(ContradictionResolutionEventModel.person_id == self.person_id)
+        return query.order_by(ContradictionResolutionEventModel.created_at.asc()).all()
 
     def list_contradictions(
         self,
