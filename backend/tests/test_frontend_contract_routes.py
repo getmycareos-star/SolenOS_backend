@@ -314,6 +314,58 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
 
 
 
+
+def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkeypatch):
+    from datetime import datetime, timezone
+
+    client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
+    try:
+        event_id = "lcr-context-owner-event"
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id=event_id,
+            person_id=person_id,
+            event_type="caregiver_observation",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc),
+            title="Owner-scoped context test",
+            description="This event must only appear in its owner's LCR context.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+        db.close()
+
+        own = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert own.status_code == 200, own.text
+        payload = own.json()
+        assert payload["read_only"] is True
+        assert payload["history_coverage"] == "bounded_subset"
+        assert "schema_status" in payload
+        assert "missing_required_sources" in payload
+        assert "missing_optional_sources" in payload
+        own_events = payload["sources"]["events"]["items"]
+        assert any(item.get("id") == event_id for item in own_events)
+        assert payload["sources"]["events"]["returned_count"] <= 1
+
+        other = client.get(
+            "/api/v1/care-continuity/context?limit_per_source=1",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert other.status_code == 200, other.text
+        other_events = other.json()["sources"]["events"]["items"]
+        assert all(item.get("id") != event_id for item in other_events)
+        assert all(item.get("person_id") != person_id for source in other.json()["sources"].values() for item in source["items"])
+
+        unauthenticated = client.get("/api/v1/care-continuity/context")
+        assert unauthenticated.status_code == 401, unauthenticated.text
+    finally:
+        teardown()
+
+
 def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
     import json
     import app.api.collaboration as collaboration_api
