@@ -65,6 +65,11 @@ class Contradiction(Base):
     subject_id = Column(String, nullable=False)
     field = Column(String, nullable=False)
     description = Column(Text, nullable=False)
+    event_id = Column(String, ForeignKey("care_events.id", ondelete="SET NULL"), nullable=True, index=True)
+    context_key = Column(String(160), nullable=True)
+    effective_from = Column(DateTime(timezone=True), nullable=True)
+    effective_to = Column(DateTime(timezone=True), nullable=True)
+    matching_candidate_ids = Column(JSONList, nullable=False, default=list)
     evidence_ids = Column(JSONList, nullable=True)
     # Source assertion IDs are part of the persisted conflict provenance.
     # The existing migration defines this column as TEXT; JSONList preserves
