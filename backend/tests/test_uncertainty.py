@@ -785,3 +785,64 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         assert other_client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history").status_code == 404
     finally:
         teardown_db()
+
+
+
+def test_evidence_review_history_persists_attribution_and_is_person_scoped():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="review-person", name="Review Person")
+        caregiver = Caregiver(
+            id="review-caregiver", name="Review Caregiver",
+            email="review@example.com", relationship="Family", person_id=person.id,
+        )
+        other_person = Person(id="review-other-person", name="Other Review Person")
+        other_caregiver = Caregiver(
+            id="review-other-caregiver", name="Other Review Caregiver",
+            email="review-other@example.com", relationship="Family", person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        evidence = Evidence(
+            id="review-evidence-1", person_id=person.id, type="caregiver_report",
+            source_text="Caregiver reported a missed appointment.", uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report", time_provenance="reported as occurring last Tuesday",
+        )
+        db.add(evidence)
+        db.commit()
+        db.close()
+
+        client = authorized_client("review-person")
+        other_client = authorized_client("review-other-person")
+        payload = {
+            "review_type": "reliability",
+            "outcome": "unverified",
+            "rationale": "The source is attributed, but no independent corroborating record is linked.",
+            "policy_version": "evidence-review-v1",
+            "criteria": [
+                {"criterion": "source attribution", "result": "present", "rationale": "Uploader and source type are persisted."},
+                {"criterion": "independent corroboration", "result": "missing", "rationale": "No independent source is linked."},
+            ],
+        }
+        created = client.post("/api/v1/care-continuity/evidence/review-evidence-1/reviews", json=payload)
+        assert created.status_code == 201, created.text
+        row = created.json()
+        assert row["evidence_id"] == "review-evidence-1"
+        assert row["source_attribution"]["source_type"] == "caregiver_report"
+        assert row["reviewed_by_caregiver_id"] == "review-caregiver"
+
+        listed = client.get("/api/v1/care-continuity/evidence/review-evidence-1/reviews")
+        assert listed.status_code == 200, listed.text
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["policy_version"] == "evidence-review-v1"
+        assert other_client.get("/api/v1/care-continuity/evidence/review-evidence-1/reviews").status_code == 404
+        invalid = client.post(
+            "/api/v1/care-continuity/evidence/review-evidence-1/reviews",
+            json={**payload, "outcome": "high_confidence"},
+        )
+        assert invalid.status_code == 422
+    finally:
+        teardown_db()
