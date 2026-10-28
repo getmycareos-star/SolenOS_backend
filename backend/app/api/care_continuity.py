@@ -433,8 +433,16 @@ def current_care_projection(
     for row in (sources.get("follow_up_links") or {}).get("items", []):
         add("follow_up_links", row, "Follow-up", 4, require_open=True)
     for row in (sources.get("events") or {}).get("items", []):
-        if row.get("attention_candidate") is True or row.get("follow_up_candidate") is True:
+        event_type = str(row.get("event_type") or "").strip().lower()
+        needs_attention = row.get("attention_candidate") is True or row.get("follow_up_candidate") is True
+        is_daily_capture = event_type in {"structured_daily_capture", "daily_care_entry"}
+        if needs_attention:
             add("events", row, "Care event needing attention", 5, require_open=True)
+        elif is_daily_capture:
+            # Daily Care is a source event in the longitudinal view even when
+            # no automated attention/follow-up flag was raised. It remains a
+            # caregiver-recorded event, not a verified clinical fact.
+            add("events", row, "Daily care entry", 6)
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
