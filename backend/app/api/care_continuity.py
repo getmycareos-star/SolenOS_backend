@@ -650,6 +650,37 @@ def get_situation_understanding(request: Request, db: Session = Depends(get_db))
     return {"person_id": person_id, "status": "available", "assessment_id": row["id"], "created_at": row["created_at"], "assessment": assessment}
 
 
+@router.get("/situation-understanding/history")
+def situation_understanding_history(
+    request: Request,
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Return immutable, person-scoped assessment snapshots newest first."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+        raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
+    table = _table(db, "care_delta_runs")
+    rows = db.execute(
+        select(table).where(
+            table.c.person_id == person_id,
+            table.c.source == "situation_understanding_assessment",
+        ).order_by(desc(table.c.created_at)).limit(limit)
+    ).mappings().all()
+    items = []
+    for row in rows:
+        try:
+            assessment = json.loads(row["delta_json"])
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=503, detail="Stored situation assessment is invalid") from exc
+        items.append({
+            "assessment_id": row["id"],
+            "created_at": _jsonable(row["created_at"]),
+            "assessment": assessment,
+        })
+    return {"person_id": person_id, "items": items, "count": len(items)}
+
+
 @router.post("/situation-understanding/reassess")
 def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
     """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
@@ -658,7 +689,6 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     assessment = _build_situation_understanding_assessment(db, person_id)
-    serialized = json.dumps(assessment, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     latest = db.execute(
         select(table).where(
             table.c.person_id == person_id,
@@ -672,12 +702,50 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
             previous_assessment = {}
         previous_comparison = dict(previous_assessment) if isinstance(previous_assessment, dict) else {}
         current_comparison = dict(assessment)
-        # The assessment timestamp is metadata, not a semantic change. Compare
-        # the evidence-derived projection without it to avoid duplicate snapshots.
+        # Compare semantic content, excluding the assessment clock.
         previous_comparison.pop("as_of", None)
         current_comparison.pop("as_of", None)
-        if previous_comparison == current_comparison:
+        previous_records = {
+            (str(item.get("source", "")), str(item.get("id", ""))): item
+            for item in (previous_assessment.get("current_care_reality", {}).get("records", []) if isinstance(previous_assessment, dict) else [])
+            if item.get("id")
+        }
+        current_records = {
+            (str(item.get("source", "")), str(item.get("id", ""))): item
+            for item in assessment.get("current_care_reality", {}).get("records", [])
+            if item.get("id")
+        }
+        changes = []
+        for key, current in current_records.items():
+            prior = previous_records.get(key)
+            if prior is None:
+                changes.append({"change_type": "newly_included", "source": key[0], "record_id": key[1], "current": current, "previous": None})
+            elif json.dumps(prior, sort_keys=True, default=str) != json.dumps(current, sort_keys=True, default=str):
+                changes.append({"change_type": "record_updated", "source": key[0], "record_id": key[1], "current": current, "previous": prior})
+        for key, prior in previous_records.items():
+            if key not in current_records:
+                changes.append({"change_type": "no_longer_in_current_projection", "source": key[0], "record_id": key[1], "current": None, "previous": prior})
+        assessment["evolution_since_previous_assessment"] = {
+            "comparison_available": True,
+            "previous_assessment_id": latest["id"],
+            "change_count": len(changes),
+            "changes": changes[:200],
+            "interpretation_limit": "Projection differences only. Removal from a bounded projection does not establish deletion or clinical improvement/deterioration.",
+        }
+        # Avoid a new snapshot when source content and coverage are semantically unchanged.
+        previous_comparison.pop("evolution_since_previous_assessment", None)
+        current_comparison.pop("evolution_since_previous_assessment", None)
+        if previous_comparison == current_comparison and not changes:
             return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": previous_assessment}
+    else:
+        assessment["evolution_since_previous_assessment"] = {
+            "comparison_available": False,
+            "previous_assessment_id": None,
+            "change_count": 0,
+            "changes": [],
+            "interpretation_limit": "No earlier persisted assessment exists; no historical baseline is assumed.",
+        }
+    serialized = json.dumps(assessment, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     evidence_ids = sorted({
         str(evidence_id)
         for domain in assessment.get("current_care_reality", {}).get("records", [])
