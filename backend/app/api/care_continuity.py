@@ -1209,6 +1209,20 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource == "fact-evidence":
+        fact_evidence = _table(db, "care_fact_evidence")
+        duplicate = db.execute(
+            select(fact_evidence.c.id).where(
+                fact_evidence.c.fact_id == data["fact_id"],
+                fact_evidence.c.evidence_id == data["evidence_id"],
+                fact_evidence.c.person_id == person_id,
+            ).limit(1)
+        ).first()
+        if duplicate:
+            raise HTTPException(
+                status_code=409,
+                detail="This evidence is already linked to the claim; duplicate links cannot count as corroboration.",
+            )
     _validate_links(db, person_id, resource, data)
     table = _table(db, RESOURCES[resource])
     data["person_id"] = person_id
