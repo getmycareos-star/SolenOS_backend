@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
 from app.models.anonymous_session import AnonymousSession
-from app.models.change import Baseline, Change, Pattern, Situation
+from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
 from app.schemas.change import (
     BaselineCreate,
     Baseline as BaselineSchema,
@@ -15,6 +15,8 @@ from app.schemas.change import (
     Situation as SituationSchema,
     SituationResponse,
     ChangeDetailResponse,
+    ChangeConfirmationRequest,
+    ChangeConfirmationTransitionResponse,
 )
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations, update_situations
@@ -131,6 +133,92 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
         .order_by(Change.created_at.desc())
         .limit(100)
         .all()
+    )
+
+
+@router.post(
+    "/changes/{person_id}/{change_id}/confirmation",
+    response_model=ChangeConfirmationTransitionResponse,
+)
+def transition_change_confirmation(
+    person_id: str,
+    change_id: str,
+    payload: ChangeConfirmationRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Record an audited caregiver confirmation decision without rewriting source evidence."""
+    session = _require_person_scope(request, db, person_id)
+    allowed_statuses = {"awaiting_confirmation", "confirmed", "rejected", "inconclusive"}
+    if payload.status not in allowed_statuses:
+        raise HTTPException(status_code=422, detail="Unsupported confirmation status")
+    if payload.status in {"rejected", "inconclusive"} and not (payload.reason or "").strip():
+        raise HTTPException(status_code=422, detail="A reason is required for rejected or inconclusive decisions")
+
+    change = (
+        db.query(Change)
+        .filter(Change.id == change_id, Change.person_id == person_id)
+        .with_for_update()
+        .first()
+    )
+    if change is None:
+        raise HTTPException(status_code=404, detail="Change assessment not found")
+    if not change.is_active or change.superseded_by_change_id:
+        raise HTTPException(status_code=409, detail="A superseded change cannot be confirmed or rejected")
+    previous_status = change.confirmation_status or "detected"
+    transitions = {
+        "detected": {"awaiting_confirmation", "confirmed", "rejected", "inconclusive"},
+        "awaiting_confirmation": {"confirmed", "rejected", "inconclusive"},
+        "confirmed": {"awaiting_confirmation"},
+        "rejected": {"awaiting_confirmation"},
+        "inconclusive": {"awaiting_confirmation"},
+    }
+    if payload.status not in transitions.get(previous_status, set()):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Invalid confirmation transition from {previous_status} to {payload.status}",
+        )
+
+    supplied_evidence_ids = list(dict.fromkeys(payload.evidence_ids))
+    if supplied_evidence_ids:
+        valid_ids = {
+            row[0]
+            for row in db.query(CareEvent.id).filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(supplied_evidence_ids),
+            ).all()
+        }
+        if valid_ids != set(supplied_evidence_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Every confirmation evidence reference must identify a persisted event in this care record",
+            )
+
+    transition = ChangeConfirmationEvent(
+        change_id=change.id,
+        person_id=person_id,
+        actor_caregiver_id=session.caregiver_id,
+        previous_status=previous_status,
+        new_status=payload.status,
+        reason=(payload.reason or "").strip() or None,
+        evidence_ids=supplied_evidence_ids,
+    )
+    change.confirmation_status = payload.status
+    db.add(transition)
+    try:
+        db.commit()
+        db.refresh(change)
+        db.refresh(transition)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Confirmation transition could not be persisted") from exc
+    return ChangeConfirmationTransitionResponse(
+        change=change,
+        transition_id=transition.id,
+        previous_status=previous_status,
+        new_status=payload.status,
+        actor_caregiver_id=session.caregiver_id,
+        created_at=transition.created_at,
     )
 
 
