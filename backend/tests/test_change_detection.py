@@ -127,7 +127,8 @@ def test_change_detection_onset():
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "fall", None, now)
         assert len(changes) == 1
-        assert changes[0].change_type.value == "onset"
+        assert changes[0].change_type.value == "emergence"
+        assert "No comparable prior events" in changes[0].previous_state
         assert changes[0].previous_count == 0
         assert changes[0].current_count == 3
         db.close()
