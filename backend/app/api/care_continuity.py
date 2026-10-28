@@ -365,7 +365,7 @@ def current_care_projection(
         source_id = str(row.get("id") or "")
         if not source_id or (source_name, source_id) in seen:
             return
-        raw_status = row.get("status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
+        raw_status = row.get("status") or row.get("lifecycle_status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
         status = str(raw_status).strip().lower() if raw_status is not None else "status_unknown"
         closed_statuses = {"resolved", "completed", "closed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}
         if require_open and status in closed_statuses:
@@ -375,13 +375,13 @@ def current_care_projection(
         if source_name == "assertions" and status in {"retracted", "superseded"}:
             return
 
-        title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field",
+        title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "follow_up_kind", "target_type",
                         "observation_category", "decision_text", "description", "event_type")
-        description_fields = ("description", "question", "fact_value", "asserted_value",
+        description_fields = ("description", "question", "notes", "fact_value", "asserted_value",
                               "perspective_text", "observed_value", "decision_text", "summary", "resolution")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
-        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
+        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at") or row.get("due_at")
         recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at")
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
@@ -413,17 +413,19 @@ def current_care_projection(
         add("missing_information", row, "Information missing", 2, require_open=True)
     for row in (sources.get("open_questions") or {}).get("items", []):
         add("open_questions", row, "Open question", 3, require_open=True)
+    for row in (sources.get("follow_up_links") or {}).get("items", []):
+        add("follow_up_links", row, "Follow-up", 4, require_open=True)
     for row in (sources.get("events") or {}).get("items", []):
         if row.get("attention_candidate") is True or row.get("follow_up_candidate") is True:
-            add("events", row, "Care event needing attention", 4, require_open=True)
+            add("events", row, "Care event needing attention", 5, require_open=True)
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
-        add("caregiver_observations", row, "Caregiver observation", 5)
+        add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
-        add("facts", row, "Recorded fact", 6)
+        add("facts", row, "Recorded fact", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
-        add("assertions", row, "Reported information", 7, require_open=True)
+        add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
-        add("decisions", row, "Care decision", 8, require_open=True)
+        add("decisions", row, "Care decision", 9, require_open=True)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
