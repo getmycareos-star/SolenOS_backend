@@ -286,6 +286,9 @@ def test_detect_time_patterns():
     assert len(patterns) >= 1
     time_patterns = [p for p in patterns if p["pattern_type"] == "time_of_day"]
     assert len(time_patterns) >= 1
+    # Frequency counts describe observed recurrence; they are not calibrated
+    # probabilities and must not be exposed as confidence scores.
+    assert all(pattern["confidence"] is None for pattern in patterns)
 
 
 def test_natural_language_time_ago():
