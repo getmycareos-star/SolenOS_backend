@@ -721,7 +721,7 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Events frequently occur in the {period}",
                 "period": period,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
+                "confidence": None,  # Pattern frequency is descriptive, not a calibrated probability.
                 "window_days": window_days,
             })
 
@@ -732,7 +732,7 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Events frequently occur on {day}s",
                 "day": day,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
+                "confidence": None,  # Pattern frequency is descriptive, not a calibrated probability.
                 "window_days": window_days,
             })
 
@@ -743,7 +743,7 @@ def detect_time_patterns(events: list, window_days: int = 30, reference_time: Op
                 "label": f"Recurring {evt_type} events",
                 "event_type": evt_type,
                 "count": count,
-                "confidence": min(count / 10.0, 1.0),
+                "confidence": None,  # Pattern frequency is descriptive, not a calibrated probability.
                 "window_days": window_days,
             })
 
