@@ -26,3 +26,12 @@ def test_lcr_source_schema_is_cached_per_engine_and_reflects_partial_schema():
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+def test_lcr_context_decodes_persisted_jsonlist_text_without_guessing_plain_text():
+    from app.services.lcr_context import _safe_value
+
+    assert _safe_value('["evidence-a", "evidence-b"]', "evidence_ids") == ["evidence-a", "evidence-b"]
+    assert _safe_value('{"reported": true}', "context_payload") == {"reported": True}
+    assert _safe_value("not-json", "evidence_ids") == "not-json"
+    assert _safe_value('["not-a-list-field"]', "source_text") == '["not-a-list-field"]'
