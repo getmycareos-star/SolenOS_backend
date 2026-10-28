@@ -165,6 +165,11 @@ def test_contradiction_not_collapsed_to_unknown():
             person_id=person.id,
         )
         db.add_all([person, caregiver])
+        db.flush()
+        db.add_all([
+            Evidence(id="ev-1", person_id=person.id, type="document", source_text="Medication list states discontinued.", uploaded_by_caregiver_id=caregiver.id, source_type="document"),
+            Evidence(id="ev-2", person_id=person.id, type="document", source_text="Current medication list includes metformin.", uploaded_by_caregiver_id=caregiver.id, source_type="document"),
+        ])
         db.commit()
         db.close()
 
