@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+import hashlib
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
+from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, Pattern, Situation
 from app.schemas.change import (
     BaselineCreate,
@@ -18,6 +20,29 @@ from app.services.situation_formation import detect_situations, update_situation
 from app.services.explanation import explain_situation
 
 router = APIRouter(prefix="/change", tags=["change"])
+
+
+def _require_person_scope(request: Request, db: Session, person_id: str) -> AnonymousSession:
+    """Require a live server-issued bearer session scoped to the requested care record."""
+    authorization = request.headers.get("authorization", "")
+    scheme, _, raw_token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not raw_token.strip():
+        raise HTTPException(status_code=401, detail="A valid SolenOS care session is required")
+    token_hash = hashlib.sha256(raw_token.strip().encode("utf-8")).hexdigest()
+    session = (
+        db.query(AnonymousSession)
+        .filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if session is None:
+        raise HTTPException(status_code=401, detail="The SolenOS care session is invalid or expired")
+    if session.person_id != person_id:
+        raise HTTPException(status_code=403, detail="This session cannot access the requested care record")
+    return session
 
 
 def _parse_reference_time(value: Optional[str]) -> Optional[datetime]:
@@ -40,16 +65,17 @@ def _parse_reference_time(value: Optional[str]) -> Optional[datetime]:
 
 
 @router.post("/baselines", response_model=BaselineSchema)
-def create_baseline(baseline: BaselineCreate, db: Session = Depends(get_db)):
-    db_baseline = Baseline(**baseline.model_dump())
-    db.add(db_baseline)
-    db.commit()
-    db.refresh(db_baseline)
-    return db_baseline
+def create_baseline(baseline: BaselineCreate, request: Request, db: Session = Depends(get_db)):
+    _require_person_scope(request, db, baseline.person_id)
+    raise HTTPException(
+        status_code=405,
+        detail="Baselines are derived from persisted care events and cannot be supplied by clients",
+    )
 
 
 @router.get("/baselines/{person_id}", response_model=List[BaselineSchema])
-def list_baselines(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+def list_baselines(person_id: str, request: Request, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_person_scope(request, db, person_id)
     query = db.query(Baseline).filter(Baseline.person_id == person_id)
     if subject_type:
         query = query.filter(Baseline.subject_type == subject_type)
@@ -60,17 +86,20 @@ def list_baselines(person_id: str, subject_type: Optional[str] = None, db: Sessi
 def detect_changes(
     person_id: str,
     event_type: str,
+    request: Request,
     subject_id: Optional[str] = None,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    _require_person_scope(request, db, person_id)
     ref_time = _parse_reference_time(reference_time)
     changes = detect_event_changes(db, person_id, event_type, subject_id, ref_time)
     return changes
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
-def list_changes(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+def list_changes(person_id: str, request: Request, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_person_scope(request, db, person_id)
     query = db.query(Change).filter(Change.person_id == person_id)
     if subject_type:
         query = query.filter(Change.subject_type == subject_type)
@@ -81,10 +110,12 @@ def list_changes(person_id: str, subject_type: Optional[str] = None, db: Session
 def detect_patterns_endpoint(
     person_id: str,
     event_type: str,
+    request: Request,
     subject_id: Optional[str] = None,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    _require_person_scope(request, db, person_id)
     from app.services.pattern_detection import detect_patterns as _detect_patterns
     ref_time = _parse_reference_time(reference_time)
     patterns = _detect_patterns(db, person_id, event_type, subject_id, ref_time)
@@ -92,7 +123,8 @@ def detect_patterns_endpoint(
 
 
 @router.get("/patterns/{person_id}", response_model=List[PatternSchema])
-def list_patterns(person_id: str, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+def list_patterns(person_id: str, request: Request, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+    _require_person_scope(request, db, person_id)
     query = db.query(Pattern).filter(Pattern.person_id == person_id)
     if subject_type:
         query = query.filter(Pattern.subject_type == subject_type)
@@ -102,9 +134,11 @@ def list_patterns(person_id: str, subject_type: Optional[str] = None, db: Sessio
 @router.get("/situations/detect", response_model=List[SituationResponse])
 def detect_situations_endpoint(
     person_id: str,
+    request: Request,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    _require_person_scope(request, db, person_id)
     ref_time = _parse_reference_time(reference_time)
     situations = detect_situations(db, person_id, ref_time)
     result = []
@@ -159,7 +193,8 @@ def detect_situations_endpoint(
 
 
 @router.get("/situations/{person_id}", response_model=List[SituationSchema])
-def list_situations(person_id: str, db: Session = Depends(get_db)):
+def list_situations(person_id: str, request: Request, db: Session = Depends(get_db)):
+    _require_person_scope(request, db, person_id)
     return db.query(Situation).filter(Situation.person_id == person_id).order_by(Situation.created_at.desc()).all()
 
 
@@ -167,9 +202,11 @@ def list_situations(person_id: str, db: Session = Depends(get_db)):
 def update_situations_endpoint(
     person_id: str,
     event_id: str,
+    request: Request,
     reference_time: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    _require_person_scope(request, db, person_id)
     event = db.query(CareEvent).filter(CareEvent.id == event_id, CareEvent.person_id == person_id).first()
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
