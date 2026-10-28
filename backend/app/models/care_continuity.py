@@ -197,3 +197,26 @@ def _version_care_state(session, flush_context, instances):
             evidence_ids=list(evidence_ids),
             changed_by_caregiver_id=str(caregiver_id) if caregiver_id else None,
         ))
+
+
+
+class EvidenceReviewRecord(Base):
+    """Append-only, versioned assessment of persisted evidence and its attribution."""
+    __tablename__ = "evidence_review_records"
+    __table_args__ = (
+        Index("ix_evidence_review_records_evidence", "evidence_id"),
+        Index("ix_evidence_review_records_person", "person_id"),
+        Index("ix_evidence_review_records_type", "review_type"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    review_type = Column(String(32), nullable=False)
+    outcome = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    criteria = Column(JSONList, nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    source_attribution_snapshot = Column(Text, nullable=False)
+    reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
