@@ -436,7 +436,7 @@ def current_care_projection(
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
-        add("facts", row, "Recorded fact", 7)
+        add("facts", row, "Recorded information", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
