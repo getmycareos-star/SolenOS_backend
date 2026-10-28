@@ -21,6 +21,7 @@ from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
 from app.api.reminders import router as reminders_router
 from app.api.capture_review import router as capture_review_router
+from app.api.account_auth import router as account_auth_router
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -66,6 +67,7 @@ app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
+app.include_router(account_auth_router, prefix="/api/v1")
 
 # All care-data APIs require a server-issued bearer capability scoped to one
 # person. The anonymous bootstrap is the only way to obtain a new capability;
@@ -84,6 +86,15 @@ PUBLIC_V1_ENDPOINTS = {
 async def enforce_scoped_anonymous_session(request: Request, call_next):
     path = str(request.scope.get("path") or request.url.path).rstrip("/")
     method = request.method.upper()
+    # Account routes validate their own account bearer token. Signup/login are
+    # intentionally available before a care-record session exists.
+    if path in {
+        "/api/v1/auth/signup",
+        "/api/v1/auth/login",
+        "/api/v1/auth/me",
+        "/api/v1/auth/logout",
+    }:
+        return await call_next(request)
     if method == "OPTIONS":
         return await call_next(request)
     if not path.startswith("/api/v1/") and path != "/api/situation":
@@ -137,7 +148,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         request.state.anonymous_session_id = session.id
         request.state.scoped_person_id = scoped_person_id
         request.state.scoped_caregiver_id = scoped_caregiver_id
-        if path.endswith("/sessions/refresh") and method == "POST":
+        if path in {"/api/v1/sessions/refresh", "/api/v1/sessions/revoke"} and method == "POST":
             return await call_next(request)
 
         # Resolve FastAPI path parameters before executing the endpoint. Explicit
