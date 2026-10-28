@@ -44,14 +44,21 @@ from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
 
-class ShareIntakeBodyLimitMiddleware:
-    MAX_BYTES = 8 * 1024 * 1024
+class RequestBodySizeLimitMiddleware:
+    # Bound request buffering before FastAPI parses JSON or multipart bodies.
+    LIMITS = {
+        '/api/v1/share-intake': 8 * 1024 * 1024,
+        # 10 MiB file limit plus bounded multipart fields and framing.
+        '/api/v1/upload': 12 * 1024 * 1024,
+    }
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope.get('type') != 'http' or scope.get('method', '').upper() != 'POST' or scope.get('path', '').rstrip('/') != '/api/v1/share-intake':
+        path = scope.get('path', '').rstrip('/')
+        max_bytes = self.LIMITS.get(path)
+        if scope.get('type') != 'http' or scope.get('method', '').upper() != 'POST' or max_bytes is None:
             await self.app(scope, receive, send)
             return
         headers = {k.lower(): v for k, v in scope.get('headers', [])}
@@ -59,7 +66,7 @@ class ShareIntakeBodyLimitMiddleware:
             length = int(headers.get(b'content-length', b'0') or b'0')
         except (TypeError, ValueError):
             length = 0
-        if length < 0 or length > self.MAX_BYTES:
+        if length < 0 or length > max_bytes:
             await self.reject(send)
             return
         chunks = []
@@ -70,7 +77,7 @@ class ShareIntakeBodyLimitMiddleware:
                 return
             chunk = message.get('body', b'')
             size += len(chunk)
-            if size > self.MAX_BYTES:
+            if size > max_bytes:
                 await self.reject(send)
                 return
             chunks.append(chunk)
@@ -135,7 +142,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
-app.add_middleware(ShareIntakeBodyLimitMiddleware)
+app.add_middleware(RequestBodySizeLimitMiddleware)
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
