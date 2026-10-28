@@ -483,6 +483,185 @@ def current_care_projection(
     }
 
 
+
+def _build_situation_understanding_assessment(db: Session, person_id: str) -> dict[str, Any]:
+    """Compose an explainable assessment from persisted LCR sources; never invent care facts."""
+    context = build_lcr_context(db, person_id, limit_per_source=50)
+    sources = context.get("sources") or {}
+    source_domains = {
+        "events": "current_state_reconstruction",
+        "facts": "current_care_reality",
+        "assertions": "care_context_reconstruction",
+        "caregiver_observations": "functional_status_understanding",
+        "caregiver_contexts": "caregiver_capacity_understanding",
+        "caregiver_perspectives": "care_needs_understanding",
+        "appointments": "care_context_awareness",
+        "decision_outcomes": "longitudinal_care_understanding",
+        "decisions": "situation_evolution_tracking",
+        "uncertainties": "situation_confidence_assessment",
+        "information_gaps": "situation_prioritisation",
+        "missing_information": "situation_prioritisation",
+        "conflicts": "whole_situation_reasoning",
+        "reconciliations": "cross_domain_care_reasoning",
+        "provenance": "care_context_reconstruction",
+        "timeline": "historical_state_reconstruction",
+        "follow_up_links": "situation_reassessment",
+    }
+    evidence_ids: set[str] = set()
+    domain_sources: dict[str, dict[str, Any]] = {}
+    all_items: list[dict[str, Any]] = []
+    for source_name, source in sources.items():
+        rows = source.get("items") or []
+        for row in rows:
+            all_items.append({"source": source_name, **row})
+            ids = row.get("evidence_ids")
+            if isinstance(ids, list):
+                evidence_ids.update(str(value) for value in ids if value)
+        domain = source_domains.get(source_name)
+        if domain:
+            domain_sources.setdefault(domain, {"source_names": [], "record_count": 0, "source_statuses": []})
+            domain_sources[domain]["source_names"].append(source_name)
+            domain_sources[domain]["record_count"] += len(rows)
+            domain_sources[domain]["source_statuses"].append(source.get("status", "unknown"))
+    for domain, value in domain_sources.items():
+        value["source_names"] = sorted(set(value["source_names"]))
+        value["source_statuses"] = sorted(set(value["source_statuses"]))
+        value["evidence_state"] = "supported_by_persisted_records" if value["record_count"] else "no_records_returned"
+    open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started"}
+    attention_items = []
+    uncertainty_items = []
+    missing_items = []
+    for item in all_items:
+        status = str(item.get("status") or item.get("lifecycle_status") or item.get("assertion_status") or "").lower()
+        source = item["source"]
+        summary_item = {
+            "id": str(item.get("id") or ""),
+            "source": source,
+            "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("event_type") or source)[:240],
+            "status": status or "not_recorded",
+            "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
+            "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
+            "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
+            "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
+        }
+        if source in {"conflicts", "reconciliations", "uncertainties", "information_gaps", "missing_information", "open_questions"} and status not in {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}:
+            (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties"} else missing_items).append(summary_item)
+        elif source == "events" and (item.get("attention_candidate") is True or item.get("follow_up_candidate") is True):
+            attention_items.append(summary_item)
+        elif source == "follow_up_links" and status in open_statuses:
+            attention_items.append(summary_item)
+    required_missing = context.get("missing_required_sources") or []
+    optional_missing = context.get("missing_optional_sources") or []
+    return {
+        "schema_version": "situation-understanding.v1",
+        "person_id": str(person_id),
+        "as_of": context.get("as_of"),
+        "assessment_method": "deterministic_composition_of_persisted_lcr_sources",
+        "read_only_source_of_truth": True,
+        "history_coverage": context.get("history_coverage", "bounded_subset"),
+        "schema_status": context.get("schema_status", "partial"),
+        "missing_required_sources": required_missing,
+        "missing_optional_sources": optional_missing,
+        "coverage": {
+            "sources_examined": len(sources),
+            "sources_with_records": sum(1 for value in sources.values() if value.get("items")),
+            "records_examined": len(all_items),
+            "distinct_linked_evidence_ids": len(evidence_ids),
+            "is_complete": not required_missing and not optional_missing and not any(value.get("has_more") for value in sources.values()),
+        },
+        "domains": domain_sources,
+        "current_care_reality": {
+            "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "caregiver_observations", "caregiver_contexts"}][:100],
+            "notice": "Records are reported with their source status. A record or missing record is not, by itself, proof of clinical truth or absence.",
+        },
+        "longitudinal_context": {
+            "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions"}][:100],
+            "bounded": True,
+        },
+        "priorities": attention_items[:50],
+        "uncertainties_and_conflicts": uncertainty_items[:100],
+        "missing_information": missing_items[:100],
+        "confidence_assessment": {
+            "overall": "not_calibrated",
+            "basis": {
+                "source_coverage": "partial" if required_missing or optional_missing else "available",
+                "linked_evidence_ids": len(evidence_ids),
+                "records_without_explicit_evidence_link": sum(1 for item in all_items if not item.get("evidence_ids")),
+                "history_coverage": context.get("history_coverage", "bounded_subset"),
+            },
+            "limitations": ["No calibrated probability is asserted.", "Unavailable or bounded sources can omit relevant context.", "Reported claims and derived assessments are not automatically verified care facts."],
+        },
+        "notice": "This assessment composes existing persisted LCR sources. It does not diagnose, infer causation, or promote unreviewed claims into authoritative facts.",
+    }
+
+
+@router.get("/situation-understanding")
+def get_situation_understanding(request: Request, db: Session = Depends(get_db)):
+    """Return the latest persisted assessment for the session-scoped person."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+        raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
+    table = _table(db, "care_delta_runs")
+    row = db.execute(
+        select(table).where(
+            table.c.person_id == person_id,
+            table.c.source == "situation_understanding_assessment",
+        ).order_by(desc(table.c.created_at)).limit(1)
+    ).mappings().first()
+    if row is None:
+        return {"person_id": person_id, "status": "not_assessed", "assessment": None}
+    try:
+        assessment = json.loads(row["delta_json"])
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Stored situation assessment is invalid") from exc
+    return {"person_id": person_id, "status": "available", "assessment_id": row["id"], "created_at": row["created_at"], "assessment": assessment}
+
+
+@router.post("/situation-understanding/reassess")
+def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
+    """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+        raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
+    table = _table(db, "care_delta_runs")
+    assessment = _build_situation_understanding_assessment(db, person_id)
+    serialized = json.dumps(assessment, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    latest = db.execute(
+        select(table).where(
+            table.c.person_id == person_id,
+            table.c.source == "situation_understanding_assessment",
+        ).order_by(desc(table.c.created_at)).limit(1)
+    ).mappings().first()
+    if latest and latest.get("delta_json") == serialized:
+        return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": assessment}
+    evidence_ids = sorted({
+        str(evidence_id)
+        for domain in assessment.get("current_care_reality", {}).get("records", [])
+        for evidence_id in domain.get("evidence_ids", [])
+        if evidence_id
+    })
+    now = datetime.now(timezone.utc)
+    row = {
+        "id": str(uuid.uuid4()),
+        "person_id": person_id,
+        "source": "situation_understanding_assessment",
+        "event_date": now,
+        "source_event_id": None,
+        "evidence_ids": evidence_ids,
+        "delta_json": serialized,
+        "model_name": "deterministic-lcr-composition-v1",
+        "created_by_caregiver_id": caregiver_id,
+        "created_at": now,
+    }
+    try:
+        db.execute(insert(table).values(**row))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Situation assessment could not be persisted") from exc
+    return {"person_id": person_id, "status": "created", "assessment_id": row["id"], "assessment": assessment}
+
+
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
