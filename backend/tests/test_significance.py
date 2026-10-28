@@ -5,7 +5,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base
+from app.core.database import Base, SessionLocal as DefaultSessionLocal
+import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
@@ -34,11 +35,13 @@ def override_get_db():
 
 def setup_db():
     Base.metadata.create_all(bind=engine)
+    main_module.SessionLocal = TestingSessionLocal
 
 
 def teardown_db():
-    Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+    Base.metadata.drop_all(bind=engine)
 
 
 def _issue_scoped_session(db, person, caregiver):
