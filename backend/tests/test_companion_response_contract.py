@@ -557,6 +557,15 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     assert query.startswith("What about that?")
 
 
+def test_short_standalone_question_does_not_inherit_previous_topic():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="One sleep note is recorded."),
+    ]
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+    assert "sleep" in collaboration._context_query_with_history("What about that?", prior).casefold()
+
+
 def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
     prior = [SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?")]
     query = collaboration._context_query_with_history(
