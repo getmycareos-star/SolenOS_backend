@@ -383,7 +383,7 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeyp
             db.add(CareEvent(
                 person_id=person_id, event_type="observation", status="recorded",
                 occurred_at=now - timedelta(hours=index + 1), title=f"Unrelated household note {index}",
-                description="A household item was recorded with no sleep details.",
+                description="A household item was recorded with no related details.",
                 evidence_ids=[], created_by_caregiver_id=caregiver_id,
                 time_provenance="caregiver_reported",
             ))
