@@ -675,3 +675,72 @@ def test_new_evidence_supersedes_prior_active_change_without_erasing_history():
     finally:
         teardown_db()
 
+def test_change_detail_returns_persisted_source_evidence_and_blocks_cross_person_access():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-change-detail", name="Change detail recipient")
+        caregiver = Caregiver(
+            id="caregiver-change-detail",
+            name="Change detail caregiver",
+            email="change-detail@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="person-change-detail-other", name="Other recipient")
+        other_caregiver = Caregiver(
+            id="caregiver-change-detail-other",
+            name="Other caregiver",
+            email="change-detail-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index in range(3):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="fall",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=7 + index * 7),
+                    title=f"Persisted fall observation {index + 1}",
+                    description="Recorded source observation.",
+                    time_provenance="caregiver_reported",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        db.commit()
+        assert changes
+        change_id = changes[0].id
+        token = issue_scoped_session(db, person, caregiver)
+        other_token = issue_scoped_session(db, other_person, other_caregiver)
+        db.close()
+
+        client = TestClient(app)
+        response = client.get(
+            f"/api/v1/change/changes/{person.id}/{change_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["change"]["id"] == change_id
+        assert payload["change"]["person_id"] == person.id
+        assert payload["evidence"]
+        assert all(item["id"] in payload["change"]["evidence_ids"] for item in payload["evidence"])
+        assert all(item["title"].startswith("Persisted fall observation") for item in payload["evidence"])
+
+        forbidden = client.get(
+            f"/api/v1/change/changes/{person.id}/{change_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert forbidden.status_code == 403
+    finally:
+        teardown_db()
+
