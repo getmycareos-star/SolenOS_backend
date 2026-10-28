@@ -1745,18 +1745,46 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     user_message_time = datetime.now(timezone.utc)
     assistant_message_time = user_message_time + timedelta(microseconds=1)
     db.add(ConversationMessage(
+        id=client_turn_id or str(uuid.uuid4()),
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
         created_at=user_message_time,
     ))
     assistant_row = ConversationMessage(
+        id=f"{client_turn_id}:assistant" if client_turn_id else str(uuid.uuid4()),
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         created_at=assistant_message_time,
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Two concurrent retries can both pass the preflight lookup. The
+        # primary-key collision is the final idempotency guard; replay only
+        # the already-committed pair and clean up an empty duplicate session.
+        if client_turn_id:
+            prior_user_row = db.query(ConversationMessage).filter_by(
+                id=client_turn_id, role="user"
+            ).first()
+            if prior_user_row:
+                if session.id != prior_user_row.session_id:
+                    duplicate_session = db.query(ConversationSession).filter_by(
+                        id=session.id, person_id=person_id, caregiver_id=caregiver_id
+                    ).first()
+                    if duplicate_session and db.query(ConversationMessage).filter_by(
+                        session_id=duplicate_session.id
+                    ).count() == 0:
+                        db.delete(duplicate_session)
+                        db.commit()
+                replay = _replay_companion_turn(
+                    db, prior_user_row, person_id, caregiver_id, payload.session_id
+                )
+                if replay is not None:
+                    return replay
+        raise
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
