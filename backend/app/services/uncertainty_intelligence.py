@@ -58,8 +58,15 @@ def analyze_uncertainty(
     classifications: List[str] = []
     limitations: List[str] = []
     explicit_uncertainty = any(pattern.search(claim) for pattern in _UNCERTAINTY_PATTERNS)
+    evidence_uncertainty = any(
+        pattern.search(_text(item.get("text")))
+        for item in items
+        for pattern in _UNCERTAINTY_PATTERNS
+    )
     if explicit_uncertainty:
         classifications.append("explicit_uncertainty")
+    if evidence_uncertainty:
+        classifications.append("uncertainty_in_source_evidence")
     if not items:
         classifications.append("insufficient_evidence")
         limitations.append("No retrieved evidence records were supplied to this assessment.")
@@ -151,7 +158,8 @@ def analyze_uncertainty(
         "epistemic_state": epistemic_state,
         "classifications": list(dict.fromkeys(classifications)),
         "explicit_uncertainty": explicit_uncertainty,
-        "inferred_uncertainty": bool(classifications) and not explicit_uncertainty,
+        "uncertainty_in_source_evidence": evidence_uncertainty,
+        "inferred_uncertainty": bool(classifications) and not (explicit_uncertainty or evidence_uncertainty),
         "evidence_completeness": completeness,
         "source_reliability": "not_quantified",
         "conclusion_confidence": None,
