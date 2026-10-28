@@ -13,12 +13,14 @@ from app.models.uncertainty import Contradiction
 from app.core.change_enums import SignificanceVerdict, EvidenceStatus, BaselineConfidence
 
 
-_FUNCTIONAL_IMPACT_KEYWORDS = (
-    "couldn't get up", "could not get up", "unable to stand", "unable to walk",
-    "needed help", "required assistance", "mobility", "walking", "fall",
-    "fell", "fallen", "confused", "disoriented", "unsteady", "weak", "couldn't walk",
-    "cannot walk", "lost balance", "slurred", "drooping", "vision",
-)
+# Structured event-type identifiers only; free-text caregiver prose cannot
+# independently establish functional impact.
+_FUNCTIONAL_IMPACT_EVENT_TYPES = frozenset({
+    "fall",
+    "injury",
+    "mobility_assistance_required",
+    "transfer_assistance_required",
+})
 
 
 def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -155,11 +157,11 @@ def _contextual_associations(db: Session, person_id: str, events: List[CareEvent
 
 
 def _functional_impact(events: List[CareEvent]) -> bool:
-    for e in events:
-        blob = " ".join(filter(None, [e.title, e.description])).lower()
-        if any(k in blob for k in _FUNCTIONAL_IMPACT_KEYWORDS):
-            return True
-    return False
+    return any(
+        isinstance(event.event_type, str)
+        and event.event_type.strip().lower() in _FUNCTIONAL_IMPACT_EVENT_TYPES
+        for event in events
+    )
 
 
 def assess_change(
