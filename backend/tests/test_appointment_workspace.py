@@ -285,3 +285,50 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert body["source_coverage"]["community"] == "not_authorized"
     assert body["source_coverage"]["medications_and_allergies"] == "unavailable"
     assert "DO NOT LEAK THIS" not in response.text
+
+
+def test_situation_understanding_assessment_is_persisted_and_person_scoped(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS care_delta_runs (
+                id VARCHAR(36) PRIMARY KEY,
+                person_id VARCHAR(255) NOT NULL,
+                source VARCHAR(100) NOT NULL,
+                event_date DATETIME NOT NULL,
+                source_event_id VARCHAR(255),
+                evidence_ids JSON NOT NULL,
+                delta_json TEXT NOT NULL,
+                model_name VARCHAR(120) NOT NULL,
+                created_by_caregiver_id VARCHAR(255),
+                created_at DATETIME NOT NULL
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES ('understanding-fact', :person_id, 'mobility', 'Caregiver-reported mobility change',
+                    'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {"person_id": owner["person"]["id"]})
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["status"] in {"created", "unchanged"}
+    assert body["assessment"]["person_id"] == owner["person"]["id"]
+    assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
+    assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
+    assert any(
+        item.get("id") == "understanding-fact"
+        for item in body["assessment"]["current_care_reality"]["records"]
+    )
+
+    retrieved = test_client.get("/api/v1/care-continuity/situation-understanding", headers=headers)
+    assert retrieved.status_code == 200, retrieved.text
+    assert retrieved.json()["assessment_id"] == body["assessment_id"]
+    assert retrieved.json()["assessment"]["person_id"] == owner["person"]["id"]
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    other_view = test_client.get("/api/v1/care-continuity/situation-understanding", headers=other_headers)
+    assert other_view.status_code == 200, other_view.text
+    assert other_view.json()["status"] == "not_assessed"
+    assert "Caregiver-reported mobility change" not in other_view.text
