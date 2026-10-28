@@ -245,7 +245,7 @@ WRITABLE = {
     # Identity fields are injected from the server-issued session below.
     "caregiver-contexts": {"context_type", "context_payload", "epistemic_status", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "notes"},
     "caregiver-perspectives": {"topic", "perspective_text", "epistemic_status", "evidence_ids", "source_type", "source_id", "recorded_at", "effective_from", "effective_to", "supersedes_id"},
-    "caregiver-observations": {"observation_category", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id"},
+    "caregiver-observations": {"observation_category", "description", "observed_value", "observed_at", "recorded_at", "epistemic_status", "observation_type", "evidence_ids", "source_type", "source_id"},
     "living-records": {"record_status", "schema_version"},
     "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
     "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
@@ -1365,7 +1365,15 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         if "observation_content" in table.c:
             data["observation_content"] = data.get("description")
         if "observation_type" in table.c:
-            data["observation_type"] = ObservationType.DIRECT.name
+            # Missing observation basis is reported/second-hand, not silently
+            # upgraded to direct observation. Explicit bases are preserved.
+            raw_observation_type = str(data.get("observation_type") or "second_hand").strip().casefold()
+            allowed_observation_types = {item.value.casefold(): item.name for item in ObservationType}
+            allowed_observation_types.update({item.name.casefold(): item.name for item in ObservationType})
+            normalized_observation_type = allowed_observation_types.get(raw_observation_type)
+            if normalized_observation_type is None:
+                raise HTTPException(status_code=422, detail="Unsupported observation type; choose direct, indirect, second_hand, or document_review")
+            data["observation_type"] = normalized_observation_type
         if "information_visibility" in table.c:
             data["information_visibility"] = InformationVisibility.PRIVATE.name
         if "is_promoted_to_shared" in table.c:
