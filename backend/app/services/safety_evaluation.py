@@ -90,7 +90,9 @@ class SafetyEvaluationSuite:
                     authority=SourceAuthority.DOCUMENT,
                     quality=SourceQuality.HIGH,
                     currentness=CurrentnessStatus.CURRENT,
-                    confidence=0.9,
+                    confidence=None,
+                    supports_claim=True,
+                    reviewed_support=True,
                 )
             ]
             epistemic_status["claim_1"] = "known"
