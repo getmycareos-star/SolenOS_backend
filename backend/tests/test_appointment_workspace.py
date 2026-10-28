@@ -62,6 +62,37 @@ def client():
     Base.metadata.drop_all(bind=engine)
 
 
+def test_current_care_projection_is_read_only_and_person_scoped(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES
+              ('owner-fact', :owner_id, 'sleep_pattern', 'Caregiver-reported sleep changes', 'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+              ('other-fact', :other_id, 'private_detail', 'Other person's private care detail', 'confirmed', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"]})
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["read_only"] is True
+    assert body["projection_type"] == "bounded_evidence_derived_current_care"
+    assert any(item["id"] == "owner-fact" for item in body["items"])
+    assert all(item["id"] != "other-fact" for item in body["items"])
+    assert "Other person's private care detail" not in response.text
+    # SQLite fixture intentionally omits the full migration schema; the API must
+    # report incomplete coverage rather than pretending this is the full LCR.
+    assert body["schema_status"] != "complete"
+    assert body["missing_required_sources"]
+
+
+def test_current_care_projection_requires_session(client):
+    test_client, _, _ = client
+    response = test_client.get("/api/v1/care-continuity/current-care")
+    assert response.status_code == 401, response.text
+
+
 def test_appointment_workspace_requires_session(client):
     test_client, _, _ = client
     assert test_client.get("/api/v1/appointment-workspaces").status_code == 401
