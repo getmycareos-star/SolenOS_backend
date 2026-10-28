@@ -135,6 +135,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
     method = request.method.upper()
     if method == "OPTIONS":
         return await call_next(request)
+    if path == "/api/v1/sessions/anonymous" and method == "POST":
+        return await call_next(request)
     if path.endswith("/share-intake") and method == "POST":
         # This is a short-lived capability bootstrap, not an authenticated care
         # endpoint. Enforce the body limit while streaming as well as checking
