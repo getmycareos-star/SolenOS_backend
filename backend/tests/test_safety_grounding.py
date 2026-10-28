@@ -590,3 +590,30 @@ class TestSafetyAPI:
         assert response.status_code == 200
         data = response.json()
         assert "total_adversarial_tests" in data
+
+
+def test_public_safety_input_cannot_self_certify_reviewed_evidence():
+    from app.api.safety import _sanitize_client_review_flags
+
+    supplied = SafetyContractInput(
+        user_intent="A claim has supporting evidence.",
+        candidate_claims=["The note confirms the claim."],
+        evidence_references=[
+            EvidenceReference(
+                evidence_id="evidence-1",
+                source_text="The note confirms the claim.",
+                authority=SourceAuthority.DOCUMENT,
+                quality=SourceQuality.HIGH,
+                currentness=CurrentnessStatus.CURRENT,
+                supports_claim=True,
+                reviewed_support=True,
+            )
+        ],
+        risk_classification=RiskClass.INFORMATIONAL,
+        proposed_action_level="informational",
+        user_role="caregiver",
+        person_id="test-person",
+    )
+    sanitized = _sanitize_client_review_flags(supplied)
+    assert sanitized.evidence_references[0].supports_claim is False
+    assert sanitized.evidence_references[0].reviewed_support is None
