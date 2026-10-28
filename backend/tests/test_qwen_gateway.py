@@ -45,7 +45,7 @@ def test_qwen_chat_classifies_missing_model_or_route_as_503(monkeypatch):
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hello"}])
     assert error.value.status_code == 503
-    assert "HTTP 404" in error.value.detail
+    assert "returned 404" in error.value.detail
     assert "verify that the model is installed" in error.value.detail
 
 
