@@ -160,9 +160,13 @@ def compare_to_baseline(
         current_frequency = current_count / (current_window_days / 30.0) if current_window_days > 0 else 0.0
         frequency_delta = current_frequency - baseline.frequency_per_period
         if baseline.frequency_per_period == 0:
-            relative_change = float('inf') if current_count > 0 else 0.0
+            relative_change = float('inf') if current_frequency > 0 else 0.0
         else:
-            relative_change = ((current_count - baseline.event_count) / baseline.event_count) * 100 if baseline.event_count > 0 else float('inf')
+            relative_change = (
+                (frequency_delta / baseline.frequency_per_period) * 100
+                if baseline.frequency_per_period > 0
+                else None
+            )
     return {
         "baseline_event_count": baseline.event_count,
         "baseline_window_days": max((_ensure_utc(baseline.window_end) - _ensure_utc(baseline.window_start)).days, 1),
