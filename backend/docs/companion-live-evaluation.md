@@ -26,6 +26,10 @@ Replace the host and port with the actual configured private endpoint. Do not us
 
 The JSON output reports each case's pass/fail result, HTTP status, and latency. A nonzero exit code means at least one release criterion failed. A successful run is evidence for that specific model, runtime, and code revision only; rerun it after model/runtime or retrieval changes.
 
+## CI and release gate
+
+The repository has a separate Qwen image-build/E2E workflow that downloads and starts the configured small Qwen model, then exercises real HTTP-to-inference paths. This PR is titled with “Qwen” so that workflow is eligible to run on the pull request. Confirm the job itself completes successfully on the latest head; a skipped job, mocked unit test, or Docker image build alone does not count as real-inference verification.
+
 ## Important limitation
 
 This script has been added to make real inference evaluation repeatable, but it must still be executed against a reachable real Qwen runtime before the live-inference release gate can be marked passed. Mock-based unit tests are not a substitute.
