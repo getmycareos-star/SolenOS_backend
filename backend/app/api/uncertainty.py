@@ -102,7 +102,10 @@ def update_question(
 def create_contradiction(
     contradiction: ContradictionCreate, engine: UncertaintyEngine = Depends(get_engine)
 ):
-    return engine.create_contradiction(contradiction)
+    try:
+        return engine.create_contradiction(contradiction)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/contradictions/{person_id}", response_model=List[Contradiction])
