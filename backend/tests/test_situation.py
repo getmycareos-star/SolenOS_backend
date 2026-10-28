@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from pydantic import ValidationError
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -489,7 +490,7 @@ def test_quick_capture_rejects_invalid_event_timestamp_without_saving():
 
 
 def test_quick_capture_rejects_unsupported_category():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SituationInput(
             caregiver_id="caregiver",
             person_id="person",
