@@ -136,6 +136,47 @@ def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monke
     assert forbidden.status_code == 403, forbidden.text
 
 
+def test_daily_capture_receipt_survives_secondary_pipeline_failures(client, monkeypatch):
+    import app.api.v1 as api_v1
+
+    test_client, owner, _ = client
+
+    def fail_secondary(*args, **kwargs):
+        raise RuntimeError("secondary pipeline unavailable")
+
+    monkeypatch.setattr(api_v1, "_log_and_learn", fail_secondary)
+    monkeypatch.setattr(api_v1, "extract_review_candidates", fail_secondary)
+    monkeypatch.setattr(api_v1, "persist_capture_analysis", fail_secondary)
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    note = "Caregiver recorded a new overnight waking observation."
+    response = test_client.post("/api/v1/daily/log", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "caregiver_id": owner["caregiver"]["id"],
+        "medications": [],
+        "vitals": [],
+        "scales": [],
+        "notes": note,
+    })
+
+    assert response.status_code == 200, response.text
+    receipt = response.json()
+    assert receipt["success"] is True
+    assert receipt["learning_pipeline_status"] == "unavailable"
+    assert receipt["qwen_extraction_status"] == "unavailable"
+    assert receipt["qwen_analysis_id"] is None
+
+    projection = test_client.get(
+        "/api/v1/care-continuity/current-care", headers=headers
+    )
+    assert projection.status_code == 200, projection.text
+    assert any(
+        note in item.get("description", "")
+        for item in projection.json()["items"]
+        if item["kind"] == "Daily care entry"
+    ), projection.text
+
+
 def test_current_care_projection_requires_session(client):
     test_client, _, _ = client
     response = test_client.get("/api/v1/care-continuity/current-care")
