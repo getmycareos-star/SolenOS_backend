@@ -1215,6 +1215,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             select(fact_evidence.c.id).where(
                 fact_evidence.c.fact_id == data["fact_id"],
                 fact_evidence.c.evidence_id == data["evidence_id"],
+                fact_evidence.c.evidence_role == data.get("evidence_role", "supports"),
                 fact_evidence.c.person_id == person_id,
             ).limit(1)
         ).first()
