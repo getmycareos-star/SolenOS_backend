@@ -681,6 +681,38 @@ def situation_understanding_history(
     return {"person_id": person_id, "items": items, "count": len(items)}
 
 
+@router.get("/situation-understanding/history/{assessment_id}")
+def get_situation_understanding_snapshot(
+    assessment_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Read one immutable snapshot only when it belongs to the session-scoped person."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+        raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
+    table = _table(db, "care_delta_runs")
+    row = db.execute(
+        select(table).where(
+            table.c.id == assessment_id,
+            table.c.person_id == person_id,
+            table.c.source == "situation_understanding_assessment",
+        ).limit(1)
+    ).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Situation assessment snapshot was not found")
+    try:
+        assessment = json.loads(row["delta_json"])
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Stored situation assessment is invalid") from exc
+    return {
+        "person_id": person_id,
+        "assessment_id": row["id"],
+        "created_at": _jsonable(row["created_at"]),
+        "assessment": assessment,
+    }
+
+
 @router.post("/situation-understanding/reassess")
 def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
     """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
