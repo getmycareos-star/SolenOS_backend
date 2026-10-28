@@ -910,5 +910,10 @@ def test_conflict_candidates_match_context_and_overlapping_time_without_auto_res
             **base, "effective_from": "2026-10-06T00:00:00Z", "effective_to": "2026-10-05T00:00:00Z",
         })
         assert invalid_interval.status_code == 422
+
+        unaudited_resolution = client.post("/api/v1/uncertainty/contradictions", json={
+            **base, "resolution_status": "resolved", "resolution_notes": "Client attempted to create an already resolved conflict.",
+        })
+        assert unaudited_resolution.status_code == 422
     finally:
         teardown_db()
