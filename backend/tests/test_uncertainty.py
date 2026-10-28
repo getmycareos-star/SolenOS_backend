@@ -708,3 +708,80 @@ def test_uncertainty_api_rejects_missing_bearer_session():
         assert response.status_code == 401
     finally:
         teardown_db()
+
+
+
+def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="resolution-person", name="Resolution Person")
+        caregiver = Caregiver(
+            id="resolution-caregiver",
+            name="Resolution Caregiver",
+            email="resolution@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="resolution-other-person", name="Other Person")
+        other_caregiver = Caregiver(
+            id="resolution-other-caregiver",
+            name="Other Caregiver",
+            email="resolution-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client("resolution-person")
+        other_client = authorized_client("resolution-other-person")
+        created = client.post("/api/v1/uncertainty/contradictions", json={
+            "person_id": "resolution-person",
+            "subject_type": "medication",
+            "subject_id": "medication-1",
+            "field": "status",
+            "description": "Two records disagree about current status",
+            "evidence_ids": [],
+        })
+        assert created.status_code == 200, created.text
+        conflict_id = created.json()["id"]
+
+        denied = other_client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={"resolution_status": "resolved", "resolution_notes": "Reviewed"},
+        )
+        assert denied.status_code == 404
+
+        missing_rationale = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={"resolution_status": "resolved"},
+        )
+        assert missing_rationale.status_code == 422
+
+        resolved = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={"resolution_status": "resolved", "resolution_notes": "Reviewed the two source records; discrepancy remains documented."},
+        )
+        assert resolved.status_code == 200, resolved.text
+        assert resolved.json()["resolution_status"] == "resolved"
+
+        reopened = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={"resolution_status": "reopened", "resolution_notes": "New conflicting evidence was added; reassessment required."},
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["resolution_status"] == "reopened"
+
+        history = client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history")
+        assert history.status_code == 200, history.text
+        events = history.json()
+        assert [event["new_status"] for event in events] == ["resolved", "reopened"]
+        assert all(event["rationale"] for event in events)
+        assert all(event["person_id"] == "resolution-person" for event in events)
+        assert other_client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history").status_code == 404
+    finally:
+        teardown_db()
