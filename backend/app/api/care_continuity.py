@@ -21,10 +21,135 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
+from app.models.care import Evidence
+from app.models.care_continuity import EvidenceReviewRecord
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/care-continuity", tags=["care-continuity"])
+
+
+REVIEW_TYPES = {
+    "quality": {"adequate", "limited", "insufficient", "undetermined"},
+    "reliability": {"supported", "contested", "unverified", "undetermined"},
+    "source_confidence": {"verified", "partially_verified", "unverified", "unknown"},
+    "freshness": {"current", "stale", "historical", "undetermined"},
+    "completeness": {"complete", "partial", "missing", "undetermined"},
+}
+
+
+@router.post("/evidence/{evidence_id}/reviews", status_code=201)
+def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Append a versioned, evidence-linked review without overwriting source evidence."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    review_type = str(payload.get("review_type", "")).strip()
+    outcome = str(payload.get("outcome", "")).strip()
+    rationale = str(payload.get("rationale", "")).strip()
+    policy_version = str(payload.get("policy_version", "")).strip()
+    criteria = payload.get("criteria")
+    if review_type not in REVIEW_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported evidence review type")
+    if outcome not in REVIEW_TYPES[review_type]:
+        raise HTTPException(status_code=422, detail="Outcome is not valid for this review type")
+    if not rationale:
+        raise HTTPException(status_code=422, detail="Review rationale is required")
+    if not policy_version or len(policy_version) > 64:
+        raise HTTPException(status_code=422, detail="A bounded policy version is required")
+    if not isinstance(criteria, list) or not criteria:
+        raise HTTPException(status_code=422, detail="Structured review criteria are required")
+    for item in criteria:
+        if not isinstance(item, dict) or not all(
+            isinstance(item.get(key), str) and item[key].strip()
+            for key in ("criterion", "result", "rationale")
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail="Each criterion must include criterion, result, and rationale text",
+            )
+
+    attribution = {
+        "evidence_id": evidence.id,
+        "person_id": evidence.person_id,
+        "evidence_type": evidence.type,
+        "source_type": evidence.source_type,
+        "source_text_present": bool(evidence.source_text),
+        "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+        "uploaded_by_caregiver_id": evidence.uploaded_by_caregiver_id,
+        "time_provenance": evidence.time_provenance,
+        "location": evidence.location,
+        "source_span_start": evidence.source_span_start,
+        "source_span_end": evidence.source_span_end,
+    }
+    row = EvidenceReviewRecord(
+        evidence_id=evidence.id,
+        person_id=person_id,
+        review_type=review_type,
+        outcome=outcome,
+        rationale=rationale,
+        criteria=criteria,
+        policy_version=policy_version,
+        source_attribution_snapshot=json.dumps(attribution, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+        reviewed_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence review could not be persisted")
+        raise HTTPException(status_code=503, detail="Evidence review could not be persisted") from exc
+    return {
+        "id": row.id,
+        "evidence_id": row.evidence_id,
+        "person_id": row.person_id,
+        "review_type": row.review_type,
+        "outcome": row.outcome,
+        "rationale": row.rationale,
+        "criteria": row.criteria,
+        "policy_version": row.policy_version,
+        "source_attribution": json.loads(row.source_attribution_snapshot),
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
+        "created_at": row.created_at,
+    }
+
+
+@router.get("/evidence/{evidence_id}/reviews")
+def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    evidence = db.query(Evidence.id).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    rows = db.query(EvidenceReviewRecord).filter(
+        EvidenceReviewRecord.evidence_id == evidence_id,
+        EvidenceReviewRecord.person_id == person_id,
+    ).order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc()).all()
+    return [
+        {
+            "id": row.id,
+            "evidence_id": row.evidence_id,
+            "person_id": row.person_id,
+            "review_type": row.review_type,
+            "outcome": row.outcome,
+            "rationale": row.rationale,
+            "criteria": row.criteria,
+            "policy_version": row.policy_version,
+            "source_attribution": json.loads(row.source_attribution_snapshot),
+            "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id,
+            "created_at": row.created_at,
+        }
+        for row in rows
+    ]
 
 RESOURCES = {
     "facts": "care_facts",
