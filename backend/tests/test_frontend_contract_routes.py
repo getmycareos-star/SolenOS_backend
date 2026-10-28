@@ -772,6 +772,18 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         assert medication.status_code == 201, medication.text
         medication_id = medication.json()["evidence_id"]
 
+        disguised_docx = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+            },
+            files={"file": ("discharge.docx", b"not a zip-based Word document", "application/octet-stream")},
+        )
+        assert disguised_docx.status_code == 422, disguised_docx.text
+
         docx_bytes = b"PK\x03\x04" + b"minimal docx fixture"
         document = client.post(
             "/api/v1/upload",
