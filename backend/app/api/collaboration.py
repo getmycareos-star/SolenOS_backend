@@ -1809,6 +1809,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
+        "idempotent_replay": False,
         "messages": [{
             "role": row.role,
             "text": row.content,
