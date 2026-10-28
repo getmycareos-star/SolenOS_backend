@@ -292,6 +292,12 @@ def test_companion_prior_turns_are_bounded_json_context_not_model_roles(monkeypa
         assert payload["current_message"] == "What about that?"
         assert len(history[0]["content"]) <= 2000
         assert second.json()["written_to_lcr"] is False
+        persisted_messages = second.json()["messages"]
+        assert [item["role"] for item in persisted_messages] == [
+            "user", "assistant", "user", "assistant"
+        ]
+        persisted_times = [item["created_at"] for item in persisted_messages]
+        assert all(left < right for left, right in zip(persisted_times, persisted_times[1:]))
     finally:
         teardown()
 
