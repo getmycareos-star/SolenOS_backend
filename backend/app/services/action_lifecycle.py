@@ -39,12 +39,22 @@ class ActionLifecycleService:
         return action
 
     def record_completion(self, action: ActionModel, evidence: ActionCompletionEvidence, db: Session) -> ActionModel:
-        if action.status in ("cancelled", "superseded", "expired"):
-            raise ValueError(f"Cannot complete action in status {action.status}")
+        # Completion is a claim about a real-world task, not a UI toggle.
+        # Only active actions may be completed, and the supporting evidence must
+        # exist and belong to the same care recipient as the action.
+        if action.status != ActionStatus.ACTIVE:
+            raise ValueError(f"Cannot complete action in status {action.status}; action must be active")
+
+        verification = self.verify_completion_evidence(action, evidence.evidence_ids, db)
+        if not verification["verified"]:
+            raise ValueError(verification["reason"])
 
         action.status = ActionStatus.COMPLETED
-        action.completion_evidence_ids = evidence.evidence_ids
-        action.completion_confidence = evidence.completion_confidence
+        action.completion_evidence_ids = list(evidence.evidence_ids)
+        action.completion_confidence = min(
+            evidence.completion_confidence,
+            float(verification["confidence"]),
+        )
         action.completed_at = datetime.utcnow()
 
         db.add(action)
@@ -92,10 +102,23 @@ class ActionLifecycleService:
             return {"verified": False, "reason": "No evidence provided"}
 
         from app.models.care import Evidence as EvidenceModel
-        evidence_items = db.query(EvidenceModel).filter(EvidenceModel.id.in_(evidence_ids)).all()
+        # Deduplicate IDs and require every requested evidence item to exist.
+        # A partial match must not be treated as proof of completion.
+        requested_ids = set(evidence_ids)
+        evidence_items = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.id.in_(requested_ids),
+                EvidenceModel.person_id == action.person_id,
+            )
+            .all()
+        )
 
-        if not evidence_items:
-            return {"verified": False, "reason": "No valid evidence found"}
+        if not evidence_items or {item.id for item in evidence_items} != requested_ids:
+            return {
+                "verified": False,
+                "reason": "Evidence is missing or does not belong to this care record",
+            }
 
         evidence_strengths = []
         for ev in evidence_items:

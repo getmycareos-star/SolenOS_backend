@@ -513,6 +513,38 @@ def list_corrections(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/observations", response_model=ObservationSchema)
 def create_observation(observation: ObservationCreate, db: Session = Depends(get_db)):
+    # Validate referential integrity before persisting an observation.
+    person = db.query(PersonModel).filter(PersonModel.id == observation.person_id).first()
+    if not person:
+        raise HTTPException(status_code=404, detail="Care recipient not found")
+
+    caregiver = (
+        db.query(CaregiverModel)
+        .filter(
+            CaregiverModel.id == observation.caregiver_id,
+            CaregiverModel.person_id == observation.person_id,
+        )
+        .first()
+    )
+    if not caregiver:
+        raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
+
+    evidence_ids = set(observation.evidence_ids or [])
+    if evidence_ids:
+        evidence = (
+            db.query(EvidenceModel)
+            .filter(
+                EvidenceModel.id.in_(evidence_ids),
+                EvidenceModel.person_id == observation.person_id,
+            )
+            .all()
+        )
+        if {item.id for item in evidence} != evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Evidence is missing or does not belong to this care record",
+            )
+
     db_obs = ObservationModel(**observation.model_dump())
     db.add(db_obs)
     db.commit()
