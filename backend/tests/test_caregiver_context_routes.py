@@ -843,6 +843,25 @@ def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_witho
     )
     assert second_link.status_code == 201, second_link.text
 
+    review_payload = {
+        "review_type": "reliability",
+        "outcome": "supported",
+        "rationale": "Reviewer inspected the source record and recorded the source relationship.",
+        "policy_version": "evidence-review-v1",
+        "criteria": [
+            {"criterion": "source attribution", "result": "present", "rationale": "The caregiver source is attributed."},
+            {"criterion": "independent corroboration", "result": "independent_source_linked", "rationale": "Reviewer marked the source as independent; the content still needs duplicate checking."},
+            {"criterion": "temporal context", "result": "specified", "rationale": "The source record contains its stated timing."},
+        ],
+    }
+    for evidence_id in ("duplicate-evidence-a", "duplicate-evidence-b"):
+        review_response = client.post(
+            f"/api/v1/care-continuity/evidence/{evidence_id}/reviews",
+            headers=headers,
+            json=review_payload,
+        )
+        assert review_response.status_code == 201, review_response.text
+
     integrity = client.get(
         f"/api/v1/care-continuity/facts/{fact_id}/evidence-integrity",
         headers=headers,
@@ -851,5 +870,6 @@ def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_witho
     result = integrity.json()
     assert result["linked_evidence_count"] == 2
     assert result["independent_corroboration_status"] == "not_established"
+    assert result["evidence"][0]["source_independence"] == "independent_source_linked"
     assert len(result["duplicate_content_candidates"]) == 1
     assert set(result["duplicate_content_candidates"][0]["evidence_ids"]) == {"duplicate-evidence-a", "duplicate-evidence-b"}
