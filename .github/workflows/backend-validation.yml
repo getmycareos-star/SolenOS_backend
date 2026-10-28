@@ -137,11 +137,12 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker run --detach --name solenos-backend-ci --network none \
+          docker run --detach --name solenos-backend-ci --network bridge \
             --publish 127.0.0.1:18080:8080 \
             --env APP_ENV=development \
             --env DATABASE_URL=sqlite:////tmp/solenos-ci.db \
-            --env SECRET_KEY=ci-only-not-for-production \
+            --env SECRET_KEY=ci-only-not-for-production \\
+            --env OLLAMA_BASE_URL=http://127.0.0.1:9 \\
             solenos-backend-ci:latest
           cleanup() {
             docker logs solenos-backend-ci || true
