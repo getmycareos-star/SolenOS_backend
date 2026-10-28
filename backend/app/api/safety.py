@@ -26,6 +26,9 @@ from app.schemas.safety import (
 )
 from app.core.safety_enums import (
     EscalationStatus as EscalationStatusEnum,
+    SourceAuthority,
+    SourceQuality,
+    CurrentnessStatus,
 )
 from app.models.safety import (
     SafetyEventModel,
@@ -49,7 +52,17 @@ def _sanitize_client_review_flags(input_data: SafetyContractInput) -> SafetyCont
     # authorized review state may establish support; this endpoint currently
     # treats submitted support flags as unverified candidates.
     evidence = [
-        item.model_copy(update={"supports_claim": False, "reviewed_support": None})
+        item.model_copy(update={
+            "authority": SourceAuthority.UNKNOWN,
+            "quality": SourceQuality.UNVERIFIED,
+            "currentness": CurrentnessStatus.UNKNOWN_CURRENCY,
+            "confidence": None,
+            "document_time": None,
+            "uploaded_at": None,
+            "supports_claim": False,
+            "contradicts_claim": False,
+            "reviewed_support": None,
+        })
         for item in input_data.evidence_references
     ]
     return input_data.model_copy(update={"evidence_references": evidence})
