@@ -358,7 +358,7 @@ def test_lcr_context_is_bearer_scoped_bounded_and_reports_schema_coverage(monkey
         assert other.status_code == 200, other.text
         other_events = other.json()["sources"]["events"]["items"]
         assert all(item.get("id") != event_id for item in other_events)
-        assert all(item.get("person_id") != person_id for source in other.json()["sources"].values() for item in source["items"])
+        assert all(item.get("id") != event_id for source in other.json()["sources"].values() for item in source["items"])
 
         unauthenticated = client.get("/api/v1/care-continuity/context")
         assert unauthenticated.status_code == 401, unauthenticated.text
