@@ -68,6 +68,7 @@ class Change(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     superseded_by_change_id = Column(String, ForeignKey("changes.id"), nullable=True)
+    confirmation_status = Column(String(32), nullable=False, default="detected", server_default="detected", index=True)
     is_active = Column(Boolean, default=True)
 
 
