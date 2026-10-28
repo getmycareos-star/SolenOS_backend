@@ -1282,6 +1282,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    if client_turn_id:
+        prior_user_row = db.query(ConversationMessage).filter_by(
+            id=client_turn_id, role="user"
+        ).first()
+        if prior_user_row:
+            replay = _replay_companion_turn(
+                db, prior_user_row, person_id, caregiver_id, payload.session_id
+            )
+            if replay is None:
+                # Do not reveal whether a colliding key belongs to another
+                # caregiver or another conversation.
+                raise HTTPException(
+                    status_code=409,
+                    detail="This message identifier cannot be replayed in this conversation.",
+                )
+            return replay
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
