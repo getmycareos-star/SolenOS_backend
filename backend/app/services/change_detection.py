@@ -147,14 +147,14 @@ def _create_change(
     # Keep only actual care-event IDs in evidence_ids; baseline_id already has its
     # own foreign-key field. This also makes repeated assessments idempotent.
     evidence_ids = sorted({e.id for e in events if e.id})
+    normalized_subject_id = subject_id or ""
     existing = (
         db.query(Change)
         .filter(
             Change.person_id == person_id,
             Change.subject_type == subject_type,
-            Change.subject_id == subject_id,
+            Change.subject_id == normalized_subject_id,
             Change.change_type == change_type,
-            Change.current_count == current_count,
             Change.is_active.is_(True),
         )
         .order_by(Change.created_at.desc())
@@ -162,9 +162,11 @@ def _create_change(
     )
     evidence_signature = set(evidence_ids)
     for candidate in existing:
-        if set(candidate.evidence_ids or []) == evidence_signature:
-            # Repeated reconciliation over the same persisted source observations
-            # returns the existing assessment instead of creating duplicate history.
+        if (
+            candidate.current_count == current_count
+            and set(candidate.evidence_ids or []) == evidence_signature
+        ):
+            # Identical evidence and measurement must remain idempotent.
             return candidate
         if not evidence_signature and candidate.created_at is not None:
             created_at = _ensure_utc(candidate.created_at)
@@ -196,6 +198,15 @@ def _create_change(
     )
     db.add(change)
     db.flush()
+
+    # When new evidence changes an active assessment, retain the previous record
+    # as history and explicitly link it to the replacement. Never leave two active
+    # assessments for the same person/domain/subject/change type.
+    for candidate in existing:
+        candidate.is_active = False
+        candidate.superseded_by_change_id = change.id
+    if existing:
+        db.flush()
 
     from app.services.significance import assess_change
     assess_change(db, change, baseline, comparison, events, now)
