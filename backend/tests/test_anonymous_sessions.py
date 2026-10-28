@@ -499,6 +499,7 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     assert recorded.json()["source_type"] == "feedback"
 
     from app.models.improvement_training_example import ImprovementTrainingExample
+    from app.models.memory import LearningEvent, ReasoningMemory
     db = TestSessionLocal()
     try:
         staged = db.query(ImprovementTrainingExample).filter_by(
@@ -510,6 +511,20 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         assert "2026-05-31" not in staged[0].sample_text
         assert "[redacted email]" in staged[0].sample_text
         assert "[redacted date]" in staged[0].sample_text
+
+        # Consent-gated product-improvement staging and personal learning memory
+        # are distinct stores with different retention rules.
+        memories = db.query(ReasoningMemory).filter_by(
+            person_id=created["person"]["id"], memory_type="feedback"
+        ).all()
+        events = db.query(LearningEvent).filter_by(
+            person_id=created["person"]["id"], event_type="feedback"
+        ).all()
+        assert len(memories) == 1
+        assert "Deliberately submitted feedback" in str(memories[0].value)
+        assert len(events) == 1
+        assert events[0].caregiver_id == created["caregiver"]["id"]
+        assert "help_improve" in events[0].detail
     finally:
         db.close()
 
@@ -529,7 +544,6 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
     blocked = client.post("/api/v1/feedback", params=query, headers=headers)
     assert blocked.status_code == 403, blocked.text
 
-    from app.models.memory import ReasoningMemory
     db = TestSessionLocal()
     try:
         assert db.query(ImprovementTrainingExample).filter_by(
@@ -537,6 +551,9 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         ).count() == 0
         assert db.query(ReasoningMemory).filter_by(
             person_id=created["person"]["id"], memory_type="feedback"
+        ).count() == 1
+        assert db.query(LearningEvent).filter_by(
+            person_id=created["person"]["id"], event_type="feedback"
         ).count() == 1
     finally:
         db.close()
