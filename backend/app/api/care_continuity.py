@@ -343,6 +343,119 @@ def read_lcr_context(
     return build_lcr_context(db, person_id, limit_per_source=limit_per_source, query=query)
 
 
+@router.get("/current-care")
+def current_care_projection(
+    request: Request,
+    limit_per_source: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Return a bounded caregiver-facing projection from existing scoped LCR sources.
+
+    This is a read-only projection, not a new source of truth. It deliberately
+    retains competing claims and labels source/status rather than inferring that
+    the newest report is necessarily correct.
+    """
+    person_id, _ = _scoped_identity(request, db)
+    context = build_lcr_context(db, person_id, limit_per_source=limit_per_source)
+    sources = context.get("sources") or {}
+    current_items: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(source_name: str, row: dict[str, Any], kind: str, priority: int, *, require_open: bool = False) -> None:
+        source_id = str(row.get("id") or "")
+        if not source_id or (source_name, source_id) in seen:
+            return
+        raw_status = row.get("status") or row.get("assertion_status") or row.get("decision_status") or row.get("epistemic_status")
+        status = str(raw_status).strip().lower() if raw_status is not None else "status_unknown"
+        closed_statuses = {"resolved", "completed", "closed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}
+        if require_open and status in closed_statuses:
+            return
+        if source_name == "facts" and row.get("superseded_by_fact_id"):
+            return
+        if source_name == "assertions" and status in {"retracted", "superseded"}:
+            return
+
+        title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field",
+                        "observation_category", "decision_text", "description", "event_type")
+        description_fields = ("description", "question", "fact_value", "asserted_value",
+                              "perspective_text", "observed_value", "decision_text", "summary", "resolution")
+        title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
+        description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
+        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
+        recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at")
+        evidence_ids = row.get("evidence_ids")
+        if not isinstance(evidence_ids, list):
+            evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
+        source_label = row.get("source_label") or row.get("source_type") or row.get("author_label") or row.get("created_by_caregiver_id")
+        current_items.append({
+            "id": source_id,
+            "kind": kind,
+            "priority": priority,
+            "title": title[:240],
+            "description": description[:1600],
+            "status": status,
+            "epistemic_status": row.get("epistemic_status") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
+            "source_type": source_name,
+            "source_label": str(source_label)[:160] if source_label else "Source not recorded",
+            "occurred_at": occurred_at,
+            "recorded_at": recorded_at,
+            "evidence_ids": evidence_ids[:50],
+        })
+        seen.add((source_name, source_id))
+
+    # Highest priority first: unresolved disagreement, then explicit unknowns,
+    # missing information and open questions. These are never auto-resolved.
+    for row in (sources.get("conflicts") or {}).get("items", []):
+        add("conflicts", row, "Conflict", 0, require_open=True)
+    for row in (sources.get("uncertainties") or {}).get("items", []):
+        add("uncertainties", row, "Needs clarification", 1, require_open=True)
+    for row in (sources.get("missing_information") or {}).get("items", []):
+        add("missing_information", row, "Information missing", 2, require_open=True)
+    for row in (sources.get("open_questions") or {}).get("items", []):
+        add("open_questions", row, "Open question", 3, require_open=True)
+    for row in (sources.get("events") or {}).get("items", []):
+        if row.get("attention_candidate") is True or row.get("follow_up_candidate") is True:
+            add("events", row, "Care event needing attention", 4, require_open=True)
+    for row in (sources.get("caregiver_observations") or {}).get("items", []):
+        add("caregiver_observations", row, "Caregiver observation", 5)
+    for row in (sources.get("facts") or {}).get("items", []):
+        add("facts", row, "Recorded fact", 6)
+    for row in (sources.get("assertions") or {}).get("items", []):
+        add("assertions", row, "Reported information", 7, require_open=True)
+    for row in (sources.get("decisions") or {}).get("items", []):
+        add("decisions", row, "Care decision", 8, require_open=True)
+
+    def sort_key(item: dict[str, Any]) -> tuple[int, str]:
+        return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
+
+    current_items.sort(key=sort_key, reverse=False)
+    # Preserve priority ordering; within each priority, newest recorded item first.
+    ordered: list[dict[str, Any]] = []
+    for priority in sorted({item["priority"] for item in current_items}):
+        group = [item for item in current_items if item["priority"] == priority]
+        group.sort(key=lambda item: str(item.get("recorded_at") or item.get("occurred_at") or ""), reverse=True)
+        ordered.extend(group)
+
+    return {
+        "person_id": person_id,
+        "as_of": context.get("as_of"),
+        "projection_type": "bounded_evidence_derived_current_care",
+        "read_only": True,
+        "history_coverage": context.get("history_coverage", "bounded_subset"),
+        "schema_status": context.get("schema_status", "partial"),
+        "missing_required_sources": context.get("missing_required_sources", []),
+        "missing_optional_sources": context.get("missing_optional_sources", []),
+        "items": ordered[:12],
+        "item_count": min(len(ordered), 12),
+        "has_more": len(ordered) > 12,
+        "source_coverage": {
+            name: {"status": value.get("status"), "returned_count": value.get("returned_count", 0), "has_more": value.get("has_more", False)}
+            for name, value in sources.items()
+        },
+        "notice": "This is a bounded record view, not a clinical conclusion. Conflicting claims remain separate; unavailable sources may make this view incomplete.",
+    }
+
+
 @router.get("/summary")
 def continuity_summary(request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
