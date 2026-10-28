@@ -1368,3 +1368,45 @@ def test_email_uploads_validate_format_and_outlook_compound_signature(monkeypatc
     finally:
         teardown()
 
+
+
+def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(monkeypatch):
+    client, token, person_id, _, _, other_person_id = setup_client(monkeypatch)
+    auth = {"Authorization": f"Bearer {token}"}
+    try:
+        foreign = client.post(
+            "/api/v1/uncertainty/analyze",
+            headers=auth,
+            json={
+                "person_id": other_person_id,
+                "subject_type": "care_record",
+                "subject_id": "current",
+                "field": "care_status",
+                "claim": "The current care status is unknown.",
+                "task": "summarize",
+                "evidence_ids": [],
+                "required_fields": [],
+                "conflict_ids": [],
+            },
+        )
+        assert foreign.status_code == 403, foreign.text
+
+        duplicate = client.post(
+            "/api/v1/uncertainty/analyze",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "subject_type": "care_record",
+                "subject_id": "current",
+                "field": "care_status",
+                "claim": "The current care status is unknown.",
+                "task": "summarize",
+                "evidence_ids": ["same-id", "same-id"],
+                "required_fields": [],
+                "conflict_ids": [],
+            },
+        )
+        assert duplicate.status_code == 422, duplicate.text
+        assert "Duplicate evidence IDs" in duplicate.text
+    finally:
+        teardown()
