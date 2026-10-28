@@ -712,7 +712,10 @@ def test_share_intake_persists_across_requests_and_cannot_be_replayed(monkeypatc
         oversized = client.post(
             "/api/v1/share-intake",
             content=b" " * (8 * 1024 * 1024 + 1),
-            headers={"content-type": "application/json"},
+            headers={
+                "content-type": "application/json",
+                "content-length": str(8 * 1024 * 1024 + 1),
+            },
         )
         assert oversized.status_code == 413, oversized.text
 
