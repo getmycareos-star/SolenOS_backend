@@ -160,7 +160,8 @@ async def upload_evidence(
     if person_id != scoped_person_id or caregiver_id != scoped_caregiver_id:
         raise HTTPException(status_code=403, detail="Upload identity does not match this care-record session")
 
-    filename = os.path.basename(file.filename or "upload").replace("\r", "").replace("\n", "").strip()[:255] or "upload"
+    raw_filename = (file.filename or "upload").replace("\\", "/")
+    filename = os.path.basename(raw_filename).replace("\r", "").replace("\n", "").strip()[:255] or "upload"
     suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     mime_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     mime_by_extension = {
