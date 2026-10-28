@@ -18,6 +18,8 @@ from app.schemas.uncertainty import (
     SubjectUncertaintySummary,
 )
 from app.services.uncertainty import UncertaintyEngine
+from app.services.uncertainty_intelligence import analyze_uncertainty
+from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
@@ -155,3 +157,74 @@ def get_subject_summary(
     engine: UncertaintyEngine = Depends(get_engine),
 ):
     return engine.get_subject_summary(person_id, subject_type, subject_id)
+
+
+@router.post("/analyze", response_model=UncertaintyAnalysisResponse)
+def analyze_and_persist_uncertainty(
+    request: UncertaintyAnalysisRequest,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Analyze a real workflow claim and persist the epistemic result.
+
+    The endpoint does not treat supplied prose as verified evidence and never emits
+    a calibrated probability. Evidence retrieval and person authorization must be
+    performed by the authenticated calling workflow before invoking this route.
+    """
+    try:
+        analysis = analyze_uncertainty(
+            claim=request.claim,
+            task=request.task,
+            evidence=request.evidence,
+            required_fields=request.required_fields,
+            unresolved_conflicts=request.unresolved_conflicts,
+            source_access=request.source_access,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    from app.schemas.uncertainty import UncertaintyAssessmentCreate
+    from app.core.uncertainty_enums import EpistemicState, GapReason
+
+    state = EpistemicState(analysis["epistemic_state"])
+    reason_by_classification = {
+        "missing_information": GapReason.NOT_DOCUMENTED,
+        "possible_reference_ambiguity": GapReason.AMBIGUOUS,
+        "conflicting_evidence": GapReason.CONFLICTING,
+        "insufficient_evidence": GapReason.INSUFFICIENT_EVIDENCE,
+        "outdated_information": GapReason.OUTDATED,
+        "knowledge_boundary": GapReason.INACCESSIBLE,
+        "source_verification_uncertainty": GapReason.LOW_QUALITY,
+        "causal_inference_review": GapReason.INSUFFICIENT_EVIDENCE,
+        "temporal_uncertainty": GapReason.MISSING_CONTEXT,
+    }
+    gap_reason = next(
+        (reason_by_classification[item] for item in analysis["classifications"] if item in reason_by_classification),
+        None,
+    )
+    evidence_ids = [
+        str(item["id"]) for item in request.evidence
+        if isinstance(item, dict) and item.get("id") is not None
+    ]
+    persisted = engine.create_uncertainty_assessment(
+        UncertaintyAssessmentCreate(
+            person_id=request.person_id,
+            subject_type=request.subject_type,
+            subject_id=request.subject_id,
+            field=request.field,
+            epistemic_state=state,
+            confidence=None,
+            known_value=None,
+            gap_reason=gap_reason,
+            context=[analysis],
+            evidence_ids=evidence_ids or None,
+            assessed_by_caregiver_id=request.assessed_by_caregiver_id,
+        )
+    )
+    return {
+        "assessment_id": persisted.id,
+        "person_id": persisted.person_id,
+        "subject_type": persisted.subject_type,
+        "subject_id": persisted.subject_id,
+        "field": persisted.field,
+        "analysis": analysis,
+    }
