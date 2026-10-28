@@ -14,6 +14,7 @@ from app.schemas.change import (
     Pattern as PatternSchema,
     Situation as SituationSchema,
     SituationResponse,
+    ChangeDetailResponse,
 )
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations, update_situations
@@ -131,6 +132,39 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
         .limit(100)
         .all()
     )
+
+
+@router.get("/changes/{person_id}/{change_id}", response_model=ChangeDetailResponse)
+def get_change_detail(
+    person_id: str,
+    change_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return one persisted assessment with only its source evidence for this person."""
+    _require_person_scope(request, db, person_id)
+    change = (
+        db.query(Change)
+        .filter(Change.id == change_id, Change.person_id == person_id)
+        .first()
+    )
+    if change is None:
+        raise HTTPException(status_code=404, detail="Change assessment not found")
+
+    evidence_ids = list(dict.fromkeys(change.evidence_ids or []))
+    evidence = []
+    if evidence_ids:
+        evidence = (
+            db.query(CareEvent)
+            .filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(evidence_ids),
+            )
+            .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
+            .all()
+        )
+    # Do not return arbitrary event records referenced by stale or corrupt IDs.
+    return ChangeDetailResponse(change=change, evidence=evidence)
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
