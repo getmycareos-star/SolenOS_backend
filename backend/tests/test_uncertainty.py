@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app
-from app.models.care import Person, Caregiver
+from app.models.care import Person, Caregiver, Evidence
 from app.models.anonymous_session import AnonymousSession
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -356,6 +356,15 @@ def test_epistemic_view_summary():
             person_id=person.id,
         )
         db.add_all([person, caregiver])
+        db.flush()
+        db.add(Evidence(
+            id="evidence-person-7-med-name",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="Caregiver reported the medication name as Metformin.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        ))
         db.commit()
         db.close()
 
@@ -370,6 +379,7 @@ def test_epistemic_view_summary():
                 "field": "name",
                 "epistemic_state": "known",
                 "known_value": "Metformin",
+                "evidence_ids": ["evidence-person-7-med-name"],
             },
         )
         
@@ -439,6 +449,15 @@ def test_case_b_explicit_negative_not_unknown():
             person_id=person.id,
         )
         db.add_all([person, caregiver])
+        db.flush()
+        db.add(Evidence(
+            id="evidence-person-b-falls",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="Caregiver reported no falls in the past six months.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+        ))
         db.commit()
         db.close()
 
@@ -454,6 +473,7 @@ def test_case_b_explicit_negative_not_unknown():
                 "epistemic_state": "known",
                 "known_value": "No falls in the past six months",
                 "gap_reason": "absent",
+                "evidence_ids": ["evidence-person-b-falls"],
             },
         )
         assert response.status_code == 200
