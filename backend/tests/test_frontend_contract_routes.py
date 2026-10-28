@@ -751,6 +751,17 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
     client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
     headers = {"Authorization": f"Bearer {token}"}
     try:
+        oversized_request = client.post(
+            "/api/v1/upload",
+            content=b"x" * (12 * 1024 * 1024 + 1),
+            headers={
+                **headers,
+                "content-type": "multipart/form-data; boundary=solenos-limit-test",
+                "content-length": str(12 * 1024 * 1024 + 1),
+            },
+        )
+        assert oversized_request.status_code == 413, oversized_request.text
+
         png_bytes = b"\x89PNG\r\n\x1a\n" + b"medication image bytes"
         medication = client.post(
             "/api/v1/upload",
