@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 import hashlib
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
@@ -787,6 +788,18 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         assert [event["new_status"] for event in events] == ["resolved", "reopened"]
         assert all(event["rationale"] for event in events)
         assert all(event["person_id"] == "resolution-person" for event in events)
+
+        from app.models.uncertainty import ContradictionResolutionEvent
+        audit_db = TestingSessionLocal()
+        try:
+            audit_event = audit_db.query(ContradictionResolutionEvent).first()
+            audit_event.rationale = "Attempted audit rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                audit_db.commit()
+            audit_db.rollback()
+        finally:
+            audit_db.close()
+
         assert other_client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history").status_code == 404
     finally:
         teardown_db()
