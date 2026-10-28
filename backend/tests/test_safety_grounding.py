@@ -347,21 +347,52 @@ class TestSourceQualityEvaluator:
     def setup_method(self):
         self.evaluator = SourceQualityEvaluator()
 
-    def test_clinician_source_high_quality(self):
+    def test_authority_alone_does_not_establish_quality(self):
         quality = self.evaluator.evaluate(SourceAuthority.CLINICIAN, CurrentnessStatus.CURRENT)
-        assert quality == SourceQuality.HIGH
+        assert quality == SourceQuality.UNVERIFIED
 
-    def test_stale_evidence_downgrade(self):
-        quality = self.evaluator.evaluate(SourceAuthority.CLINICIAN, CurrentnessStatus.STALE)
-        assert quality in (SourceQuality.MODERATE, SourceQuality.LOW)
+    def test_explicit_direct_contextual_evidence_can_be_high_quality(self):
+        assessment = self.evaluator.assess(
+            SourceAuthority.CLINICIAN,
+            CurrentnessStatus.CURRENT,
+            source_text="Recorded observation with relevant context.",
+            source_identity_verified=True,
+            directness="direct",
+            context_present=True,
+            supporting_material_present=True,
+            ambiguity_present=False,
+        )
+        assert assessment["quality"] == SourceQuality.HIGH.value
+        assert assessment["rule_version"] == self.evaluator.RULE_VERSION
+        assert "Evidence quality is not truth, authenticity, or source reliability." in assessment["limitations"]
 
-    def test_unknown_authority_low_quality(self):
+    def test_unknown_source_remains_unverified(self):
         quality = self.evaluator.evaluate(SourceAuthority.UNKNOWN, CurrentnessStatus.CURRENT)
-        assert quality == SourceQuality.LOW
+        assert quality == SourceQuality.UNVERIFIED
 
-    def test_contradictory_evidence_low_quality(self):
-        quality = self.evaluator.evaluate(SourceAuthority.CLINICIAN, CurrentnessStatus.CURRENT, is_contradictory=True)
-        assert quality == SourceQuality.LOW
+    def test_contradiction_does_not_downgrade_evidence_quality(self):
+        args = dict(
+            source_text="Recorded observation with relevant context.",
+            source_identity_verified=True,
+            directness="direct",
+            context_present=True,
+            supporting_material_present=True,
+            ambiguity_present=False,
+        )
+        ordinary = self.evaluator.evaluate(SourceAuthority.CLINICIAN, CurrentnessStatus.CURRENT, **args)
+        contradictory = self.evaluator.evaluate(SourceAuthority.CLINICIAN, CurrentnessStatus.CURRENT, is_contradictory=True, **args)
+        assert ordinary == contradictory == SourceQuality.HIGH
+
+    def test_freshness_requires_domain_specific_policy(self):
+        now = datetime(2026, 10, 28, tzinfo=timezone.utc)
+        assert self.evaluator.get_currentness_status(now, None, now) == CurrentnessStatus.UNKNOWN_CURRENCY
+        assert self.evaluator.get_currentness_status(now, None, now, max_age_days=30) == CurrentnessStatus.CURRENT
+        assert self.evaluator.get_currentness_status(datetime(2026, 1, 1, tzinfo=timezone.utc), None, now, max_age_days=30) == CurrentnessStatus.STALE
+
+    def test_claim_extraction_does_not_invent_confidence(self):
+        claims = ClaimExtractionEngine().extract("The medication definitely caused the falls.")
+        assert len(claims) == 1
+        assert claims[0].confidence is None
 
 
 class TestRiskClassifier:
