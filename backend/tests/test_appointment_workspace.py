@@ -87,6 +87,37 @@ def test_current_care_projection_is_read_only_and_person_scoped(client):
     assert body["missing_required_sources"]
 
 
+def test_saved_daily_care_entry_appears_in_longitudinal_projection(client, monkeypatch):
+    import app.api.v1 as api_v1
+
+    test_client, owner, _ = client
+    # Prove the record write and projection do not depend on a live optional model.
+    def unavailable_model(*args, **kwargs):
+        raise RuntimeError("optional model unavailable")
+
+    monkeypatch.setattr(api_v1, "extract_review_candidates", unavailable_model)
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    saved = test_client.post("/api/v1/daily/log", headers=headers, json={
+        "person_id": owner["person"]["id"],
+        "caregiver_id": owner["caregiver"]["id"],
+        "medications": [],
+        "vitals": [],
+        "scales": [],
+        "notes": "Caregiver reported a disrupted sleep routine.",
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["success"] is True
+    assert saved.json()["qwen_extraction_status"] == "unavailable"
+
+    projection = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
+    assert projection.status_code == 200, projection.text
+    body = projection.json()
+    daily_items = [item for item in body["items"] if item["kind"] == "Daily care entry"]
+    assert daily_items, body
+    assert any("disrupted sleep routine" in item["description"] for item in daily_items)
+    assert all(item["source_collection"] == "events" for item in daily_items)
+
+
 def test_current_care_projection_requires_session(client):
     test_client, _, _ = client
     response = test_client.get("/api/v1/care-continuity/current-care")
