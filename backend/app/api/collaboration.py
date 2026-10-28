@@ -482,6 +482,21 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             terms = re.findall(r"[a-z]+", claim)
             if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
                 return True
+    # A question can mention the same words as an unsupported delivery claim.
+    # Do not treat word overlap as proof when the source explicitly lacks a receipt.
+    missing_delivery_state = re.search(
+        r"\bno\b.{0,100}\b(?:reminder|notification|message|alert|delivery receipt|delivery status)\b"
+        r".{0,80}\b(?:available|supplied|provided|known|confirmed)\b",
+        source,
+    )
+    delivery_status_claim = re.search(
+        r"\b(?:no|the|a)\s+(?:reminder|notification|message|alert)\s+"
+        r"(?:was\s+)?(?:delivered|sent|received|read)\b",
+        text,
+    )
+    if missing_delivery_state and delivery_status_claim:
+        return True
+
     # Never ask caregivers to disclose credentials or one-time verification secrets.
     if re.search(
         r"\b(?:provide|share|send|tell me|give me|enter)\b.{0,70}\b"
