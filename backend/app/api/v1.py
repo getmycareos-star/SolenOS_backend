@@ -363,16 +363,25 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     except Exception:
         qwen_status = "unavailable"
 
-    analysis = persist_capture_analysis(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        source_event_id=event.id,
-        source_evidence_id=None,
-        source_text=source_text,
-        extraction_status=qwen_status,
-        candidates=qwen_candidates if qwen_status == "available" else None,
-    )
+    analysis_id = None
+    try:
+        analysis = persist_capture_analysis(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=event.id,
+            source_evidence_id=None,
+            source_text=source_text,
+            extraction_status=qwen_status,
+            candidates=qwen_candidates if qwen_status == "available" else None,
+        )
+        analysis_id = analysis.id
+    except Exception:
+        # The care event has already been committed. Roll back only the
+        # secondary review transaction and return the durable event receipt.
+        db.rollback()
+        qwen_status = "unavailable"
+        qwen_candidates = None
 
     return {
         "success": True,
@@ -381,7 +390,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "recorded_at": event.recorded_at,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
-        "qwen_analysis_id": analysis.id,
+        "qwen_analysis_id": analysis_id,
         "qwen_review_required": True,
         "qwen_written_to_lcr": False,
     }
