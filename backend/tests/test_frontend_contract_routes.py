@@ -293,7 +293,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
                 "evidence_type": "document",
                 "extracted_text": text_bytes.decode("utf-8"),
             },
-            files={"file": (r"C:\\fakepath\\care-note.txt", text_bytes, "text/plain")},
+            files={"file": (r"C:\fakepath\care-note.txt", text_bytes, "text/plain")},
         )
         assert text_upload.status_code == 201, text_upload.text
         assert text_upload.json()["persisted"] is True
