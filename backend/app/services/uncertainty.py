@@ -248,10 +248,14 @@ class UncertaintyEngine:
         if requested_status not in resolution_statuses:
             raise ValueError("Unsupported conflict resolution status")
         rationale = (update_data.get("resolution_notes") or "").strip()
-        if status_changed and requested_status in {"resolved", "partially_resolved", "qualified", "superseded", "reopened"} and not rationale:
-            raise ValueError("A non-empty rationale is required to resolve, partially resolve, or reopen a conflict")
-
         evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
+        audit_event_required = (
+            status_changed
+            or ("resolution_notes" in update_data and update_data.get("resolution_notes") != db_contradiction.resolution_notes)
+            or ("evidence_ids" in update_data and evidence_ids != (db_contradiction.evidence_ids or []))
+        )
+        if audit_event_required and not rationale:
+            raise ValueError("A non-empty rationale is required for conflict status, rationale, or evidence-link changes")
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("Duplicate evidence IDs are not allowed in conflict resolution")
         if "evidence_ids" in update_data or status_changed:
@@ -266,7 +270,7 @@ class UncertaintyEngine:
                     raise ValueError("Resolution evidence must belong to the same care record")
 
         try:
-            if status_changed:
+            if audit_event_required:
                 event = ContradictionResolutionEventModel(
                     contradiction_id=db_contradiction.id,
                     person_id=db_contradiction.person_id,
