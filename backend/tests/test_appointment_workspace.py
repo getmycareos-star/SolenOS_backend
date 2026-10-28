@@ -335,6 +335,31 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert retrieved.json()["assessment_id"] == body["assessment_id"]
     assert retrieved.json()["assessment"]["person_id"] == owner["person"]["id"]
 
+    # A genuinely new persisted source record must change the next assessment
+    # and be represented as a projection delta, not a clinical interpretation.
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
+            VALUES ('understanding-fact-2', :person_id, 'daily_function', 'Newly reported support requirement',
+                    'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {"person_id": owner["person"]["id"]})
+    changed = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
+    assert changed.status_code == 200, changed.text
+    changed_body = changed.json()
+    assert changed_body["status"] == "created"
+    evolution = changed_body["assessment"]["evolution_since_previous_assessment"]
+    assert evolution["comparison_available"] is True
+    assert evolution["previous_assessment_id"] == body["assessment_id"]
+    assert any(
+        item["change_type"] == "newly_included" and item["record_id"] == "understanding-fact-2"
+        for item in evolution["changes"]
+    )
+    history = test_client.get("/api/v1/care-continuity/situation-understanding/history", headers=headers)
+    assert history.status_code == 200, history.text
+    assert history.json()["count"] == 2
+    assert history.json()["items"][0]["assessment_id"] == changed_body["assessment_id"]
+    assert history.json()["items"][1]["assessment_id"] == body["assessment_id"]
+
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_view = test_client.get("/api/v1/care-continuity/situation-understanding", headers=other_headers)
     assert other_view.status_code == 200, other_view.text
