@@ -451,6 +451,22 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert observation.json()["reported_by_caregiver_id"] == first["caregiver"]["id"]
     assert perspective.json()["person_id"] == first["person"]["id"]
     assert observation.json()["person_id"] == first["person"]["id"]
+    assert observation.json()["observation_type"] == "SECOND_HAND"
+
+    direct = client.post(
+        "/api/v1/care-continuity/caregiver-observations",
+        headers=headers,
+        json={"observation_category": "mobility", "description": "Caregiver directly observed the transfer.", "observation_type": "direct", "observed_at": "2026-10-28T09:00:00Z"},
+    )
+    assert direct.status_code == 201, direct.text
+    assert direct.json()["observation_type"] == "DIRECT"
+
+    invalid = client.post(
+        "/api/v1/care-continuity/caregiver-observations",
+        headers=headers,
+        json={"observation_category": "mobility", "description": "Unsupported basis.", "observation_type": "guess"},
+    )
+    assert invalid.status_code == 422
 
 def test_lcr_version_endpoint_persists_immutable_person_scoped_snapshot():
     client = TestClient(app)
