@@ -96,3 +96,19 @@ class UncertaintyAssessment(Base):
     assessed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     superseded_by_assessment_id = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
+
+
+
+class ContradictionResolutionEvent(Base):
+    """Immutable audit record for each conflict resolution/reopening transition."""
+    __tablename__ = "contradiction_resolution_events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    contradiction_id = Column(String, ForeignKey("contradictions.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    actor_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    previous_status = Column(String(32), nullable=False)
+    new_status = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    evidence_ids = Column(JSONList, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
