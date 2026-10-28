@@ -193,37 +193,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         return await call_next(request)
     if path == "/api/v1/sessions/anonymous" and method == "POST":
         return await call_next(request)
-    if path.endswith("/share-intake") and method == "POST":
-        # This is a short-lived capability bootstrap, not an authenticated care
-        # endpoint. Enforce the body limit while streaming as well as checking
-        # Content-Length: clients can omit or lie about that header.
-        max_share_request_bytes = 8 * 1024 * 1024
-        try:
-            content_length = int(request.headers.get("content-length", "0"))
-        except ValueError:
-            content_length = 0
-        if content_length < 0 or content_length > max_share_request_bytes:
-            return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
-
-        chunks = []
-        received_bytes = 0
-        async for chunk in request.stream():
-            received_bytes += len(chunk)
-            if received_bytes > max_share_request_bytes:
-                return JSONResponse(status_code=413, content={"detail": "Share payload exceeds the 8 MB request limit"})
-            chunks.append(chunk)
-        body = b"".join(chunks)
-        sent = False
-
-        async def receive_share_body():
-            nonlocal sent
-            if sent:
-                return {"type": "http.request", "body": b"", "more_body": False}
-            sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
-
-        request._body = body
-        request._receive = receive_share_body
+    # The outer ASGI middleware already bounded and buffered this public bootstrap
+    # request. Do not read and buffer its body a second time here.
+    if path == "/api/v1/share-intake" and method == "POST":
         return await call_next(request)
     if not path.startswith("/api/v1/") and path != "/api/situation":
         return await call_next(request)
