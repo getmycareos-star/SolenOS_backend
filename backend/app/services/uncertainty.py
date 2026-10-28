@@ -174,11 +174,11 @@ class UncertaintyEngine:
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         requested_status = update_data.get("resolution_status", db_contradiction.resolution_status)
         status_changed = requested_status != db_contradiction.resolution_status
-        resolution_statuses = {"resolved", "partially_resolved", "reopened", "unresolved"}
+        resolution_statuses = {"resolved", "partially_resolved", "qualified", "superseded", "reopened", "unresolved"}
         if requested_status not in resolution_statuses:
             raise ValueError("Unsupported conflict resolution status")
         rationale = (update_data.get("resolution_notes") or "").strip()
-        if status_changed and requested_status in {"resolved", "partially_resolved", "reopened"} and not rationale:
+        if status_changed and requested_status in {"resolved", "partially_resolved", "qualified", "superseded", "reopened"} and not rationale:
             raise ValueError("A non-empty rationale is required to resolve, partially resolve, or reopen a conflict")
 
         evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
@@ -217,7 +217,7 @@ class UncertaintyEngine:
             if status_changed and requested_status == "resolved":
                 db_contradiction.resolved_at = datetime.now(timezone.utc)
                 db_contradiction.resolved_by_caregiver_id = self.caregiver_id
-            elif status_changed and requested_status in {"reopened", "unresolved", "partially_resolved"}:
+            elif status_changed and requested_status in {"reopened", "unresolved", "partially_resolved", "qualified", "superseded"}:
                 db_contradiction.resolved_at = None
                 db_contradiction.resolved_by_caregiver_id = None
 
