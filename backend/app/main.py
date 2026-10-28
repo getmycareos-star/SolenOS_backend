@@ -94,7 +94,7 @@ class RequestBodySizeLimitMiddleware:
         await self.app(scope, replay, send)
 
     async def reject(self, send):
-        body = b'{"detail":"Share payload exceeds the 8 MB request limit"}'
+        body = b'{"detail":"Request payload exceeds the configured size limit"}'
         await send({'type': 'http.response.start', 'status': 413, 'headers': [(b'content-type', b'application/json'), (b'content-length', str(len(body)).encode('ascii'))]})
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
