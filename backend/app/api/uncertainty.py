@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence
+from app.models.uncertainty import Contradiction
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -184,6 +185,21 @@ def analyze_and_persist_uncertainty(
     a calibrated probability. Evidence retrieval and person authorization must be
     performed by the authenticated calling workflow before invoking this route.
     """
+    requested_conflict_ids = list(dict.fromkeys(request.conflict_ids))
+    if requested_conflict_ids:
+        conflict_rows = (
+            engine.db.query(Contradiction)
+            .filter(
+                Contradiction.person_id == request.person_id,
+                Contradiction.id.in_(requested_conflict_ids),
+            )
+            .all()
+        )
+        if len(conflict_rows) != len(requested_conflict_ids):
+            raise HTTPException(status_code=404, detail="One or more conflict records were not found for this person")
+    else:
+        conflict_rows = []
+
     requested_evidence_ids = list(dict.fromkeys(request.evidence_ids))
     if requested_evidence_ids:
         evidence_rows = (
@@ -214,7 +230,7 @@ def analyze_and_persist_uncertainty(
                 for row in evidence_rows
             ],
             required_fields=request.required_fields,
-            unresolved_conflicts=request.unresolved_conflicts,
+            unresolved_conflicts=[{"id": row.id, "field": row.field, "description": row.description, "evidence_ids": row.evidence_ids, "status": row.resolution_status} for row in conflict_rows if row.resolution_status != "resolved"],
             source_access=request.source_access,
         )
     except ValueError as exc:
@@ -252,7 +268,6 @@ def analyze_and_persist_uncertainty(
             gap_reason=gap_reason,
             context=[analysis],
             evidence_ids=evidence_ids or None,
-            assessed_by_caregiver_id=request.assessed_by_caregiver_id,
         )
     )
     return {
