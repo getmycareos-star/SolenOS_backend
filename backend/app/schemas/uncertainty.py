@@ -211,7 +211,7 @@ class UncertaintyAnalysisRequest(BaseModel):
     field: str
     claim: str = Field(..., min_length=1, max_length=12000)
     task: str = Field(..., min_length=1, max_length=80)
-    evidence: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_ids: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
     unresolved_conflicts: List[Dict[str, Any]] = Field(default_factory=list)
     source_access: str = Field(default="available", pattern="^(available|unavailable|failed|restricted)$")
