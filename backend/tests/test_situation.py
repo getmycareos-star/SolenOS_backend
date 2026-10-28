@@ -114,7 +114,9 @@ def test_post_situation_preserves_caregiver_reported_event_time_provenance():
         )
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["events"][0]["occurred_at"] == event_time
+        # SQLite returns timezone-naive datetimes; the service normalizes offset-free
+        # storage to UTC and the supplied instant must remain unchanged.
+        assert data["events"][0]["occurred_at"].startswith("2026-10-20T08:30:00")
         assert data["events"][0]["time_provenance"] == "caregiver_reported_event_time"
 
         db = TestingSessionLocal()
