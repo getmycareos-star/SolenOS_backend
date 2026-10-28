@@ -231,7 +231,7 @@ def analyze_and_persist_uncertainty(
             ],
             required_fields=request.required_fields,
             unresolved_conflicts=[{"id": row.id, "field": row.field, "description": row.description, "evidence_ids": row.evidence_ids, "status": row.resolution_status} for row in conflict_rows if row.resolution_status != "resolved"],
-            source_access=request.source_access,
+            source_access="available",
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
