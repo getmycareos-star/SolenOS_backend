@@ -557,3 +557,51 @@ def test_improvement_feedback_requires_session_and_explicit_saved_opt_in():
         ).count() == 1
     finally:
         db.close()
+
+def test_change_detection_reads_require_a_scoped_bearer_session():
+    client = TestClient(app)
+    created = create_session(client, "Change API recipient")
+
+    unauthenticated = client.get(f"/api/v1/change/changes/{created['person']['id']}")
+    assert unauthenticated.status_code == 401, unauthenticated.text
+
+    authorized = client.get(
+        f"/api/v1/change/changes/{created['person']['id']}",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+    )
+    assert authorized.status_code == 200, authorized.text
+    assert authorized.json() == []
+
+
+def test_change_detection_rejects_cross_person_access():
+    client = TestClient(app)
+    first = create_session(client, "First change recipient")
+    second = create_session(client, "Second change recipient")
+
+    response = client.get(
+        f"/api/v1/change/changes/{first['person']['id']}",
+        headers={"Authorization": f"Bearer {second['access_token']}"},
+    )
+    assert response.status_code == 403, response.text
+
+
+def test_clients_cannot_write_unsupported_baseline_values():
+    client = TestClient(app)
+    created = create_session(client, "Baseline recipient")
+
+    response = client.post(
+        "/api/v1/change/baselines",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": created["person"]["id"],
+            "subject_type": "fall",
+            "subject_id": "",
+            "window_start": "2026-01-01T00:00:00Z",
+            "window_end": "2026-02-01T00:00:00Z",
+            "event_count": 999,
+            "frequency_per_period": 999,
+            "evidence_ids": [],
+        },
+    )
+    assert response.status_code == 405, response.text
+
