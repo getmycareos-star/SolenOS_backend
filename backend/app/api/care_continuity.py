@@ -591,6 +591,44 @@ def current_care_projection(
         group.sort(key=lambda item: str(item.get("recorded_at") or item.get("occurred_at") or ""), reverse=True)
         ordered.extend(group)
 
+    # Attach the latest persisted evidence reviews without treating absence of a
+    # review as a positive quality or freshness result.
+    review_schema_available = inspect(db.get_bind()).has_table("evidence_review_records")
+    referenced_evidence_ids = sorted({
+        str(evidence_id)
+        for item in ordered
+        for evidence_id in (item.get("evidence_ids") or [])
+        if evidence_id
+    })
+    latest_reviews: dict[tuple[str, str], EvidenceReviewRecord] = {}
+    if review_schema_available and referenced_evidence_ids:
+        review_rows = db.query(EvidenceReviewRecord).filter(
+            EvidenceReviewRecord.person_id == person_id,
+            EvidenceReviewRecord.evidence_id.in_(referenced_evidence_ids),
+        ).order_by(EvidenceReviewRecord.created_at.desc(), EvidenceReviewRecord.id.desc()).all()
+        for review in review_rows:
+            latest_reviews.setdefault((str(review.evidence_id), review.review_type), review)
+
+    for item in ordered:
+        evidence_assessments = []
+        for evidence_id in item.get("evidence_ids") or []:
+            for review_type in ("quality", "reliability", "source_confidence", "freshness", "completeness"):
+                review = latest_reviews.get((str(evidence_id), review_type))
+                if review is not None:
+                    evidence_assessments.append({
+                        "evidence_id": str(evidence_id),
+                        "review_type": review.review_type,
+                        "outcome": review.outcome,
+                        "rationale": review.rationale,
+                        "policy_version": review.policy_version,
+                        "reviewed_at": review.created_at.isoformat() if review.created_at else None,
+                    })
+        item["evidence_assessments"] = evidence_assessments
+        item["evidence_assessment_coverage"] = (
+            "persisted_reviews_available" if evidence_assessments
+            else ("no_reviews_recorded" if review_schema_available else "unavailable_schema")
+        )
+
     return {
         "person_id": person_id,
         "as_of": context.get("as_of"),
