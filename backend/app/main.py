@@ -512,6 +512,7 @@ def get_situation(
         "title": event.title,
         "description": event.description,
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+        "time_provenance": event.time_provenance,
         "evidence_ids": event.evidence_ids or [],
     } for event in events]
 
