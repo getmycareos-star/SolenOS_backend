@@ -10,6 +10,7 @@ import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent
 from app.models.anonymous_session import AnonymousSession
+from app.models.care_continuity import CareAssertion
 from app.models.change import Baseline, Change, ChangeConfirmationEvent
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -822,6 +823,89 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
             headers={"Authorization": f"Bearer {token}"},
         )
         assert missing_reason.status_code == 422
+    finally:
+        teardown_db()
+
+def test_structured_assertion_transition_is_persisted_idempotently_and_returns_source_assertions():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-assertion-transition", name="Assertion transition recipient")
+        caregiver = Caregiver(
+            id="caregiver-assertion-transition",
+            name="Assertion transition caregiver",
+            email="assertion-transition@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        observations = [
+            ("independent", 10),
+            ("needs assistance", 3),
+            ("needs assistance", 1),
+        ]
+        assertion_ids = []
+        for index, (value, days_ago) in enumerate(observations):
+            event = CareEvent(
+                person_id=person.id,
+                event_type="functional_observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Structured functional observation {index + 1}",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(event)
+            db.flush()
+            assertion = CareAssertion(
+                person_id=person.id,
+                subject_type="functional",
+                subject_id="daily_activity",
+                field="assistance_level",
+                assertion_kind="time_bound_observation",
+                asserted_value=value,
+                source_event_id=event.id,
+                source_label="caregiver_record",
+                source_text=None,
+                evidence_ids=[],
+                assertion_status="reported",
+                observed_at=now - timedelta(days=days_ago),
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(assertion)
+            db.flush()
+            assertion_ids.append(assertion.id)
+        db.commit()
+
+        from app.services.change_detection import detect_assertion_changes
+        first = detect_assertion_changes(db, person.id, now)
+        db.commit()
+        assert len(first) == 1
+        change_id = first[0].id
+        assert first[0].previous_state == "independent"
+        assert first[0].current_state == "needs assistance"
+        assert first[0].change_direction.value == "unknown"
+        assert first[0].significance_verdict.value == "insufficient_evidence"
+        assert set(first[0].evidence_ids) == set(assertion_ids)
+
+        second = detect_assertion_changes(db, person.id, now)
+        db.commit()
+        assert [item.id for item in second] == [change_id]
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        db.close()
+
+        response = TestClient(app).get(
+            f"/api/v1/change/changes/{person_id}/{change_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert {item["id"] for item in payload["assertions"]} == set(assertion_ids)
+        assert payload["change"]["confirmation_status"] == "detected"
     finally:
         teardown_db()
 
