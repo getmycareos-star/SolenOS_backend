@@ -193,9 +193,23 @@ class ChangeEvidenceResponse(BaseModel):
         from_attributes = True
 
 
+class ChangeConfirmationHistoryItem(BaseModel):
+    id: str
+    previous_status: str
+    new_status: str
+    actor_caregiver_id: str
+    reason: Optional[str] = None
+    evidence_ids: List[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class ChangeDetailResponse(BaseModel):
     change: Change
     evidence: List[ChangeEvidenceResponse]
+    confirmation_history: List[ChangeConfirmationHistoryItem] = Field(default_factory=list)
 
 class ChangeConfirmationRequest(BaseModel):
     status: str
