@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.database import get_db
+from app.api.care_delta import _scoped_identity
 from app.schemas.safety import (
     SafetyContractInput,
     SafetyContractOutput,
@@ -69,10 +70,13 @@ def _sanitize_client_review_flags(input_data: SafetyContractInput) -> SafetyCont
 
 
 @router.post("/evaluate", response_model=SafetyContractOutput)
-def evaluate_safety(input_data: SafetyContractInput, db: Session = Depends(get_db)):
+def evaluate_safety(input_data: SafetyContractInput, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    if input_data.person_id != person_id:
+        raise HTTPException(status_code=403, detail="Safety evaluation is scoped to the authenticated care record")
     engine = SafetyEngine()
-    output = engine.evaluate(_sanitize_client_review_flags(input_data))
-    return output
+    sanitized_input = _sanitize_client_review_flags(input_data).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
+    return engine.evaluate(sanitized_input)
 
 
 @router.post("/validate-response", response_model=SafetyDecisionObject)
@@ -89,11 +93,14 @@ def validate_response(
 
 
 @router.post("/audit", response_model=SafetyAuditRecord)
-def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, final_output: Optional[str] = None, db: Session = Depends(get_db)):
+def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractOutput, request: Request, final_output: Optional[str] = None, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    if input_data.person_id != person_id:
+        raise HTTPException(status_code=403, detail="Safety audit is scoped to the authenticated care record")
     engine = SafetyEngine()
     # Recompute the audit decision server-side. The caller-supplied output is
     # accepted only for API compatibility and is never treated as proof.
-    sanitized_input = _sanitize_client_review_flags(input_data)
+    sanitized_input = _sanitize_client_review_flags(input_data).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
     verified_output = engine.evaluate(sanitized_input)
     audit_data = engine.create_safety_audit(sanitized_input, verified_output, final_output)
     db_audit = SafetyAuditRecordModel(**audit_data)
