@@ -42,6 +42,8 @@ REVIEW_TYPES = {
 def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
     """Append a versioned, evidence-linked review without overwriting source evidence."""
     person_id, caregiver_id = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("evidence_review_records"):
+        raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
@@ -124,6 +126,8 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
 @router.get("/evidence/{evidence_id}/reviews")
 def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("evidence_review_records"):
+        raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
     evidence = db.query(Evidence.id).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
