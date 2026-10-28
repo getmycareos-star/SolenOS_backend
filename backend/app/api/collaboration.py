@@ -168,6 +168,9 @@ async def upload_evidence(
         "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
         "yml": "application/yaml", "pdf": "application/pdf", "jpg": "image/jpeg",
         "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+        "doc": "application/msword",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "rtf": "application/rtf",
     }
     if mime_type in {"", "application/octet-stream"} and suffix in mime_by_extension:
         mime_type = mime_by_extension[suffix]
