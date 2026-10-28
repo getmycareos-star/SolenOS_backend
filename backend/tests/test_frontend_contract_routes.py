@@ -814,6 +814,21 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         downloaded = client.get(f"/api/v1/upload/{document_id}", headers=headers)
         assert downloaded.status_code == 200
         assert downloaded.content == docx_bytes
+
+        # A stored blob whose bytes no longer match its recorded digest/size must
+        # not be served as if it were the original care document.
+        from app.models.collaboration import EvidenceUpload
+        db = TestingSessionLocal()
+        try:
+            blob = db.query(EvidenceUpload).filter_by(evidence_id=document_id).one()
+            blob.content = b"corrupted stored bytes"
+            db.commit()
+        finally:
+            db.close()
+
+        corrupted_download = client.get(f"/api/v1/upload/{document_id}", headers=headers)
+        assert corrupted_download.status_code == 500, corrupted_download.text
+        assert "integrity" in corrupted_download.json()["detail"].lower()
     finally:
         teardown()
 
