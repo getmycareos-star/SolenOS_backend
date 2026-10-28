@@ -213,8 +213,6 @@ class UncertaintyAnalysisRequest(BaseModel):
     evidence_ids: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
     conflict_ids: List[str] = Field(default_factory=list)
-    source_access: str = Field(default="available", pattern="^(available|unavailable|failed|restricted)$")
-    assessed_by_caregiver_id: Optional[str] = None
 
 
 class UncertaintyAnalysisResponse(BaseModel):
