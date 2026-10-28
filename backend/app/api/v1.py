@@ -341,15 +341,23 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     db.add(event)
     db.commit()
     db.refresh(event)
-    _log_and_learn(
-        db,
-        person_id,
-        event_type,
-        title,
-        "care_event",
-        source_id=event.id,
-        caregiver_id=caregiver_id,
-    )
+    # The event is the primary user-requested write. Learning telemetry is
+    # secondary and must not make a committed capture look unsaved, which could
+    # prompt a caregiver to retry and create duplicate entries.
+    learning_pipeline_status = "available"
+    try:
+        _log_and_learn(
+            db,
+            person_id,
+            event_type,
+            title,
+            "care_event",
+            source_id=event.id,
+            caregiver_id=caregiver_id,
+        )
+    except Exception:
+        db.rollback()
+        learning_pipeline_status = "unavailable"
 
     # Analyze the saved capture through the shared Railway-local Qwen gateway.
     # This response is a review aid only; candidate output is never written as
@@ -388,6 +396,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "id": event.id,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
+        "learning_pipeline_status": learning_pipeline_status,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
         "qwen_analysis_id": analysis_id,
