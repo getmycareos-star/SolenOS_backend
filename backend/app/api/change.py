@@ -94,7 +94,43 @@ def detect_changes(
     _require_person_scope(request, db, person_id)
     ref_time = _parse_reference_time(reference_time)
     changes = detect_event_changes(db, person_id, event_type, subject_id, ref_time)
+    db.commit()
     return changes
+
+
+@router.post("/changes/reassess", response_model=List[ChangeSchema])
+def reassess_changes(person_id: str, request: Request, db: Session = Depends(get_db)):
+    """Reconcile change assessments from this person's persisted care events only."""
+    _require_person_scope(request, db, person_id)
+    event_types = [
+        row[0]
+        for row in db.query(CareEvent.event_type)
+        .filter(
+            CareEvent.person_id == person_id,
+            CareEvent.event_type.is_not(None),
+        )
+        .distinct()
+        .order_by(CareEvent.event_type.asc())
+        .all()
+        if row[0]
+    ]
+    try:
+        for event_type in event_types:
+            detect_event_changes(db, person_id, event_type, None)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Persisted change reassessment could not be completed",
+        ) from exc
+    return (
+        db.query(Change)
+        .filter(Change.person_id == person_id, Change.is_active.is_(True))
+        .order_by(Change.created_at.desc())
+        .limit(100)
+        .all()
+    )
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
@@ -103,7 +139,7 @@ def list_changes(person_id: str, request: Request, subject_type: Optional[str] =
     query = db.query(Change).filter(Change.person_id == person_id)
     if subject_type:
         query = query.filter(Change.subject_type == subject_type)
-    return query.order_by(Change.created_at.desc()).all()
+    return query.order_by(Change.created_at.desc()).limit(100).all()
 
 
 @router.get("/patterns/detect", response_model=List[PatternSchema])
