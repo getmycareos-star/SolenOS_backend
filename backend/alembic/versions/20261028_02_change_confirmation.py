@@ -56,7 +56,28 @@ def downgrade() -> None:
     bind = op.get_bind()
     inspector = inspect(bind)
     if inspector.has_table("change_confirmation_events"):
+        has_history = bind.execute(
+            sa.text("SELECT 1 FROM change_confirmation_events LIMIT 1")
+        ).first()
+        if has_history:
+            raise RuntimeError(
+                "Cannot downgrade change confirmation while audited transitions exist; "
+                "export and explicitly reconcile the audit history before any destructive rollback."
+            )
+    if inspector.has_table("changes"):
+        has_confirmed_state = bind.execute(
+            sa.text(
+                "SELECT 1 FROM changes "
+                "WHERE confirmation_status IS NOT NULL AND confirmation_status <> 'detected' LIMIT 1"
+            )
+        ).first() if "confirmation_status" in {column["name"] for column in inspector.get_columns("changes")} else None
+        if has_confirmed_state:
+            raise RuntimeError(
+                "Cannot downgrade change confirmation while reviewed change states exist."
+            )
+    if inspector.has_table("change_confirmation_events"):
         op.drop_table("change_confirmation_events")
+    inspector = inspect(bind)
     if inspector.has_table("changes"):
         columns = {column["name"] for column in inspector.get_columns("changes")}
         if "confirmation_status" in columns:
