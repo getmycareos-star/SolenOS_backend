@@ -204,6 +204,10 @@ TEXT_FIELDS = {
     "notes", "reason", "review_notes", "resolution",
 }
 MAX_TEXT_CHARS = 1600
+JSON_TEXT_FIELDS = {
+    "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
+    "context", "metadata", "context_payload",
+}
 
 
 def _safe_value(value: Any, key: str | None = None) -> Any:
@@ -213,6 +217,13 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
         return {str(k): _safe_value(v, str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_safe_value(v, key) for v in value]
+    if isinstance(value, str) and key in JSON_TEXT_FIELDS and value.lstrip().startswith(("[", "{")):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, (list, dict)):
+                return _safe_value(parsed, key)
+        except (TypeError, json.JSONDecodeError):
+            pass
     if isinstance(value, str) and key in TEXT_FIELDS and len(value) > MAX_TEXT_CHARS:
         return value[:MAX_TEXT_CHARS] + "… [truncated]"
     return value
