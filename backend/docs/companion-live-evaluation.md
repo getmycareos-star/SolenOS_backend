@@ -4,16 +4,18 @@ This evaluator sends real requests through `/api/v1/conversation/message` using 
 
 ## Run from PowerShell
 
-From the backend directory, configure the exact private Ollama endpoint and model already available to your test environment:
+From the backend directory, run this in a runner/container that can actually reach the private Ollama endpoint. The PowerShell syntax below is for setting the variables; a local Windows PC cannot ordinarily resolve a Railway `.railway.internal` hostname unless it is running inside the appropriate network.
 
 ```powershell
 $env:SOLENOS_RUN_LIVE_QWEN_EVAL = "1"
+$env:APP_ENV = "ci"
+$env:SECRET_KEY = "ci-only-secret-key-long-enough-for-test-runtime"
 $env:OLLAMA_BASE_URL = "http://<your-private-ollama-host>:<port>"
 $env:OLLAMA_MODEL = "qwen2.5:0.5b"
 python scripts/evaluate_companion_live_qwen.py
 ```
 
-Replace the host and port with the actual configured private endpoint. Do not use a public or hosted inference URL. The script fails closed if the explicit opt-in or required endpoint/model variables are absent.
+Replace the host and port with the actual configured private endpoint. Do not use a public or hosted inference URL. The script fails closed if the explicit opt-in or required endpoint/model variables are absent. The repository's Qwen-specific GitHub Actions job is the available repeatable path for running against the bundled model without requiring a paid inference provider.
 
 ## Cases
 
