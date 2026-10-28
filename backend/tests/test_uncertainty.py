@@ -642,3 +642,49 @@ def test_case_i_incomplete_record():
         assert data["gap_reason"] == "insufficient_evidence"
     finally:
         teardown_db()
+
+
+def test_uncertainty_api_enforces_session_scope_and_ignores_body_identity():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person_a = Person(id="scope-person-a", name="Scoped Person A")
+        caregiver_a = Caregiver(id="scope-caregiver-a", name="Caregiver A", email=None, relationship="Family", person_id=person_a.id)
+        person_b = Person(id="scope-person-b", name="Scoped Person B")
+        caregiver_b = Caregiver(id="scope-caregiver-b", name="Caregiver B", email=None, relationship="Family", person_id=person_b.id)
+        db.add_all([person_a, caregiver_a, person_b, caregiver_b])
+        db.commit()
+        db.close()
+
+        client = authorized_client("scope-person-a")
+        denied = client.get("/api/v1/uncertainty/gaps/scope-person-b")
+        assert denied.status_code == 403
+
+        created = client.post("/api/v1/uncertainty/gaps", json={
+            "person_id": "scope-person-b",
+            "subject_type": "medication",
+            "subject_id": "med-scope",
+            "field": "dose",
+            "epistemic_state": "unknown",
+            "gap_reason": "not_documented",
+            "description": "Dose has not been documented.",
+        })
+        assert created.status_code == 200
+        assert created.json()["person_id"] == "scope-person-a"
+        assert client.get("/api/v1/uncertainty/gaps/scope-person-b").status_code == 403
+    finally:
+        teardown_db()
+
+
+def test_uncertainty_api_rejects_missing_bearer_session():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        response = client.get("/api/v1/uncertainty/gaps/person-not-authorized")
+        assert response.status_code == 401
+    finally:
+        teardown_db()
