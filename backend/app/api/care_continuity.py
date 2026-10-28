@@ -794,7 +794,10 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         "source": "situation_understanding_assessment",
         "event_date": now,
         "source_event_id": None,
-        "evidence_ids": evidence_ids,
+        # This endpoint uses a reflected SQLAlchemy Table, which sees the
+        # JSONList TypeDecorator's TEXT storage as plain TEXT. Serialize explicitly
+        # rather than binding a Python list to a TEXT column.
+        "evidence_ids": json.dumps(evidence_ids, separators=(",", ":")),
         "delta_json": serialized,
         "model_name": "deterministic-lcr-composition-v1",
         "created_by_caregiver_id": caregiver_id,
