@@ -66,6 +66,8 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    # Client-generated UUID reused on ambiguous retries; not an auth credential.
+    client_turn_id: Optional[uuid.UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -113,6 +115,69 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+def _replay_companion_turn(
+    db: Session,
+    user_row: ConversationMessage,
+    person_id: str,
+    caregiver_id: str,
+    requested_session_id: str | None = None,
+) -> dict | None:
+    """Return a previously committed turn only within its original authorized session."""
+    session = db.query(ConversationSession).filter_by(
+        id=user_row.session_id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        status="active",
+    ).first()
+    if not session or (requested_session_id and requested_session_id != session.id):
+        return None
+    assistant_row = db.query(ConversationMessage).filter_by(
+        id=f"{user_row.id}:assistant",
+        session_id=session.id,
+        role="assistant",
+    ).first()
+    if not assistant_row:
+        return None
+    try:
+        evidence_ids = json.loads(assistant_row.evidence_ids_json or "[]")
+        if not isinstance(evidence_ids, list):
+            evidence_ids = []
+    except (TypeError, ValueError):
+        evidence_ids = []
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session.id)
+        .order_by(ConversationMessage.created_at.asc())
+        .all()
+    )
+    return {
+        "session_id": session.id,
+        "person_id": person_id,
+        "reply": assistant_row.content,
+        "guard_verdict": assistant_row.guard_verdict,
+        "safety_note": assistant_row.safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": [],
+        "source_evidence_ids": evidence_ids,
+        "source_appointment_ids": [],
+        "source_assertion_ids": [],
+        "source_lcr_context_ids": [],
+        "lcr_context_coverage": {"status": "idempotent_replay_context_not_recomputed"},
+        "ai_generated": assistant_row.guard_verdict == "passed",
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+        "idempotent_replay": True,
+        "messages": [{
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        } for row in history],
+    }
 
 
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
