@@ -272,11 +272,28 @@ def _table(db: Session, name: str) -> Table:
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
 
+JSON_TEXT_FIELDS = {
+    "evidence_ids", "source_ids", "source_assertion_ids", "matching_candidate_ids",
+    "claim_refs", "competing_claim_ids", "context", "criteria", "metadata",
+    "context_payload", "section_payload", "snapshot_payload", "before_state", "after_state",
+}
+
+
 def _jsonable(value: Any):
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
+        result = {}
+        for key, item in value.items():
+            if key in JSON_TEXT_FIELDS and isinstance(item, str) and item.lstrip().startswith(("[", "{")):
+                try:
+                    parsed = json.loads(item)
+                    if isinstance(parsed, (list, dict)):
+                        item = parsed
+                except (TypeError, json.JSONDecodeError):
+                    pass
+            result[str(key)] = _jsonable(item)
+        return result
     if isinstance(value, (list, tuple)):
         return [_jsonable(v) for v in value]
     return value
