@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Enum as SQLEnum
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Enum as SQLEnum, event
 from sqlalchemy.sql import func
+from sqlalchemy.orm import Session
 import uuid
 from app.core.database import Base
 from app.core.types import JSONList
@@ -117,3 +118,12 @@ class ContradictionResolutionEvent(Base):
     rationale = Column(Text, nullable=False)
     evidence_ids = Column(JSONList, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def prevent_conflict_history_mutation(session, flush_context, instances):
+    if any(
+        isinstance(item, ContradictionResolutionEvent)
+        for item in list(session.dirty) + list(session.deleted)
+    ):
+        raise ValueError("Conflict resolution history is append-only and cannot be updated or deleted")
