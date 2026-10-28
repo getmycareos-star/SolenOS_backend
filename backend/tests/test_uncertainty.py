@@ -831,6 +831,8 @@ def test_evidence_review_history_persists_attribution_and_is_person_scoped():
                 {"criterion": "source attribution", "result": "present", "rationale": "Uploader and source type are persisted."},
                 {"criterion": "independent corroboration", "result": "none_linked", "rationale": "No independent source is linked."},
                 {"criterion": "temporal context", "result": "partial", "rationale": "The report says last Tuesday without an absolute date."},
+                {"criterion": "evidence freshness", "result": "undetermined", "rationale": "The event date is not absolute enough to assess current relevance."},
+                {"criterion": "record completeness", "result": "partial", "rationale": "The report does not include a source document or follow-up outcome."},
             ],
         }
         created = client.post("/api/v1/care-continuity/evidence/review-evidence-1/reviews", json=payload)
