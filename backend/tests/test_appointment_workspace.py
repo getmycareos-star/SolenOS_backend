@@ -317,6 +317,14 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert body["assessment"]["person_id"] == owner["person"]["id"]
     assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
     assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
+    assert len(body["assessment"]["capabilities"]) == 20
+    assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] in {
+        "supported_by_persisted_records", "insufficient_evidence"
+    }
+    repeated = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["status"] == "unchanged"
+    assert repeated.json()["assessment_id"] == body["assessment_id"]
     assert any(
         item.get("id") == "understanding-fact"
         for item in body["assessment"]["current_care_reality"]["records"]
