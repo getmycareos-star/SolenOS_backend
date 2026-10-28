@@ -851,3 +851,63 @@ def test_evidence_review_history_persists_attribution_and_is_person_scoped():
         assert invalid.status_code == 422
     finally:
         teardown_db()
+
+
+
+def test_conflict_candidates_match_context_and_overlapping_time_without_auto_resolution():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="match-person", name="Match Person")
+        caregiver = Caregiver(
+            id="match-caregiver", name="Match Caregiver",
+            email="match@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client("match-person")
+        base = {
+            "person_id": "match-person",
+            "subject_type": "daily_care",
+            "subject_id": "sleep-observation",
+            "field": "sleep_pattern",
+            "description": "Care reports differ about sleep timing.",
+            "context_key": "overnight-at-home",
+        }
+        first = client.post("/api/v1/uncertainty/contradictions", json={
+            **base, "effective_from": "2026-10-01T00:00:00Z", "effective_to": "2026-10-03T00:00:00Z",
+        })
+        assert first.status_code == 200, first.text
+        first_id = first.json()["id"]
+        assert first.json()["resolution_status"] == "unresolved"
+
+        overlapping = client.post("/api/v1/uncertainty/contradictions", json={
+            **base, "effective_from": "2026-10-02T00:00:00Z", "effective_to": "2026-10-04T00:00:00Z",
+        })
+        assert overlapping.status_code == 200, overlapping.text
+        assert first_id in overlapping.json()["matching_candidate_ids"]
+        assert overlapping.json()["resolution_status"] == "unresolved"
+
+        different_context = client.post("/api/v1/uncertainty/contradictions", json={
+            **{**base, "context_key": "overnight-at-facility"},
+            "effective_from": "2026-10-02T00:00:00Z", "effective_to": "2026-10-04T00:00:00Z",
+        })
+        assert different_context.status_code == 200, different_context.text
+        assert different_context.json()["matching_candidate_ids"] == []
+
+        disjoint = client.post("/api/v1/uncertainty/contradictions", json={
+            **base, "effective_from": "2026-10-05T00:00:00Z", "effective_to": "2026-10-06T00:00:00Z",
+        })
+        assert disjoint.status_code == 200, disjoint.text
+        assert disjoint.json()["matching_candidate_ids"] == []
+
+        invalid_interval = client.post("/api/v1/uncertainty/contradictions", json={
+            **base, "effective_from": "2026-10-06T00:00:00Z", "effective_to": "2026-10-05T00:00:00Z",
+        })
+        assert invalid_interval.status_code == 422
+    finally:
+        teardown_db()
