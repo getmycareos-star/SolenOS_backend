@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
@@ -21,12 +21,19 @@ from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
+from app.api.care_delta import _scoped_identity
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
 
-def get_engine(db: Session = Depends(get_db)) -> UncertaintyEngine:
-    return UncertaintyEngine(db)
+def get_engine(request: Request, db: Session = Depends(get_db)) -> UncertaintyEngine:
+    # Derive scope from the server-validated bearer session, never request body IDs.
+    person_id, caregiver_id = _scoped_identity(request, db)
+    return UncertaintyEngine(db, person_id=person_id, caregiver_id=caregiver_id)
+
+def _require_person_scope(engine: UncertaintyEngine, person_id: str) -> None:
+    if engine.person_id is not None and person_id != engine.person_id:
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
 
 
 @router.post("/gaps", response_model=InformationGap)
@@ -42,6 +49,7 @@ def list_gaps(
     status: Optional[GapLifecycleStatus] = None,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.list_information_gaps(
         person_id, subject_type, subject_id, status
     )
@@ -72,6 +80,7 @@ def list_questions(
     status: Optional[str] = None,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.list_open_questions(person_id, subject_type, subject_id, status)
 
 
@@ -102,6 +111,7 @@ def list_contradictions(
     resolution_status: Optional[str] = None,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.list_contradictions(
         person_id, subject_type, subject_id, resolution_status
     )
@@ -134,6 +144,7 @@ def list_assessments(
     epistemic_state: Optional[EpistemicState] = None,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.list_assessments(
         person_id, subject_type, subject_id, epistemic_state
     )
@@ -146,6 +157,7 @@ def get_epistemic_view(
     subject_id: str,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.get_epistemic_view(person_id, subject_type, subject_id)
 
 
@@ -156,6 +168,7 @@ def get_subject_summary(
     subject_id: str,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
+    _require_person_scope(engine, person_id)
     return engine.get_subject_summary(person_id, subject_type, subject_id)
 
 
