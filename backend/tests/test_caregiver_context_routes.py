@@ -852,6 +852,8 @@ def test_claim_evidence_links_reject_duplicates_and_flag_duplicate_content_witho
             {"criterion": "source attribution", "result": "present", "rationale": "The caregiver source is attributed."},
             {"criterion": "independent corroboration", "result": "independent_source_linked", "rationale": "Reviewer marked the source as independent; the content still needs duplicate checking."},
             {"criterion": "temporal context", "result": "specified", "rationale": "The source record contains its stated timing."},
+            {"criterion": "evidence freshness", "result": "undetermined", "rationale": "Current relevance has not been independently established."},
+            {"criterion": "record completeness", "result": "partial", "rationale": "Only the source text is present; corroborating context is not attached."},
         ],
     }
     for evidence_id in ("duplicate-evidence-a", "duplicate-evidence-b"):
