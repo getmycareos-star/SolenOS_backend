@@ -502,6 +502,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "decision_outcomes": "longitudinal_care_understanding",
         "decisions": "situation_evolution_tracking",
         "uncertainties": "situation_confidence_assessment",
+        "uncertainty_assessments": "situation_confidence_assessment",
         "information_gaps": "situation_prioritisation",
         "missing_information": "situation_prioritisation",
         "conflicts": "whole_situation_reasoning",
@@ -541,20 +542,20 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "id": str(item.get("id") or ""),
             "source": source,
             "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("event_type") or source)[:240],
-            "status": status or "not_recorded",
+            "status": status or str(item.get("epistemic_state") or item.get("epistemic_status") or "not_recorded").lower(),
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
             "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
         }
-        if source in {"conflicts", "reconciliations", "uncertainties", "information_gaps", "missing_information", "open_questions"} and status not in {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled"}:
-            (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties"} else missing_items).append(summary_item)
+        if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments", "information_gaps", "missing_information", "open_questions"} and status not in {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "known"}:
+            (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments"} else missing_items).append(summary_item)
         elif source == "events" and (item.get("attention_candidate") is True or item.get("follow_up_candidate") is True):
             attention_items.append(summary_item)
         elif source == "follow_up_links" and status in open_statuses:
             attention_items.append(summary_item)
     capability_specs = {
-        "situation_understanding": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "information_gaps", "conflicts"],
+        "situation_understanding": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "uncertainty_assessments", "information_gaps", "conflicts"],
         "current_care_reality": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts"],
         "care_context_reconstruction": ["assertions", "evidence", "provenance", "events", "facts"],
         "whole_situation_reasoning": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "appointments", "conflicts", "reconciliations"],
@@ -569,11 +570,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "baseline_establishment": ["facts", "assertions", "caregiver_observations", "events"],
         "current_state_reconstruction": ["events", "facts", "assertions", "caregiver_observations"],
         "historical_state_reconstruction": ["timeline", "events", "decisions", "decision_outcomes", "corrections"],
-        "situation_summarisation": ["events", "facts", "assertions", "decisions", "decision_outcomes", "uncertainties", "conflicts"],
+        "situation_summarisation": ["events", "facts", "assertions", "decisions", "decision_outcomes", "uncertainties", "uncertainty_assessments", "conflicts"],
         "situation_prioritisation": ["conflicts", "reconciliations", "uncertainties", "information_gaps", "missing_information", "open_questions", "follow_up_links", "events"],
         "situation_reassessment": ["follow_up_links", "appointments", "information_gaps", "uncertainties", "events"],
         "situation_evolution_tracking": ["events", "facts", "decisions", "decision_outcomes", "timeline"],
-        "situation_confidence_assessment": ["evidence", "provenance", "uncertainties", "conflicts", "reconciliations", "assertions"],
+        "situation_confidence_assessment": ["evidence", "provenance", "uncertainties", "uncertainty_assessments", "conflicts", "reconciliations", "assertions"],
     }
     capabilities = {}
     for capability, source_names in capability_specs.items():
