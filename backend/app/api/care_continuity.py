@@ -1258,7 +1258,18 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
         Evidence.id.in_(evidence_ids or ["__no_evidence__"]),
     ).all()
     evidence_by_id = {str(row.id): row for row in evidence_rows}
+    latest_reliability_reviews: dict[str, EvidenceReviewRecord] = {}
+    if inspect(db.get_bind()).has_table("evidence_review_records") and evidence_ids:
+        review_rows = db.query(EvidenceReviewRecord).filter(
+            EvidenceReviewRecord.person_id == person_id,
+            EvidenceReviewRecord.evidence_id.in_(evidence_ids),
+            EvidenceReviewRecord.review_type == "reliability",
+        ).order_by(EvidenceReviewRecord.created_at.desc(), EvidenceReviewRecord.id.desc()).all()
+        for review in review_rows:
+            latest_reliability_reviews.setdefault(str(review.evidence_id), review)
+
     groups: dict[str, list[str]] = {}
+    fingerprint_reviews: dict[str, set[str]] = {}
     records = []
     for link in link_rows:
         evidence = evidence_by_id.get(str(link.evidence_id))
@@ -1276,6 +1287,15 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
             ids_for_fingerprint = groups.setdefault(fingerprint, [])
             if str(evidence.id) not in ids_for_fingerprint:
                 ids_for_fingerprint.append(str(evidence.id))
+        review = latest_reliability_reviews.get(str(evidence.id))
+        independence_review = "not_reviewed"
+        if review is not None:
+            for criterion in review.criteria or []:
+                if isinstance(criterion, dict) and criterion.get("criterion") == "independent corroboration":
+                    independence_review = str(criterion.get("result") or "not_assessed")
+                    break
+        if fingerprint:
+            fingerprint_reviews.setdefault(fingerprint, set()).add(independence_review)
         records.append({
             "evidence_id": evidence.id,
             "link_role": link.evidence_role,
@@ -1286,20 +1306,35 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
             "source_span": link.source_span,
             "content_fingerprint": fingerprint,
             "integrity_status": "available",
-            "source_independence": "not_established",
+            "source_independence": independence_review,
+            "source_independence_review_id": review.id if review is not None else None,
+            "source_independence_review_policy": review.policy_version if review is not None else None,
         })
+    duplicate_fingerprints = {fingerprint for fingerprint, ids in groups.items() if len(ids) > 1}
     duplicate_content_groups = [
         {"fingerprint": fingerprint, "evidence_ids": ids, "interpretation": "Same normalized source text; do not count these records as independent corroboration without source review."}
         for fingerprint, ids in groups.items() if len(ids) > 1
     ]
+    reviewed_independent_fingerprints = {
+        fingerprint for fingerprint, results in fingerprint_reviews.items()
+        if "independent_source_linked" in results
+        and "copied_or_same_origin" not in results
+        and fingerprint not in duplicate_fingerprints
+    }
+    if len(reviewed_independent_fingerprints) >= 2:
+        corroboration_status = "reviewed_multiple_distinct_sources_candidate"
+    elif len(reviewed_independent_fingerprints) == 1:
+        corroboration_status = "only_one_reviewed_source_candidate"
+    else:
+        corroboration_status = "not_established"
     return {
         "person_id": person_id,
         "fact_id": fact_id,
         "linked_evidence_count": len(records),
         "distinct_nonempty_content_count": len(groups),
         "duplicate_content_candidates": duplicate_content_groups,
-        "independent_corroboration_status": "not_established",
-        "interpretation_limit": "Different text does not prove independent origin. Identical normalized text is a duplicate-content candidate, not proof of copying. Source independence requires explicit provenance review.",
+        "independent_corroboration_status": corroboration_status,
+        "interpretation_limit": "Different text does not prove independent origin. Identical normalized text is a duplicate-content candidate, not proof of copying. Reviewed source-independence labels are human review claims, not proof that the underlying claim is true.",
         "evidence": records,
     }
 
