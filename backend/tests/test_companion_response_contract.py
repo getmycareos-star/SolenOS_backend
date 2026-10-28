@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -482,6 +482,68 @@ def test_companion_query_terms_expand_common_caregiving_paraphrases():
     medication_terms = collaboration._companion_query_terms("Was the pill recorded?")
     assert "pill" in medication_terms
     assert "medication" in medication_terms
+
+
+def test_companion_retrieves_relevant_older_document_beyond_recent_upload_window(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older document contains a sleep observation; it does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        older = EvidenceModel(
+            person_id=person_id,
+            type="document",
+            source_text="August care note: waking several times overnight and restless sleep.",
+            original_file_path=None,
+            uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"August care note.pdf"}',
+            time_provenance="caregiver_reported",
+            confidence=None,
+            evidence_status="recorded",
+            source_type="document",
+        )
+        db.add(older)
+        for index in range(25):
+            db.add(EvidenceModel(
+                person_id=person_id,
+                type="document",
+                source_text=f"Unrelated household document number {index}.",
+                original_file_path=None,
+                uploaded_at=now - timedelta(hours=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"household note"}',
+                time_provenance="caregiver_reported",
+                confidence=None,
+                evidence_status="recorded",
+                source_type="document",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_evidence_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
 
 
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
