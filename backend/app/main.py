@@ -44,6 +44,53 @@ from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
 
+class ShareIntakeBodyLimitMiddleware:
+    MAX_BYTES = 8 * 1024 * 1024
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'http' or scope.get('method', '').upper() != 'POST' or scope.get('path', '').rstrip('/') != '/api/v1/share-intake':
+            await self.app(scope, receive, send)
+            return
+        headers = {k.lower(): v for k, v in scope.get('headers', [])}
+        try:
+            length = int(headers.get(b'content-length', b'0') or b'0')
+        except (TypeError, ValueError):
+            length = 0
+        if length < 0 or length > self.MAX_BYTES:
+            await self.reject(send)
+            return
+        chunks = []
+        size = 0
+        while True:
+            message = await receive()
+            if message.get('type') == 'http.disconnect':
+                return
+            chunk = message.get('body', b'')
+            size += len(chunk)
+            if size > self.MAX_BYTES:
+                await self.reject(send)
+                return
+            chunks.append(chunk)
+            if not message.get('more_body', False):
+                break
+        body = b''.join(chunks)
+        sent = False
+        async def replay():
+            nonlocal sent
+            if sent:
+                return {'type': 'http.request', 'body': b'', 'more_body': False}
+            sent = True
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+        await self.app(scope, replay, send)
+
+    async def reject(self, send):
+        body = b'{"detail":"Share payload exceeds the 8 MB request limit"}'
+        await send({'type': 'http.response.start', 'status': 413, 'headers': [(b'content-type', b'application/json'), (b'content-length', str(len(body)).encode('ascii'))]})
+        await send({'type': 'http.response.body', 'body': body, 'more_body': False})
+
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
@@ -87,6 +134,8 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
+
+app.add_middleware(ShareIntakeBodyLimitMiddleware)
 
 app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
