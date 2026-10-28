@@ -709,6 +709,13 @@ def test_casual_greeting_is_rejected_before_situation_capture_writes(monkeypatch
 def test_share_intake_persists_across_requests_and_cannot_be_replayed(monkeypatch):
     client, _, _, _, _, _ = setup_client(monkeypatch)
     try:
+        oversized = client.post(
+            "/api/v1/share-intake",
+            content=b" " * (8 * 1024 * 1024 + 1),
+            headers={"content-type": "application/json"},
+        )
+        assert oversized.status_code == 413, oversized.text
+
         original = b"shared-care-document"
         encoded = base64.b64encode(original).decode("ascii")
         created = client.post("/api/v1/share-intake", json={
