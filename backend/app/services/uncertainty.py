@@ -184,7 +184,7 @@ class UncertaintyEngine:
         evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
         if len(evidence_ids) != len(set(evidence_ids)):
             raise ValueError("Duplicate evidence IDs are not allowed in conflict resolution")
-        if status_changed:
+        if "evidence_ids" in update_data or status_changed:
             from app.models.care import Evidence
             if evidence_ids:
                 evidence_count = (
