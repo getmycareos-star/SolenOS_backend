@@ -47,10 +47,18 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     def create_evidence(source_text: str, doc: Optional[SituationDocument] = None) -> Evidence:
         metadata = None
-        if doc and (doc.ocr_confidence is not None or doc.mime_type):
+        if doc:
+            # Preserve the extractor's actual provenance. Unknown confidence stays
+            # unknown; upload time is not evidence of a document's effective date.
             metadata = {
-                "ocr_confidence": doc.ocr_confidence,
+                "document_id": doc.id,
+                "document_name": doc.name,
                 "mime_type": doc.mime_type,
+                "extraction_source": doc.extraction_source,
+                "ocr_confidence": doc.ocr_confidence,
+                "document_time_status": "not_extracted",
+                "captured_at": payload.provenance.captured_at if payload.provenance else None,
+                "entry_method": payload.provenance.entry_method if payload.provenance else None,
             }
         evidence = Evidence(
             person_id=payload.person_id,
@@ -60,9 +68,17 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             extra_metadata=json.dumps(metadata) if metadata else None,
             time_provenance=payload.provenance.captured_at if payload.provenance else None,
             uploaded_by_caregiver_id=payload.caregiver_id,
-            confidence=doc.ocr_confidence if doc else None,
+            confidence=doc.ocr_confidence if doc else 1.0,
             evidence_status="reported",
-            source_type="caregiver_observation",
+            source_type=(
+                "caregiver_observation"
+                if not doc
+                else "document_ocr"
+                if doc.extraction_source == "ocr"
+                else "document_text_extraction"
+                if doc.extraction_source in ("text", "tika")
+                else "document_extraction_method_unknown"
+            ),
         )
         db.add(evidence)
         db.flush()
@@ -109,6 +125,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         title=payload.raw_input.strip()[:200] if payload.raw_input and payload.raw_input.strip() else "Document observation",
         description=payload.raw_input.strip() if payload.raw_input and payload.raw_input.strip() else None,
         evidence_ids=evidence_ids,
+        tags=[f"capture_category:{payload.capture_category}"] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
     )
     db.add(care_event)
