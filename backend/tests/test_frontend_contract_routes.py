@@ -1323,3 +1323,48 @@ def test_request_body_limit_rejects_chunked_share_intake_without_content_length(
 
     asyncio.run(middleware(scope, receive, send))
     assert statuses == [413]
+
+def test_email_uploads_validate_format_and_outlook_compound_signature(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    headers = {"Authorization": f"Bearer {token}"}
+    data = {"person_id": person_id, "caregiver_id": caregiver_id, "evidence_type": "document"}
+    try:
+        fake_eml = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=data,
+            files={"file": ("care-note.eml", b"just arbitrary bytes", "application/octet-stream")},
+        )
+        assert fake_eml.status_code == 422, fake_eml.text
+
+        valid_eml_bytes = b"From: caregiver@example.test\r\nSubject: Appointment update\r\n\r\nFollow-up requested.\r\n"
+        eml = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=data,
+            files={"file": ("care-note.eml", valid_eml_bytes, "application/octet-stream")},
+        )
+        assert eml.status_code == 201, eml.text
+        assert eml.json()["mime_type"] == "message/rfc822"
+
+        fake_msg = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=data,
+            files={"file": ("outlook-note.msg", b"not an Outlook compound file", "application/vnd.ms-outlook")},
+        )
+        assert fake_msg.status_code == 422, fake_msg.text
+
+        # Outlook .msg files use the OLE Compound File Binary signature.
+        msg_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"minimal fixture"
+        msg = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=data,
+            files={"file": ("outlook-note.msg", msg_bytes, "application/octet-stream")},
+        )
+        assert msg.status_code == 201, msg.text
+        assert msg.json()["mime_type"] == "application/vnd.ms-outlook"
+    finally:
+        teardown()
+
