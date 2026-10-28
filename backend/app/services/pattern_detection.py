@@ -260,7 +260,7 @@ def _build_instability_pattern(
     event_ids = []
     for c in changes:
         event_ids.extend(c.evidence_ids or [])
-    event_ids = list(set(event_ids))
+    event_ids = sorted(set(event_ids))
     temporal_start = min(c.created_at for c in changes)
     temporal_end = max(c.created_at for c in changes)
     pattern = Pattern(
@@ -278,6 +278,4 @@ def _build_instability_pattern(
         evidence_count=len(event_ids),
         alternative_interpretations=[],
     )
-    db.add(pattern)
-    db.flush()
-    return pattern
+    return _persist_pattern(db, pattern)
