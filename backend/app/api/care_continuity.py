@@ -381,7 +381,7 @@ def current_care_projection(
                               "perspective_text", "observed_value", "decision_text", "summary", "resolution")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
-        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at") or row.get("due_at")
+        occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
         recorded_at = row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at")
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
@@ -400,6 +400,7 @@ def current_care_projection(
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "occurred_at": occurred_at,
+            "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
         })
