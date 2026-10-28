@@ -302,6 +302,60 @@ def test_companion_prior_turns_are_bounded_json_context_not_model_roles(monkeypa
         teardown()
 
 
+def test_companion_retry_replays_same_turn_without_duplicate_messages_or_cross_person_disclosure(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "I don't have enough recorded information to answer that."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        other_token, other_person_id, _ = create_session(client)
+        turn_id = "11111111-1111-4111-8111-111111111111"
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": person_id,
+            "text": "What is recorded about sleep?",
+            "client_turn_id": turn_id,
+        }
+
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert first_data["idempotent_replay"] is False
+        assert len(first_data["messages"]) == 2
+
+        # Simulate an ambiguous network outcome: the client retries without
+        # having received/stored the first response's session_id.
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["idempotent_replay"] is True
+        assert retry_data["session_id"] == first_data["session_id"]
+        assert retry_data["reply"] == first_data["reply"]
+        assert len(retry_data["messages"]) == 2
+        assert len(calls) == 1
+
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "person_id": other_person_id,
+                "text": "What is recorded about sleep?",
+                "client_turn_id": turn_id,
+            },
+        )
+        assert cross_person.status_code == 409
+        assert "reply" not in cross_person.json()
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
 def test_companion_retrieves_relevant_older_event_beyond_recent_baseline(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
