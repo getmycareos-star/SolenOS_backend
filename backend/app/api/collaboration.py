@@ -1589,16 +1589,22 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         evidence_ids = source_evidence_ids
 
     # Persist only after a valid model response or the safety guard response exists.
-    # This is conversation history, not LCR evidence. A failed inference leaves no
-    # new message pair and the uncommitted new session is rolled back by the request.
+    # This is conversation history, not LCR evidence. Give the two rows explicit,
+    # strictly increasing timestamps: PostgreSQL now() is transaction-stable, so
+    # relying on server defaults can give both rows the same timestamp and make
+    # transcript order nondeterministic.
+    user_message_time = datetime.now(timezone.utc)
+    assistant_message_time = user_message_time + timedelta(microseconds=1)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        created_at=user_message_time,
     ))
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        created_at=assistant_message_time,
     )
     db.add(assistant_row)
     db.commit()
