@@ -116,6 +116,7 @@ class ContradictionResolutionEvent(Base):
     previous_status = Column(String(32), nullable=False)
     new_status = Column(String(32), nullable=False)
     rationale = Column(Text, nullable=False)
+    resolution_scope = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
