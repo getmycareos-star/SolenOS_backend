@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261029_30_comp_turn_idem"
-down_revision = "20261029_29_evidence_relationship_scope"
+down_revision = "20261029_29_ev_rel_scope"
 branch_labels = None
 depends_on = None
 
