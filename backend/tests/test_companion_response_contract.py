@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -248,6 +248,211 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The available record does not establish a change over time."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": person_id,
+            "text": "Has the care situation changed?",
+            "client_turn_id": "retry-turn-0001",
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["idempotent_replay"] is True
+        assert retry_data["session_id"] == first_data["session_id"]
+        assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_record_refs"] == first_data["source_record_refs"]
+        assert retry_data["written_to_lcr"] is False
+        assert len(calls) == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).all()
+            assert [row.role for row in rows] == ["user", "assistant"]
+            assert rows[0].created_at < rows[1].created_at
+            assert {row.client_turn_id for row in rows} == {"retry-turn-0001"}
+            assert rows[1].source_record_refs_json == retry_data["source_record_refs"] and isinstance(rows[1].source_record_refs_json, str)
+        finally:
+            db.close()
+
+        changed = {**payload, "text": "A different message using the same turn ID"}
+        conflict = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert conflict.status_code == 409, conflict.text
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "person_id": other_person_id,
+                "text": payload["text"],
+                "client_turn_id": payload["client_turn_id"],
+            },
+        )
+        assert cross_person.status_code == 409, cross_person.text
+        assert first_data["reply"] not in cross_person.text
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
+def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older record says sleep was restless overnight; it does not establish a long-term trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Overnight rest observation",
+            description="Caregiver reported restless sleep and waking several times overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="daily_note",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Routine household observation {index}; no additional details.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        db.close()
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_historical_document_beyond_recent_upload_window_is_retrieved(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older caregiver-provided note mentions restless sleep overnight."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        older = EvidenceModel(
+            person_id=person_id, type="document",
+            source_text="Older care note: restless sleep and waking several times overnight.",
+            original_file_path=None, uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"older-care-note.pdf"}',
+            time_provenance="caregiver_reported", confidence=None,
+            evidence_status="recorded", source_type="document",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(25):
+            db.add(EvidenceModel(
+                person_id=person_id, type="document",
+                source_text=f"Unrelated household paperwork {index}.",
+                original_file_path=None, uploaded_at=now - timedelta(hours=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"household-paperwork.pdf"}',
+                time_provenance="caregiver_reported", confidence=None,
+                evidence_status="recorded", source_type="document",
+            ))
+        db.commit()
+        db.close()
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_evidence_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_source_row_ranking_prefers_relevance_over_recency_and_synonyms():
+    from datetime import datetime, timedelta
+    now = datetime(2026, 10, 29, 12, 0)
+    unrelated = SimpleNamespace(
+        title="Lunch planning", description="A routine meal observation.",
+        event_type="daily_note", status="recorded", occurred_at=now,
+    )
+    older_relevant = SimpleNamespace(
+        title="Overnight rest", description="Restless sleep and repeated waking.",
+        event_type="observation", status="recorded", occurred_at=now - timedelta(days=120),
+    )
+    ranked = collaboration._rank_source_rows(
+        "What happened with Mum's sleep?", [unrelated, older_relevant],
+        ("title", "description", "event_type", "status"), 1,
+    )
+    assert ranked == [older_relevant]
+    clinic = SimpleNamespace(
+        title="Neurology consultation", location="Clinic", provider="Neurology team",
+        healthcare_org="Community clinic", status="completed",
+        scheduled_at=now - timedelta(days=120),
+    )
+    meal = SimpleNamespace(
+        title="Lunch planning", location="Home", provider=None,
+        healthcare_org=None, status="recorded", scheduled_at=now,
+    )
+    assert collaboration._rank_source_rows(
+        "Tell me about the clinic visit", [meal, clinic],
+        ("title", "location", "provider", "healthcare_org", "status"), 1,
+    ) == [clinic]
 
 
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
