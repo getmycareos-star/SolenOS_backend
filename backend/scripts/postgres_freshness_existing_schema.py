@@ -47,39 +47,28 @@ def seed() -> None:
         ))
         db.commit()
 
+    # The 20261022_01 baseline uses Base.metadata.create_all(), which
+    # pre-creates all currently registered ORM tables on a fresh database.
+    # Reconcile those existing tables rather than creating them a second time.
+    inspector = inspect(engine)
+    for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
+        assert inspector.has_table(table), f"baseline did not create expected ORM table {table}"
+
     with engine.begin() as connection:
+        # Simulate an older partial assessment schema while preserving the
+        # original table and its existing data.
         connection.execute(text("""
-            CREATE TABLE evidence_freshness_policies (
-                id VARCHAR PRIMARY KEY,
-                person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
-                domain_key VARCHAR(80) NOT NULL,
-                policy_version VARCHAR(64) NOT NULL,
-                max_age_days INTEGER NULL,
-                historical_after_days INTEGER NULL,
-                rationale TEXT NOT NULL,
-                created_by_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id),
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
-                CONSTRAINT uq_evidence_freshness_policy_version
-                    UNIQUE (person_id, domain_key, policy_version)
-            )
+            ALTER TABLE evidence_freshness_assessments
+            DROP COLUMN IF EXISTS source_time_kind
         """))
-        # Deliberately model an older partial table: source_time_kind was
-        # introduced after the initial assessment schema.
-        connection.execute(text("""
-            CREATE TABLE evidence_freshness_assessments (
-                id VARCHAR PRIMARY KEY,
-                person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
-                evidence_id VARCHAR NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
-                policy_id VARCHAR NOT NULL REFERENCES evidence_freshness_policies(id) ON DELETE RESTRICT,
-                policy_version VARCHAR(64) NOT NULL,
-                freshness_status VARCHAR(32) NOT NULL,
-                source_time TIMESTAMP WITH TIME ZONE NULL,
-                assessed_at TIMESTAMP WITH TIME ZONE NOT NULL,
-                age_days INTEGER NULL,
-                rationale TEXT NOT NULL,
-                assessed_by_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id)
-            )
-        """))
+        for index in (
+            "ix_evidence_freshness_policies_person_id",
+            "ix_evidence_freshness_policies_person_domain",
+            "ix_evidence_freshness_assessments_person_id",
+            "ix_evidence_freshness_assessments_person_evidence",
+            "ix_evidence_freshness_assessments_policy",
+        ):
+            connection.execute(text(f'DROP INDEX IF EXISTS "{index}"'))
         connection.execute(text("""
             INSERT INTO evidence_freshness_policies
                 (id, person_id, domain_key, policy_version, max_age_days,
