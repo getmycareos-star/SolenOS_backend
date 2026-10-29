@@ -1,13 +1,13 @@
 """Create persistent open-loop records, audit events, and dependencies.
 
-Revision ID: 20261029_18_open_loops
-Revises: 20261029_17_pattern_metrics
+Revision ID: 20261029_20_open_loops
+Revises: 20261029_19_evidence_idem
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20261029_18_open_loops"
-down_revision = "20261029_17_pattern_metrics"
+revision = "20261029_20_open_loops"
+down_revision = "20261029_19_evidence_idem"
 branch_labels = None
 depends_on = None
 
