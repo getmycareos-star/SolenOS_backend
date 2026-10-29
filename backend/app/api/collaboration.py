@@ -939,19 +939,19 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 
 
 _MEASUREMENT_REQUESTS = (
-    (re.compile(r"\\b(?:blood\\s+pressure|bp)\\b", re.IGNORECASE), re.compile(r"\\b(?:blood\\s+pressure|systolic|diastolic)\\b", re.IGNORECASE), "blood pressure reading"),
-    (re.compile(r"\\b(?:blood\\s+sugar|blood\\s+glucose|glucose)\\b", re.IGNORECASE), re.compile(r"\\b(?:blood\\s+sugar|blood\\s+glucose|glucose|mg\\s*/?\\s*dl|mmol\\s*/?\\s*l)\\b", re.IGNORECASE), "blood glucose reading"),
-    (re.compile(r"\\b(?:oxygen\\s+saturation|spo2|oxygen\\s+level)\\b", re.IGNORECASE), re.compile(r"\\b(?:oxygen\\s+saturation|spo2|oxygen\\s+level)\\b", re.IGNORECASE), "oxygen saturation reading"),
-    (re.compile(r"\\b(?:heart\\s+rate|pulse)\\b", re.IGNORECASE), re.compile(r"\\b(?:heart\\s+rate|pulse)\\b", re.IGNORECASE), "heart-rate reading"),
-    (re.compile(r"\\b(?:body\\s+temperature|temperature)\\b", re.IGNORECASE), re.compile(r"\\b(?:body\\s+temperature|temperature)\\b", re.IGNORECASE), "temperature reading"),
-    (re.compile(r"\\b(?:body\\s+weight|weight)\\b", re.IGNORECASE), re.compile(r"\\b(?:body\\s+weight|weight)\\b", re.IGNORECASE), "weight measurement"),
+    (re.compile(r"\b(?:blood\s+pressure|bp)\b", re.IGNORECASE), re.compile(r"\b(?:blood\s+pressure|systolic|diastolic)\b", re.IGNORECASE), "blood pressure reading"),
+    (re.compile(r"\b(?:blood\s+sugar|blood\s+glucose|glucose)\b", re.IGNORECASE), re.compile(r"\b(?:blood\s+sugar|blood\s+glucose|glucose|mg\s*/?\s*dl|mmol\s*/?\s*l)\b", re.IGNORECASE), "blood glucose reading"),
+    (re.compile(r"\b(?:oxygen\s+saturation|spo2|oxygen\s+level)\b", re.IGNORECASE), re.compile(r"\b(?:oxygen\s+saturation|spo2|oxygen\s+level)\b", re.IGNORECASE), "oxygen saturation reading"),
+    (re.compile(r"\b(?:heart\s+rate|pulse)\b", re.IGNORECASE), re.compile(r"\b(?:heart\s+rate|pulse)\b", re.IGNORECASE), "heart-rate reading"),
+    (re.compile(r"\b(?:body\s+temperature|temperature)\b", re.IGNORECASE), re.compile(r"\b(?:body\s+temperature|temperature)\b", re.IGNORECASE), "temperature reading"),
+    (re.compile(r"\b(?:body\s+weight|weight)\b", re.IGNORECASE), re.compile(r"\b(?:body\s+weight|weight)\b", re.IGNORECASE), "weight measurement"),
 )
 
 
 def _missing_requested_measurement_response(user_text: str, authorized_lines: list[str]) -> str | None:
     """Prevent model-invented measurements when the requested measure is absent from retrieved records."""
     question = user_text or ""
-    context = "\\n".join(authorized_lines or [])
+    context = "\n".join(authorized_lines or [])
     for request_pattern, evidence_pattern, label in _MEASUREMENT_REQUESTS:
         if request_pattern.search(question) and not evidence_pattern.search(context):
             return f"I couldn't find a {label} in the available care record for the time you asked about."
