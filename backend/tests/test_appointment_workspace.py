@@ -548,6 +548,19 @@ def test_structured_source_observation_appears_in_current_care_projection(client
             "person_id": owner["person"]["id"],
             "caregiver_id": owner["caregiver"]["id"],
         })
+        connection.execute(text("""
+            INSERT INTO care_events (
+                id, person_id, event_type, status, occurred_at, title,
+                evidence_ids, created_by_caregiver_id
+            ) VALUES (
+                'sleep-linked-event', :person_id, 'sleep', 'recorded',
+                CURRENT_TIMESTAMP, 'Recorded sleep event',
+                '["sleep-source-evidence"]', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     response = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
@@ -581,6 +594,17 @@ def test_structured_source_observation_appears_in_current_care_projection(client
         and row["source"] == "evidence_observations"
         for row in assessment["situation_trajectory"]["entries"]
     )
+    shared_source_group = next(
+        group for group in assessment["cross_domain_source_links"]["groups"]
+        if group["evidence_id"] == "sleep-source-evidence"
+    )
+    assert set(shared_source_group["domains"]) == {
+        "current_state_reconstruction", "evidence_grounded_situation_understanding"
+    }
+    assert {item["source"] for item in shared_source_group["records"]} == {
+        "events", "evidence_observations"
+    }
+    assert "does not establish independent corroboration" in shared_source_group["interpretation_limit"]
 
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_response = test_client.get("/api/v1/care-continuity/current-care", headers=other_headers)
