@@ -100,3 +100,56 @@ def build_evidence_lineage(
             lineage.setdefault(evidence_id, "persisted-lineage:" + evidence_id)
 
     return lineage, independence
+
+
+def summarize_evidence_lineage(
+    evidence_rows: Iterable[Any],
+    relationships: Iterable[Any],
+    selected_evidence_ids: Iterable[str],
+) -> dict[str, Any]:
+    """Human/audit-readable lineage summary for any LCR-facing workflow."""
+    evidence_rows = list(evidence_rows)
+    relationships = list(relationships)
+    selected = sorted({str(value) for value in selected_evidence_ids})
+    lineage_by_id, independence_by_id = build_evidence_lineage(
+        evidence_rows, relationships, selected
+    )
+    grouped: dict[str, list[str]] = {}
+    for evidence_id, lineage_id in lineage_by_id.items():
+        grouped.setdefault(lineage_id, []).append(evidence_id)
+
+    origin_keys: dict[str, set[str]] = {}
+    for relationship in relationships:
+        origin_key = str(getattr(relationship, "origin_group_key", "") or "").strip()
+        if not origin_key:
+            continue
+        for evidence_id in (
+            str(getattr(relationship, "source_evidence_id", "") or ""),
+            str(getattr(relationship, "related_evidence_id", "") or ""),
+        ):
+            if evidence_id in selected:
+                origin_keys.setdefault(lineage_by_id.get(evidence_id, ""), set()).add(origin_key)
+
+    groups = []
+    for lineage_id, evidence_ids in sorted(grouped.items()):
+        ids = sorted(evidence_ids)
+        groups.append({
+            "lineage_id": lineage_id,
+            "evidence_ids": ids,
+            "origin_group_keys": sorted(origin_keys.get(lineage_id, set())),
+            "source_independence_status": (
+                "shared_origin" if any(independence_by_id.get(eid) == "shared_origin" for eid in ids)
+                else "independence_not_assessed"
+            ),
+            "basis": "explicit_persisted_provenance",
+            "interpretation_limit": "A source-lineage relationship does not establish that a claim is true.",
+        })
+    return {
+        "status": "assessed" if selected else "not_assessed",
+        "evidence_ids_considered": selected,
+        "groups": groups,
+        "interpretation_limit": (
+            "Only explicit parent/source references and persisted reviewed relationships are used. "
+            "Text similarity does not prove copying, common origin, or independence."
+        ),
+    }
