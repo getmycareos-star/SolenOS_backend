@@ -146,6 +146,24 @@ def test_decrease_requires_complete_coverage_for_both_comparison_windows():
         assert decreases[0].current_coverage_status == "covered"
         assert decreases[0].baseline_coverage_fraction == pytest.approx(1.0)
         assert decreases[0].current_coverage_fraction == pytest.approx(1.0)
+
+        # A later contradictory/unknown coverage declaration must invalidate the
+        # prior decrease claim rather than leave it active as if fully supported.
+        db.add(ObservationCoverage(
+            id="current-coverage-conflict", person_id=person.id, subject_type="fall",
+            window_start=now - timedelta(days=3), window_end=now,
+            coverage_status="unknown", source_evidence_ids=[],
+            rationale="The final interval cannot be confirmed as continuously observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        reassessed = detect_event_changes(db, person.id, "fall", None, now)
+        assert not any(row.change_type.value == "decrease" for row in reassessed)
+        db.commit()
+        persisted_old_decrease = db.query(Change).filter_by(id=decreases[0].id).one()
+        assert persisted_old_decrease.is_active is False
+        assert "no longer active" in persisted_old_decrease.explanation.lower()
+        assert "historical assessment is retained" in persisted_old_decrease.explanation.lower()
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
