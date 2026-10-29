@@ -979,6 +979,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_appointment_ids: list[str] = []
     source_handoff_ids: list[str] = []
     source_notification_ids: list[str] = []
+    source_freshness_assessment_ids: list[str] = []
 
     # Data minimization: do not send private LCR events or appointments to
     # Daily Capture, document-only or Community assistance. Each workflow gets
@@ -1065,6 +1066,38 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 f"Recorded notification [{notification.id}]: title={notification.title}; "
                 f"category={notification.category}; priority={notification.priority}; "
                 f"read={notification.read_at is not None}; body={(notification.body or '')[:500]}"
+            )
+
+    freshness_workflows = {
+        "living_care_record", "care_history_search", "care_situation_change", "delta_engine",
+        "evidence_provenance", "uncertainty_contradictions", "returning_caregiver",
+        "appointment", "after_appointment", "handoff", "professional_summary",
+        "two_week_review", "decision_outcome", "critical_information_completeness",
+        "document_validity_renewal", "emergency_readiness", "care_transition",
+    }
+    if payload.workflow in freshness_workflows:
+        freshness_rows = (
+            db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
+            .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
+            .filter(EvidenceFreshnessAssessment.person_id == person_id)
+            .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
+            .limit(50)
+            .all()
+        )
+        seen_freshness_pairs = set()
+        for assessment, policy in freshness_rows:
+            pair = (str(assessment.evidence_id), str(assessment.policy_id))
+            if pair in seen_freshness_pairs:
+                continue
+            seen_freshness_pairs.add(pair)
+            source_freshness_assessment_ids.append(str(assessment.id))
+            context_lines.append(
+                f"Recorded freshness policy application [{assessment.id}] for evidence [{assessment.evidence_id}]: "
+                f"domain={policy.domain_key}; policy_version={assessment.policy_version}; "
+                f"status={assessment.freshness_status}; source_time_kind={assessment.source_time_kind or 'unknown'}; "
+                f"source_time={assessment.source_time.isoformat() if assessment.source_time else 'unknown'}; "
+                f"age_days={assessment.age_days if assessment.age_days is not None else 'unknown'}; "
+                f"rationale={assessment.rationale}. This is a policy application, not a truth judgment."
             )
 
     # These workflows cannot infer live account, permission, delivery, or persistence
@@ -1217,6 +1250,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_appointment_ids": source_appointment_ids,
         "source_handoff_ids": source_handoff_ids,
         "source_notification_ids": source_notification_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "provider_status": "available",
     }
 
