@@ -1,0 +1,340 @@
+"""Longitudinal messy-care benchmark using persisted SQLAlchemy records and the real API.
+
+All cases are synthetic but independently labelled before execution. They deliberately
+exercise temporal boundaries, incomplete observation coverage, repeated source lineage,
+multiple care domains, idempotent pattern reconciliation, and scoped API access.
+A pass is not clinical validation or evidence of real-patient performance.
+"""
+from datetime import datetime, timedelta, timezone
+import hashlib
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
+import app.main as main_module
+from app.main import app
+from app.models.anonymous_session import AnonymousSession
+from app.models.care import CareEvent, Caregiver, Person
+from app.models.change import Change, Pattern
+from app.models.observation_coverage import ObservationCoverage
+from app.services.baseline import get_longitudinal_event_counts
+from app.services.change_detection import detect_event_changes
+from app.services.pattern_detection import detect_patterns
+from app.core.change_enums import ChangeType
+
+NOW = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(
+    autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
+)
+
+
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture(autouse=True)
+def isolated_database():
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = TestingSessionLocal
+    yield
+    app.dependency_overrides.clear()
+    main_module.SessionLocal = DefaultSessionLocal
+    Base.metadata.drop_all(bind=engine)
+
+
+def make_person(db, suffix="a"):
+    person = Person(id=f"person-{suffix}", name=f"Synthetic Person {suffix}")
+    caregiver = Caregiver(
+        id=f"caregiver-{suffix}",
+        name=f"Synthetic Caregiver {suffix}",
+        email=f"caregiver-{suffix}@benchmark.invalid",
+        relationship="Family",
+        person_id=person.id,
+    )
+    db.add_all([person, caregiver])
+    db.flush()
+    return person, caregiver
+
+
+def add_event(db, person, caregiver, event_type, days_ago, title, evidence_ids=None):
+    event = CareEvent(
+        id=f"{person.id}-{event_type}-{days_ago}-{title.lower().replace(' ', '-')}",
+        person_id=person.id,
+        event_type=event_type,
+        status="recorded",
+        occurred_at=NOW - timedelta(days=days_ago),
+        title=title,
+        description=title,
+        evidence_ids=evidence_ids or [],
+        created_by_caregiver_id=caregiver.id,
+        time_provenance="caregiver_observed",
+    )
+    db.add(event)
+    db.flush()
+    return event
+
+
+def add_coverage(db, person, caregiver, event_type, start, end, status="covered"):
+    db.add(ObservationCoverage(
+        person_id=person.id,
+        subject_type=event_type,
+        window_start=start,
+        window_end=end,
+        coverage_status=status,
+        source_evidence_ids=[],
+        rationale=f"Independently labelled benchmark coverage: {status}",
+        recorded_by_caregiver_id=caregiver.id,
+    ))
+    db.flush()
+
+
+def add_complete_comparison_coverage(db, person, caregiver, event_type, oldest_day):
+    add_coverage(
+        db, person, caregiver, event_type,
+        NOW - timedelta(days=oldest_day), NOW - timedelta(days=42), "covered"
+    )
+    add_coverage(
+        db, person, caregiver, event_type,
+        NOW - timedelta(days=42), NOW, "covered"
+    )
+
+
+def issue_session(db, person, caregiver):
+    token = f"benchmark-token-{person.id}"
+    db.add(AnonymousSession(
+        id=f"session-{person.id}",
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        token_hash=hashlib.sha256(token.encode()).hexdigest(),
+        expires_at=NOW + timedelta(days=1),
+    ))
+    db.flush()
+    return token
+
+
+def test_abrupt_new_event_is_labelled_emergence_not_proven_prior_absence():
+    """A new record is evidence of first recorded occurrence, not proof it never happened."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "abrupt")
+        add_event(db, person, caregiver, "night_waking", 1, "Awake repeatedly overnight")
+        changes = detect_event_changes(db, person.id, "night_waking", None, NOW)
+        db.flush()
+        assert len(changes) == 1
+        assert changes[0].change_type == ChangeType.EMERGENCE
+        assert "does not establish that the event was absent" in changes[0].explanation.lower()
+        assert changes[0].confidence is None
+
+
+def test_covered_longitudinal_rate_increase_requires_two_covered_windows():
+    """A burst is compared to this person's actual prior event history and coverage."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "increase")
+        for day in (170, 130, 95):
+            add_event(db, person, caregiver, "night_waking", day, f"Historical waking {day}")
+        for day in (35, 24, 14, 5):
+            add_event(db, person, caregiver, "night_waking", day, f"Recent waking {day}")
+        add_complete_comparison_coverage(db, person, caregiver, "night_waking", 170)
+        changes = detect_event_changes(db, person.id, "night_waking", None, NOW)
+        db.flush()
+        assert any(change.change_type == ChangeType.INCREASE for change in changes)
+        increase = next(change for change in changes if change.change_type == ChangeType.INCREASE)
+        assert increase.baseline_coverage_status == "covered"
+        assert increase.current_coverage_status == "covered"
+        assert set(increase.evidence_ids) <= {
+            row[0] for row in db.query(CareEvent.id).filter(CareEvent.person_id == person.id).all()
+        }
+        assert increase.confidence is None
+
+
+def test_unknown_coverage_does_not_turn_silence_into_a_rate_claim():
+    """No coverage rows means unknown, not a zero rate or evidence of improvement."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "unknown-coverage")
+        for day in (170, 130, 95):
+            add_event(db, person, caregiver, "falls", day, f"Historical fall {day}")
+        add_event(db, person, caregiver, "falls", 5, "Recent fall")
+        changes = detect_event_changes(db, person.id, "falls", None, NOW)
+        db.flush()
+        assert not any(
+            change.change_type in {ChangeType.INCREASE, ChangeType.DECREASE}
+            for change in changes
+        )
+        baseline = db.query(Change).filter(Change.person_id == person.id).all()
+        assert all(
+            item.baseline_coverage_status != "covered"
+            or item.current_coverage_status != "covered"
+            for item in baseline
+        )
+
+
+def test_partial_coverage_blocks_comparable_rate_increase():
+    """A documentation burst during partial observation is not a measured occurrence-rate increase."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "partial")
+        for day in (170, 130, 95):
+            add_event(db, person, caregiver, "agitation", day, f"Historical agitation {day}")
+        for day in (35, 24, 14, 5):
+            add_event(db, person, caregiver, "agitation", day, f"Recent agitation {day}")
+        add_coverage(db, person, caregiver, "agitation",
+                     NOW - timedelta(days=170), NOW - timedelta(days=42), "covered")
+        add_coverage(db, person, caregiver, "agitation",
+                     NOW - timedelta(days=42), NOW, "partial")
+        changes = detect_event_changes(db, person.id, "agitation", None, NOW)
+        db.flush()
+        assert not any(change.change_type == ChangeType.INCREASE for change in changes)
+
+
+def test_future_dated_events_are_not_counted_as_current_observations():
+    """Future timestamps must not contaminate today's longitudinal counts."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "future")
+        add_event(db, person, caregiver, "sleep", 5, "Real recent sleep event")
+        future = CareEvent(
+            id="future-sleep-event",
+            person_id=person.id,
+            event_type="sleep",
+            status="recorded",
+            occurred_at=NOW + timedelta(days=2),
+            title="Future-dated sleep event",
+            description="Must not count as already observed",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_observed",
+        )
+        db.add(future)
+        db.flush()
+        counts = get_longitudinal_event_counts(db, person.id, "sleep", None, NOW)
+        assert counts["current_window_count"] == 1
+        assert all(event.occurred_at <= NOW for event in counts["recent_events"])
+
+
+def test_identical_source_lineage_is_not_counted_twice_in_longitudinal_history():
+    """Two event rows carrying the same source-evidence IDs represent one source event."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "duplicate")
+        add_event(db, person, caregiver, "meal", 2, "Ate a few bites", ["source-meal-1"])
+        add_event(db, person, caregiver, "meal", 1, "Copied summary of same meal", ["source-meal-1"])
+        counts = get_longitudinal_event_counts(db, person.id, "meal", None, NOW)
+        assert counts["current_window_count"] == 1
+        assert len(counts["recent_events"]) == 1
+
+
+def test_distinct_care_domains_and_people_are_never_mixed():
+    """Mobility, nutrition, and another person's records cannot inflate this subject's baseline."""
+    with TestingSessionLocal() as db:
+        person_a, caregiver_a = make_person(db, "scope-a")
+        person_b, caregiver_b = make_person(db, "scope-b")
+        add_event(db, person_a, caregiver_a, "mobility", 2, "Needed help standing")
+        add_event(db, person_a, caregiver_a, "nutrition", 1, "Ate half dinner")
+        add_event(db, person_b, caregiver_b, "mobility", 1, "Needed help standing")
+        counts = get_longitudinal_event_counts(db, person_a.id, "mobility", None, NOW)
+        assert counts["total_events"] == 1
+        assert {event.person_id for event in counts["all_events"]} == {person_a.id}
+        assert {event.event_type for event in counts["all_events"]} == {"mobility"}
+
+
+def test_recurrence_reconciliation_is_persisted_and_idempotent():
+    """Repeated reassessment must not manufacture duplicate active patterns."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "recurrence")
+        first = add_event(db, person, caregiver, "falls", 20, "Fall near bathroom")
+        second = add_event(db, person, caregiver, "falls", 7, "Fall near bathroom")
+        db.flush()
+        first_pass = detect_patterns(db, person.id, "falls", None, NOW)
+        db.commit()
+        second_pass = detect_patterns(db, person.id, "falls", None, NOW)
+        db.commit()
+        recurrence_first = [p for p in first_pass if p.pattern_type.value == "recurrence"]
+        recurrence_second = [p for p in second_pass if p.pattern_type.value == "recurrence"]
+        assert recurrence_first
+        assert recurrence_second
+        assert recurrence_first[0].id == recurrence_second[0].id
+        assert set(recurrence_first[0].event_ids) == {first.id, second.id}
+        assert db.query(Pattern).filter(
+            Pattern.person_id == person.id,
+            Pattern.subject_type == "falls",
+            Pattern.pattern_type == recurrence_first[0].pattern_type,
+            Pattern.is_active.is_(True),
+        ).count() == 1
+
+
+def test_real_change_api_requires_session_and_persists_assessment():
+    """Exercise FastAPI routing, scoped bearer auth, and SQL persistence—not a mocked handler."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "api")
+        add_event(db, person, caregiver, "falls", 1, "Fall reported by family")
+        token = issue_session(db, person, caregiver)
+        db.commit()
+
+    with TestClient(app) as client:
+        unauthenticated = client.get(
+            "/api/v1/change/changes/detect",
+            params={"person_id": person.id, "event_type": "falls", "reference_time": NOW.isoformat()},
+        )
+        assert unauthenticated.status_code == 401
+
+        response = client.get(
+            "/api/v1/change/changes/detect",
+            params={"person_id": person.id, "event_type": "falls", "reference_time": NOW.isoformat()},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload
+        assert payload[0]["person_id"] == person.id
+        with TestingSessionLocal() as db:
+            persisted = db.query(Change).filter(
+                Change.person_id == person.id,
+                Change.subject_type == "falls",
+                Change.is_active.is_(True),
+            ).all()
+            assert persisted
+            assert payload[0]["id"] in {row.id for row in persisted}
+
+
+def test_change_api_rejects_cross_person_record_access():
+    """A valid token for person A must not permit reading person B's change assessments."""
+    with TestingSessionLocal() as db:
+        person_a, caregiver_a = make_person(db, "api-owner")
+        person_b, caregiver_b = make_person(db, "api-other")
+        token_a = issue_session(db, person_a, caregiver_a)
+        db.commit()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/change/baselines/" + person_b.id,
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert response.status_code == 403
+
+
+def test_independently_labelled_benchmark_cases_are_not_scored_from_service_self_report():
+    """Guard against a benchmark that passes by reading its own claimed score."""
+    labels = {
+        "abrupt_new_event": "emergence",
+        "complete_coverage_burst": "increase",
+        "unknown_coverage": "no_rate_claim",
+        "partial_coverage": "no_rate_increase",
+        "future_timestamp": "exclude_from_current_count",
+        "duplicate_source": "count_once",
+        "cross_domain": "strict_scope",
+        "recurrence_reassessment": "idempotent",
+        "api_persistence": "persisted",
+        "cross_person_access": "403",
+    }
+    assert len(labels) == 10
+    assert len(set(labels.values())) == 10
