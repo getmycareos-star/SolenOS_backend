@@ -540,6 +540,24 @@ def test_structured_source_observation_appears_in_current_care_projection(client
     assert item["source_passage"] == "woke twice overnight"
     assert item["epistemic_status"] == "caregiver_reported"
 
+    situation = test_client.post(
+        "/api/v1/care-continuity/situation-understanding/reassess", headers=headers
+    )
+    assert situation.status_code == 200, situation.text
+    assessment = situation.json()["assessment"]
+    projected = [
+        row for row in assessment["current_care_reality"]["records"]
+        if row.get("id") == "sleep-structured-observation"
+    ]
+    assert len(projected) == 1
+    assert projected[0]["source"] == "evidence_observations"
+    assert projected[0]["evidence_ids"] == ["sleep-source-evidence"]
+    assert any(
+        row["record_id"] == "sleep-structured-observation"
+        and row["source"] == "evidence_observations"
+        for row in assessment["situation_trajectory"]["entries"]
+    )
+
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_response = test_client.get("/api/v1/care-continuity/current-care", headers=other_headers)
     assert other_response.status_code == 200, other_response.text
