@@ -8,6 +8,9 @@ from app.services.temporal_intelligence import utc_now
 from app.services.observation_coverage import assess_observation_coverage
 
 
+MAX_LONGITUDINAL_EVENTS = 5000
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -62,7 +65,14 @@ def get_longitudinal_event_counts(
     )
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
-    queried_events = query.order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc()).all()
+    queried_events = (
+        query.order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+        .limit(MAX_LONGITUDINAL_EVENTS + 1)
+        .all()
+    )
+    history_truncated = len(queried_events) > MAX_LONGITUDINAL_EVENTS
+    queried_events = queried_events[:MAX_LONGITUDINAL_EVENTS]
+    queried_events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
     # A copied event is only deduplicated when the same source evidence anchors
     # the same occurrence time. Reusing one document to describe multiple events
     # must not collapse distinct dated occurrences into one count.
@@ -91,6 +101,7 @@ def get_longitudinal_event_counts(
         "current_window_end": now,
         "recent_events": recent_events,
         "all_events": events,
+        "history_truncated": history_truncated,
     }
 
 
@@ -124,18 +135,20 @@ def build_baseline(
     window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
     coverage = assess_observation_coverage(db, person_id, event_type, window_start, window_end)
     coverage_complete = coverage["coverage_status"] == "covered"
-    # Do not expose a normalized occurrence rate without an explicit observation
-    # denominator. Counts remain available as recorded evidence, not as true rates.
+    history_truncated = bool(counts.get("history_truncated"))
+    baseline_complete = coverage_complete and not history_truncated
+    # Do not expose a normalized rate as the person's historical baseline when
+    # the bounded query may have omitted earlier events.
     frequency_per_period = (
         event_count / (window_days / 30.0)
-        if coverage_complete and event_count
-        else 0.0 if coverage_complete else None
+        if baseline_complete and event_count
+        else 0.0 if baseline_complete else None
     )
-    # Event volume alone cannot establish a reliable baseline when the domain
-    # may not have been observed. Coverage gates stability and confidence.
+    # Event volume alone cannot establish a reliable baseline when observation
+    # coverage is incomplete or source history exceeded the explicit query bound.
     confidence = (
         BaselineConfidence.LOW
-        if not coverage_complete
+        if not baseline_complete
         else BaselineConfidence.HIGH
         if event_count >= 5
         else BaselineConfidence.MODERATE
@@ -179,9 +192,9 @@ def build_baseline(
             and _ensure_utc(existing.window_start) == _ensure_utc(window_start)
             and _ensure_utc(existing.window_end) == _ensure_utc(window_end)
             and existing.confidence == confidence
-            and bool(existing.is_stable) == coverage_complete
+            and bool(existing.is_stable) == baseline_complete
             and same_density
-            and bool(existing.documentation_bias_flag) == (not coverage_complete)
+            and bool(existing.documentation_bias_flag) == (not baseline_complete)
         ):
             return existing
 
@@ -203,9 +216,13 @@ def build_baseline(
         frequency_per_period=frequency_per_period,
         state_value=None,
         confidence=confidence,
-        is_stable=coverage_complete,
+        is_stable=baseline_complete,
         observation_density=observation_density,
-        documentation_bias_flag=not coverage_complete,
+        documentation_bias_flag=not baseline_complete,
+        state_value=(
+            f"Historical event query was bounded to the most recent {MAX_LONGITUDINAL_EVENTS} eligible records; earlier history may be omitted."
+            if history_truncated else None
+        ),
         evidence_ids=evidence_ids,
     )
     db.add(baseline)
