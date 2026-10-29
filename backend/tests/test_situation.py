@@ -590,3 +590,25 @@ def test_document_without_ocr_score_keeps_confidence_unknown():
     finally:
         db.close()
         teardown_db()
+
+def test_situation_alternative_confidence_is_not_invented_from_pattern_strength():
+    from types import SimpleNamespace
+    from app.services.situation_formation import _derive_alternatives
+
+    pattern = SimpleNamespace(
+        pattern_type=SimpleNamespace(value="recurrence"),
+        subject_type="sleep",
+        pattern_strength=SimpleNamespace(value="moderate"),
+        evidence_count=3,
+    )
+    db = TestingSessionLocal()
+    try:
+        alternatives = _derive_alternatives(db, "person-with-no-change-records", [], [pattern])
+    finally:
+        db.close()
+
+    assert len(alternatives) == 1
+    assert alternatives[0]["confidence"] is None
+    assert alternatives[0]["confidence_status"] == "not_calibrated"
+    assert "may reflect recording cadence" in alternatives[0]["interpretation"]
+
