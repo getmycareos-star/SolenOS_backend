@@ -1250,6 +1250,25 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     """Compose an explainable assessment from persisted LCR sources; never invent care facts."""
     context = build_lcr_context(db, person_id, limit_per_source=50)
     sources = context.get("sources") or {}
+    candidate_evidence_ids: set[str] = set()
+    for source_name, source_value in sources.items():
+        for source_item in source_value.get("items") or []:
+            if source_name == "evidence" and source_item.get("id"):
+                candidate_evidence_ids.add(str(source_item["id"]))
+            linked = source_item.get("evidence_ids")
+            if isinstance(linked, list):
+                candidate_evidence_ids.update(str(value) for value in linked if value)
+            if source_name == "evidence_observations" and source_item.get("evidence_id"):
+                candidate_evidence_ids.add(str(source_item["evidence_id"]))
+    authorized_evidence_ids = set()
+    if candidate_evidence_ids:
+        authorized_evidence_ids = {
+            str(value)
+            for value in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(candidate_evidence_ids),
+            ).scalars().all()
+        }
     source_domains = {
         "events": "current_state_reconstruction",
         "facts": "current_care_reality",
@@ -1282,14 +1301,22 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             # projections expose a uniform evidence_ids list. Preserve that link
             # in every downstream LCR view instead of losing provenance at the
             # situation-understanding projection boundary.
-            if source_name == "evidence_observations" and normalized_row.get("evidence_id"):
-                normalized_row["evidence_ids"] = [str(normalized_row["evidence_id"])]
-            all_items.append({"source": source_name, **normalized_row})
-            ids = row.get("evidence_ids")
-            if isinstance(ids, list):
-                evidence_ids.update(str(value) for value in ids if value)
+            raw_linked_ids = row.get("evidence_ids")
+            if not isinstance(raw_linked_ids, list):
+                raw_linked_ids = []
             if source_name == "evidence_observations" and row.get("evidence_id"):
-                evidence_ids.add(str(row["evidence_id"]))
+                raw_linked_ids = [str(row["evidence_id"])]
+            normalized_row["evidence_ids"] = [
+                str(value) for value in raw_linked_ids
+                if value and str(value) in authorized_evidence_ids
+            ]
+            normalized_row["evidence_link_validation"] = (
+                "same_care_record_evidence_reference_verified"
+                if normalized_row["evidence_ids"]
+                else "no_authorized_evidence_reference_returned"
+            )
+            all_items.append({"source": source_name, **normalized_row})
+            evidence_ids.update(normalized_row["evidence_ids"])
         domain = source_domains.get(source_name)
         if domain:
             domain_sources.setdefault(domain, {"source_names": [], "record_count": 0, "source_statuses": []})
