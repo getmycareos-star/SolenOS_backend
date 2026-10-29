@@ -207,6 +207,7 @@ def test_change_assessment_without_explicit_baseline_is_insufficient():
         evidence=[{"id": "new-observation", "text": "Ate less at breakfast.", "source_type": "caregiver_report"}],
     )
     assert "missing_baseline" in result["classifications"]
+    assert result["epistemic_state"] == "unknown"
     assert result["sufficiency"] == "insufficient_pending_resolution"
     assert result["conclusion_confidence"] is None
 
@@ -238,6 +239,7 @@ def test_baseline_without_current_observation_cannot_establish_change():
         }],
     )
     assert "missing_baseline" in result["classifications"]
+    assert result["epistemic_state"] == "unknown"
     assert result["comparison_basis"]["explicit_baseline_present"] is True
     assert result["comparison_basis"]["separate_comparison_observation_present"] is False
     assert result["sufficiency"] == "insufficient_pending_resolution"
