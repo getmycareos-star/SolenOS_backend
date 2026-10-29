@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -304,6 +304,69 @@ def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeyp
         assert older_id in data["source_event_ids"]
         assert older_id in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_historical_document_beyond_recent_upload_window_is_retrieved(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older caregiver-provided note mentions restless sleep overnight."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        older = EvidenceModel(
+            person_id=person_id,
+            type="document",
+            source_text="Older care note: restless sleep and waking several times overnight.",
+            original_file_path=None,
+            uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"older-care-note.pdf"}',
+            time_provenance="caregiver_reported",
+            confidence=None,
+            evidence_status="recorded",
+            source_type="document",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(25):
+            db.add(EvidenceModel(
+                person_id=person_id,
+                type="document",
+                source_text=f"Unrelated household paperwork {index}.",
+                original_file_path=None,
+                uploaded_at=now - timedelta(hours=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"household-paperwork.pdf"}',
+                time_provenance="caregiver_reported",
+                confidence=None,
+                evidence_status="recorded",
+                source_type="document",
+            ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_evidence_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
         assert data["written_to_lcr"] is False
     finally:
         teardown()
