@@ -719,5 +719,11 @@ def test_current_care_hides_superseded_observation_but_retains_history(client):
         headers=headers,
     )
     assert history.status_code == 200, history.text
-    assert {item["id"] for item in history.json()} == {"sleep-observation-v1", "sleep-observation-v2"}
+    history_body = history.json()
+    assert history_body["count"] == 2
+    history_items = {item["id"]: item for item in history_body["items"]}
+    assert set(history_items) == {"sleep-observation-v1", "sleep-observation-v2"}
+    assert history_items["sleep-observation-v1"]["is_superseded"] is True
+    assert history_items["sleep-observation-v2"]["is_superseded"] is False
+    assert "Append-only" in history_body["history_policy"]
 
