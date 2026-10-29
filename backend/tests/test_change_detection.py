@@ -1952,6 +1952,7 @@ def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypa
 def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
     setup_db()
     try:
+        from app.services.change_detection import detect_event_changes
         import app.services.baseline as baseline_service
 
         monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
