@@ -53,6 +53,49 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_idempotent_retry_replays_original_response_and_provenance(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = {"count": 0}
+
+    def fake_qwen(base, model, messages, options=None):
+        calls["count"] += 1
+        return "The available record does not establish a sleep trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _caregiver_id = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "c61e7f15-b6aa-4f2c-9b85-cf8d31dd7211"
+        payload = {"person_id": person_id, "text": "What did we record about sleep?", "client_turn_id": turn_id}
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+
+        # Retry without a session ID to simulate a lost first response.
+        replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_data = replay.json()
+        assert replay_data["session_id"] == first_data["session_id"]
+        assert replay_data["reply"] == first_data["reply"]
+        assert replay_data["source_record_refs"] == first_data["source_record_refs"]
+        assert replay_data["written_to_lcr"] is False
+        assert calls["count"] == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
+            assert len(rows) == 2
+            user_rows = [row for row in rows if row.role == "user"]
+            assistant_rows = [row for row in rows if row.role == "assistant"]
+            assert len(user_rows) == 1 and user_rows[0].client_turn_id == turn_id
+            assert len(assistant_rows) == 1 and assistant_rows[0].response_metadata_json
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
@@ -252,6 +295,90 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_context_ranking_expands_caregiving_paraphrases_without_overriding_direct_matches():
+    sleep_record = 'LCR event evidence: {"title":"Waking several times overnight","description":"Restless sleep reported."}'
+    unrelated_record = 'LCR event evidence: {"title":"Lunch planning","description":"Meal preference."}'
+    ranked = collaboration._rank_context_lines("What happened with her rest?", [unrelated_record, sleep_record], limit=1)
+    assert ranked == [sleep_record]
+
+    medication_record = 'LCR event evidence: {"title":"Medication list reviewed","description":"Pill list was recorded."}'
+    ranked_medication = collaboration._rank_context_lines(
+        "Was the medicine recorded?", [unrelated_record, medication_record], limit=1
+    )
+    assert ranked_medication == [medication_record]
+
+
+def test_short_standalone_question_does_not_inherit_prior_care_topic():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="There is a sleep note."),
+    ]
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+    resolved = collaboration._context_query_with_history("What about that?", prior)
+    assert "sleep" in resolved.casefold()
+    assert "there is a sleep note" not in resolved.casefold()
+
+
+def test_companion_retrieves_matching_historical_event_outside_recent_event_window(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The saved note mentions waking several times overnight. It does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        db = TestingSessionLocal()
+        now = datetime(2026, 10, 27, 12, 0)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Overnight waking observation",
+            description="Caregiver noted waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            time_provenance="caregiver_reported",
+            confidence=None,
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="routine",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated routine event {index}",
+                description="A routine household task with no additional detail.",
+                evidence_ids=[],
+                time_provenance="caregiver_reported",
+                confidence=None,
+                created_by_caregiver_id=caregiver_id,
+            ))
+        db.commit()
+        older_id = str(older.id)
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
@@ -259,7 +386,8 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     ]
     query = collaboration._context_query_with_history("What about that?", prior)
     assert "sleep" in query.casefold()
-    assert "poor sleep" in query.casefold()
+    assert "sleep" in query.casefold()
+    assert "poor sleep" not in query.casefold()
     assert query.startswith("What about that?")
 
 
