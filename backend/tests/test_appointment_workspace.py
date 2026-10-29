@@ -759,6 +759,26 @@ def test_current_care_hides_superseded_observation_but_retains_history(client):
         })
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    branching_correction = test_client.post(
+        "/api/v1/care-continuity/evidence/correction-source-evidence/observations",
+        headers=headers,
+        json={
+            "observation_kind": "caregiver_report",
+            "epistemic_status": "reported",
+            "subject_label": "care recipient",
+            "attribute": "sleep",
+            "value_text": "woke twice",
+            "source_passage": "woke twice overnight",
+            "source_span_start": 20,
+            "source_span_end": 40,
+            "extraction_method": "human_entered",
+            "extraction_version": "manual-v1",
+            "supersedes_observation_id": "sleep-observation-v1",
+            "correction_rationale": "Attempted branch from an already corrected observation.",
+        },
+    )
+    assert branching_correction.status_code == 409, branching_correction.text
+
     projection = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
     assert projection.status_code == 200, projection.text
     current_observations = [
