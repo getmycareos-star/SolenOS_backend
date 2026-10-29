@@ -5,6 +5,7 @@ from app.models.care import CareEvent
 from app.models.change import Baseline
 from app.core.change_enums import BaselineType, BaselineConfidence
 from app.services.temporal_intelligence import utc_now
+from app.services.observation_coverage import assess_observation_coverage
 
 
 def _utc_now() -> datetime:
@@ -114,14 +115,20 @@ def build_baseline(
     event_count = len(baseline_events)
     window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
     frequency_per_period = event_count / (window_days / 30.0) if event_count else 0.0
+    coverage = assess_observation_coverage(db, person_id, event_type, window_start, window_end)
+    coverage_complete = coverage["coverage_status"] == "covered"
+    # Event volume alone cannot establish a reliable baseline when the domain
+    # may not have been observed. Coverage gates stability and confidence.
     confidence = (
-        BaselineConfidence.HIGH
+        BaselineConfidence.LOW
+        if not coverage_complete
+        else BaselineConfidence.HIGH
         if event_count >= 5
         else BaselineConfidence.MODERATE
         if event_count >= 2
         else BaselineConfidence.LOW
     )
-    observation_density = event_count / max(window_days, 1)
+    observation_density = coverage["coverage_fraction"]
     evidence_ids = sorted({e.id for e in baseline_events if e.id})
     existing_baselines = (
         db.query(Baseline)
@@ -157,9 +164,9 @@ def build_baseline(
         frequency_per_period=frequency_per_period,
         state_value=None,
         confidence=confidence,
-        is_stable=True,
+        is_stable=coverage_complete,
         observation_density=observation_density,
-        documentation_bias_flag=False,
+        documentation_bias_flag=not coverage_complete,
         evidence_ids=evidence_ids,
     )
     db.add(baseline)
