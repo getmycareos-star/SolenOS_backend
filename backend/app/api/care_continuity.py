@@ -973,10 +973,10 @@ def list_observation_coverage(
 
 @router.get("/observation-coverage/assessment")
 def get_observation_coverage_assessment(
+    request: Request,
     subject_type: str = Query(min_length=1, max_length=120),
     window_start: datetime = Query(),
     window_end: datetime = Query(),
-    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """Assess recorded coverage; never infer that no event occurred during an unobserved interval."""
