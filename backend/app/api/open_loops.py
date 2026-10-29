@@ -813,11 +813,27 @@ def reassess_open_loops(request: Request, db: Session = Depends(get_db)):
             loop.status = "open"
         _reassess(db, loop)
         after = _snapshot(loop)
-        if before["status"] != after["status"] or before["priority"] != after["priority"] or before["priority_reasons"] != after["priority_reasons"]:
-            _audit(db, loop, "reassessed", before)
+        state_changed = (
+            before["status"] != after["status"]
+            or before["priority"] != after["priority"]
+            or before["priority_reasons"] != after["priority_reasons"]
+        )
+        # Every explicit reassessment is recorded, even when the decision is
+        # unchanged. This makes "nothing changed" an auditable result rather
+        # than an invisible operation.
+        _audit(db, loop, "reassessed", before, [{
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "state_changed": state_changed,
+        }])
+        if state_changed:
             changed.append(loop.id)
     db.commit()
-    return {"scanned": len(loops), "changed_ids": changed, "as_of": datetime.now(timezone.utc)}
+    return {
+        "scanned": len(loops),
+        "changed_ids": changed,
+        "audited_count": len(loops),
+        "as_of": datetime.now(timezone.utc),
+    }
 
 
 logger = logging.getLogger(__name__)
