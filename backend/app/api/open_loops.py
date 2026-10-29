@@ -273,7 +273,13 @@ def _audit(db, loop, event_type, before, evidence=None, key=None, actor="session
             OpenLoopEvent.idempotency_key == key,
         ).first()
         if existing:
-            return existing
+            # A reused key must abort the surrounding transaction. Returning
+            # silently here allowed a retried request to commit a second state
+            # mutation without a corresponding audit event.
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key has already been used for this care record",
+            )
     db.add(OpenLoopEvent(
         loop_id=loop.id, person_id=loop.person_id, caregiver_id=loop.caregiver_id,
         event_type=event_type, before_state=before, after_state=_snapshot(loop),
