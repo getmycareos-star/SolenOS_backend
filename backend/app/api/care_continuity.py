@@ -28,7 +28,7 @@ from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, EvidenceObservation
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -233,6 +233,166 @@ def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depe
         }
         for row in rows
     ]
+
+
+@router.post("/evidence/{evidence_id}/observations", status_code=201)
+def create_evidence_observation(
+    evidence_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Append a source-span-verified observation to evidence owned by this session."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("evidence_observations"):
+        raise HTTPException(status_code=503, detail="Structured observation storage is unavailable until migration completes")
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    allowed = {
+        "observation_kind", "epistemic_status", "subject_label", "attribute",
+        "value_text", "normalized_value", "units", "context", "occurred_at",
+        "observed_at", "reported_at", "observer_label", "observer_caregiver_id",
+        "observation_method", "source_passage", "source_span_start", "source_span_end",
+        "negated", "hedge_marker", "ambiguity_note", "extraction_method",
+        "extraction_version", "extraction_run_id", "supersedes_observation_id",
+        "correction_rationale",
+    }
+    unknown = set(payload) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unsupported observation fields: {sorted(unknown)}")
+
+    required = ("observation_kind", "epistemic_status", "subject_label", "attribute",
+                "source_passage", "source_span_start", "source_span_end",
+                "extraction_method", "extraction_version")
+    missing = [key for key in required if payload.get(key) is None or (isinstance(payload.get(key), str) and not payload[key].strip())]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Required observation fields are missing: {missing}")
+    source_text = evidence.source_text
+    passage = payload.get("source_passage")
+    start, end = payload.get("source_span_start"), payload.get("source_span_end")
+    if not isinstance(source_text, str) or not source_text:
+        raise HTTPException(status_code=422, detail="Linked evidence has no source text to validate this observation against")
+    if isinstance(start, bool) or not isinstance(start, int) or isinstance(end, bool) or not isinstance(end, int):
+        raise HTTPException(status_code=422, detail="Source span offsets must be integer character offsets")
+    if start < 0 or end <= start or end > len(source_text):
+        raise HTTPException(status_code=422, detail="Source span offsets are outside the linked evidence text")
+    if source_text[start:end] != passage:
+        raise HTTPException(status_code=422, detail="Source passage must exactly match the linked evidence at the supplied character offsets")
+
+    epistemic_status = str(payload["epistemic_status"]).strip().lower()
+    allowed_epistemic = {
+        "directly_observed", "caregiver_reported", "person_reported",
+        "professional_reported", "document_derived", "inferred",
+        "uncertain", "disputed", "unknown",
+    }
+    if epistemic_status not in allowed_epistemic:
+        raise HTTPException(status_code=422, detail="Unsupported epistemic status; preserve the source's actual status")
+
+    observer_caregiver_id = payload.get("observer_caregiver_id")
+    if observer_caregiver_id and not db.query(Caregiver.id).filter(
+        Caregiver.id == observer_caregiver_id, Caregiver.person_id == person_id
+    ).first():
+        raise HTTPException(status_code=404, detail="Observer caregiver was not found in this care record")
+
+    supersedes_id = payload.get("supersedes_observation_id")
+    correction_rationale = payload.get("correction_rationale")
+    if bool(supersedes_id) != bool(isinstance(correction_rationale, str) and correction_rationale.strip()):
+        raise HTTPException(status_code=422, detail="Corrections require both supersedes_observation_id and correction_rationale")
+    if supersedes_id:
+        prior = db.query(EvidenceObservation).filter(
+            EvidenceObservation.id == supersedes_id,
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+        ).first()
+        if prior is None:
+            raise HTTPException(status_code=404, detail="Observation to correct was not found in this evidence record")
+        already_superseded = db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.supersedes_observation_id == supersedes_id,
+        ).first()
+        if already_superseded:
+            raise HTTPException(status_code=409, detail="This observation already has a correction; correct the latest version instead")
+
+    def parse_time(field: str):
+        value = payload.get(field)
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{field} must be an ISO-8601 timestamp string")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"{field} must be a valid ISO-8601 timestamp") from exc
+        return parsed
+
+    row = EvidenceObservation(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        evidence_id=evidence_id,
+        supersedes_observation_id=supersedes_id,
+        correction_rationale=correction_rationale.strip() if isinstance(correction_rationale, str) else None,
+        observation_kind=str(payload["observation_kind"]).strip(),
+        epistemic_status=epistemic_status,
+        subject_label=str(payload["subject_label"]).strip(),
+        attribute=str(payload["attribute"]).strip(),
+        value_text=payload.get("value_text"),
+        normalized_value=payload.get("normalized_value"),
+        units=payload.get("units"),
+        context=payload.get("context"),
+        occurred_at=parse_time("occurred_at"),
+        observed_at=parse_time("observed_at"),
+        reported_at=parse_time("reported_at"),
+        observer_label=payload.get("observer_label"),
+        observer_caregiver_id=observer_caregiver_id,
+        observation_method=payload.get("observation_method"),
+        source_passage=passage,
+        source_span_start=start,
+        source_span_end=end,
+        negated=payload.get("negated"),
+        hedge_marker=payload.get("hedge_marker"),
+        ambiguity_note=payload.get("ambiguity_note"),
+        extraction_method=str(payload["extraction_method"]).strip(),
+        extraction_version=str(payload["extraction_version"]).strip(),
+        extraction_run_id=payload.get("extraction_run_id"),
+        created_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Source-linked observation could not be persisted")
+        raise HTTPException(status_code=503, detail="Source-linked observation could not be persisted") from exc
+
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "evidence_id": row.evidence_id,
+        "observation_kind": row.observation_kind,
+        "epistemic_status": row.epistemic_status,
+        "subject_label": row.subject_label,
+        "attribute": row.attribute,
+        "value_text": row.value_text,
+        "normalized_value": row.normalized_value,
+        "source_passage": row.source_passage,
+        "source_span_start": row.source_span_start,
+        "source_span_end": row.source_span_end,
+        "supersedes_observation_id": row.supersedes_observation_id,
+        "correction_rationale": row.correction_rationale,
+        "created_by_caregiver_id": row.created_by_caregiver_id,
+        "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
+        "source_of_truth": "persisted_person_scoped_evidence_observation",
+        "provenance_validation": "exact_source_text_substring_and_offsets_verified",
+    }
 
 
 @router.get("/evidence/{evidence_id}/integrity")
