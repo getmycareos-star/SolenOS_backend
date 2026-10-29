@@ -2660,6 +2660,11 @@ def create_evidence_observation(
             raise HTTPException(status_code=422, detail="The superseded observation must belong to this evidence and care record")
         if superseded_observation.attribute != attribute.strip():
             raise HTTPException(status_code=422, detail="A correction must retain the same observation attribute")
+    correction_rationale = payload.get("correction_rationale")
+    if superseded_observation is not None and (not isinstance(correction_rationale, str) or len(correction_rationale.strip()) < 3):
+        raise HTTPException(status_code=422, detail="A correction rationale of at least 3 characters is required when superseding an observation")
+    if correction_rationale is not None and (not isinstance(correction_rationale, str) or len(correction_rationale) > 4000):
+        raise HTTPException(status_code=422, detail="correction_rationale must be a string up to 4000 characters")
     duplicate = db.query(EvidenceObservation.id).filter(
         EvidenceObservation.person_id == person_id,
         EvidenceObservation.evidence_id == evidence_id,
@@ -2674,6 +2679,7 @@ def create_evidence_observation(
         raise HTTPException(status_code=409, detail="An identical observation already exists; use supersedes_observation_id for a correction")
     row = EvidenceObservation(
         person_id=person_id, evidence_id=evidence_id, supersedes_observation_id=superseded_observation.id if superseded_observation else None,
+        correction_rationale=correction_rationale.strip() if isinstance(correction_rationale, str) else None,
         observation_kind=kind, epistemic_status=status,
         subject_label=subject.strip(), attribute=attribute.strip(), value_text=value,
         normalized_value=payload.get("normalized_value"), units=payload.get("units"), context=payload.get("context"),
@@ -2709,6 +2715,7 @@ def _evidence_observation_response(row):
     return {
         "id": row.id, "person_id": row.person_id, "evidence_id": row.evidence_id,
         "supersedes_observation_id": row.supersedes_observation_id,
+        "correction_rationale": row.correction_rationale,
         "observation_kind": row.observation_kind, "epistemic_status": row.epistemic_status,
         "subject_label": row.subject_label, "attribute": row.attribute, "value_text": row.value_text,
         "normalized_value": row.normalized_value, "units": row.units, "context": row.context,
