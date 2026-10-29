@@ -52,6 +52,61 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_idempotent_retry_replays_reply_and_source_provenance(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {"calls": 0}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["calls"] += 1
+        return "The record notes poor sleep in one observation. It does not establish a worsening trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported poor sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = str(event.id)
+        db.close()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "turn-retry-00000001"
+        payload = {
+            "person_id": person_id,
+            "text": "What did we record about sleep?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert event_id in first_data["source_event_ids"]
+        assert first_data["written_to_lcr"] is False
+
+        retry_payload = {**payload, "session_id": first_data["session_id"]}
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=retry_payload)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["idempotent_replay"] is True
+        assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert event_id in retry_data["source_event_ids"]
+        assert captured["calls"] == 1
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
