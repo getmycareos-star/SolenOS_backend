@@ -1702,7 +1702,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         event_context = _rank_context_lines(retrieval_query, event_context, 5)
         assertion_context = _rank_context_lines(retrieval_query, assertion_context, 4)
         appointment_context = _rank_context_lines(retrieval_query, appointment_context, 3)
-        evidence_context = _rank_context_lines(retrieval_query, evidence_context, 4)
+        # Keep query-matched historical evidence in the selected context even
+        # when a larger set of recent uploads would otherwise crowd it out.
+        matching_evidence_ids = {str(row.id) for row in matching_evidence_rows}
+        matched_evidence_lines = [
+            line for line in evidence_context
+            if _context_record_ids([line], "evidence_id")
+            and _context_record_ids([line], "evidence_id")[0] in matching_evidence_ids
+        ]
+        ranked_evidence_lines = _rank_context_lines(retrieval_query, evidence_context, 4)
+        evidence_context = list(dict.fromkeys([
+            *matched_evidence_lines[:4],
+            *ranked_evidence_lines,
+        ]))[:4]
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
