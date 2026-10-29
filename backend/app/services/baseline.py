@@ -55,6 +55,9 @@ def get_longitudinal_event_counts(
         CareEvent.person_id == person_id,
         CareEvent.event_type == event_type,
         CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
+        # Future-dated records are temporal-integrity issues, not observations
+        # already available at the requested reference time.
+        CareEvent.occurred_at <= now,
     )
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
@@ -65,6 +68,8 @@ def get_longitudinal_event_counts(
     seen_source_signatures = set()
     for event in queried_events:
         evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
+        # Only non-empty shared source IDs establish duplicate identity. Empty
+        # evidence arrays do not mean separate events are the same event.
         identity = ("evidence", evidence_signature) if evidence_signature else ("event", event.id)
         if identity in seen_source_signatures:
             continue
@@ -74,7 +79,10 @@ def get_longitudinal_event_counts(
     six_weeks_ago = now - timedelta(days=42)
     current_window_count = sum(1 for e in events if _ensure_utc(e.occurred_at) >= six_weeks_ago)
     historical_count = sum(1 for e in events if _ensure_utc(e.occurred_at) < six_weeks_ago)
-    recent_events = [e for e in events if _ensure_utc(e.occurred_at) >= six_weeks_ago]
+    recent_events = [
+        e for e in events
+        if six_weeks_ago <= _ensure_utc(e.occurred_at) <= now
+    ]
     return {
         "total_events": len(events),
         "current_window_count": current_window_count,
