@@ -1358,7 +1358,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
-        for appointment in appointments:
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.person_id == person_id,
+                    or_(*[
+                        column.ilike(f"%{term}%")
+                        for column in (
+                            Appointment.title, Appointment.provider, Appointment.healthcare_org,
+                            Appointment.location, Appointment.status,
+                        )
+                        for term in retrieval_terms if len(term) >= 3
+                    ]),
+                )
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(20)
+                .all()
+            )
+        combined_appointments = []
+        seen_appointment_ids = set()
+        for row in [*matching_appointments, *appointments]:
+            if str(row.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(row.id))
+                combined_appointments.append(row)
+        for appointment in combined_appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
                 "LCR appointment evidence: "
@@ -1385,6 +1410,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
+        matching_evidence_rows = []
+        if retrieval_terms:
+            matching_evidence_rows = (
+                evidence_query.filter(or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type,
+                        EvidenceModel.source_type, EvidenceModel.original_author,
+                    )
+                    for term in retrieval_terms if len(term) >= 3
+                ]))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         linked_rows = (
             evidence_query.filter(EvidenceModel.id.in_(linked_ids))
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -1405,7 +1445,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        # Relevant older evidence must survive even after many newer uploads.
+        for row in [*matching_evidence_rows, *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
