@@ -447,7 +447,18 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 if not item.get("change_type"):
                     item["change_type"] = "uncertain"
                     item["certainty"] = "uncertain"
-            computed.append({"domain": domain, "name": name, "change_type": item.get("change_type"), "previous": item.get("previous"), "current": item.get("current"), "certainty": item.get("certainty", "uncertain"), "comparison_basis": item.get("comparison_basis")})
+            computed.append({
+                "domain": domain,
+                "name": name,
+                "field": item.get("field", expected_field),
+                "change_type": item.get("change_type"),
+                "previous": item.get("previous"),
+                "current": item.get("current"),
+                "certainty": item.get("certainty", "uncertain"),
+                "comparison_basis": item.get("comparison_basis"),
+                "baseline_assertion_ids": list(item.get("existing_assertions") or []),
+                "baseline_values": list(item.get("prior_state_candidates") or ([item.get("previous")] if item.get("previous") is not None else [])),
+            })
 
     # Historical imports may explain what was true then, but must not regress
     # the active state if a later-dated assertion already exists. Annotate every
@@ -643,10 +654,33 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 excerpt = str(source_item.get("evidence_excerpt") or "").strip()
                 finding_evidence = _match_finding_evidence(persisted_evidence, excerpt)
                 finding_evidence_ids = [str(row["id"]) for row in finding_evidence if row.get("id")]
+                baseline_ids = set(str(value) for value in (source_item.get("existing_assertions") or []))
+                baseline_assertions = [
+                    assertion for assertion in active_state
+                    if str(assertion.get("assertion_id")) in baseline_ids
+                ]
+                # Prior state is usable as a comparison baseline only when it is
+                # an actual persisted assertion for this person/field. Keep its
+                # source status explicit; it is not promoted to verified fact.
+                baseline_evidence = [{
+                    "id": str(assertion["assertion_id"]),
+                    "source_type": "care_assertion",
+                    "text": str(assertion.get("value") or ""),
+                    "verified": assertion.get("status") == "accepted",
+                    "observed_at": assertion.get("observed_at"),
+                    "role": "baseline",
+                    "is_baseline": True,
+                } for assertion in baseline_assertions if assertion.get("value") not in (None, "")]
+                current_evidence = [{
+                    **item,
+                    "role": "current",
+                    "is_baseline": False,
+                } for item in finding_evidence]
+                assessment_evidence = baseline_evidence + current_evidence
                 analysis = analyze_uncertainty(
                     claim=(str(finding.get("current") or "") or str(finding.get("change_type") or "Change not established")),
                     task="identify_change",
-                    evidence=finding_evidence,
+                    evidence=assessment_evidence,
                     unresolved_conflicts=([{
                         "field": finding_field,
                         "description": finding.get("comparison_warning") or "Competing state values were found.",
@@ -656,7 +690,14 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 if finding.get("change_type") == "conflicting":
                     epistemic_state = EpistemicState.CONFLICTING
                     gap_reason = GapReason.CONFLICTING
-                elif not finding_evidence:
+                elif (
+                    not finding_evidence
+                    or analysis.get("sufficiency") == "insufficient_pending_resolution"
+                    or "missing_baseline" in analysis.get("classifications", [])
+                ):
+                    # A source quote without a comparable persisted baseline does
+                    # not establish a change. Preserve the observation, but leave
+                    # the change assessment unknown until the missing prerequisite exists.
                     epistemic_state = EpistemicState.UNKNOWN
                     gap_reason = GapReason.INSUFFICIENT_EVIDENCE
                 elif finding.get("certainty") != "supported" or finding.get("historical_only"):
