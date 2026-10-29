@@ -9,7 +9,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent, Evidence as EvidenceModel
+from app.models.care import CareEvent, Evidence as EvidenceModel, Evidence
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -544,3 +545,85 @@ def test_grounding_reference_validator_does_not_treat_unreferenced_plain_languag
         "The available information does not establish why this happened.",
         "A caregiver reported the event, but the cause is not recorded.",
     ) is False
+
+
+
+def test_companion_surfaces_freshness_policy_context_and_persists_reference(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The saved policy marks this evidence for review; that does not establish whether it is true."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        from datetime import datetime, timedelta, timezone
+        event_time = datetime.now(timezone.utc) - timedelta(days=45)
+        evidence = Evidence(
+            id="companion-freshness-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="A document with an explicitly dated care observation.",
+            uploaded_by_caregiver_id=caregiver_id,
+            occurred_at=event_time,
+            collected_at=event_time,
+        )
+        policy = EvidenceFreshnessPolicy(
+            id="companion-freshness-policy",
+            person_id=person_id,
+            domain_key="document_history",
+            policy_version="v1",
+            max_age_days=30,
+            historical_after_days=180,
+            rationale="Explicit caregiver-selected review boundary for this test.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        assessment = EvidenceFreshnessAssessment(
+            id="companion-freshness-assessment",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            policy_id=policy.id,
+            policy_version=policy.policy_version,
+            freshness_status="needs_review",
+            source_time=event_time,
+            source_time_kind="event_occurrence",
+            assessed_at=datetime.now(timezone.utc),
+            age_days=45,
+            rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
+            assessed_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, policy, assessment])
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What should I know about this document?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert "companion-freshness-assessment" in data["source_freshness_assessment_ids"]
+        assert {
+            "record_type": "freshness_assessment",
+            "record_id": "companion-freshness-assessment",
+        } in data["source_record_refs"]
+        assert "needs_review" in captured["messages"][-1]["content"]
+        assert "not a truth judgment" in captured["messages"][-1]["content"]
+
+        history = client.get(
+            f"/api/v1/conversation/{data['session_id']}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert history.status_code == 200, history.text
+        assistant_message = history.json()["messages"][-1]
+        assert {
+            "record_type": "freshness_assessment",
+            "record_id": "companion-freshness-assessment",
+        } in assistant_message["source_record_refs"]
+    finally:
+        teardown()
