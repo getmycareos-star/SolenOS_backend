@@ -2211,6 +2211,7 @@ def test_authenticated_reassessment_persists_cross_domain_convergence():
     setup_db()
     try:
         from app.core.database import get_db
+        from app.core.change_enums import PatternType
         app.dependency_overrides[get_db] = override_get_db
 
         db = TestingSessionLocal()
@@ -2249,7 +2250,7 @@ def test_authenticated_reassessment_persists_cross_domain_convergence():
             .filter(
                 Pattern.person_id == person.id,
                 Pattern.subject_type == "cross_domain",
-                Pattern.pattern_type == "convergence",
+                Pattern.pattern_type == PatternType.CONVERGENCE,
                 Pattern.is_active.is_(True),
             )
             .one()
