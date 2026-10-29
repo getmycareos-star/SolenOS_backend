@@ -51,7 +51,9 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note",
                    "extraction_method", "extraction_version", "extraction_run_id",
                    "created_by_caregiver_id", "recorded_at"],
-        "order": ["occurred_at", "recorded_at", "created_at"],
+        # Prefer recording order so a recent correction is not hidden behind
+        # an older event-time value in a bounded source projection.
+        "order": ["recorded_at", "created_at", "occurred_at"],
     },
     "facts": {
         "table": "care_facts",
