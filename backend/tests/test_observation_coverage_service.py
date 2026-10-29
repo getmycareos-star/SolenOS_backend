@@ -736,8 +736,10 @@ def test_explicit_partial_coverage_is_not_reported_as_unknown():
         db.commit()
         result = assess_observation_coverage(db, person.id, "mobility", start, end)
         assert result["coverage_status"] == "partial"
-        assert result["coverage_fraction"] == 0
-        assert "explicitly partial" in result["limitations"][0]
+        # "Partial" is an explicit qualitative state, but without sub-interval
+        # boundaries it does not supply a defensible numeric coverage fraction.
+        assert result["coverage_fraction"] is None
+        assert "incomplete or conflicting" in result["limitations"][0]
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
