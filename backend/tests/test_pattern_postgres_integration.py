@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.models.care import Caregiver, CareEvent, Person
 from app.models.change import Baseline, Change, Pattern
+from app.models.significance import AssessmentDimension, SignificanceAssessment
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -144,7 +145,18 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         ).all())
     finally:
         db.rollback()
-        # Remove only this test's rows. Delete dependent assessments before source records.
+        # Remove only this test's rows, respecting the production foreign-key graph.
+        # Reconciliation can create significance assessments that reference a baseline;
+        # those assessments and their dimensions must be deleted before baselines.
+        assessment_ids = db.query(SignificanceAssessment.id).filter(
+            SignificanceAssessment.person_id.in_([person_a_id, person_b_id])
+        ).subquery()
+        db.query(AssessmentDimension).filter(
+            AssessmentDimension.assessment_id.in_(assessment_ids)
+        ).delete(synchronize_session=False)
+        db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.person_id.in_([person_a_id, person_b_id])
+        ).delete(synchronize_session=False)
         for model in (Pattern, Change, Baseline, CareEvent, Caregiver):
             db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
