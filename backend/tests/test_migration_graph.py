@@ -25,3 +25,4 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     assert "20261029_16_q_intent" in revision_ids
     assert "20261029_17_pattern_metrics" in revision_ids
     assert "20261029_18_acq_provenance" in revision_ids
+    assert "20261029_19_evidence_idem" in revision_ids
