@@ -639,6 +639,38 @@ def test_near_duplicate_candidates_fail_closed_when_comparison_limit_is_exceeded
     assert result["records_available"] == NEAR_DUPLICATE_MAX_RECORDS + 1
     assert "no conclusion" in result["interpretation_limit"]
 
+
+def test_evidence_ingestion_key_is_idempotent_and_payload_bound(review_records):
+    client_a, client_b = review_records
+    payload = {
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "source_text": "Caregiver reports that the afternoon visit happened.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+        "ingestion_key": "capture-retry-20261029-01",
+    }
+    first = client_a.post("/api/v1/evidence", json=payload)
+    assert first.status_code == 200, first.text
+    replay = client_a.post("/api/v1/evidence", json=payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["id"] == first.json()["id"]
+
+    changed = {**payload, "source_text": "Changed payload using the same key."}
+    conflict = client_a.post("/api/v1/evidence", json=changed)
+    assert conflict.status_code == 409, conflict.text
+
+    # The same opaque key is isolated by care-record ownership.
+    other_record = {
+        **payload,
+        "person_id": "review-person-b",
+        "uploaded_by_caregiver_id": "review-caregiver-b",
+        "source_text": "A separate person's independent report.",
+    }
+    separate = client_b.post("/api/v1/evidence", json=other_record)
+    assert separate.status_code == 200, separate.text
+    assert separate.json()["id"] != first.json()["id"]
+
+
 def test_evidence_acquisition_provenance_persists_and_is_scoped(review_records):
     client_a, _client_b = review_records
     payload = {
