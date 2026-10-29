@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer, Boolean
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer, Boolean, Index
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -43,6 +43,7 @@ class ConversationSession(Base):
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
+    __table_args__ = (Index("uq_conversation_messages_client_turn_id", "client_turn_id", unique=True),)
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)
@@ -51,6 +52,9 @@ class ConversationMessage(Base):
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
     source_record_refs_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    # Only assistant rows carry a client turn key and response provenance.
+    client_turn_id = Column(String(36), nullable=True)
+    response_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 

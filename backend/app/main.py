@@ -3,6 +3,7 @@ from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
+import logging
 import asyncio
 import hashlib
 import os
@@ -45,6 +46,9 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
+
+logger = logging.getLogger(__name__)
+
 
 class RequestBodySizeLimitMiddleware:
     # Bound request buffering before FastAPI parses JSON or multipart bodies.
@@ -978,18 +982,23 @@ def readiness_check(db: Session = Depends(get_db)):
         required_tables = set(Base.metadata.tables.keys())
         missing_tables = required_tables - existing_tables
     except SQLAlchemyError as exc:
+        logger.warning("readiness_failed stage=database_connectivity error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
     except Exception as exc:
+        logger.error("readiness_failed stage=orm_schema_inspection error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
+        logger.error("readiness_failed stage=orm_tables_missing count=%s names=%s", len(missing_tables), ",".join(sorted(missing_tables)))
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
+        logger.error("readiness_failed stage=orm_column_comparison error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
+        logger.error("readiness_failed stage=orm_columns_missing count=%s differences=%s", len(differences), " | ".join(differences)[:2000])
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     migration_state = "not_checked"
@@ -1012,6 +1021,7 @@ def readiness_check(db: Session = Depends(get_db)):
                 for row in db.execute(text("SELECT version_num FROM alembic_version")).all()
             }
             if not expected_heads or applied_heads != expected_heads:
+                logger.error("readiness_failed stage=alembic_head_mismatch expected=%s applied=%s", ",".join(sorted(expected_heads)), ",".join(sorted(applied_heads)))
                 raise HTTPException(status_code=503, detail="Database migrations are not current")
 
             required_migration_tables = set([
@@ -1071,6 +1081,7 @@ def readiness_check(db: Session = Depends(get_db)):
                 name for name in required_migration_tables if not inspector.has_table(name)
             )
             if missing_migration_tables:
+                logger.error("readiness_failed stage=continuity_tables_missing count=%s names=%s", len(missing_migration_tables), ",".join(missing_migration_tables))
                 raise HTTPException(
                     status_code=503,
                     detail={"message": "Migration-created continuity schema is incomplete",
@@ -1082,6 +1093,7 @@ def readiness_check(db: Session = Depends(get_db)):
         except HTTPException:
             raise
         except Exception as exc:
+            logger.error("readiness_failed stage=alembic_schema_verification error_type=%s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Database migration state could not be verified") from exc
 
     return {

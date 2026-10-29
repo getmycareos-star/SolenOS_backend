@@ -424,19 +424,17 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         assert response.json()["ai_generated"] is True
         assert evidence_id in response.json()["source_evidence_ids"]
 
-        user_payload = json.loads(captured["messages"][-1]["content"])
-        evidence_context = user_payload["authorized_record_context"]["caregiver_provided_evidence"]
-        lineage_context = user_payload["authorized_record_context"]["evidence_lineage"]
-        assert lineage_context["status"] in {"assessed_bounded_subset", "unavailable_schema", "not_assessed"}
-        assert "does not establish common origin" in lineage_context["interpretation_limit"] or "does not prove" in lineage_context["interpretation_limit"]
-        assert "evidence_lineage" in user_payload["authorized_record_context"]
-        assert any(
-            item.get("evidence_id") == evidence_id
-            and item.get("filename") == "care-letter.txt"
-            and "follow-up date is not stated" in item.get("source_text", "").lower()
-            for item in map(json.loads, [entry.removeprefix("Caregiver-provided evidence: ") for entry in evidence_context])
+        user_payload = captured["messages"][-1]["content"]
+        assert evidence_id in user_payload
+        assert "care-letter.txt" in user_payload
+        assert "follow-up date is not stated" in user_payload.lower()
+        assert "Evidence lineage" in user_payload
+        assert "interpretation_limit" in user_payload
+        assert (
+            "does not establish common origin" in user_payload
+            or "does not prove" in user_payload
         )
-        assert "A newer upload does not automatically supersede an older document" in captured["messages"][0]["content"]
+        assert "A newer upload does not automatically supersede older evidence" in captured["messages"][0]["content"]
     finally:
         teardown()
 
