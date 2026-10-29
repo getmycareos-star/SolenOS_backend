@@ -70,6 +70,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Existing ingestion/extraction and care-assertion paths preserve source text, evidence IDs, source spans, and separate event/recording times in supported workflows.
 - [x] Add append-only typed observations linked to an exact passage and offsets in original evidence, with source kind, epistemic status, subject, attribute/value/units/context, negation, hedging, ambiguity, observer/method, extraction method/version, and separate occurrence/observation/report/recording times.
 - [x] Validate exact source passages, ambiguous repeated passage offsets, observed-status requirements, unknown/missing value semantics, time-zone-bearing timestamps, and same-record observer identity.
+- [x] Preserve observation corrections as new append-only versions with a same-evidence supersession link and mandatory correction rationale.
 - [ ] Universal automated extraction across document/audio/transcript/image/text adapters and pronoun/entity resolution remain incomplete.
 - [ ] Verify document, audio, transcript, image, and text paths preserve originals and report unsupported formats/failures.
 
@@ -127,6 +128,8 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 
 ### Q. Frontend evidence workflows — PARTIAL
 - [x] The persisted EvidenceReviewPanel is connected to current-care understanding and displays the backend-computed source-text hash status (match/mismatch/unavailable), exact hash scope, and explicit limitation that the hash does not authenticate the original binary.
+- [x] Connect source lineage and corroboration review to the UI with explicit independence state and failure-not-success messaging.
+- [x] Connect structured observation capture/history to the UI, including exact source passage, epistemic status, negation, hedging, ambiguity, and justified correction history.
 - [x] Add a caregiver-facing claim assessment panel in the LCR with all ten explicit statuses, source-link relationship controls, exact-passage input, rationale, and persisted assessment history.
 - [x] Current-care UI already exposes evidence-integrity inspection, duplicate candidates, interpretation limits, and review coverage.
 - [x] Frontend verification asserts the LCR connection and guards against reintroducing arbitrary confidence thresholds.
