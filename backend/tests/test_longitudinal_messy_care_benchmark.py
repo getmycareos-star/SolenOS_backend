@@ -60,24 +60,28 @@ def isolated_database():
 
 
 def make_person(db, suffix="a"):
-    person = Person(id=f"person-{suffix}", name=f"Synthetic Person {suffix}")
+    # IDs must fit the production PostgreSQL varchar(32) schema.
+    compact = hashlib.sha256(suffix.encode()).hexdigest()[:12]
+    person = Person(id=f"p-{compact}", name=f"Synthetic Person {suffix}")
     db.add(person)
     db.flush()  # PostgreSQL enforces the caregiver -> person foreign key.
     caregiver = Caregiver(
-        id=f"caregiver-{suffix}",
+        id=f"c-{compact}",
         name=f"Synthetic Caregiver {suffix}",
-        email=f"caregiver-{suffix}@benchmark.invalid",
+        email=f"c-{compact}@benchmark.invalid",
         relationship="Family",
         person_id=person.id,
     )
     db.add(caregiver)
     db.flush()
+    # Persist identity fixtures before separate API sessions use them on PostgreSQL.
+    db.commit()
     return person, caregiver
 
 
 def add_event(db, person, caregiver, event_type, days_ago, title, evidence_ids=None):
     event = CareEvent(
-        id=f"{person.id}-{event_type}-{days_ago}-{title.lower().replace(' ', '-')}",
+        id="ev-" + hashlib.sha256((person.id + "|" + event_type + "|" + str(days_ago) + "|" + title).encode()).hexdigest()[:24],
         person_id=person.id,
         event_type=event_type,
         status="recorded",
