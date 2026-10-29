@@ -567,7 +567,7 @@ def test_structured_source_observation_appears_in_current_care_projection(client
                 id, person_id, event_type, status, occurred_at, title,
                 evidence_ids, created_by_caregiver_id
             ) VALUES (
-                'foreign-evidence-link-event', :person_id, 'routine', 'recorded',
+                'foreign-evidence-link-event', :person_id, 'structured_daily_capture', 'recorded',
                 CURRENT_TIMESTAMP, 'Record with unauthorized legacy evidence link',
                 '["private-evidence-other"]', :caregiver_id
             )
