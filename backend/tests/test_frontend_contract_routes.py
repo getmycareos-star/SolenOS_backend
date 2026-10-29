@@ -968,7 +968,7 @@ def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fal
         )
         assert response.status_code == 200, response.text
         assert len(calls) == 2
-        assert response.json()["reply"] == "I can organize the recorded handoff details and flag missing information without inventing a handoff."
+        assert response.json()["reply"] == "I can organize the details you provide and flag what remains unknown."
         assert response.json()["ai_generated"] is True
         assert response.json()["written_to_lcr"] is False
         db = TestingSessionLocal()
