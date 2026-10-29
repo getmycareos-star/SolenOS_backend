@@ -4,27 +4,15 @@ on:
   pull_request:
     paths:
       - "backend/alembic/**"
-      - "backend/app/models/**"
-      - "backend/app/core/database.py"
-      - "backend/app/api/open_loops.py"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_background_worker.py"
-      - "backend/tests/test_evidence_freshness_policy.py"
-      - "backend/tests/test_companion_response_contract.py"
-      - "backend/tests/test_qwen_background_worker.py"
+      - "backend/app/**"
+      - "backend/tests/**"
       - ".github/workflows/postgres-migration-validation.yml"
   push:
     branches: [main]
     paths:
       - "backend/alembic/**"
-      - "backend/app/models/**"
-      - "backend/app/core/database.py"
-      - "backend/app/api/open_loops.py"
-      - "backend/app/api/collaboration.py"
-      - "backend/app/services/qwen_background_worker.py"
-      - "backend/tests/test_evidence_freshness_policy.py"
-      - "backend/tests/test_companion_response_contract.py"
-      - "backend/tests/test_qwen_background_worker.py"
+      - "backend/app/**"
+      - "backend/tests/**"
       - ".github/workflows/postgres-migration-validation.yml"
 
 permissions:
@@ -290,6 +278,78 @@ jobs:
               )
               assert has_unique, f"{table} missing unique target revision constraint"
               print(f"PASS unique revision {table}")
+          engine.dispose()
+          PY
+
+      - name: Verify freshness append-only triggers reject direct SQL mutation
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.exc import DBAPIError
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+
+          def exercise_mutation(table, row_id, update_sql, test_suffix):
+              person_id = f"freshness-trigger-person-{test_suffix}"
+              caregiver_id = f"freshness-trigger-caregiver-{test_suffix}"
+              evidence_id = f"freshness-trigger-evidence-{test_suffix}"
+              policy_id = f"freshness-trigger-policy-{test_suffix}"
+              assessment_id = f"freshness-trigger-assessment-{test_suffix}"
+              with engine.connect() as connection:
+                  transaction = connection.begin()
+                  try:
+                      connection.execute(text("INSERT INTO persons (id, name) VALUES (:id, 'Freshness trigger test')"), {"id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO caregivers (id, name, relationship, person_id, timezone)
+                          VALUES (:id, 'Freshness trigger caregiver', 'family', :person_id, 'UTC')
+                      """), {"id": caregiver_id, "person_id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence (id, person_id, type, source_text, uploaded_by_caregiver_id, source_text_sha256)
+                          VALUES (:id, :person_id, 'caregiver_report', 'source for freshness trigger', :caregiver_id,
+                                  'd9b1f3e2b0e1a5a8c2c3d4e5f60718293a4b5c6d7e8f901234567890abcdef12')
+                      """), {"id": evidence_id, "person_id": person_id, "caregiver_id": caregiver_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_freshness_policies
+                            (id, person_id, domain_key, policy_version, max_age_days,
+                             historical_after_days, rationale, created_by_caregiver_id)
+                          VALUES (:id, :person_id, 'trigger_test', 'v1', 30, 180,
+                                  'Explicit migration trigger test policy', :caregiver_id)
+                      """), {"id": policy_id, "person_id": person_id, "caregiver_id": caregiver_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_freshness_assessments
+                            (id, person_id, evidence_id, policy_id, policy_version, freshness_status,
+                             source_time, source_time_kind, assessed_at, age_days, rationale, assessed_by_caregiver_id)
+                          VALUES (:id, :person_id, :evidence_id, :policy_id, 'v1', 'unknown_source_time',
+                                  NULL, NULL, CURRENT_TIMESTAMP, NULL, 'Trigger test assessment', :caregiver_id)
+                      """), {"id": assessment_id, "person_id": person_id, "evidence_id": evidence_id,
+                              "policy_id": policy_id, "caregiver_id": caregiver_id})
+                      try:
+                          connection.execute(text(update_sql), {"id": row_id(policy_id, assessment_id)})
+                      except DBAPIError as exc:
+                          transaction.rollback()
+                          assert "append-only" in str(exc).lower(), f"unexpected {table} trigger error: {exc}"
+                          print(f"PASS direct SQL mutation rejected for {table}")
+                          return
+                      transaction.rollback()
+                      raise AssertionError(f"Direct SQL mutation unexpectedly succeeded for {table}")
+                  finally:
+                      if transaction.is_active:
+                          transaction.rollback()
+
+          exercise_mutation(
+              "evidence_freshness_policies",
+              lambda policy_id, assessment_id: policy_id,
+              "UPDATE evidence_freshness_policies SET rationale = 'tampered' WHERE id = :id",
+              "policy",
+          )
+          exercise_mutation(
+              "evidence_freshness_assessments",
+              lambda policy_id, assessment_id: assessment_id,
+              "UPDATE evidence_freshness_assessments SET rationale = 'tampered' WHERE id = :id",
+              "assessment",
+          )
           engine.dispose()
           PY
 
