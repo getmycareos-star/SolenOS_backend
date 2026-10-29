@@ -119,6 +119,20 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
         "order": ["asked_at"],
     },
+    "open_loop_records": {
+        "table": "open_loop_records",
+        "required": False,
+        "fields": [
+            "id", "loop_type", "title", "description", "status", "outcome_status",
+            "owner_role", "owner_label", "uncertainty", "missing_information", "options",
+            "request_text", "recipient_label", "requested_at", "last_contact_at",
+            "verification_rule", "deadline_at", "deadline_source", "deadline_timezone",
+            "consequence_of_delay", "priority", "priority_reasons", "deferred_reason",
+            "review_at", "inactive_since", "closure_result", "closed_at",
+            "cancellation_reason", "recurrence_of_id", "created_at", "updated_at", "version",
+        ],
+        "order": ["updated_at", "created_at"],
+    },
     "information_gaps": {
         "table": "information_gaps",
         "required": False,
@@ -210,6 +224,7 @@ SEARCH_FIELDS = {
     "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
     "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
     "corrections": ["target_type", "original_text", "corrected_text", "reason"],
+    "open_loop_records": ["loop_type", "title", "description", "status", "request_text", "recipient_label"],
     "appointments": ["title", "status", "description"],
 }
 
@@ -221,7 +236,7 @@ TEXT_FIELDS = {
 MAX_TEXT_CHARS = 1600
 JSON_TEXT_FIELDS = {
     "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
-    "context", "metadata", "context_payload",
+    "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
 }
 
 
