@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, List, Optional
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 CoverageStatus = Literal["covered", "partial", "uncovered", "unknown"]
@@ -33,6 +33,16 @@ class ObservationCoverageRecord(ObservationCoverageCreate):
     id: str
     recorded_by_caregiver_id: str
     created_at: datetime
+
+    @field_validator("window_start", "window_end", mode="before")
+    @classmethod
+    def normalize_sqlite_naive_datetimes(cls, value):
+        # SQLite drops timezone metadata even for DateTime(timezone=True).
+        # Treat naive persisted values as UTC on output. Incoming request
+        # validation still rejects timestamps without explicit offsets.
+        if isinstance(value, datetime) and (value.tzinfo is None or value.utcoffset() is None):
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
     class Config:
         from_attributes = True
