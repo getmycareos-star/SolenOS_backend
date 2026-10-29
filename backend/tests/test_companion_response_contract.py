@@ -200,6 +200,64 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
         teardown()
 
 
+def test_companion_retrieves_matching_historical_event_beyond_recent_40(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older care record mentions poor sleep. The record does not establish a worsening trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        db = TestingSessionLocal()
+        now = datetime(2026, 10, 29, 12, 0)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index),
+                title=f"Meal observation {index}",
+                description=f"Caregiver recorded meal details {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Overnight waking and poor rest",
+            description="Caregiver reported waking several times overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        db.commit()
+        older_id = str(older.id)
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     recent_irrelevant = (
         'LCR event evidence: {"event_id":"meal-2","title":"Lunch observation",'
