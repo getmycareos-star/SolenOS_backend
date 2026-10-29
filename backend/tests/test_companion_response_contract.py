@@ -460,6 +460,14 @@ def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     assert collaboration._context_record_ids(ranked, "event_id") == ["sleep-1"]
 
 
+def test_generic_record_word_does_not_outweigh_specific_care_evidence():
+    first = 'LCR event evidence: {"event_id":"first","title":"Lunch", "status":"recorded"}'
+    second = 'LCR event evidence: {"event_id":"second","title":"Sleep", "status":"recorded"}'
+    assert collaboration._rank_context_lines("Tell me about the record", [first, second], limit=2) == [
+        first, second
+    ]
+
+
 def test_context_ranking_preserves_input_order_when_query_has_no_relevant_terms():
     first = 'LCR event evidence: {"event_id":"newer","title":"Observation"}'
     second = 'LCR event evidence: {"event_id":"older","title":"Observation"}'
