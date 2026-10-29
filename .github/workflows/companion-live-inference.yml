@@ -27,6 +27,7 @@ jobs:
       OLLAMA_NUM_CTX: "1024"
       OLLAMA_NUM_PREDICT: "96"
       OLLAMA_NUM_THREADS: "2"
+      SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
       DATABASE_URL: sqlite:////tmp/solenos-live-inference.db
     steps:
       - name: Check out repository
