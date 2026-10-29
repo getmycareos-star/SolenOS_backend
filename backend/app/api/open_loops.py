@@ -291,6 +291,7 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
 @router.post("", status_code=201)
 def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     deadline = _utc(payload.deadline_at)
     if deadline and not payload.deadline_source:
         raise HTTPException(status_code=422, detail="A deadline requires an explicit source")
@@ -481,6 +482,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
     evidence = changes.pop("evidence", [])
+    _validate_source_evidence_references(db, person_id, evidence)
     key = changes.pop("idempotency_key", None)
     reason = changes.pop("reason", None)
     requested_status = changes.pop("status", None)
