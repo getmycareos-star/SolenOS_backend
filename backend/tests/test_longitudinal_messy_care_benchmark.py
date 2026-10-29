@@ -366,8 +366,8 @@ def test_attention_candidate_confusion_matrix_uses_actual_service_outputs():
         cases.append(("ambiguous_report", False, person.id, "altered_mental_status"))
 
         person, caregiver = make_person(db, "score-documentation")
-        add_event(db, person, caregiver, "appetite", 0, "Ate less today")
-        add_event(db, person, caregiver, "appetite", 0, "Ate less today")
+        add_event(db, person, caregiver, "appetite", 0, "Ate less today report one")
+        add_event(db, person, caregiver, "appetite", 0, "Ate less today report two")
         cases.append(("same_reporter_documentation_burst", False, person.id, "appetite"))
 
         # Run the real change/significance service and capture its actual
