@@ -567,6 +567,8 @@ def test_companion_replays_same_turn_without_second_inference(monkeypatch):
         assert replay.json()["session_id"] == first.json()["session_id"]
         assert replay.json()["reply"] == first.json()["reply"]
         assert replay.json()["source_record_refs"] == first.json()["source_record_refs"]
+        assert replay.json()["messages"][-1]["source_event_ids"] == first.json()["source_event_ids"]
+        assert replay.json()["messages"][-1]["source_record_refs"] == first.json()["source_record_refs"]
         assert len(calls) == 1
 
         history = client.get(
@@ -576,6 +578,8 @@ def test_companion_replays_same_turn_without_second_inference(monkeypatch):
         assert history.status_code == 200, history.text
         assert [message["role"] for message in history.json()["messages"]] == ["user", "assistant"]
         assert history.json()["messages"][-1]["persistence"] == "conversation_only"
+        assert history.json()["messages"][-1]["source_event_ids"] == first.json()["source_event_ids"]
+        assert history.json()["messages"][-1]["source_record_refs"] == first.json()["source_record_refs"]
     finally:
         teardown()
 
