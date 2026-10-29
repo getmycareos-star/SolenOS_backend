@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from pydantic import ValidationError
+from app.schemas.observation_coverage import ObservationCoverageCreate
 
 from app.core.database import Base
 from app.models.care import Person, Caregiver
@@ -142,3 +144,20 @@ def test_decrease_requires_complete_coverage_for_both_comparison_windows():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+
+def test_coverage_input_rejects_naive_timestamps():
+    try:
+        ObservationCoverageCreate(
+            person_id="person",
+            subject_type="mobility",
+            window_start=datetime(2026, 10, 1),
+            window_end=datetime(2026, 10, 2),
+            coverage_status="covered",
+            rationale="Coverage interval was explicitly observed.",
+        )
+    except ValidationError as exc:
+        assert "explicit timezone offset" in str(exc)
+    else:
+        raise AssertionError("Naive timestamps must be rejected for coverage windows")
