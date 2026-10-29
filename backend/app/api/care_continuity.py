@@ -2400,7 +2400,8 @@ SOURCE_RELATIONSHIP_TYPES = {
     "corroborates", "contradicts", "duplicates", "related_to",
 }
 SOURCE_INDEPENDENCE_STATUSES = {"independent", "shared_origin", "unknown", "not_assessed"}
-LINEAGE_RELATIONSHIP_TYPES = {"copied_from", "forwarded_from", "derived_from", "same_origin"}
+LINEAGE_RELATIONSHIP_TYPES = {"copied_from", "forwarded_from", "derived_from"}
+DEPENDENT_RELATIONSHIP_TYPES = LINEAGE_RELATIONSHIP_TYPES | {"same_origin"}
 
 
 @router.post("/evidence/{evidence_id}/relationships", status_code=201)
@@ -2424,9 +2425,9 @@ def create_evidence_source_relationship(
     independence = payload.get("source_independence_status")
     rationale = payload.get("rationale")
     origin_group_key = payload.get("origin_group_key")
-    if relationship_type not in SOURCE_RELATIONSHIP_TYPES:
+    if not isinstance(relationship_type, str) or relationship_type not in SOURCE_RELATIONSHIP_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported source relationship type")
-    if independence not in SOURCE_INDEPENDENCE_STATUSES:
+    if not isinstance(independence, str) or independence not in SOURCE_INDEPENDENCE_STATUSES:
         raise HTTPException(status_code=422, detail="An explicit source-independence state is required")
     if not isinstance(rationale, str) or len(rationale.strip()) < 3:
         raise HTTPException(status_code=422, detail="A rationale of at least 3 characters is required")
@@ -2434,7 +2435,7 @@ def create_evidence_source_relationship(
         not isinstance(origin_group_key, str) or not origin_group_key.strip() or len(origin_group_key) > 128
     ):
         raise HTTPException(status_code=422, detail="origin_group_key must be a non-empty string up to 128 characters")
-    if relationship_type in LINEAGE_RELATIONSHIP_TYPES:
+    if relationship_type in DEPENDENT_RELATIONSHIP_TYPES:
         if independence not in {"shared_origin", "unknown", "not_assessed"}:
             raise HTTPException(
                 status_code=422,
