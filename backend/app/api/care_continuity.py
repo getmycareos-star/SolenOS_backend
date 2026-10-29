@@ -3779,3 +3779,219 @@ def list_evidence_freshness_assessments(evidence_id: str, request: Request, db: 
         "limit": 500,
         "interpretation_limit": "This is an append-only history of policy applications, not a truth judgment. Different domains may apply different explicit policies to the same evidence.",
     }
+
+
+COMPLETENESS_KEY_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
+
+
+def _completeness_policy_response(row: EvidenceCompletenessPolicy) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "domain_key": row.domain_key,
+        "purpose_key": row.purpose_key,
+        "policy_version": row.policy_version,
+        "required_fields": list(row.required_fields or []),
+        "rationale": row.rationale,
+        "created_by_caregiver_id": row.created_by_caregiver_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "immutable": True,
+        "interpretation_limit": "This is a purpose-specific checklist policy, not a universal completeness score.",
+    }
+
+
+@router.post("/evidence-completeness/policies", status_code=201)
+def create_evidence_completeness_policy(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Create a versioned checklist for a specific care domain and purpose."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to define a completeness policy")
+    domain_key = str(payload.get("domain_key") or "").strip().lower()
+    purpose_key = str(payload.get("purpose_key") or "").strip().lower()
+    policy_version = str(payload.get("policy_version") or "").strip()
+    rationale = str(payload.get("rationale") or "").strip()
+    required_fields = payload.get("required_fields")
+    if not COMPLETENESS_KEY_PATTERN.fullmatch(domain_key):
+        raise HTTPException(status_code=422, detail="domain_key must be a lowercase domain identifier")
+    if not COMPLETENESS_KEY_PATTERN.fullmatch(purpose_key):
+        raise HTTPException(status_code=422, detail="purpose_key must be a lowercase purpose identifier")
+    if not policy_version or len(policy_version) > 64:
+        raise HTTPException(status_code=422, detail="An explicit policy_version of at most 64 characters is required")
+    if not rationale:
+        raise HTTPException(status_code=422, detail="A rationale for this purpose-specific policy is required")
+    if not isinstance(required_fields, list) or not required_fields or len(required_fields) > 100:
+        raise HTTPException(status_code=422, detail="required_fields must be a non-empty list of at most 100 field identifiers")
+    fields = [str(value).strip().lower() for value in required_fields]
+    if any(not COMPLETENESS_KEY_PATTERN.fullmatch(value) for value in fields) or len(fields) != len(set(fields)):
+        raise HTTPException(status_code=422, detail="required_fields must contain unique lowercase field identifiers")
+    existing = db.query(EvidenceCompletenessPolicy.id).filter(
+        EvidenceCompletenessPolicy.person_id == person_id,
+        EvidenceCompletenessPolicy.domain_key == domain_key,
+        EvidenceCompletenessPolicy.purpose_key == purpose_key,
+        EvidenceCompletenessPolicy.policy_version == policy_version,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="That completeness policy version already exists; create a new version instead of overwriting history")
+    row = EvidenceCompletenessPolicy(
+        person_id=person_id, domain_key=domain_key, purpose_key=purpose_key,
+        policy_version=policy_version, required_fields=fields, rationale=rationale,
+        created_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The completeness policy version already exists; no policy was overwritten") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence completeness policy could not be persisted")
+        raise HTTPException(status_code=503, detail="Completeness policy could not be persisted") from exc
+    return _completeness_policy_response(row)
+
+
+@router.get("/evidence-completeness/policies")
+def list_evidence_completeness_policies(request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    rows = db.query(EvidenceCompletenessPolicy).filter(
+        EvidenceCompletenessPolicy.person_id == person_id,
+    ).order_by(
+        EvidenceCompletenessPolicy.domain_key.asc(),
+        EvidenceCompletenessPolicy.purpose_key.asc(),
+        EvidenceCompletenessPolicy.created_at.asc(),
+    ).limit(500).all()
+    return {"items": [_completeness_policy_response(row) for row in rows], "bounded": True, "limit": 500}
+
+
+def _completeness_assessment_response(row: EvidenceCompletenessAssessment) -> dict[str, Any]:
+    try:
+        field_evidence = json.loads(row.field_evidence_json)
+    except (TypeError, ValueError):
+        field_evidence = {}
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "policy_id": row.policy_id,
+        "policy_version": row.policy_version,
+        "subject_type": row.subject_type,
+        "subject_id": row.subject_id,
+        "status": row.assessment_status,
+        "required_fields": list(row.required_fields or []),
+        "satisfied_fields": list(row.satisfied_fields or []),
+        "missing_fields": list(row.missing_fields or []),
+        "field_evidence": field_evidence,
+        "evidence_ids": list(row.evidence_ids or []),
+        "rationale": row.rationale,
+        "assessment_basis": row.assessment_basis,
+        "semantic_sufficiency": row.semantic_sufficiency,
+        "assessed_by_caregiver_id": row.assessed_by_caregiver_id,
+        "assessed_at": row.assessed_at.isoformat() if row.assessed_at else None,
+        "immutable": True,
+        "interpretation_limit": "Completeness status measures explicit source-link coverage against this policy. It does not prove the linked evidence semantically satisfies a field or is true.",
+    }
+
+
+@router.post("/evidence-completeness/assessments", status_code=201)
+def assess_evidence_completeness(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Persist explicit source-link coverage against a same-person, versioned checklist."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to assess completeness")
+    policy_id = str(payload.get("policy_id") or "").strip()
+    subject_type = str(payload.get("subject_type") or "").strip().lower()
+    subject_id = str(payload.get("subject_id") or "").strip()
+    rationale = str(payload.get("rationale") or "").strip()
+    assessment_mode = payload.get("assessment_mode", "assessed")
+    field_evidence = payload.get("field_evidence", {})
+    if not policy_id or not subject_type or not subject_id or not rationale:
+        raise HTTPException(status_code=422, detail="policy_id, subject_type, subject_id, and rationale are required")
+    if not COMPLETENESS_KEY_PATTERN.fullmatch(subject_type) or len(subject_id) > 160:
+        raise HTTPException(status_code=422, detail="subject_type or subject_id is invalid")
+    if assessment_mode not in {"assessed", "not_assessed"}:
+        raise HTTPException(status_code=422, detail="assessment_mode must be assessed or not_assessed")
+    if not isinstance(field_evidence, dict):
+        raise HTTPException(status_code=422, detail="field_evidence must map required fields to evidence ID lists")
+    policy = db.query(EvidenceCompletenessPolicy).filter(
+        EvidenceCompletenessPolicy.id == policy_id,
+        EvidenceCompletenessPolicy.person_id == person_id,
+    ).first()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Completeness policy not found")
+    required = list(policy.required_fields or [])
+    if set(field_evidence) - set(required):
+        raise HTTPException(status_code=422, detail="field_evidence contains fields not declared by the selected policy")
+    if assessment_mode == "not_assessed" and field_evidence:
+        raise HTTPException(status_code=422, detail="A not_assessed result cannot claim source links")
+    normalized: dict[str, list[str]] = {}
+    for field_name, values in field_evidence.items():
+        if not isinstance(values, list) or len(values) != len(set(values)) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise HTTPException(status_code=422, detail="Each field must map to a list of unique non-empty evidence IDs")
+        normalized[field_name] = [value.strip() for value in values]
+    evidence_ids = list(dict.fromkeys(value for values in normalized.values() for value in values))
+    if len(evidence_ids) > 100:
+        raise HTTPException(status_code=422, detail="A completeness assessment may link at most 100 evidence items")
+    if evidence_ids:
+        rows = db.query(Evidence.id).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+        ).all()
+        if len(rows) != len(evidence_ids):
+            raise HTTPException(status_code=422, detail="Every linked evidence ID must belong to the authenticated care record")
+    satisfied = [field for field in required if normalized.get(field)]
+    missing = [field for field in required if not normalized.get(field)]
+    if assessment_mode == "not_assessed":
+        status = "undetermined"
+        satisfied = []
+        missing = []
+    elif not satisfied:
+        status = "missing"
+    elif missing:
+        status = "partial"
+    else:
+        status = "complete"
+    row = EvidenceCompletenessAssessment(
+        person_id=person_id,
+        policy_id=policy.id,
+        policy_version=policy.policy_version,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        assessment_status=status,
+        required_fields=required,
+        satisfied_fields=satisfied,
+        missing_fields=missing,
+        field_evidence_json=json.dumps(normalized, ensure_ascii=False, sort_keys=True),
+        evidence_ids=evidence_ids,
+        rationale=rationale,
+        assessment_basis="linked_source_coverage_only",
+        semantic_sufficiency="not_automatically_verified",
+        assessed_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence completeness assessment could not be persisted")
+        raise HTTPException(status_code=503, detail="Completeness assessment could not be persisted") from exc
+    return _completeness_assessment_response(row)
+
+
+@router.get("/evidence-completeness/assessments/{subject_type}/{subject_id}")
+def list_evidence_completeness_assessments(subject_type: str, subject_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    rows = db.query(EvidenceCompletenessAssessment).filter(
+        EvidenceCompletenessAssessment.person_id == person_id,
+        EvidenceCompletenessAssessment.subject_type == subject_type,
+        EvidenceCompletenessAssessment.subject_id == subject_id,
+    ).order_by(
+        EvidenceCompletenessAssessment.assessed_at.asc(),
+        EvidenceCompletenessAssessment.id.asc(),
+    ).limit(500).all()
+    return {
+        "items": [_completeness_assessment_response(row) for row in rows],
+        "bounded": True,
+        "limit": 500,
+        "interpretation_limit": "Assessment history is append-only and purpose-specific; linked source presence does not prove semantic sufficiency.",
+    }
