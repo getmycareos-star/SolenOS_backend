@@ -1678,3 +1678,80 @@ def test_pattern_detection_does_not_mix_events_from_different_situations():
         db.close()
     finally:
         teardown_db()
+
+
+def test_observation_coverage_api_persists_and_enforces_person_scope():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="coverage-write-person", name="Coverage writer")
+        caregiver = Caregiver(
+            id="coverage-write-caregiver",
+            name="Coverage writer caregiver",
+            email="coverage-write@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="coverage-other-person-api", name="Other care record")
+        other_caregiver = Caregiver(
+            id="coverage-other-caregiver-api",
+            name="Other caregiver",
+            email="coverage-other-api@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        other_token = issue_scoped_session(db, other_person, other_caregiver)
+        db.close()
+
+        client = TestClient(app)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        start = now - timedelta(days=7)
+        payload = {
+            "person_id": "coverage-write-person",
+            "subject_type": "mobility",
+            "window_start": start.isoformat(),
+            "window_end": now.isoformat(),
+            "coverage_status": "covered",
+            "source_evidence_ids": [],
+            "rationale": "Caregiver explicitly observed the mobility domain throughout this interval.",
+        }
+        created = client.post(
+            "/api/v1/change/coverage",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["coverage_status"] == "covered"
+        assert created.json()["recorded_by_caregiver_id"] == "coverage-write-caregiver"
+
+        assessed = client.get(
+            "/api/v1/change/coverage/coverage-write-person",
+            params={
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": now.isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert assessed.status_code == 200, assessed.text
+        assert assessed.json()["coverage_status"] == "covered"
+        assert assessed.json()["coverage_fraction"] == pytest.approx(1.0)
+        assert len(assessed.json()["records"]) == 1
+
+        denied = client.get(
+            "/api/v1/change/coverage/coverage-write-person",
+            params={
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": now.isoformat(),
+            },
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert denied.status_code == 403
+    finally:
+        teardown_db()
