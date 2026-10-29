@@ -1321,6 +1321,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_lcr_context_ids: list[str] = []
     source_lcr_record_refs: list[dict[str, str]] = []
     source_freshness_assessment_ids: list[str] = []
+    freshness_source_status = "not_retrieved"
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
 
     if emergency:
@@ -1545,7 +1546,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
         freshness_context: list[str] = []
-        if source_evidence_ids:
+        if not source_evidence_ids:
+            freshness_source_status = "no_linked_evidence"
+        elif not (
+            inspect(db.get_bind()).has_table("evidence_freshness_assessments")
+            and inspect(db.get_bind()).has_table("evidence_freshness_policies")
+        ):
+            freshness_source_status = "unavailable_schema"
+            freshness_context.append(
+                "Freshness assessment source is unavailable in this database schema. "
+                "Currentness is unknown; do not infer that evidence is current or stale."
+            )
+        else:
             freshness_rows = (
                 db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
                 .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
@@ -1557,6 +1569,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 .limit(50)
                 .all()
             )
+            freshness_source_status = "available" if freshness_rows else "no_assessments_returned"
             seen_freshness_pairs = set()
             for assessment, policy in freshness_rows:
                 pair = (str(assessment.evidence_id), str(assessment.policy_id))
@@ -1596,6 +1609,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "appointments": appointment_context,
             "caregiver_provided_evidence": evidence_context,
             "evidence_freshness_assessments": freshness_context,
+            "evidence_freshness_source_status": freshness_source_status,
             "shared_lcr_context": shared_lcr_lines,
             "lcr_context_coverage": lcr_context_coverage,
             "evidence_lineage": evidence_lineage_context,
@@ -1789,6 +1803,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_assertion_ids": source_assertion_ids,
         "source_lcr_context_ids": source_lcr_context_ids,
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
         "source_record_refs": source_record_refs,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
