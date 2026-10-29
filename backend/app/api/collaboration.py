@@ -1431,8 +1431,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Recent windows are a default, not a search boundary. Independently query
         # older source records, then rank by relevance before recency. All queries
         # remain scoped to the authenticated person/caregiver.
-        direct_terms = list(dict.fromkeys(_base_context_terms(user_text)))
-        expanded_terms = list(dict.fromkeys(_expanded_context_terms(retrieval_query)))
+        direct_terms = sorted(_base_context_terms(user_text))
+        expanded_terms = sorted(_expanded_context_terms(retrieval_query))
         retrieval_terms = list(dict.fromkeys([*direct_terms, *expanded_terms]))[:24]
         if retrieval_terms and not _is_casual_greeting(user_text):
             existing_event_ids = set(_context_record_ids(event_context, "event_id"))
