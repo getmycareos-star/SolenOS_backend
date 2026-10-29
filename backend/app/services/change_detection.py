@@ -244,20 +244,24 @@ def _create_change(
             ("current_coverage_status", comparison.get("current_coverage_status")),
             ("baseline_coverage_fraction", comparison.get("baseline_coverage_fraction")),
             ("current_coverage_fraction", comparison.get("current_coverage_fraction")),
-            ("comparison_window_start", comparison.get("current_window_start")),
-            ("comparison_window_end", comparison.get("current_window_end")),
         )
         for field, expected in comparisons:
             actual = getattr(candidate, field, None)
-            if field in {"comparison_window_start", "comparison_window_end"}:
-                actual = _ensure_utc(actual)
-                expected = _ensure_utc(expected)
             if isinstance(actual, (float, int)) and isinstance(expected, (float, int)):
-                if abs(float(actual) - float(expected)) > 1e-9:
+                # Window endpoints move with reference_time. Ignore tiny fraction
+                # drift caused only by request-time movement; a status transition
+                # (unknown -> covered) or meaningful coverage change still rebuilds.
+                if abs(float(actual) - float(expected)) > 1e-6:
                     return False
             elif actual != expected:
                 return False
-        return candidate.baseline_id == baseline_id
+        # A newly derived baseline ID alone is not a semantic change. Compare the
+        # rendered baseline/current states instead, which include the actual
+        # measurements and denominators that explain the assessment.
+        return (
+            candidate.previous_state == previous_state
+            and candidate.current_state == current_state
+        )
 
     for candidate in existing:
         if (
