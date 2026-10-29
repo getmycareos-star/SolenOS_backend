@@ -1929,6 +1929,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    turn_time = datetime.now(timezone.utc)
     response_metadata = {
         "session_id": session.id,
         "person_id": person_id,
@@ -1956,6 +1957,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
         response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=turn_time + timedelta(microseconds=1),
     )
     try:
         db.add(ConversationMessage(
@@ -1963,6 +1965,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
             source_record_refs_json="[]", client_turn_id=client_turn_id,
             request_fingerprint=request_fingerprint if client_turn_id else None,
+            created_at=turn_time,
         ))
         db.add(assistant_row)
         db.commit()
