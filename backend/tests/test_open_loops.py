@@ -222,6 +222,13 @@ def test_open_loop_create_and_update_reject_cross_person_source_ids():
     )
     assert updated.status_code == 404, updated.text
 
+    closed = client.post(
+        f"/api/v1/open-loops/{own_loop['id']}/close",
+        headers=headers_a,
+        json={"text": "Attempt closure with a foreign source", "evidence": [{"evidence_id": foreign_source_id}]},
+    )
+    assert closed.status_code == 404, closed.text
+
 
 def test_professional_input_requires_source_evidence():
     client = TestClient(app)
