@@ -120,34 +120,12 @@ def detect_changes(
 def reassess_changes(person_id: str, request: Request, db: Session = Depends(get_db)):
     """Reconcile change assessments from this person's persisted care events only."""
     _require_person_scope(request, db, person_id)
-    event_types = [
-        row[0]
-        for row in db.query(CareEvent.event_type)
-        .filter(
-            CareEvent.person_id == person_id,
-            CareEvent.event_type.is_not(None),
-        )
-        .distinct()
-        .order_by(CareEvent.event_type.asc())
-        .all()
-        if row[0]
-    ]
     try:
-        from app.services.pattern_detection import (
-            detect_patterns as reconcile_patterns,
-            detect_cross_domain_patterns,
-        )
+        from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
-        for event_type in event_types:
-            detect_event_changes(db, person_id, event_type, None)
-            # Pattern reconciliation runs only after the evidence-backed change
-            # assessments have been flushed into this transaction.
-            reconcile_patterns(db, person_id, event_type, None)
-        # Cross-domain co-occurrence is a separate descriptive assessment across
-        # persisted source events. It does not assert causal relationships.
-        detect_cross_domain_patterns(db, person_id)
-        detect_assertion_changes(db, person_id)
-        detect_numeric_observation_changes(db, person_id)
+        # Shared by this explicit endpoint and source-write paths so the same
+        # reconciliation semantics apply to new/late evidence and corrections.
+        reconcile_person_change_intelligence(db, person_id)
         db.commit()
     except Exception as exc:
         db.rollback()

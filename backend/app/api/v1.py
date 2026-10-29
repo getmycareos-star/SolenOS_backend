@@ -8,6 +8,7 @@ import hashlib
 from app.core.database import get_db
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConsentRecord
 from app.models.care import (
@@ -463,9 +464,22 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         qwen_status = "unavailable"
         qwen_candidates = None
 
+    change_intelligence_status = "available"
+    try:
+        reconcile_person_change_intelligence(db, person_id)
+        db.commit()
+    except Exception:
+        db.rollback()
+        change_intelligence_status = "unavailable"
+        logger.exception(
+            "Change intelligence reconciliation failed after durable capture event %s",
+            event.id,
+        )
+
     return {
         "success": True,
         "id": event.id,
+        "change_intelligence_status": change_intelligence_status,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
         "learning_pipeline_status": learning_pipeline_status,
@@ -505,6 +519,22 @@ def create_event(event: CareEventCreate, db: Session = Depends(get_db)):
         source_id=db_event.id,
         caregiver_id=event.created_by_caregiver_id,
     )
+    try:
+        reconcile_person_change_intelligence(db, db_event.person_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "Change intelligence reconciliation failed after durable care event %s",
+            db_event.id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The care event was saved, but change-intelligence reassessment failed. "
+                f"Do not resubmit the event; retry reassessment instead. Event id: {db_event.id}"
+            ),
+        ) from exc
     return db_event
 
 
@@ -587,6 +617,22 @@ def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db
         caregiver_id=correction.caregiver_id,
     )
     engine.after_save(db_correction.person_id)
+    try:
+        reconcile_person_change_intelligence(db, db_correction.person_id)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception(
+            "Change intelligence reconciliation failed after correction %s",
+            db_correction.id,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "The correction was saved, but change-intelligence reassessment failed. "
+                f"Do not resubmit the correction; retry reassessment instead. Correction id: {db_correction.id}"
+            ),
+        ) from exc
 
     return db_correction
 
