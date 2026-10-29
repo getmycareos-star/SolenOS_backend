@@ -931,6 +931,25 @@ def current_care_projection(
     person_id, _ = _scoped_identity(request, db)
     context = build_lcr_context(db, person_id, limit_per_source=limit_per_source)
     sources = context.get("sources") or {}
+    candidate_evidence_ids: set[str] = set()
+    for source_name, source_value in sources.items():
+        for source_item in source_value.get("items") or []:
+            if source_name == "evidence" and source_item.get("id"):
+                candidate_evidence_ids.add(str(source_item["id"]))
+            linked = source_item.get("evidence_ids")
+            if isinstance(linked, list):
+                candidate_evidence_ids.update(str(value) for value in linked if value)
+            if source_name == "evidence_observations" and source_item.get("evidence_id"):
+                candidate_evidence_ids.add(str(source_item["evidence_id"]))
+    authorized_evidence_ids = set()
+    if candidate_evidence_ids:
+        authorized_evidence_ids = {
+            str(value)
+            for value in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(candidate_evidence_ids),
+            ).scalars().all()
+        }
     current_items: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -961,6 +980,10 @@ def current_care_projection(
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
         if source_name == "evidence_observations" and row.get("evidence_id"):
             evidence_ids = [str(row["evidence_id"])]
+        evidence_ids = [
+            str(value) for value in evidence_ids
+            if value and str(value) in authorized_evidence_ids
+        ]
         source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
         origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
@@ -986,6 +1009,10 @@ def current_care_projection(
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
+            "evidence_link_validation": (
+                "same_care_record_evidence_reference_verified"
+                if evidence_ids else "no_authorized_evidence_reference_returned"
+            ),
             "claim_refs": claim_refs[:20],
             "claim_count": len(claim_refs),
             "supersedes_observation_id": row.get("supersedes_observation_id") if source_name == "evidence_observations" else None,
