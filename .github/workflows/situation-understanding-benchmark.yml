@@ -2,7 +2,7 @@ name: Situation-understanding benchmark
 
 on:
   push:
-    branches: [main]
+    branches: [main, benchmark/longitudinal-messy-care-v1]
     paths:
       - "backend/app/services/uncertainty_intelligence.py"
       - "backend/app/services/baseline.py"
@@ -142,4 +142,4 @@ jobs:
               raise SystemExit("PostgreSQL longitudinal integration gate failed.")
           PY
 
-# CI retrigger: validate the corrected longitudinal fixture and PostgreSQL integration path.
+# PR branch push trigger ensures a new run is created for every benchmark fix commit.
