@@ -96,6 +96,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert data["written_to_lcr"] is False
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in data["source_record_refs"]
         assert "The record contains one sleep observation" in data["reply"]
 
         system_prompt = captured["messages"][0]["content"]
@@ -111,6 +112,9 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             assert db.query(CareEvent).filter_by(person_id=person_id).count() == 1
             messages = db.query(ConversationMessage).all()
             assert [message.role for message in messages] == ["user", "assistant"]
+            assert messages[0].source_record_refs_json == "[]"
+            saved_refs = __import__("json").loads(messages[1].source_record_refs_json)
+            assert {"record_type": "care_event", "record_id": event_id} in saved_refs
         finally:
             db.close()
     finally:
