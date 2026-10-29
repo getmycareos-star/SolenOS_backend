@@ -489,8 +489,12 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
             setattr(loop, field, value)
     if requested_status == "deferred" and not reason and not loop.deferred_reason:
         raise HTTPException(status_code=422, detail="Deferral reason is required")
+    if requested_status == "deferred" and reason:
+        loop.deferred_reason = reason
     if requested_status == "review_abandoned" and not reason:
         raise HTTPException(status_code=422, detail="Abandonment review requires a reason")
+    if requested_status == "review_abandoned":
+        loop.inactive_since = loop.updated_at
     if reason:
         evidence = [*evidence, {"kind": "human_reason", "text": reason}]
     _reassess(db, loop)
