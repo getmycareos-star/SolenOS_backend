@@ -124,6 +124,9 @@ def test_evidence_backed_assumption_keeps_explicit_status_and_provenance():
     assert assumption["supporting_evidence_ids"] == ["evidence-breakfast"]
     assert assumption["verified_supporting_evidence_ids"] == ["evidence-breakfast"]
     assert assumption["has_verified_supporting_evidence"] is True
+    assert assumption["engine_semantic_support_verified"] is False
+    assert assumption["support_validation_scope"] == "reference_and_source_status_only_not_semantic_entailment"
+    assert "candidate_support_not_semantically_verified" in result["classifications"]
 
 
 def test_unverified_support_cannot_accept_an_assumption():
