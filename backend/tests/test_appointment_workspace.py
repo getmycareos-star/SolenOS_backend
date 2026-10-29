@@ -539,3 +539,69 @@ def test_structured_source_observation_appears_in_current_care_projection(client
     assert "sleep-structured-observation" not in other_response.text
     assert "woke twice overnight" not in other_response.text
 
+def test_current_care_hides_superseded_observation_but_retains_history(client):
+    test_client, owner, _ = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO evidence (
+                id, person_id, type, source_text, uploaded_by_caregiver_id
+            ) VALUES (
+                'correction-source-evidence', :person_id, 'caregiver_note',
+                'Caregiver recorded: woke twice overnight.', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+        connection.execute(text("""
+            INSERT INTO evidence_observations (
+                id, person_id, evidence_id, supersedes_observation_id, correction_rationale,
+                observation_kind, epistemic_status, subject_label, attribute, value_text,
+                source_passage, source_span_start, source_span_end, extraction_method,
+                extraction_version, created_by_caregiver_id
+            ) VALUES (
+                'sleep-observation-v1', :person_id, 'correction-source-evidence', NULL, NULL,
+                'reported_observation', 'caregiver_reported', 'care recipient', 'sleep',
+                'woke twice', 'woke twice overnight', 20, 40,
+                'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+        connection.execute(text("""
+            INSERT INTO evidence_observations (
+                id, person_id, evidence_id, supersedes_observation_id, correction_rationale,
+                observation_kind, epistemic_status, subject_label, attribute, value_text,
+                source_passage, source_span_start, source_span_end, extraction_method,
+                extraction_version, created_by_caregiver_id
+            ) VALUES (
+                'sleep-observation-v2', :person_id, 'correction-source-evidence',
+                'sleep-observation-v1', 'Preserved the complete wording of the source passage.',
+                'reported_observation', 'caregiver_reported', 'care recipient', 'sleep',
+                'woke twice overnight', 'woke twice overnight', 20, 40,
+                'test_fixture_manual_annotation', 'test-fixture-v2', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    projection = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
+    assert projection.status_code == 200, projection.text
+    current_observations = [
+        item for item in projection.json()["items"]
+        if item["source_collection"] == "evidence_observations"
+    ]
+    assert [item["id"] for item in current_observations] == ["sleep-observation-v2"]
+    assert current_observations[0]["supersedes_observation_id"] == "sleep-observation-v1"
+    assert current_observations[0]["correction_rationale"] == "Preserved the complete wording of the source passage."
+
+    history = test_client.get(
+        "/api/v1/care-continuity/evidence/correction-source-evidence/observations",
+        headers=headers,
+    )
+    assert history.status_code == 200, history.text
+    assert {item["id"] for item in history.json()} == {"sleep-observation-v1", "sleep-observation-v2"}
+
