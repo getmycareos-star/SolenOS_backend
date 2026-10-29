@@ -141,7 +141,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert "current_message" in calls[0][-1]["content"]
+        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
     finally:
         teardown()
 
