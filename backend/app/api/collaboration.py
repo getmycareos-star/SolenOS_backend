@@ -1342,7 +1342,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         retrieval_query = _context_query_with_history(user_text, prior_messages)
-        retrieval_terms = _expanded_context_terms(retrieval_query)
+        direct_retrieval_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", retrieval_query.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:16]
+        expanded_retrieval_terms = _expanded_context_terms(" ".join(direct_retrieval_terms))
+        retrieval_terms = list(dict.fromkeys(
+            [*direct_retrieval_terms, *sorted(expanded_retrieval_terms - set(direct_retrieval_terms))]
+        ))[:32]
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
