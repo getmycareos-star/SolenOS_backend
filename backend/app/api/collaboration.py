@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect
+from sqlalchemy import inspect, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -68,6 +68,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -499,6 +500,33 @@ _CONTEXT_STOPWORDS = {
 }
 
 
+_COMPANION_SYNONYM_GROUPS = (
+    frozenset({"sleep", "rest", "waking", "awake", "overnight", "insomnia"}),
+    frozenset({"appointment", "visit", "clinic", "doctor", "consultation", "specialist"}),
+    frozenset({"medication", "medicine", "medicines", "pill", "pills", "dose", "dosage", "prescription"}),
+    frozenset({"fall", "falls", "fell", "slip", "slipped", "stumble", "stumbled"}),
+    frozenset({"pain", "ache", "aching", "sore", "soreness", "hurt", "hurting"}),
+    frozenset({"breathing", "breathless", "breathlessness", "shortness", "winded"}),
+    frozenset({"confusion", "confused", "disoriented", "disorientation", "forgetful", "forgetfulness"}),
+    frozenset({"mood", "upset", "distressed", "agitated", "agitation", "irritable", "irritability"}),
+    frozenset({"eating", "appetite", "meal", "meals", "food", "feeding"}),
+    frozenset({"drinking", "fluids", "hydration", "thirst", "dehydration"}),
+)
+
+
+def _expanded_context_terms(query: str) -> set[str]:
+    """Transparent lexical expansion for retrieval only; never establishes truth."""
+    terms = {
+        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+    expanded = set(terms)
+    for group in _COMPANION_SYNONYM_GROUPS:
+        if terms & group:
+            expanded.update(group)
+    return expanded
+
+
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """Put query-relevant authorized records first without changing their meaning.
 
@@ -507,10 +535,7 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """
     if limit <= 0 or not lines:
         return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
-        if token not in _CONTEXT_STOPWORDS
-    }
+    query_terms = _expanded_context_terms(query)
     if not query_terms:
         return lines[:limit]
 
@@ -537,12 +562,14 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # Only explicit reference language inherits prior dialogue. Short standalone
+    # questions are new topics unless they contain a referential expression.
+    if not referential:
         return current
     recent = [
         f"{message.role}: {(message.content or '')[:500]}"
