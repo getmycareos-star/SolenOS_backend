@@ -266,12 +266,15 @@ def analyze_uncertainty(
         "sufficiency": sufficiency,
         "missing_fields": missing,
         "unresolved_conflicts": conflicts,
-        "assumptions": [{
-            "statement": "The supplied evidence list is complete for this request.",
-            "status": "unverified",
-            "introduced_by": "assessment_pipeline",
-            "validation_needed": "Confirm that all relevant accessible records were retrieved.",
-        }] if source_access == "available" else [],
+        # The caller supplies a bounded set of retrieved records. The assessment
+        # cannot independently prove that every relevant source was searched.
+        "assumptions": [],
+        "retrieval_scope": {
+            "basis": "only_records_supplied_to_this_assessment",
+            "completeness_verified": False,
+            "unknown_relevant_sources_may_exist": True,
+            "source_access_status": normalized_access or "unspecified",
+        },
         "alternatives": [],
         "clarification_questions": questions,
         "evidence_refs": evidence_refs,
