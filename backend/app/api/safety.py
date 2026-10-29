@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -183,7 +183,7 @@ def create_escalation(
     risk_category: RiskClass,
     recommended_reviewer: EscalationDestination,
     urgency: str = "routine",
-    evidence_ids: Optional[List[str]] = None,
+    evidence_ids: Optional[List[str]] = Query(default=None),
     uncertainty: Optional[str] = None,
     provenance: Optional[str] = None,
     db: Session = Depends(get_db),
