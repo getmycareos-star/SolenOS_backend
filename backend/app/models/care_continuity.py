@@ -222,6 +222,28 @@ class EvidenceReviewRecord(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class EvidenceClaimAssessment(Base):
+    """Append-only assessment version for a source-attributed care claim."""
+    __tablename__ = "evidence_claim_assessments"
+    __table_args__ = (
+        UniqueConstraint("claim_id", "claim_version", name="uq_evidence_claim_assessment_version"),
+        Index("ix_evidence_claim_assessments_person_claim", "person_id", "claim_id", "claim_version"),
+        Index("ix_evidence_claim_assessments_person_created", "person_id", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    claim_id = Column(String, ForeignKey("care_assertions.id"), nullable=False, index=True)
+    claim_version = Column(Integer, nullable=False)
+    status = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    evidence_links = Column(JSONList, nullable=False)
+    reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    supersedes_assessment_id = Column(String, ForeignKey("evidence_claim_assessments.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 @event.listens_for(Session, "before_flush")
 def _enforce_evidence_review_append_only(session, flush_context, instances):
     """Review history is immutable: append a new review instead of editing an old one."""
@@ -229,3 +251,12 @@ def _enforce_evidence_review_append_only(session, flush_context, instances):
         raise ValueError("Evidence review records are append-only and cannot be updated")
     if any(isinstance(obj, EvidenceReviewRecord) for obj in session.deleted):
         raise ValueError("Evidence review records are append-only and cannot be deleted")
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_claim_assessment_append_only(session, flush_context, instances):
+    """Claim assessment history is append-only; create a new version to correct it."""
+    if any(isinstance(obj, EvidenceClaimAssessment) for obj in session.dirty):
+        raise ValueError("Evidence claim assessments are append-only and cannot be updated")
+    if any(isinstance(obj, EvidenceClaimAssessment) for obj in session.deleted):
+        raise ValueError("Evidence claim assessments are append-only and cannot be deleted")
