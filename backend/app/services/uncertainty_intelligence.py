@@ -141,12 +141,20 @@ def analyze_uncertainty(
     if missing_time:
         classifications.append("temporal_uncertainty")
         limitations.append("At least one time-sensitive evidence item has no usable observation or effective timestamp.")
-    if task in {"identify_change", "change_detection", "compare_state"} and not any(
+    has_baseline = any(
         item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline"
         for item in items
-    ):
+    )
+    has_comparison_observation = any(
+        item.get("is_baseline") is not True and _text(item.get("role")).lower() != "baseline"
+        for item in items
+    )
+    if task in {"identify_change", "change_detection", "compare_state"} and (not has_baseline or not has_comparison_observation):
         classifications.append("missing_baseline")
-        limitations.append("No explicit comparison baseline was supplied; a change cannot be established from this assessment alone.")
+        if not has_baseline:
+            limitations.append("No explicit comparison baseline was supplied; a change cannot be established from this assessment alone.")
+        if not has_comparison_observation:
+            limitations.append("No separate current/comparison observation was supplied alongside the baseline.")
     ambiguity_signals = [
         item for item in items
         if item.get("ambiguous") is True
@@ -215,7 +223,7 @@ def analyze_uncertainty(
         epistemic_state = "partially_known"  # Evidence presence alone never proves a claim.
     task_thresholds = {
         "summarize": "qualified_summary_permitted" if items else "insufficient",
-        "identify_change": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
+        "identify_change": "possible_change_only" if items and not conflicts and not missing and has_baseline and has_comparison_observation else "insufficient",
         "change_detection": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
         "compare_state": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
         "low_risk_next_step": "qualified_low_risk_step_permitted" if items else "insufficient",
@@ -274,6 +282,11 @@ def analyze_uncertainty(
             "completeness_verified": False,
             "unknown_relevant_sources_may_exist": True,
             "source_access_status": normalized_access or "unspecified",
+        },
+        "comparison_basis": {
+            "explicit_baseline_present": has_baseline,
+            "separate_comparison_observation_present": has_comparison_observation,
+            "change_established_by_this_assessment": False,
         },
         "alternatives": [],
         "clarification_questions": questions,
