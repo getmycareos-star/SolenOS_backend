@@ -340,6 +340,22 @@ def _reassess(db, loop):
 
 
 @router.post("", status_code=201)
+def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
+                  event_type: str, idempotency_key: Optional[str]):
+    """Resolve committed mutation retries without appending duplicate evidence."""
+    if not idempotency_key:
+        return None
+    event = db.query(OpenLoopEvent).filter(
+        OpenLoopEvent.person_id == person_id,
+        OpenLoopEvent.idempotency_key == idempotency_key,
+    ).first()
+    if event is None:
+        return None
+    if event.loop_id != loop_id or event.event_type != event_type:
+        raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop event")
+    return _snapshot(_get_scoped(db, person_id, caregiver_id, loop_id))
+
+
 def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     deadline = _utc(payload.deadline_at)
@@ -522,6 +538,9 @@ def get_loop(loop_id: str, request: Request, db: Session = Depends(get_db)):
 def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key)
+    if replay is not None:
+        return replay
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
     evidence = changes.pop("evidence", [])
@@ -568,6 +587,9 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
 def record_response(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "response_recorded", payload.idempotency_key)
+    if replay is not None:
+        return replay
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
     if loop.loop_type == "professional_input" and not payload.evidence:
@@ -590,6 +612,9 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
 def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key)
+    if replay is not None:
+        return replay
     before = _snapshot(loop)
     loop.action_evidence = [*(loop.action_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     _reassess(db, loop)
@@ -603,6 +628,9 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
 def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "contradiction_reconciled", payload.idempotency_key)
+    if replay is not None:
+        return replay
     if loop.loop_type != "contradiction":
         raise HTTPException(status_code=409, detail="Only contradiction loops can be reconciled")
     if not payload.evidence:
@@ -625,6 +653,9 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
 def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key)
+    if replay is not None:
+        return replay
     before = _snapshot(loop)
     loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     loop.outcome_status = "outcome_reported"
@@ -638,6 +669,9 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
 def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_verified", payload.idempotency_key)
+    if replay is not None:
+        return replay
     if not payload.evidence or not payload.verification_rule or not (loop.verification_rule or payload.verification_rule):
         raise HTTPException(status_code=409, detail="Outcome verification requires evidence and an explicit verification rule")
     before = _snapshot(loop)
@@ -654,6 +688,9 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
 def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key)
+    if replay is not None:
+        return {"accepted": True, "verification": "verified", "loop": replay}
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
     blockers = db.query(OpenLoopDependency).filter(
@@ -729,6 +766,9 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
 def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key)
+    if replay is not None:
+        return {"accepted": True, "verification": "cancelled_not_resolved", "loop": replay}
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
     before = _snapshot(loop)
@@ -747,6 +787,9 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
 def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key)
+    if replay is not None:
+        return replay
     if loop.status not in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Only closed or cancelled loops can be reopened")
     before = _snapshot(loop)
