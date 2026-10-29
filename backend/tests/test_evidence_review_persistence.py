@@ -638,3 +638,36 @@ def test_near_duplicate_candidates_fail_closed_when_comparison_limit_is_exceeded
     assert result["candidate_groups"] == []
     assert result["records_available"] == NEAR_DUPLICATE_MAX_RECORDS + 1
     assert "no conclusion" in result["interpretation_limit"]
+
+def test_evidence_acquisition_provenance_persists_and_is_scoped(review_records):
+    client_a, _client_b = review_records
+    payload = {
+        "person_id": "review-person-a",
+        "type": "imported_record",
+        "source_text": "Imported care summary; source event date was not provided.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+        "original_author": "Clinic document author",
+        "reported_by_label": "Family member who supplied the file",
+        "reported_by_caregiver_id": "review-caregiver-a",
+        "collected_by_caregiver_id": "review-caregiver-a",
+        "reported_at": "2026-10-28T09:15:00+01:00",
+        "collection_method": "manual_upload",
+        "origin_channel": "web_upload",
+        "origin_device_ref": "caregiver-device-label-1",
+        "transfer_source": "family_email",
+        "transfer_reference": "message-reference-2026-10-28",
+    }
+    created = client_a.post("/api/v1/evidence", json=payload)
+    assert created.status_code == 200, created.text
+    saved = created.json()
+    assert saved["reported_at"] is not None
+    assert saved["collection_method"] == "manual_upload"
+    assert saved["origin_device_ref"] == "caregiver-device-label-1"
+    assert saved["transfer_source"] == "family_email"
+    assert saved["transfer_reference"] == "message-reference-2026-10-28"
+    assert saved["uploaded_by_caregiver_id"] == "review-caregiver-a"
+    assert saved["original_author"] == "Clinic document author"
+    assert saved["source_text_sha256"] == hashlib.sha256(
+        payload["source_text"].encode("utf-8")
+    ).hexdigest()
+
