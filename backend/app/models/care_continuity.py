@@ -295,3 +295,56 @@ def _enforce_evidence_source_relationship_append_only(session, flush_context, in
         raise ValueError("Evidence source relationships are append-only; create a new assessment instead")
     if any(isinstance(obj, cls) for obj in session.deleted):
         raise ValueError("Evidence source relationships are append-only and cannot be deleted")
+
+
+class EvidenceObservation(Base):
+    """Structured, source-span-bound observation; never replaces its original evidence."""
+    __tablename__ = "evidence_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "person_id", "evidence_id", "source_span_start", "source_span_end",
+            "attribute", "observation_kind", "epistemic_status",
+            name="uq_evidence_observation_source_span",
+        ),
+        Index("ix_evidence_observations_person_subject", "person_id", "subject_label", "attribute"),
+        Index("ix_evidence_observations_person_time", "person_id", "occurred_at", "recorded_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    evidence_id = Column(String, ForeignKey("evidence.id", ondelete="RESTRICT"), nullable=False, index=True)
+    observation_kind = Column(String(40), nullable=False)
+    epistemic_status = Column(String(24), nullable=False)
+    subject_label = Column(String(160), nullable=False)
+    attribute = Column(String(160), nullable=False)
+    value_text = Column(Text, nullable=True)
+    normalized_value = Column(Text, nullable=True)
+    units = Column(String(80), nullable=True)
+    context = Column(Text, nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=True)
+    observed_at = Column(DateTime(timezone=True), nullable=True)
+    reported_at = Column(DateTime(timezone=True), nullable=True)
+    observer_label = Column(Text, nullable=True)
+    observer_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    observation_method = Column(String(120), nullable=True)
+    source_passage = Column(Text, nullable=False)
+    source_span_start = Column(Integer, nullable=False)
+    source_span_end = Column(Integer, nullable=False)
+    negated = Column(Boolean, nullable=True)
+    hedge_marker = Column(String(120), nullable=True)
+    ambiguity_note = Column(Text, nullable=True)
+    extraction_method = Column(String(80), nullable=False)
+    extraction_version = Column(String(80), nullable=False)
+    extraction_run_id = Column(String(128), nullable=True)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    recorded_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_evidence_observation_append_only(session, flush_context, instances):
+    """Corrections are new observation versions; original extracted records are not rewritten."""
+    cls = EvidenceObservation
+    if any(isinstance(obj, cls) for obj in session.dirty):
+        raise ValueError("Evidence observations are append-only; create a corrected observation instead")
+    if any(isinstance(obj, cls) for obj in session.deleted):
+        raise ValueError("Evidence observations are append-only and cannot be deleted")
