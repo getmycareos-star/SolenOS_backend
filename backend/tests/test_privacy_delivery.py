@@ -175,6 +175,24 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
             source_text="Private evidence from a different care record.",
             uploaded_by_caregiver_id=other_owner["caregiver"]["id"],
         ))
+        # Cross-table ID collisions must not silently choose a source type.
+        db.add(Evidence(
+            id="handoff-summary-ambiguous",
+            person_id=owner["person"]["id"],
+            type="document",
+            source_text="One record with an ambiguous identifier.",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.add(CareEvent(
+            id="handoff-summary-ambiguous",
+            person_id=owner["person"]["id"],
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Second record sharing the identifier",
+            description="Must be rejected as an ambiguous source reference.",
+            created_by_caregiver_id=owner["caregiver"]["id"],
+        ))
         db.commit()
     finally:
         db.close()
@@ -238,6 +256,17 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
         },
     )
     assert cross_person_source.status_code == 422
+
+    ambiguous_source = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "This ID matches more than one record type."},
+            "source_record_ids": ["handoff-summary-ambiguous"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert ambiguous_source.status_code == 422
 
     attached = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
