@@ -25,7 +25,7 @@ from app.models.observation_coverage import ObservationCoverage
 from app.services.baseline import get_longitudinal_event_counts
 from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
-from app.core.change_enums import ChangeType
+from app.core.change_enums import ChangeType, ChangeDirection, PatternType
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
 _benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL", "sqlite:///:memory:")
@@ -503,6 +503,51 @@ def test_persistent_observations_keep_time_bounds_and_source_event_links():
                 for event in linked
             ]
             assert min(times) <= max(times)
+
+
+def test_gradual_trend_requires_three_distinct_covered_assessments_and_source_events():
+    """The real pattern service must detect a gradual trend from persisted, covered assessments."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "gradual-trend")
+        events = [
+            add_event(db, person, caregiver, "mobility", 25, "Needed a little more support"),
+            add_event(db, person, caregiver, "mobility", 12, "Needed help standing"),
+            add_event(db, person, caregiver, "mobility", 2, "Needed help standing and walking"),
+        ]
+        add_coverage(
+            db, person, caregiver, "mobility",
+            NOW - timedelta(days=90), NOW, "covered"
+        )
+        ends = [NOW - timedelta(days=30), NOW - timedelta(days=15), NOW]
+        for index, (event, end) in enumerate(zip(events, ends), start=1):
+            db.add(Change(
+                person_id=person.id,
+                subject_type="mobility",
+                subject_id="",
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state=f"Recorded mobility state {index - 1}",
+                current_state=f"Recorded mobility state {index}",
+                magnitude=float(index * 10),
+                previous_count=index,
+                current_count=index + 1,
+                comparison_window_start=end - timedelta(days=30),
+                comparison_window_end=end,
+                baseline_coverage_status="covered",
+                current_coverage_status="covered",
+                evidence_ids=[event.id],
+                explanation="Synthetic benchmark assessment; not a clinical conclusion.",
+                is_active=True,
+            ))
+        db.flush()
+        patterns = detect_patterns(db, person.id, "mobility", None, NOW)
+        db.flush()
+        trends = [pattern for pattern in patterns if pattern.pattern_type == PatternType.TREND]
+        assert trends, "Three distinct covered assessment windows with source events should form a trend."
+        trend = trends[0]
+        assert set(trend.event_ids) == {event.id for event in events}
+        assert len(set(trend.change_ids or [])) >= 3
+        assert trend.confidence is None
 
 
 def test_conflicting_caregiver_reports_are_preserved_as_distinct_evidence():
