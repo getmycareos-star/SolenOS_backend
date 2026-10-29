@@ -164,7 +164,7 @@ def assess_corroboration(
         kind = str(getattr(link, "relationship_type", "") or "").strip().casefold().replace("-", "_").replace(" ", "_")
         if source_status in INDEPENDENT_STATUSES:
             independent_pairs.add(pair)
-            if kind in {"corroborates_claim", "corroborates_detail", "independently_corroborates"}:
+            if kind in {"corroborates", "corroborates_claim", "corroborates_detail", "independently_corroborates"}:
                 corroborating_pairs.add(pair)
         else:
             shared_pairs.add(pair)
