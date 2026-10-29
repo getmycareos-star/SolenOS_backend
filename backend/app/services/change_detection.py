@@ -186,9 +186,17 @@ def detect_event_changes(
                     subject_id=subject_id or "",
                     change_type=ChangeType.RECURRENCE,
                     change_direction=ChangeDirection.INCREASING,
-                    previous_state=f"{baseline.event_count} events in baseline window",
+                    previous_state=(
+                        f"{baseline.event_count} events in baseline window"
+                        if not comparison.get("baseline_history_truncated", False)
+                        else "Baseline event count unavailable because eligible source history was truncated"
+                    ),
                     current_state=f"{current_count} events in current window",
-                    previous_count=baseline.event_count,
+                    previous_count=(
+                        baseline.event_count
+                        if not comparison.get("baseline_history_truncated", False)
+                        else None
+                    ),
                     current_count=current_count,
                     baseline_id=baseline.id,
                     baseline=baseline,

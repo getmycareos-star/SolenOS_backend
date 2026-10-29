@@ -1985,6 +1985,10 @@ def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
         db.commit()
         changes = detect_event_changes(db, person.id, "mobility", None, now)
         assert all(change.change_type.value != "emergence" for change in changes)
+        recurrence_changes = [change for change in changes if change.change_type.value == "recurrence"]
+        assert recurrence_changes
+        assert recurrence_changes[0].previous_count is None
+        assert "unavailable because eligible source history was truncated" in recurrence_changes[0].previous_state
         db.close()
     finally:
         teardown_db()
