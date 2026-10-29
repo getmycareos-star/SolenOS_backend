@@ -180,6 +180,10 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     )
     assert verified.status_code == 200, verified.text
     assert verified.json()["outcome_status"] == "outcome_verified"
+    verification_record = verified.json()["outcome_evidence"][-1]
+    assert verification_record["verification_basis"] == "caregiver_attestation_with_persisted_source_link"
+    assert verification_record["semantic_grounding_status"] == "not_automatically_verified"
+    assert "do not automatically establish semantic entailment" in verification_record["interpretation_limit"]
 
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
@@ -467,6 +471,9 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
         },
     )
     assert reconciled.status_code == 200, reconciled.text
+    reconciliation_record = reconciled.json()["outcome_evidence"][-1]
+    assert reconciliation_record["semantic_grounding_status"] == "not_automatically_verified"
+    assert "do not automatically establish semantic entailment" in reconciliation_record["interpretation_limit"]
 
     closed = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
