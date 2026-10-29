@@ -133,19 +133,28 @@ def analyze_uncertainty(
                 cleaned = list(dict.fromkeys(ref.strip() for ref in refs))
                 evidence_fields[key] = cleaned
                 invalid_refs.extend(ref for ref in cleaned if ref not in supplied_evidence_ids)
-            has_supporting_evidence = bool(
-                evidence_fields["supporting_evidence_ids"] or evidence_fields["evidence_ids"]
-            )
+            supporting_ids = evidence_fields["supporting_evidence_ids"]
+            verified_supporting_ids = [
+                evidence_id for evidence_id in supporting_ids
+                if evidence_id in supplied_evidence_ids
+                and any(
+                    _text(item.get("id")) == evidence_id and item.get("verified") is True
+                    for item in raw_items
+                )
+            ]
             reviewer_id = _text(candidate.get("reviewed_by_caregiver_id"))
             rationale = _text(candidate.get("resolution_rationale"))
             # A caller-provided status alone is not an audited lifecycle event.
             # Terminal decisions need an authenticated reviewer (checked by the
-            # API), rationale, valid evidence references, and supporting evidence.
+            # API), rationale, valid references, and explicitly verified support.
             if invalid_refs:
                 status = "unresolved"
             if status in {"accepted", "rejected", "superseded"} and (
                 not reviewer_id or not rationale or invalid_refs
-                or (status == "accepted" and not has_supporting_evidence)
+                or (
+                    status == "accepted"
+                    and (not supporting_ids or not verified_supporting_ids)
+                )
             ):
                 status = "unresolved"
             normalized.append({
@@ -153,6 +162,8 @@ def analyze_uncertainty(
                 "status": status,
                 **evidence_fields,
                 "evidence_references_valid": not invalid_refs,
+                "verified_supporting_evidence_ids": verified_supporting_ids,
+                "has_verified_supporting_evidence": bool(verified_supporting_ids),
                 "invalid_evidence_ids": list(dict.fromkeys(invalid_refs)),
                 "reviewed_by_caregiver_id": reviewer_id or None,
                 "resolution_rationale": rationale or None,
