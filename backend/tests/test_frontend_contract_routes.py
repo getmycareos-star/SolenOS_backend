@@ -1427,5 +1427,38 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
         )
         assert baseline_not_in_evidence.status_code == 422, baseline_not_in_evidence.text
         assert "must also be included in evidence_ids" in baseline_not_in_evidence.text
+
+        assessment = client.post(
+            "/api/v1/uncertainty/analyze",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "subject_type": "care_record",
+                "subject_id": "current",
+                "field": "appointment_outcome",
+                "claim": "The appointment outcome is not recorded.",
+                "task": "summarize",
+                "evidence_ids": [],
+                "baseline_evidence_ids": [],
+                "required_fields": ["appointment_outcome"],
+                "conflict_ids": [],
+            },
+        )
+        assert assessment.status_code == 200, assessment.text
+        assessment_id = assessment.json()["assessment_id"]
+        questions = client.get(
+            f"/api/v1/uncertainty/questions/{person_id}?status=open",
+            headers=auth,
+        )
+        assert questions.status_code == 200, questions.text
+        linked_questions = [
+            question for question in questions.json()
+            if question["subject_id"] == "current"
+            and any(
+                isinstance(link, dict) and link.get("assessment_id") == assessment_id
+                for link in (question.get("context") or [])
+            )
+        ]
+        assert linked_questions, "Uncertainty clarification question was not durably linked to its assessment."
     finally:
         teardown()
