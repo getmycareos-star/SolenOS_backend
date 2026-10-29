@@ -14,20 +14,11 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    inspector = sa.inspect(bind)
-    policy_columns = {
-        "id", "person_id", "domain_key", "policy_version", "max_age_days",
-        "historical_after_days", "rationale", "created_by_caregiver_id", "created_at",
-    }
-    assessment_columns = {
-        "id", "person_id", "evidence_id", "policy_id", "policy_version",
-        "freshness_status", "source_time", "assessed_at", "age_days", "rationale",
-        "assessed_by_caregiver_id",
-    }
+    inspector = inspect(bind)
 
-    # Some legacy/schema-reconciliation paths pre-create ORM metadata before
-    # Alembic reaches this revision. Reconcile safely rather than failing with
-    # DuplicateTable or treating an incomplete pre-created schema as valid.
+    # Local/test imports may bootstrap ORM tables before Alembic starts.
+    # Production PostgreSQL normally reaches this migration without these
+    # tables. Reconcile both paths rather than failing on DuplicateTable.
     if not inspector.has_table("evidence_freshness_policies"):
         op.create_table(
             "evidence_freshness_policies",
@@ -42,23 +33,18 @@ def upgrade() -> None:
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("person_id", "domain_key", "policy_version", name="uq_evidence_freshness_policy_version"),
         )
-        inspector = sa.inspect(bind)
-    else:
-        actual = {column["name"] for column in inspector.get_columns("evidence_freshness_policies")}
-        if policy_columns - actual:
-            raise RuntimeError(
-                "Pre-existing evidence_freshness_policies table is incomplete; "
-                f"missing columns: {sorted(policy_columns - actual)}"
-            )
-        constraints = inspector.get_unique_constraints("evidence_freshness_policies")
-        indexes = inspector.get_indexes("evidence_freshness_policies")
-        has_version_unique = (
-            any(item.get("name") == "uq_evidence_freshness_policy_version"
-                and item.get("column_names") == ["person_id", "domain_key", "policy_version"] for item in constraints)
-            or any(item.get("unique") and item.get("column_names") == ["person_id", "domain_key", "policy_version"] for item in indexes)
+
+    inspector = inspect(bind)
+    policy_columns = {column["name"] for column in inspector.get_columns("evidence_freshness_policies")}
+    required_policy_columns = {
+        "id", "person_id", "domain_key", "policy_version", "max_age_days",
+        "historical_after_days", "rationale", "created_by_caregiver_id", "created_at",
+    }
+    if required_policy_columns - policy_columns:
+        raise RuntimeError(
+            "Existing evidence_freshness_policies table is incomplete: "
+            + ", ".join(sorted(required_policy_columns - policy_columns))
         )
-        if not has_version_unique:
-            raise RuntimeError("Pre-existing freshness policy table lacks unique person/domain/version enforcement")
 
     if not inspector.has_table("evidence_freshness_assessments"):
         op.create_table(
@@ -75,27 +61,33 @@ def upgrade() -> None:
             sa.Column("rationale", sa.Text(), nullable=False),
             sa.Column("assessed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
         )
-        inspector = sa.inspect(bind)
-    else:
-        actual = {column["name"] for column in inspector.get_columns("evidence_freshness_assessments")}
-        if assessment_columns - actual:
-            raise RuntimeError(
-                "Pre-existing evidence_freshness_assessments table is incomplete; "
-                f"missing columns: {sorted(assessment_columns - actual)}"
-            )
 
-    indexes = {item["name"] for item in sa.inspect(bind).get_indexes("evidence_freshness_policies")}
-    if "ix_evidence_freshness_policies_person_id" not in indexes:
-        op.create_index("ix_evidence_freshness_policies_person_id", "evidence_freshness_policies", ["person_id"])
-    if "ix_evidence_freshness_policies_person_domain" not in indexes:
-        op.create_index("ix_evidence_freshness_policies_person_domain", "evidence_freshness_policies", ["person_id", "domain_key"])
-    indexes = {item["name"] for item in sa.inspect(bind).get_indexes("evidence_freshness_assessments")}
-    if "ix_evidence_freshness_assessments_person_id" not in indexes:
-        op.create_index("ix_evidence_freshness_assessments_person_id", "evidence_freshness_assessments", ["person_id"])
-    if "ix_evidence_freshness_assessments_person_evidence" not in indexes:
-        op.create_index("ix_evidence_freshness_assessments_person_evidence", "evidence_freshness_assessments", ["person_id", "evidence_id", "assessed_at"])
-    if "ix_evidence_freshness_assessments_policy" not in indexes:
-        op.create_index("ix_evidence_freshness_assessments_policy", "evidence_freshness_assessments", ["policy_id"])
+    inspector = inspect(bind)
+    assessment_columns = {column["name"] for column in inspector.get_columns("evidence_freshness_assessments")}
+    required_assessment_columns = {
+        "id", "person_id", "evidence_id", "policy_id", "policy_version",
+        "freshness_status", "source_time", "assessed_at", "age_days",
+        "rationale", "assessed_by_caregiver_id",
+    }
+    if required_assessment_columns - assessment_columns:
+        raise RuntimeError(
+            "Existing evidence_freshness_assessments table is incomplete: "
+            + ", ".join(sorted(required_assessment_columns - assessment_columns))
+        )
+
+    # create_all() and earlier partial deployments may have created tables and
+    # some indexes already. Add missing indexes only; never drop/rebuild data.
+    expected_indexes = (
+        ("ix_evidence_freshness_policies_person_id", "evidence_freshness_policies", ["person_id"]),
+        ("ix_evidence_freshness_policies_person_domain", "evidence_freshness_policies", ["person_id", "domain_key"]),
+        ("ix_evidence_freshness_assessments_person_id", "evidence_freshness_assessments", ["person_id"]),
+        ("ix_evidence_freshness_assessments_person_evidence", "evidence_freshness_assessments", ["person_id", "evidence_id", "assessed_at"]),
+        ("ix_evidence_freshness_assessments_policy", "evidence_freshness_assessments", ["policy_id"]),
+    )
+    for name, table, columns in expected_indexes:
+        existing = {item["name"] for item in inspect(bind).get_indexes(table)}
+        if name not in existing:
+            op.create_index(name, table, columns)
 
     if bind.dialect.name == "postgresql":
         op.execute("""
@@ -106,39 +98,22 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
         """)
         for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
-            op.execute(f"""
-            DO $trigger$
-            BEGIN
-              IF NOT EXISTS (
-                SELECT 1 FROM pg_trigger
-                WHERE tgname = 'trg_{table}_immutable' AND NOT tgisinternal
-              ) THEN
-                CREATE TRIGGER trg_{table}_immutable
-                BEFORE UPDATE OR DELETE ON {table}
-                FOR EACH ROW EXECUTE FUNCTION prevent_evidence_freshness_mutation();
-              END IF;
-            END;
-            $trigger$;
-            """)
-    elif bind.dialect.name == "sqlite":
-        for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
-            op.execute(f"""
-            CREATE TRIGGER IF NOT EXISTS trg_{table}_no_update
-            BEFORE UPDATE ON {table}
-            BEGIN
-              SELECT RAISE(ABORT, 'Evidence freshness records are append-only.');
-            END;
-            """)
-            op.execute(f"""
-            CREATE TRIGGER IF NOT EXISTS trg_{table}_no_delete
-            BEFORE DELETE ON {table}
-            BEGIN
-              SELECT RAISE(ABORT, 'Evidence freshness records are append-only.');
-            END;
-            """)
-    else:
-        raise RuntimeError(f"Evidence freshness immutability is unsupported for {bind.dialect.name!r}")
-
+            trigger_name = f"trg_{table}_immutable"
+            exists = bind.execute(
+                sa.text("""
+                    SELECT 1
+                    FROM pg_trigger
+                    WHERE tgname = :trigger_name
+                      AND tgrelid = to_regclass(:table_name)
+                      AND NOT tgisinternal
+                """),
+                {"trigger_name": trigger_name, "table_name": table},
+            ).first()
+            if not exists:
+                op.execute(
+                    f"CREATE TRIGGER {trigger_name} BEFORE UPDATE OR DELETE ON {table} "
+                    "FOR EACH ROW EXECUTE FUNCTION prevent_evidence_freshness_mutation();"
+                )
 
 def downgrade() -> None:
     if op.get_bind().dialect.name == "postgresql":
