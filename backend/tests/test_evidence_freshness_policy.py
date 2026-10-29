@@ -172,3 +172,44 @@ def test_freshness_policy_and_evidence_are_scoped_to_authorized_person():
         assert client_b.get("/api/v1/care-continuity/evidence-freshness/policies").json()["items"] == []
     finally:
         teardown_records()
+
+
+
+def test_freshness_policy_and_assessment_history_are_immutable_in_the_orm():
+    from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+
+    setup_records()
+    try:
+        app.dependency_overrides[get_db] = override_get_db
+        client = client_for("freshness-person-a")
+        policy_response = client.post("/api/v1/care-continuity/evidence-freshness/policies", json={
+            "domain_key": "sleep_observation",
+            "policy_version": "v1",
+            "max_age_days": 7,
+            "rationale": "Explicit review boundary for this test domain.",
+        })
+        assert policy_response.status_code == 201, policy_response.text
+        policy_id = policy_response.json()["id"]
+        assessment = client.post("/api/v1/care-continuity/evidence-freshness/assessments", json={
+            "evidence_id": "freshness-evidence-a",
+            "policy_id": policy_id,
+        })
+        assert assessment.status_code == 201, assessment.text
+
+        db = TestingSessionLocal()
+        try:
+            policy = db.query(EvidenceFreshnessPolicy).filter_by(id=policy_id).one()
+            policy.rationale = "Attempted in-place policy rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                db.commit()
+            db.rollback()
+
+            record = db.query(EvidenceFreshnessAssessment).filter_by(id=assessment.json()["id"]).one()
+            record.rationale = "Attempted assessment rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                db.commit()
+            db.rollback()
+        finally:
+            db.close()
+    finally:
+        teardown_records()
