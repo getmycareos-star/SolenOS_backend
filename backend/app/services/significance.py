@@ -246,6 +246,7 @@ def assess_change(
 
     possible_context: List[str] = []
     possible_context.append("continuous persistence is not established by occurrence timestamps alone")
+    possible_context.append("observation coverage is not measured; recorded event rates may reflect documentation changes")
     if evidence_status == EvidenceStatus.REPORTED:
         possible_context.append("observations are caregiver-reported; no clinician verification recorded")
     if functional_score == 0.0:
