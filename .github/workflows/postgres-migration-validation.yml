@@ -340,6 +340,9 @@ jobs:
           engine = create_engine(os.environ["DATABASE_URL"])
           with Session(engine) as db:
               person = Person(id="question-answer-trigger-person", name="Question answer trigger test")
+              # Explicitly persist the parent before its foreign-key-dependent caregiver.
+              db.add(person)
+              db.flush()
               caregiver = Caregiver(
                   id="question-answer-trigger-caregiver",
                   name="Question answer trigger caregiver",
