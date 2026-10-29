@@ -108,6 +108,8 @@ jobs:
               "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "created_at"},
               "evidence_source_relationships": {"id", "person_id", "source_evidence_id", "related_evidence_id", "relationship_type", "source_independence_status", "origin_group_key", "rationale", "reviewed_by_caregiver_id", "created_at"},
               "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
+              "evidence_freshness_policies": {"id", "person_id", "domain_key", "policy_version", "max_age_days", "historical_after_days", "rationale", "created_by_caregiver_id", "created_at"},
+              "evidence_freshness_assessments": {"id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status", "source_time", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -189,6 +191,15 @@ jobs:
           print("PASS unique caregiver profile session link and nullable email")
           assert inspector.has_table("evidence_review_records"), "evidence review history table missing"
           print("PASS persisted evidence review history table")
+          assert inspector.has_table("evidence_freshness_policies"), "domain-specific freshness policy table missing"
+          assert inspector.has_table("evidence_freshness_assessments"), "freshness assessment history table missing"
+          policy_unique = inspector.get_unique_constraints("evidence_freshness_policies")
+          assert any(
+              item.get("name") == "uq_evidence_freshness_policy_version"
+              and item.get("column_names") == ["person_id", "domain_key", "policy_version"]
+              for item in policy_unique
+          ), "freshness policy versions must be unique per person and domain"
+          print("PASS versioned domain-specific freshness policy schema")
           if engine.dialect.name == "postgresql":
               with engine.connect() as connection:
                   trigger = connection.exec_driver_sql("""
@@ -223,11 +234,18 @@ jobs:
                         AND NOT tgisinternal
                   """).first()
                   assert answer_history_trigger is not None, "clarification answer history append-only trigger missing"
+                  for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
+                      freshness_trigger = connection.exec_driver_sql(
+                          "SELECT 1 FROM pg_trigger WHERE tgname = %s AND NOT tgisinternal",
+                          (f"trg_{table}_immutable",),
+                      ).first()
+                      assert freshness_trigger is not None, f"append-only trigger missing for {table}"
               print("PASS evidence review append-only trigger")
               print("PASS claim assessment append-only trigger")
               print("PASS claim dependency append-only trigger")
               print("PASS persisted conflict resolution scope column")
               print("PASS clarification answer history append-only trigger")
+              print("PASS append-only freshness policy and assessment triggers")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
               (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
@@ -527,8 +545,8 @@ jobs:
             INSERT INTO alembic_version (version_num) VALUES ('20261024_04');
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_24_baseline_history"
-          for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events qwen_model_outputs qwen_job_events qwen_safety_evaluations assessment_dimensions ai_output_rejections ai_safety_checks ai_safety_violations ai_model_versions ai_prompt_versions ai_inference_metrics ai_job_status_events ai_human_feedback ai_output_lcr_proposals ai_output_lcr_decisions care_record_identifiers care_record_sections care_record_links care_record_status_history care_fact_revisions care_assertion_revisions care_decision_revisions care_event_revisions care_observation_revisions care_change_revisions care_situation_revisions care_evidence_revisions care_record_retractions care_record_restorations appointment_workspace_records appointment_workspace_revisions shared_summary_expirations shared_summary_revocations shared_summary_access_logs shared_summary_downloads shared_summary_generation_jobs shared_summary_delivery_receipts shared_summary_consent_records shared_summary_disclosure_records shared_summary_link_events data_deletion_requests data_deletion_jobs data_export_requests privacy_incidents privacy_incident_events data_processing_records data_subject_requests sensitive_data_access_logs legal_holds audit_log_events audit_log_integrity_checks audit_log_access_records privileged_access_logs authorization_decisions failed_access_attempts evidence_source_relationships evidence_observations care_notifications care_notification_preferences notification_delivery_attempts notification_delivery_receipts notification_read_receipts care_reminders reminder_acknowledgements reminder_escalations handoff_records handoff_recipients handoff_access_logs handoff_acknowledgements delivery_failure_events change_confirmation_events contradiction_resolution_events evidence_review_records evidence_claim_dependencies open_question_answer_events; do
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_25_evidence_freshness_policy"
+          for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events qwen_model_outputs qwen_job_events qwen_safety_evaluations assessment_dimensions ai_output_rejections ai_safety_checks ai_safety_violations ai_model_versions ai_prompt_versions ai_inference_metrics ai_job_status_events ai_human_feedback ai_output_lcr_proposals ai_output_lcr_decisions care_record_identifiers care_record_sections care_record_links care_record_status_history care_fact_revisions care_assertion_revisions care_decision_revisions care_event_revisions care_observation_revisions care_change_revisions care_situation_revisions care_evidence_revisions care_record_retractions care_record_restorations appointment_workspace_records appointment_workspace_revisions shared_summary_expirations shared_summary_revocations shared_summary_access_logs shared_summary_downloads shared_summary_generation_jobs shared_summary_delivery_receipts shared_summary_consent_records shared_summary_disclosure_records shared_summary_link_events data_deletion_requests data_deletion_jobs data_export_requests privacy_incidents privacy_incident_events data_processing_records data_subject_requests sensitive_data_access_logs legal_holds audit_log_events audit_log_integrity_checks audit_log_access_records privileged_access_logs authorization_decisions failed_access_attempts evidence_source_relationships evidence_observations care_notifications care_notification_preferences notification_delivery_attempts notification_delivery_receipts notification_read_receipts care_reminders reminder_acknowledgements reminder_escalations handoff_records handoff_recipients handoff_access_logs handoff_acknowledgements delivery_failure_events change_confirmation_events contradiction_resolution_events evidence_review_records evidence_claim_dependencies open_question_answer_events evidence_freshness_policies evidence_freshness_assessments; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             if [ "$found" != "$table" ]; then
               echo "::error::Missing expected table after stamped-schema upgrade: $table (resolved=$found)"
@@ -555,7 +573,7 @@ jobs:
               ('job-qwen-backfill', 'p-qwen-backfill', 'c-qwen-backfill', 'completed', 'Summarize the appointment note', '', '[]', 'appointment', 'Preserve this exact completed suggestion.', '[\"event-source-1\"]', '[\"evidence-source-1\"]', 1);
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_24_baseline_history"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_25_evidence_freshness_policy"
           test "$(psql "$PSQL_URL" -Atc "SELECT result_text IS NULL FROM qwen_background_jobs WHERE id='job-qwen-backfill'")" = "t"
           test "$(psql "$PSQL_URL" -Atc "SELECT output_text FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "Preserve this exact completed suggestion."
           test "$(psql "$PSQL_URL" -Atc "SELECT source_event_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["event-source-1"]'
