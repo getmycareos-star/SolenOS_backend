@@ -249,4 +249,13 @@ Commits:
 - [Migration graph assertion update](https://github.com/getmycareos-star/SolenOS_backend/commit/cc87967032709362456e05defdcad41cb7f68c0a)
 - [PostgreSQL workflow revision update](https://github.com/getmycareos-star/SolenOS_backend/commit/dd66a1a5fb906e1010f123f545bc794125f3450a)
 
-The failing run that revealed these defects is [PostgreSQL migration validation run 40859766335](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40859766335). A later run on the corrected commit is required before the migration can be marked verified.
+The failing run that revealed these defects is [PostgreSQL migration validation run 40859766335](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40859766335). A corrected PostgreSQL migration validation run succeeded at [run 40859971827](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40859971827), commit [dd66a1a](https://github.com/getmycareos-star/SolenOS_backend/commit/dd66a1a5fb906e1010f123f545bc794125f3450a). This verifies that workflow's fresh PostgreSQL upgrade and subsequent migration checks for that commit; backend test-suite success remains separate and pending.
+
+
+### Frontend verification and deployment boundary
+
+- Frontend checks succeeded on current frontend `main` commit [d3862b9](https://github.com/getmycareos-star/SolenOS-landing/commit/d3862b9e5f581892b66a69246e39920c8255378d): [run 40859533079](https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40859533079).
+- Frontend validation (TypeScript, production Next.js build, and configured continuity/safety checks) succeeded on the same commit: [run 40859533053](https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40859533053).
+- Netlify deployment did **not** happen: [run 40859533059](https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40859533059) stopped because the required Netlify credentials are not configured. This is a deployment blocker, not a successful deployment.
+- The latest backend test suite and validation runs for the documentation-updated current backend `main` are still queued at this point; do not infer they passed from the PostgreSQL migration workflow.
+
