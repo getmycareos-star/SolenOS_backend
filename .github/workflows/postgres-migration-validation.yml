@@ -6,6 +6,7 @@ on:
       - "backend/alembic/**"
       - "backend/app/**"
       - "backend/tests/**"
+      - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - "backend/alembic/**"
       - "backend/app/**"
       - "backend/tests/**"
+      - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
 
 permissions:
