@@ -608,8 +608,8 @@ def test_observation_capture_validates_exact_source_span_and_person_scope(client
 
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     payload = {
-        "observation_kind": "reported_observation",
-        "epistemic_status": "caregiver_reported",
+        "observation_kind": "caregiver_report",
+        "epistemic_status": "reported",
         "subject_label": "care recipient",
         "attribute": "sleep",
         "value_text": "woke twice overnight",
@@ -627,8 +627,9 @@ def test_observation_capture_validates_exact_source_span_and_person_scope(client
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["evidence_id"] == "capture-source-owner"
-    assert body["provenance_validation"] == "exact_source_text_substring_and_offsets_verified"
-    assert body["epistemic_status"] == "caregiver_reported"
+    assert body["source_passage"] == payload["source_passage"]
+    assert body["source_span_start"] == 20 and body["source_span_end"] == 40
+    assert body["epistemic_status"] == "reported"
 
     wrong_span = test_client.post(
         "/api/v1/care-continuity/evidence/capture-source-owner/observations",
