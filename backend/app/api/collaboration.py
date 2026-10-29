@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
@@ -66,6 +67,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -497,6 +499,66 @@ _CONTEXT_STOPWORDS = {
 }
 
 
+_CONTEXT_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food", "intake"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
+
+
+def _base_context_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+
+
+def _expanded_context_terms(text: str) -> set[str]:
+    direct = _base_context_terms(text)
+    expanded = set(direct)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    return expanded
+
+
+def _rank_source_rows(query: str, rows: list, fields: tuple[str, ...], limit: int) -> list:
+    """Rank authorized ORM rows by relevance; recency only breaks ties."""
+    if limit <= 0 or not rows:
+        return []
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    scored = []
+    for index, row in enumerate(rows):
+        parts = []
+        for field in fields:
+            value = getattr(row, field, None)
+            if isinstance(value, (dict, list, tuple)):
+                value = json.dumps(value, ensure_ascii=False, default=str)
+            if value is not None:
+                parts.append(str(value))
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", " ".join(parts).casefold()))
+        score = 3 * len(direct_terms & record_terms) + len(synonym_terms & record_terms)
+        timestamp = None
+        for field in ("occurred_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at"):
+            candidate = getattr(row, field, None)
+            if candidate is not None and hasattr(candidate, "timestamp"):
+                timestamp = candidate
+                break
+        recency = timestamp.timestamp() if timestamp is not None else 0
+        scored.append((score, recency, index, row))
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return [row for _, _, _, row in scored[:limit]]
+
+
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """Put query-relevant authorized records first without changing their meaning.
 
@@ -505,19 +567,18 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """
     if limit <= 0 or not lines:
         return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
-        if token not in _CONTEXT_STOPWORDS
-    }
-    if not query_terms:
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    if not direct_terms and not synonym_terms:
         return lines[:limit]
 
     scored = []
     for index, line in enumerate(lines):
         text = (line or "").casefold()
-        record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", text))
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = 3 * len(direct_overlap) + len(synonym_overlap)
         # A matched multiword phrase is stronger than incidental single words.
         normalized_query = " ".join((query or "").casefold().split())
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
@@ -1270,6 +1331,81 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _companion_replay_response(
+    db: Session,
+    *,
+    client_turn_id: str | None,
+    request_sha256: str,
+    person_id: str,
+    caregiver_id: str,
+    requested_session_id: str | None,
+) -> dict | None:
+    """Replay a committed turn only to its original authorized caregiver."""
+    if not client_turn_id:
+        return None
+    pair = (
+        db.query(ConversationMessage, ConversationSession)
+        .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationMessage.client_turn_id == client_turn_id,
+            ConversationMessage.role == "assistant",
+        )
+        .first()
+    )
+    if not pair:
+        return None
+    saved_assistant, saved_session = pair
+    if (
+        saved_session.person_id != person_id
+        or saved_session.caregiver_id != caregiver_id
+        or saved_session.status != "active"
+    ):
+        raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+    if requested_session_id and requested_session_id != saved_session.id:
+        raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+    try:
+        metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+        source_record_refs = json.loads(saved_assistant.source_record_refs_json or "[]")
+        evidence_ids = json.loads(saved_assistant.evidence_ids_json or "[]")
+    except (TypeError, ValueError):
+        metadata, source_record_refs, evidence_ids = {}, [], []
+    if metadata.get("request_sha256") != request_sha256:
+        raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+    saved_history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=saved_session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    return {
+        "session_id": saved_session.id,
+        "person_id": person_id,
+        "reply": saved_assistant.content,
+        "guard_verdict": saved_assistant.guard_verdict,
+        "safety_note": saved_assistant.safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": metadata.get("source_event_ids", []),
+        "source_evidence_ids": metadata.get("source_evidence_ids", []),
+        "source_appointment_ids": metadata.get("source_appointment_ids", []),
+        "source_assertion_ids": metadata.get("source_assertion_ids", []),
+        "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+        "ai_generated": metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+        "idempotent_replay": True,
+        "messages": [{
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        } for row in saved_history],
+    }
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1285,6 +1421,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+
+    client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
+    if payload.client_turn_id and not client_turn_id:
+        raise HTTPException(status_code=422, detail="client_turn_id cannot be blank")
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+    replay = _companion_replay_response(
+        db,
+        client_turn_id=client_turn_id,
+        request_sha256=request_sha256,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        requested_session_id=payload.session_id,
+    )
+    if replay is not None:
+        return replay
 
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
@@ -1494,6 +1645,127 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         retrieval_query = _context_query_with_history(user_text, prior_messages)
+
+        # Recent windows are a default, not a search boundary. Independently query
+        # older source records, then rank by relevance before recency.
+        direct_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:12]
+        expanded_terms = sorted(_expanded_context_terms(retrieval_query) - set(direct_terms))
+        retrieval_terms = list(dict.fromkeys([*direct_terms, *expanded_terms]))[:24]
+        if retrieval_terms and not _is_casual_greeting(user_text):
+            existing_event_ids = set(_context_record_ids(event_context, "event_id"))
+            historical_events = db.query(CareEvent).filter(
+                CareEvent.person_id == person_id,
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        CareEvent.title, CareEvent.description,
+                        CareEvent.event_type, CareEvent.status,
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()).limit(250).all()
+            for event in _rank_source_rows(retrieval_query, historical_events, ("title", "description", "event_type", "status"), 12):
+                event_id = str(event.id)
+                if event_id in existing_event_ids:
+                    continue
+                existing_event_ids.add(event_id)
+                event_context.append("LCR event evidence: " + json.dumps({
+                    "event_id": event_id, "event_type": event.event_type, "status": event.status,
+                    "title": event.title, "description": (event.description or "")[:700],
+                    "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                    "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                    "evidence_ids": event.evidence_ids or [], "time_provenance": event.time_provenance,
+                    "confidence": event.confidence,
+                }, ensure_ascii=False))
+
+            existing_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
+            historical_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.assertion_status == "caregiver_reviewed",
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        CareAssertion.field, CareAssertion.asserted_value,
+                        CareAssertion.source_label, CareAssertion.source_text,
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
+            for assertion in _rank_source_rows(retrieval_query, historical_assertions, ("field", "asserted_value", "source_label", "source_text"), 12):
+                assertion_id = str(assertion.id)
+                if assertion_id in existing_assertion_ids:
+                    continue
+                existing_assertion_ids.add(assertion_id)
+                assertion_context.append("Caregiver-approved LCR assertion (source-attributed): " + json.dumps({
+                    "assertion_id": assertion_id, "field": assertion.field,
+                    "value": assertion.asserted_value, "assertion_kind": assertion.assertion_kind,
+                    "source_label": assertion.source_label,
+                    "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
+                    "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
+                    "source_text": (assertion.source_text or "")[:500],
+                    "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                    "status": assertion.assertion_status,
+                }, ensure_ascii=False))
+
+            existing_appointment_ids = set(_context_record_ids(appointment_context, "appointment_id"))
+            historical_appointments = db.query(Appointment).filter(
+                Appointment.person_id == person_id,
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        Appointment.title, Appointment.location, Appointment.provider,
+                        Appointment.healthcare_org, Appointment.status,
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(Appointment.scheduled_at.desc()).limit(250).all()
+            for appointment in _rank_source_rows(retrieval_query, historical_appointments, ("title", "location", "provider", "healthcare_org", "status"), 12):
+                appointment_id = str(appointment.id)
+                if appointment_id in existing_appointment_ids:
+                    continue
+                existing_appointment_ids.add(appointment_id)
+                appointment_context.append("LCR appointment evidence: " + json.dumps({
+                    "appointment_id": appointment_id, "title": appointment.title,
+                    "status": appointment.status,
+                    "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
+                    "location": appointment.location, "provider": appointment.provider,
+                    "healthcare_org": appointment.healthcare_org,
+                }, ensure_ascii=False))
+
+            existing_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
+            historical_evidence = db.query(EvidenceModel).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type)
+                    for term in retrieval_terms
+                ]),
+            ).order_by(EvidenceModel.uploaded_at.desc()).limit(250).all()
+            for evidence in _rank_source_rows(retrieval_query, historical_evidence, ("source_text", "extra_metadata", "type"), 12):
+                evidence_id = str(evidence.id)
+                if evidence_id in existing_evidence_ids:
+                    continue
+                existing_evidence_ids.add(evidence_id)
+                metadata = evidence.extra_metadata or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except (TypeError, ValueError):
+                        metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                evidence_context.append("Caregiver-provided evidence: " + json.dumps({
+                    "evidence_id": evidence_id, "type": evidence.type,
+                    "filename": metadata.get("filename"), "mime_type": metadata.get("mime_type"),
+                    "status": evidence.evidence_status, "source_type": evidence.source_type,
+                    "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+                    "source_text": (evidence.source_text or "")[:700],
+                    "time_provenance": evidence.time_provenance, "confidence": evidence.confidence,
+                }, ensure_ascii=False))
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
@@ -1769,19 +2041,55 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    turn_timestamp = datetime.now(timezone.utc)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
         source_record_refs_json="[]",
+        created_at=turn_timestamp,
     ))
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
+        created_at=turn_timestamp + timedelta(microseconds=1),
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        replay = _companion_replay_response(
+            db,
+            client_turn_id=client_turn_id,
+            request_sha256=request_sha256,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=payload.session_id,
+        )
+        if replay is not None:
+            return replay
+        raise HTTPException(
+            status_code=409 if client_turn_id else 503,
+            detail=(
+                "This turn ID is already in use; retry with the same message and turn ID"
+                if client_turn_id else
+                "The conversation could not be saved. Please retry."
+            ),
+        ) from exc
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
