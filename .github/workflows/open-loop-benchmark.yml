@@ -1,0 +1,74 @@
+name: Open Loop Engine benchmark
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/api/open_loops.py"
+      - "backend/tests/test_open_loops.py"
+      - "backend/tests/test_open_loop_benchmark.py"
+      - "backend/app/models/**"
+      - "backend/alembic/**"
+      - ".github/workflows/open-loop-benchmark.yml"
+  pull_request:
+    paths:
+      - "backend/app/api/open_loops.py"
+      - "backend/tests/test_open_loops.py"
+      - "backend/tests/test_open_loop_benchmark.py"
+      - "backend/app/models/**"
+      - "backend/alembic/**"
+      - ".github/workflows/open-loop-benchmark.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
+
+      - name: Execute Open Loop Engine benchmark
+        run: python -m pytest backend/tests/test_open_loop_benchmark.py -q --junitxml=/tmp/open-loop-benchmark.xml
+
+      - name: Calculate measured benchmark score and enforce zero-failure gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          report = Path("/tmp/open-loop-benchmark.xml")
+          if not report.exists():
+              print("OPEN_LOOP_BENCHMARK_SCORE=0.00")
+              raise SystemExit("Benchmark report missing; no score may be awarded.")
+          root = ET.parse(report).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          total = sum(int(suite.attrib.get("tests", 0)) for suite in suites)
+          failures = sum(int(suite.attrib.get("failures", 0)) for suite in suites)
+          errors = sum(int(suite.attrib.get("errors", 0)) for suite in suites)
+          skipped = sum(int(suite.attrib.get("skipped", 0)) for suite in suites)
+          executed = total - skipped
+          passed = executed - failures - errors
+          score = round(100 * passed / executed, 2) if executed else 0.0
+          print(f"OPEN_LOOP_BENCHMARK_SCORE={score:.2f}")
+          print(f"OPEN_LOOP_BENCHMARK_PASSED={passed}")
+          print(f"OPEN_LOOP_BENCHMARK_EXECUTED={executed}")
+          print(f"OPEN_LOOP_BENCHMARK_FAILED={failures + errors}")
+          print(f"OPEN_LOOP_BENCHMARK_SKIPPED={skipped}")
+          if not executed or failures or errors or skipped:
+              raise SystemExit("Open Loop benchmark gate failed: zero executed, failing/error cases, or skipped cases.")
+          PY
