@@ -136,6 +136,8 @@ SOURCES = {
         "event_time_fields": ("source_time",),
         "recorded_time_fields": ("assessed_at",),
         "detail_fields": ("evidence_id", "policy_id", "policy_version", "freshness_status", "source_time_kind", "age_days", "assessed_by_caregiver_id"),
+        "require_caregiver_owned_evidence": True,
+        "evidence_link_column": "evidence_id",
     },
     "evidence_freshness_policies": {
         "label": "Domain-specific freshness policies",
@@ -311,7 +313,8 @@ def prepare_handoff_draft(
                 }
                 continue
             evidence_table = Table("evidence", metadata, autoload_with=bind)
-            if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or "source_evidence_id" not in table.c:
+            evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
+            if not {"id", "person_id", "uploaded_by_caregiver_id"}.issubset(set(evidence_table.c.keys())) or evidence_link_column not in table.c:
                 statuses[table_name] = {
                     "status": "unavailable",
                     "reason": "evidence_scope_not_verifiable",
@@ -340,7 +343,8 @@ def prepare_handoff_draft(
             if "superseded_by_assessment_id" in table.c:
                 query = query.where(table.c.superseded_by_assessment_id.is_(None))
         if spec.get("require_caregiver_owned_evidence"):
-            query = query.join(evidence_table, table.c.source_evidence_id == evidence_table.c.id).where(
+            evidence_link_column = spec.get("evidence_link_column", "source_evidence_id")
+            query = query.join(evidence_table, table.c[evidence_link_column] == evidence_table.c.id).where(
                 evidence_table.c.person_id == person_id,
                 evidence_table.c.uploaded_by_caregiver_id == caregiver_id,
             )
