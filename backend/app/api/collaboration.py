@@ -1413,6 +1413,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # This commit contains no care-record facts or conversation messages.
         db.commit()
 
+    # Resolve follow-up references before all retrieval passes, not only before
+    # final context ranking. Prior dialogue remains retrieval context, never evidence.
+    prior_messages = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session.id)
+        .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+        .limit(8)
+        .all()
+    )
+    retrieval_query = _context_query_with_history(user_text, prior_messages)
+
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
         r"\b(?:not breathing|cannot breathe|can't breathe|unconscious|unresponsive|"
@@ -1458,8 +1469,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         # Search query-matched historical events independently of the recent-event
         # window, so a relevant older event does not disappear as the record grows.
-        event_direct_terms = sorted(_base_context_terms(user_text))
-        event_query_terms = (event_direct_terms + sorted(_expanded_context_terms(user_text) - set(event_direct_terms)))[:12]
+        event_direct_terms = sorted(_base_context_terms(retrieval_query))
+        event_query_terms = (event_direct_terms + sorted(_expanded_context_terms(retrieval_query) - set(event_direct_terms)))[:12]
         historical_events = []
         if event_query_terms:
             historical_events = (
@@ -1542,10 +1553,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
-        appointment_direct_terms = sorted(_base_context_terms(user_text))
+        appointment_direct_terms = sorted(_base_context_terms(retrieval_query))
         appointment_query_terms = (
             appointment_direct_terms
-            + sorted(_expanded_context_terms(user_text) - set(appointment_direct_terms))
+            + sorted(_expanded_context_terms(retrieval_query) - set(appointment_direct_terms))
         )[:12]
         matching_appointments = []
         if appointment_query_terms:
@@ -1601,8 +1612,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
-        evidence_direct_terms = sorted(_base_context_terms(user_text))
-        evidence_query_terms = (evidence_direct_terms + sorted(_expanded_context_terms(user_text) - set(evidence_direct_terms)))[:12]
+        evidence_direct_terms = sorted(_base_context_terms(retrieval_query))
+        evidence_query_terms = (evidence_direct_terms + sorted(_expanded_context_terms(retrieval_query) - set(evidence_direct_terms)))[:12]
         matching_evidence_rows = []
         if evidence_query_terms:
             matching_evidence_rows = (
@@ -1674,15 +1685,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Prior conversation can resolve a follow-up reference, but it remains
         # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
-
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
         shared_lcr_lines: list[str] = []
