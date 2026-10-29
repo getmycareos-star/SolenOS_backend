@@ -54,6 +54,77 @@ def test_persisted_source_lineage_is_projected_into_uncertainty_item():
     assert item["source_independence_status"] == "shared_origin"
 
 
+def test_assumption_is_not_accepted_without_linked_supporting_evidence():
+    result = analyze_uncertainty(
+        claim="The current care situation is understood.",
+        task="recommendation",
+        evidence=[{
+            "id": "evidence-current",
+            "text": "A caregiver report is available.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        assumptions=[{
+            "statement": "The caregiver report reflects the current situation.",
+            "status": "accepted",
+            "supporting_evidence_ids": [],
+            "resolution_rationale": "No direct verification available.",
+        }],
+    )
+    assert result["assumptions"][0]["status"] == "unresolved"
+    assert "unresolved_assumptions" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["conclusion_confidence"] is None
+
+
+def test_evidence_backed_assumption_keeps_explicit_status_and_provenance():
+    result = analyze_uncertainty(
+        claim="A caregiver reported the breakfast intake.",
+        task="summarize",
+        evidence=[{
+            "id": "evidence-breakfast",
+            "text": "Caregiver reported breakfast intake.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        assumptions=[{
+            "statement": "The report is being treated as a report of the caregiver's observation.",
+            "status": "accepted",
+            "supporting_evidence_ids": ["evidence-breakfast"],
+            "resolution_rationale": "The cited record contains the stated caregiver report.",
+        }],
+    )
+    assumption = result["assumptions"][0]
+    assert assumption["status"] == "accepted"
+    assert assumption["evidence_references_valid"] is True
+    assert assumption["supporting_evidence_ids"] == ["evidence-breakfast"]
+
+
+def test_alternative_with_unavailable_evidence_reference_fails_closed():
+    result = analyze_uncertainty(
+        claim="The appointment may have been rescheduled.",
+        task="recommendation",
+        evidence=[{
+            "id": "appointment-note",
+            "text": "An appointment was planned.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        alternatives=[{
+            "hypothesis": "The appointment was rescheduled.",
+            "status": "accepted",
+            "supporting_evidence_ids": ["evidence-not-retrieved"],
+            "resolution_rationale": "Claimed but not supported by retrieved data.",
+        }],
+    )
+    alternative = result["alternatives"][0]
+    assert alternative["status"] == "unresolved"
+    assert alternative["evidence_references_valid"] is False
+    assert "invalid_candidate_evidence_reference" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["conclusion_confidence"] is None
+
+
 def test_no_evidence_is_unknown_not_negative():
     result = analyze_uncertainty(
         claim="Medication status is not recorded.",
