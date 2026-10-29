@@ -68,7 +68,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Persisted contradictions include context, event, effective interval, matching candidate IDs, evidence IDs, and resolution status.
 - [x] Conflict resolution/reopening transitions have append-only audit records.
 - [x] Matching considers context and explicit time overlap; invalid intervals and creation of already-resolved conflicts are rejected.
-- [x] Partial resolution requires an explicit detail-level scope, non-empty rationale, and linked evidence; scope and evidence are retained in immutable transition history.
+- [x] Full and partial conflict resolution require linked same-record evidence and a non-empty rationale; partial resolution additionally requires an explicit detail-level scope. Scope and evidence are retained in immutable transition history.
 - [x] Add caregiver-facing LCR conflict review, evidence selection, scoped partial resolution, and history inspection with explicit failed-read/write messaging.
 - [ ] Complete attribute/value/unit comparison, automated partial-contradiction matching, resolution authority matrix, explicit unresolved remainder model, recurrence detection, and conflict notifications across all related workflows.
 - [ ] No automatic resolution by timestamp or majority vote.
