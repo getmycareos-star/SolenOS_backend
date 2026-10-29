@@ -1348,6 +1348,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
             except (TypeError, ValueError):
                 saved_metadata = {}
+            if not isinstance(saved_metadata, dict):
+                saved_metadata = {}
             if saved_metadata.get("request_sha256") != request_sha256:
                 raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
             saved_history = (
@@ -1360,6 +1362,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 saved_evidence_ids = json.loads(saved_assistant.evidence_ids_json or "[]")
             except (TypeError, ValueError):
                 saved_evidence_ids = []
+            if not isinstance(saved_evidence_ids, list):
+                saved_evidence_ids = []
+            try:
+                saved_source_record_refs = json.loads(saved_assistant.source_record_refs_json or "[]")
+            except (TypeError, ValueError):
+                saved_source_record_refs = []
+            if not isinstance(saved_source_record_refs, list):
+                saved_source_record_refs = []
             return {
                 "session_id": saved_session.id,
                 "person_id": person_id,
@@ -1371,10 +1381,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "source_event_ids": saved_metadata.get("source_event_ids", []),
                 "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
                 "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
-                "source_record_refs": (
-                    json.loads(saved_assistant.source_record_refs_json or "[]")
-                    if saved_assistant.source_record_refs_json else []
-                ),
+                "source_record_refs": saved_source_record_refs,
                 "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
                 "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
                 "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {}),
@@ -2054,6 +2061,8 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         try:
             metadata = json.loads(row.response_metadata_json or "{}")
         except (TypeError, ValueError):
+            metadata = {}
+        if not isinstance(metadata, dict):
             metadata = {}
         try:
             evidence_ids = json.loads(row.evidence_ids_json or "[]")
