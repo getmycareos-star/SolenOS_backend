@@ -40,7 +40,10 @@ def _require_person_scope(engine: UncertaintyEngine, person_id: str) -> None:
 
 @router.post("/gaps", response_model=InformationGap)
 def create_gap(gap: InformationGapCreate, engine: UncertaintyEngine = Depends(get_engine)):
-    return engine.create_information_gap(gap)
+    try:
+        return engine.create_information_gap(gap)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/gaps/{person_id}", response_model=List[InformationGap])
@@ -63,7 +66,10 @@ def update_gap(
     update: InformationGapUpdate,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
-    result = engine.update_information_gap(gap_id, update)
+    try:
+        result = engine.update_information_gap(gap_id, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Information gap not found")
     return result
