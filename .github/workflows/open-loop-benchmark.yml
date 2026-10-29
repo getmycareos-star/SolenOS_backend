@@ -43,7 +43,7 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
 
       - name: Execute Open Loop Engine benchmark
-        run: python -m pytest backend/tests/test_open_loop_benchmark.py -q --junitxml=/tmp/open-loop-benchmark.xml
+        run: python -m pytest backend/tests/test_open_loop_benchmark.py backend/tests/test_open_loop_messy_scenarios.py -q --junitxml=/tmp/open-loop-benchmark.xml
 
       - name: Calculate measured benchmark score and enforce zero-failure gate
         if: always()
