@@ -42,6 +42,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Provenance and idempotency affect auditability. Preserve them rather than
+    # deleting conversation metadata during an automated rollback.
     raise RuntimeError(
         "Refusing to drop Companion response provenance/idempotency. "
         "Use a forward-only compatibility migration to preserve audit history."
