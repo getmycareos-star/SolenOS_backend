@@ -1289,6 +1289,83 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+
+    # A retry can arrive without session_id when the first response was lost.
+    # Resolve the committed assistant row before creating any new session or
+    # invoking inference. The key is globally unique, but ownership is verified
+    # before any stored content or metadata is returned.
+    if client_turn_id:
+        existing_pair = (
+            db.query(ConversationMessage, ConversationSession)
+            .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+            .filter(
+                ConversationMessage.client_turn_id == client_turn_id,
+                ConversationMessage.role == "assistant",
+            )
+            .first()
+        )
+        if existing_pair:
+            saved_assistant, saved_session = existing_pair
+            if (
+                saved_session.person_id != person_id
+                or saved_session.caregiver_id != caregiver_id
+                or saved_session.status != "active"
+            ):
+                raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+            if payload.session_id and payload.session_id != saved_session.id:
+                raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+            try:
+                saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+            except (TypeError, ValueError):
+                saved_metadata = {}
+            if saved_metadata.get("request_sha256") != request_sha256:
+                raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+            saved_history = (
+                db.query(ConversationMessage)
+                .filter_by(session_id=saved_session.id)
+                .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+                .all()
+            )
+            try:
+                saved_evidence_ids = json.loads(saved_assistant.evidence_ids_json or "[]")
+            except (TypeError, ValueError):
+                saved_evidence_ids = []
+            try:
+                saved_record_refs = json.loads(saved_assistant.source_record_refs_json or "[]")
+            except (TypeError, ValueError):
+                saved_record_refs = []
+            return {
+                "session_id": saved_session.id,
+                "person_id": person_id,
+                "reply": saved_assistant.content,
+                "guard_verdict": saved_assistant.guard_verdict,
+                "safety_note": saved_assistant.safety_note,
+                "confidence": None,
+                "evidence_ids": saved_evidence_ids if isinstance(saved_evidence_ids, list) else [],
+                "source_event_ids": saved_metadata.get("source_event_ids", []),
+                "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
+                "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+                "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
+                "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
+                "source_freshness_assessment_ids": saved_metadata.get("source_freshness_assessment_ids", []),
+                "freshness_source_status": saved_metadata.get("freshness_source_status", "not_retrieved"),
+                "source_record_refs": saved_record_refs if isinstance(saved_record_refs, list) else [],
+                "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {}),
+                "ai_generated": saved_metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
+                "written_to_lcr": False,
+                "persistence": "conversation_only",
+                "idempotent_replay": True,
+                "messages": [{
+                    "role": row.role,
+                    "text": row.content,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "guard_verdict": row.guard_verdict,
+                    "safety_note": row.safety_note,
+                } for row in saved_history],
+            }
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
