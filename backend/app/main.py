@@ -985,7 +985,7 @@ def readiness_check(db: Session = Depends(get_db)):
         logger.warning("readiness_failed stage=database_connectivity error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
     except Exception as exc:
-        logger.exception("readiness_failed stage=orm_schema_inspection error_type=%s", type(exc).__name__)
+        logger.error("readiness_failed stage=orm_schema_inspection error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
@@ -995,7 +995,7 @@ def readiness_check(db: Session = Depends(get_db)):
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
-        logger.exception("readiness_failed stage=orm_column_comparison error_type=%s", type(exc).__name__)
+        logger.error("readiness_failed stage=orm_column_comparison error_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
         logger.error("readiness_failed stage=orm_columns_missing count=%s differences=%s", len(differences), " | ".join(differences)[:2000])
@@ -1093,7 +1093,7 @@ def readiness_check(db: Session = Depends(get_db)):
         except HTTPException:
             raise
         except Exception as exc:
-            logger.exception("readiness_failed stage=alembic_schema_verification error_type=%s", type(exc).__name__)
+            logger.error("readiness_failed stage=alembic_schema_verification error_type=%s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Database migration state could not be verified") from exc
 
     return {
