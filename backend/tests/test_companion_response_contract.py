@@ -595,15 +595,19 @@ def test_companion_retrieves_older_matching_appointments_and_reviewed_assertions
         teardown()
 
 
-def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
+def test_referential_follow_up_uses_caregiver_turns_not_assistant_claims_for_retrieval():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
-        SimpleNamespace(role="assistant", content="I can see one report of poor sleep, but no earlier comparison."),
+        SimpleNamespace(
+            role="assistant",
+            content="Her blood pressure was high and the doctor changed her medication.",
+        ),
     ]
     query = collaboration._context_query_with_history("What about that?", prior)
     assert "sleep" in query.casefold()
-    assert "poor sleep" in query.casefold()
     assert query.startswith("What about that?")
+    assert "blood pressure" not in query.casefold()
+    assert "changed her medication" not in query.casefold()
 
 
 def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
