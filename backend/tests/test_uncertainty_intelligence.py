@@ -125,7 +125,8 @@ def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leak
                 "id": "assessment-active", "person_id": "person-a", "subject_type": "care_record",
                 "subject_id": "record-a", "field": "medication_status", "epistemic_state": "unknown",
                 "confidence": None, "known_value": None, "gap_reason": "INSUFFICIENT_EVIDENCE",
-                "context": json.dumps([analysis]), "evidence_ids": "[]", "temporal_precision": None,
+                "context": json.dumps([{"origin": "delta_engine", "delta_run_pending": False, "analysis": analysis}]),
+                "evidence_ids": "[]", "temporal_precision": None,
                 "assessed_at": datetime(2026, 10, 29, tzinfo=timezone.utc),
                 "assessed_by_caregiver_id": None, "superseded_by_assessment_id": None, "is_active": True,
             },
@@ -155,8 +156,8 @@ def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leak
     assert source["returned_count"] == 1
     item = source["items"][0]
     assert item["id"] == "assessment-active"
-    assert item["context"][0]["limitations"] == analysis["limitations"]
-    assert item["context"][0]["clarification_questions"] == analysis["clarification_questions"]
+    assert item["context"][0]["analysis"]["limitations"] == analysis["limitations"]
+    assert item["context"][0]["analysis"]["clarification_questions"] == analysis["clarification_questions"]
     situation_assessment = next(
         record for record in situation["uncertainties_and_conflicts"]
         if record["id"] == "assessment-active"
