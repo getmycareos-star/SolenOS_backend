@@ -53,7 +53,8 @@ def test_partial_coverage_does_not_claim_full_observation():
         db.commit()
         result = assess_observation_coverage(db, person.id, "mobility", start, end)
         assert result["coverage_status"] == "partial"
-        assert result["coverage_fraction"] == 0.5
+        # Exactly half of the requested window is explicitly covered.
+        assert result["coverage_fraction"] == pytest.approx(0.5)
         assert "event absence cannot be inferred" in result["limitations"][0]
     finally:
         db.close()
