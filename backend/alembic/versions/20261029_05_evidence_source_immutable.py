@@ -1,12 +1,12 @@
 """Make original evidence source text and its fingerprint immutable.
 
-Revision ID: 20261029_05_evidence_source_immutable
+Revision ID: 20261029_05_evidence_immut
 Revises: 20261029_04_evidence_kind
 """
 from alembic import op
 from sqlalchemy import inspect
 
-revision = "20261029_05_evidence_source_immutable"
+revision = "20261029_05_evidence_immut"
 down_revision = "20261029_04_evidence_kind"
 branch_labels = None
 depends_on = None
