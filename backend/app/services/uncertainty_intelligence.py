@@ -267,7 +267,7 @@ def analyze_uncertainty(
     unavailable_reasons = {
         "unavailable": "A required source is not available; absence from this assessment is not a negative finding.",
         "inaccessible": "A required source is inaccessible; absence from this assessment is not a negative finding.",
-        "permission_denied": "Source access was denied; the system cannot draw a conclusion from the inaccessible source."
+        "permission_denied": "Source access was denied; the system cannot draw a conclusion from the inaccessible source.",
         "authentication_failed": "Source authentication failed; retrieval is unverified and the source cannot be treated as reviewed.",
         "not_configured": "The required source is not configured; its contents are unknown, not negative.",
         "not_attempted": "The required source was not queried; its contents are unknown, not negative.",
