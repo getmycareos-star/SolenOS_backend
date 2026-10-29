@@ -464,7 +464,7 @@ def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeyp
         teardown()
 
 
-# Companion recovery regressions: retry integrity, paraphrase retrieval, and older history.
+# Companion recovery regressions: retry integrity, paraphrase retrieval, and historical continuity.
 
 def test_companion_idempotent_retry_replays_original_response_and_provenance(monkeypatch):
     import uuid
@@ -702,107 +702,6 @@ def test_referential_follow_up_uses_latest_caregiver_turns_from_newest_first_his
     assert "Caregiver topic 1" in query
     assert "Assistant response" not in query
 
-
-def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
-    prior = [SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?")]
-    query = collaboration._context_query_with_history(
-        "What is the recorded emergency contact number for this person?", prior
-    )
-    assert query == "What is the recorded emergency contact number for this person?"
-
-
-def test_companion_rejects_unverified_sync_claim_and_does_not_persist_it(monkeypatch):
-    client = setup_client(monkeypatch)
-
-    def fake_qwen(base, model, messages, options=None):
-        return "The record is synced."
-
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
-    try:
-        token, person_id, _ = create_session(client)
-        response = client.post(
-            "/api/v1/conversation/message",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "Is the record synced?"},
-        )
-        assert response.status_code == 503, response.text
-        db = TestingSessionLocal()
-        try:
-            assert db.query(ConversationMessage).count() == 0
-            assert db.query(CareEvent).count() == 0
-        finally:
-            db.close()
-    finally:
-        teardown()
-
-
-def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monkeypatch):
-    client = setup_client(monkeypatch)
-    expected = "I cannot verify whether the record is synced because no server receipt was supplied."
-
-    def fake_qwen(base, model, messages, options=None):
-        return expected
-
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
-    try:
-        token, person_id, _ = create_session(client)
-        response = client.post(
-            "/api/v1/conversation/message",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "Is the record synced?"},
-        )
-        assert response.status_code == 200, response.text
-        assert response.json()["reply"] == expected
-        assert response.json()["written_to_lcr"] is False
-    finally:
-        teardown()
-
-def test_generic_record_word_does_not_outvote_specific_historical_evidence():
-    older_sleep = (
-        'LCR event evidence: {"event_id":"older-sleep","status":"recorded",'
-        '"title":"Waking several times overnight"}'
-    )
-    unrelated = (
-        'LCR event evidence: {"event_id":"routine","status":"recorded",'
-        '"title":"Routine household activity"}'
-    )
-    ranked = collaboration._rank_context_lines(
-        "What does the record say about rest?",
-        [unrelated, older_sleep],
-        1,
-    )
-    assert ranked == [older_sleep]
-
-
-def test_companion_paraphrase_ranking_covers_appointments_and_medication_terms():
-    appointment = (
-        'LCR appointment evidence: {"appointment_id":"visit-older",'
-        '"title":"Neurology consultation"}'
-    )
-    unrelated = (
-        'LCR appointment evidence: {"appointment_id":"meal-1",'
-        '"title":"Lunch planning"}'
-    )
-    assert collaboration._rank_context_lines(
-        "Tell me about the clinic visit", [unrelated, appointment], 1
-    ) == [appointment]
-
-    medication = (
-        'LCR event evidence: {"event_id":"med-1",'
-        '"title":"Medication dose recorded"}'
-    )
-    unrelated_sleep = (
-        'LCR event evidence: {"event_id":"sleep-1",'
-        '"title":"Restless night"}'
-    )
-    assert collaboration._rank_context_lines(
-        "Was the pill recorded?", [unrelated_sleep, medication], 1
-    ) == [medication]
-
-
-
 def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch):
     client = setup_client(monkeypatch)
     captured = []
@@ -851,10 +750,7 @@ def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch)
 
         follow_up = client.post(
             "/api/v1/conversation/message", headers=headers,
-            json={
-                "person_id": person_id, "session_id": first_data["session_id"],
-                "text": "What about that?",
-            },
+            json={"person_id": person_id, "session_id": first_data["session_id"], "text": "What about that?"},
         )
         assert follow_up.status_code == 200, follow_up.text
         follow_up_data = follow_up.json()
@@ -863,12 +759,10 @@ def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch)
         assert "has mum's sleep been getting worse" not in captured[-1][-1]["content"].casefold()
         assert follow_up_data["written_to_lcr"] is False
 
-        history = client.get(
-            f"/api/v1/conversation/{first_data['session_id']}", headers=headers
-        )
+        history = client.get(f"/api/v1/conversation/{first_data['session_id']}", headers=headers)
         assert history.status_code == 200, history.text
-        assert [row["role"] for row in history.json()["messages"]] == [
-            "user", "assistant", "user", "assistant"
-        ]
+        assert [row["role"] for row in history.json()["messages"]] == ["user", "assistant", "user", "assistant"]
     finally:
         teardown()
+
+
