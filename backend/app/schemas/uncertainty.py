@@ -222,6 +222,10 @@ class UncertaintyAnalysisRequest(BaseModel):
     baseline_evidence_ids: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
     conflict_ids: List[str] = Field(default_factory=list)
+    # Explicit candidates are persisted with their evidence references and
+    # remain unresolved unless the analyzer can validate their supplied links.
+    assumptions: List[Dict[str, Any]] = Field(default_factory=list)
+    alternatives: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class UncertaintyAnalysisResponse(BaseModel):
