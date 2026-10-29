@@ -64,7 +64,7 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         # Adversarial duplicate: importer creates a second row for the same
         # source anchor at the exact same occurrence time. It must not inflate
         # recurrence or appear as a second canonical source event.
-        a1_duplicate = add_event(person_a_id, caregiver_a_id, f"pg-event-a1-duplicate-{suffix}", 20, f"pg-source-a1-{suffix}")
+        a1_duplicate = add_event(person_a_id, caregiver_a_id, f"pg-event-a1-zduplicate-{suffix}", 20, f"pg-source-a1-{suffix}")
         a2 = add_event(person_a_id, caregiver_a_id, f"pg-event-a2-{suffix}", 10, f"pg-source-a2-{suffix}")
         # Same evidence anchor at a different time is retained as a distinct
         # occurrence, but remains one shared source (not independent corroboration).
@@ -92,10 +92,14 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         assert all(a1_duplicate.id not in (pattern.event_ids or []) for pattern in first_a)
         # Unknown coverage is not converted into an apparent frequency change.
         assert all(pattern.pattern_type.value not in {"frequency_increase", "frequency_decrease"} for pattern in first_a)
-        # Shared evidence does not become a new independent source identifier.
-        for pattern in first_a:
-            if a2.id in (pattern.event_ids or []) and a2_shared_source.id in (pattern.event_ids or []):
-                assert f"pg-source-a2-{suffix}" not in set(pattern.event_ids or [])
+        # Two differently dated event records may represent separate occurrences,
+        # but their shared evidence anchor must not be described as independent
+        # corroboration. Pattern event_ids remain event IDs, not evidence IDs.
+        assert a2.evidence_ids == a2_shared_source.evidence_ids
+        assert any(
+            a2.id in (pattern.event_ids or []) and a2_shared_source.id in (pattern.event_ids or [])
+            for pattern in first_a
+        )
 
         # A fresh SQLAlchemy session proves database persistence, not only identity-map state.
         db.close()
