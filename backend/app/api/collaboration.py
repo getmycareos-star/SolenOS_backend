@@ -1803,6 +1803,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     }, ensure_ascii=False, default=str)
                 )
         source_lcr_record_refs = _context_record_refs(shared_lcr_lines)
+        has_lineage_scope = bool(source_evidence_ids or source_lcr_context_ids)
         lineage_summary = {
             "status": evidence_lineage_context.get("status"),
             "interpretation_limit": evidence_lineage_context.get("interpretation_limit"),
@@ -1815,7 +1816,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_context = [
             *event_context, *assertion_context, *appointment_context, *evidence_context,
             *freshness_context, *shared_lcr_lines,
-            *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
+            *([] if _is_casual_greeting(user_text) or not has_lineage_scope else [lineage_context_line]),
         ]
         system_prompt = (
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
@@ -1846,7 +1847,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # answering the question. Bound context to fit the configured 1K window.
         model_context_lines = list(selected_context)
         context_chars = sum(len(line) for line in model_context_lines)
-        for line in [*freshness_context[:1], *([] if _is_casual_greeting(user_text) else [lineage_context_line])]:
+        for line in [*freshness_context[:1], *([] if _is_casual_greeting(user_text) or not has_lineage_scope else [lineage_context_line])]:
             if context_chars + len(line) <= 2400:
                 model_context_lines.append(line)
                 context_chars += len(line)
