@@ -242,6 +242,7 @@ RESOURCES = {
 WRITABLE = {
     "facts": {"subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status",
               "effective_at", "superseded_by_fact_id", "review_notes"},
+    "assertions": {"subject_type", "subject_id", "field", "assertion_kind", "asserted_value", "source_event_id", "source_label", "source_text", "evidence_ids", "observed_at", "review_after_days"},
     "fact-evidence": {"fact_id", "evidence_id", "evidence_role", "source_span"},
     "relationships": {"source_type", "source_id", "relationship_type", "target_type", "target_id", "provenance"},
     "delta-items": {"delta_run_id", "item_type", "target_type", "target_id", "before_state",
@@ -1415,6 +1416,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise HTTPException(status_code=422, detail="No supported care-continuity fields supplied")
     required = {
         "facts": ("subject_type", "fact_type", "fact_value"),
+        "assertions": ("subject_type", "subject_id", "field", "asserted_value", "source_label"),
         "fact-evidence": ("fact_id", "evidence_id"),
         "relationships": ("source_type", "source_id", "relationship_type", "target_type", "target_id"),
         "delta-items": ("delta_run_id", "item_type"),
@@ -1453,6 +1455,36 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     missing = [key for key in required if data.get(key) is None or data.get(key) == ""]
     if missing:
         raise HTTPException(status_code=422, detail={"missing_fields": missing})
+    if resource == "assertions":
+        assertion_kind = data.get("assertion_kind", "current_state")
+        if assertion_kind not in {"current_state", "time_bound_observation"}:
+            raise HTTPException(status_code=422, detail="Unsupported assertion kind")
+        data["assertion_kind"] = assertion_kind
+        # A newly submitted assertion is always a report. Confirmation requires
+        # a separate reviewed transition and cannot be set by the caller.
+        data["assertion_status"] = "reported"
+        review_days = data.get("review_after_days")
+        if review_days is not None:
+            try:
+                review_days = int(review_days)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=422, detail="review_after_days must be a positive integer") from exc
+            if review_days < 1 or review_days > 3650:
+                raise HTTPException(status_code=422, detail="review_after_days must be between 1 and 3650")
+            data["review_after_days"] = review_days
+        if assertion_kind == "current_state" and review_days is None:
+            raise HTTPException(status_code=422, detail="Current-state assertions require a caregiver-selected review window")
+        if assertion_kind == "time_bound_observation" and not data.get("observed_at"):
+            raise HTTPException(status_code=422, detail="Time-bound observations require the actual event time")
+        source_event_id = data.get("source_event_id")
+        if source_event_id:
+            event_table = _table(db, "care_events")
+            if not db.execute(select(event_table.c.id).where(
+                event_table.c.id == source_event_id,
+                event_table.c.person_id == person_id,
+            )).first():
+                raise HTTPException(status_code=404, detail="Source event was not found in this care record")
+
     if resource == "fact-evidence":
         fact_evidence = _table(db, "care_fact_evidence")
         duplicate = db.execute(
