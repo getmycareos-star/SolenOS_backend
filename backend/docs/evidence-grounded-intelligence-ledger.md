@@ -20,13 +20,16 @@ No group is marked fully complete in this ledger.
 - [x] Existing evidence identity, uploader identity, source type, original source text, upload time, source spans, and care-record ownership fields exist in the backend model.
 - [x] Distinguish uploader from author/reporter/collector in the data model: `original_author`, `reported_by_label`, `reported_by_caregiver_id`, `collected_by_caregiver_id`.
 - [x] Add collection time, event time, original timezone, origin channel, source reference, parent evidence link, ingestion time, and SHA-256 of the exact stored UTF-8 source text.
+- [x] Add separately typed `evidence_kind` and `epistemic_status` fields; unsupported classifications are rejected, and omitted values remain unclassified rather than inferred.
 - [x] Bind evidence creation to the server-issued bearer session and reject cross-record identities.
-- [ ] Verify the new migration and create/retrieve/hash behavior on current `main` in CI.
+- [ ] Verify the new migrations and create/retrieve/hash/classification behavior on current `main` in CI.
 - [ ] Complete provenance for device identity, import/transfer lineage, original binary/document hash, and explicit evidence links to every event, claim, observation, decision, outcome, and review type.
 
 ### B. Evidence and knowledge classification — PARTIAL
 - [x] Existing source type, event/assertion kind, evidence status, and epistemic-state structures distinguish several source and knowledge types.
-- [ ] Establish one versioned canonical evidence-kind vocabulary covering direct observation, caregiver report, professional observation, person's own report, documented record, instrument measurement, photo/video, audio/transcript, imported information, historical recollection, derived observation, inference, hypothesis, missing, disputed, and superseded.
+- [x] Add a schema-constrained evidence-kind vocabulary for direct observation, caregiver report, professional observation, person's own report, documented record, instrument measurement, photo/video, audio/transcript, imported information, historical recollection, derived observation, inference, and hypothesis.
+- [x] Keep epistemic status separate from evidence kind, with explicit unverified, uncertain, unknown, missing, disputed, superseded, and withdrawn values.
+- [ ] Extend and validate the vocabulary against every historical source type and all ingest adapters; status values remain optional and are not auto-inferred.
 - [ ] Verify every ingestion and presentation path preserves these distinctions without collapsing them into a generic verified label.
 
 ### C. Source reliability and evidence quality — PARTIAL
@@ -126,6 +129,8 @@ No group is marked fully complete in this ledger.
 
 ### Frontend
 - [LCR evidence review integration](https://github.com/getmycareos-star/SolenOS-landing/commit/499232feaa22adfbe77fbcd292d44b8492235844)
+- [Show evidence provenance and temporal dimensions in review UI](https://github.com/getmycareos-star/SolenOS-landing/commit/0707079fc666ed34ff03bec666e38c3575c498bb)
+- [Verify evidence classification presentation](https://github.com/getmycareos-star/SolenOS-landing/commit/c550b29afef1966dd4c5f1d9a1ae401f264c51f6)
 - [Nullable provenance confidence](https://github.com/getmycareos-star/SolenOS-landing/commit/e3f54c895adcbce13e3d53fa84439d5215d82c4f)
 - [Remove arbitrary confidence thresholds](https://github.com/getmycareos-star/SolenOS-landing/commit/b95dfe82045b7c8b547b06230d54c9d976f635f4)
 - [Add regression assertions](https://github.com/getmycareos-star/SolenOS-landing/commit/716d5ce4330a6234ebbec61459204a250d3efb15)
@@ -135,9 +140,11 @@ No group is marked fully complete in this ledger.
 - [Expose provenance fields in schemas](https://github.com/getmycareos-star/SolenOS_backend/commit/eaa2f6d31b602bd8a8b7b5d8feb98a4872870a67)
 - [Validate provenance references](https://github.com/getmycareos-star/SolenOS_backend/commit/f450b169466e94d9659e6561b6319f4baad8a957)
 - [Add provenance migration](https://github.com/getmycareos-star/SolenOS_backend/commit/a5a2764141ba8a8a41020f3eae6bcaa14e2d5ddf)
+- [Add explicit evidence-kind and epistemic-status migration](https://github.com/getmycareos-star/SolenOS_backend/commit/c104ee04033738d13776f8850d98d7f97f6eefb6)
 - [Add migration and schema validation](https://github.com/getmycareos-star/SolenOS_backend/commit/4e65f66677caec65ed03ea377d4ebbfd635e3faa)
 - [Require authenticated evidence creation](https://github.com/getmycareos-star/SolenOS_backend/commit/9e92221a7c08098eb98a883d5d77ca11446ad0cf)
 - [Add provenance and authorization tests](https://github.com/getmycareos-star/SolenOS_backend/commit/95eb8bdff2143ed300cc9d1d7e89a5ad7e8bbd61)
+- [Test explicit evidence kind and epistemic status](https://github.com/getmycareos-star/SolenOS_backend/commit/c52cfad9815d2bf909bd2988080718b4cd46b6dc)
 
 ## Verification links
 
