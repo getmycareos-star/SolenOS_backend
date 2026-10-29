@@ -2,7 +2,7 @@
 
 **Scope:** canonical `main` only. Pull requests are not modified.  
 **Purpose:** a verification ledger, not a declaration that the entire capability map is complete.  
-**Last audited:** 2026-10-29. Latest direct-main changes include uncertainty session-scope middleware hardening, explicit temporal evidence in the possible-change regression, and a persisted claim-dependency graph API/UI. Current CI for these latest commits is still pending; no new capability is considered verified until its exact-main workflow completes.  
+**Last audited:** 2026-10-29. Latest direct-main changes also bind safety evaluation references to persisted same-person evidence, replace caller-supplied source text with the stored original, clear caller-supplied review/confidence flags, validate source spans against persisted text, and scope safety response validation/audit history to the bearer session. Structured-observation tests now supply explicit source offsets. The latest backend tests and PostgreSQL migration validation are still running; do not mark these newest changes verified until the exact current-main workflow completes.  
 **Rule:** a capability is not marked complete merely because a model, helper, endpoint, UI panel, or unit test exists. Completion requires persistence, authorization, migrations, real workflow integration, and relevant automated verification.
 
 ## Status definitions
@@ -39,6 +39,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Review history is append-only in the ORM and has a PostgreSQL migration trigger.
 - [x] Unsupported numeric confidence is rejected in uncertainty assessments; frontend provenance no longer maps extraction scores through the arbitrary 0.85/0.65 thresholds.
 - [ ] Add evidence-backed authenticity/tampering checks, extraction-quality evidence, measurement method/units/calibration, and reviewer-authority policy.
+- [x] Safety evaluation now discards caller-provided authority, quality, currentness, confidence, support, and contradiction flags and uses the persisted source text for each same-person evidence ID; submitted source spans survive only if they match the stored text.
 - [ ] No confidence calibration is available until a task-specific method has validation evidence.
 
 ### D. Claim-level evidence grounding — PARTIAL
@@ -132,12 +133,14 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Reporter/collector caregiver references and parent evidence are validated against the same care record.
 - [x] Evidence reviews, claim assessments, source relationships, structured observations, claim dependencies, conflict-resolution events, and clarification-answer events are append-only in ORM; PostgreSQL/SQLite migrations add database-level mutation guards for these audit records.
 - [x] Claim-assessment writes derive person and reviewer identity from the server-validated bearer session, validate every linked evidence ID against that same person, and preserve assessment history with ORM/database append-only guards.
+- [x] Safety response validation rejects duplicate, missing, and cross-record evidence IDs; safety audit history is scoped to the authenticated record and bounded to 200 rows.
 - [ ] Audit every remaining evidence/claim/conflict/gap/question endpoint for scope authorization, every foreign ID, transactional rollback, idempotency, secure media handling, retention/deletion, backup/restore, and production failure behavior.
 - [ ] Verify immutable source handling against all writers, direct SQL, and deployed PostgreSQL behavior.
 
 ### P. Grounded AI reasoning and explanations — PARTIAL
 - [x] Existing uncertainty and trust-provenance layers represent retrieval scope, missing evidence, limitations, and non-calibrated confidence in supported flows.
-- [ ] Validate every factual output claim against persisted claim/evidence links, source passages, freshness, conflicts, and source independence.
+- [x] Safety evaluation references are rebound to persisted source text in the authorized care record; invalid/foreign evidence IDs fail closed, and client-submitted source spans are discarded when they do not match persisted text.
+- [ ] Validate every factual output claim against persisted claim/evidence links, freshness, conflicts, and source independence across all consumers.
 - [ ] Ensure citation integrity, no fabricated quotations, dependency-aware invalidation, and safe abstention across companion, summaries, appointments, LCR, and handoffs.
 
 ### Q. Frontend evidence workflows — PARTIAL
@@ -158,6 +161,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [ ] Current-main test and PostgreSQL migration runs must pass before these latest additions are considered verified.
 - [x] Add tests for source relationship persistence/isolation/cycle rejection/duplicate rejection and exact-source-span observation persistence, classification boundaries, invalid source passages, and cross-record denial.
 - [ ] Current-main backend tests and PostgreSQL migration validation must pass before these additions are considered verified; broader E2E/property/concurrency/failure tests remain incomplete.
+- [x] Add route regressions for rejecting unpersisted safety evidence IDs and cross-record audit reads, plus a sanitizer regression proving caller-supplied source text is replaced by persisted source text. The exact latest-main run remains pending.
 - [x] Add unit tests for bounded near-duplicate candidate semantics, short-text exclusion, explicit non-independence interpretation, and fail-closed behavior above the comparison cap; these are unit-level tests, not proof of the full HTTP/PostgreSQL workflow.
 
 ## Current implementation commits
