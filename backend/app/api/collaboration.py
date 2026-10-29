@@ -771,6 +771,23 @@ def _contains_unsupported_operational_claim(
 
 
 
+def _contains_unsupported_record_reference(reply: str, source_text: str) -> bool:
+    """Reject record identifiers in model output unless they occur in supplied source text.
+
+    This guards citation theater/identifier fabrication across Companion, appointment,
+    summary and handoff workflows. It does not claim to validate semantic support for
+    every natural-language proposition; that remains a separate review requirement.
+    """
+    candidates = re.findall(
+        r"(?i)\\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|"
+        r"(?:evidence|event|appointment|handoff|record|claim|assertion|source|decision|outcome)"
+        r"[\\s:_#-]+[a-z0-9][a-z0-9_-]{5,})\\b",
+        reply or "",
+    )
+    normalized_source = (source_text or "").casefold()
+    return any(candidate.casefold() not in normalized_source for candidate in candidates)
+
+
 def _companion_reply_needs_revision(text: str) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or len(words) > 55:
@@ -1115,6 +1132,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
         or _contains_unsupported_operational_claim(reply, source_context, context_lines)
+        or _contains_unsupported_record_reference(reply, source_context)
     ):
         # Ask the same local model to repair style and source fidelity. A second
         # unsupported high-impact claim is rejected instead of shown to a caregiver.
@@ -1156,6 +1174,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         or _contains_unrequested_saba(reply, source_context)
         or _contains_unsupported_care_claim(reply, source_context)
         or _contains_unsupported_operational_claim(reply, source_context, context_lines)
+        or _contains_unsupported_record_reference(reply, source_context)
     ):
         raise HTTPException(
             status_code=503,
@@ -1547,6 +1566,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unrequested_saba(reply, validation_source)
             or _contains_unsupported_care_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+            or _contains_unsupported_record_reference(reply, validation_source)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
@@ -1589,6 +1609,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+            or _contains_unsupported_record_reference(reply, validation_source)
                     or _greeting_reply_needs_revision(reply)
                 )
                 if not invalid_reply:
