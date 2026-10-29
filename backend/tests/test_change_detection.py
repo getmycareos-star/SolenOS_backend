@@ -1163,3 +1163,70 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
         db.close()
     finally:
         teardown_db()
+
+
+def test_trend_and_instability_patterns_require_persisted_coverage_provenance():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-pattern-coverage", name="Pattern coverage test")
+        caregiver = Caregiver(
+            id="caregiver-pattern-coverage",
+            name="Pattern Coverage Caregiver",
+            email="pattern-coverage@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        from app.core.change_enums import ChangeType, ChangeDirection, PatternType
+        from app.services.pattern_detection import detect_patterns
+        directions = (
+            ChangeDirection.INCREASING,
+            ChangeDirection.DECREASING,
+            ChangeDirection.INCREASING,
+        )
+        for i, direction in enumerate(directions):
+            event_time = now - timedelta(days=30 - i * 10)
+            event = CareEvent(
+                id=f"pattern-coverage-event-{i}",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=event_time,
+                title=f"Recorded mobility event {i}",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(event)
+            db.flush()
+            db.add(Change(
+                id=f"pattern-coverage-change-{i}",
+                person_id=person.id,
+                subject_type="mobility",
+                subject_id="",
+                change_type=ChangeType.INCREASE,
+                change_direction=direction,
+                previous_state="Prior recorded state",
+                current_state="Current recorded state",
+                magnitude=10.0,
+                previous_count=1,
+                current_count=2,
+                comparison_window_start=event_time - timedelta(days=7),
+                comparison_window_end=event_time,
+                confidence=None,
+                evidence_ids=[event.id],
+                baseline_coverage_status=None,
+                current_coverage_status=None,
+                created_at=event_time,
+            ))
+        db.commit()
+
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        db.commit()
+        pattern_types = {item.pattern_type for item in patterns}
+        assert PatternType.TREND not in pattern_types
+        assert PatternType.INSTABILITY not in pattern_types
+        db.close()
+    finally:
+        teardown_db()
