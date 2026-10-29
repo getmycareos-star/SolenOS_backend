@@ -337,7 +337,12 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
         db.flush()
         counts = get_longitudinal_event_counts(db, person.id, "fall", None, REFERENCE_TIME)
         observed = counts["current_window_count"] == 1 and all(
-            event.occurred_at <= REFERENCE_TIME for event in counts["recent_events"]
+            (
+                event.occurred_at.replace(tzinfo=timezone.utc)
+                if event.occurred_at.tzinfo is None
+                else event.occurred_at.astimezone(timezone.utc)
+            ) <= REFERENCE_TIME
+            for event in counts["recent_events"]
         )
         outcomes.append({
             "case": "future_dated_event_excluded_from_reference_time",
