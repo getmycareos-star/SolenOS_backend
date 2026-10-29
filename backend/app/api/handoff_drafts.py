@@ -16,6 +16,7 @@ from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.care import Evidence
+from app.models.care_continuity import EvidenceSourceRelationship
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 POLICY_VERSION = "handoff-draft-v1"
@@ -387,6 +388,7 @@ def prepare_handoff_draft(
         for evidence_id in item.get("evidence_ids", [])
     })
     evidence_by_id = {}
+    evidence_rows = []
     if referenced_evidence_ids:
         evidence_rows = db.query(Evidence).filter(
             Evidence.person_id == person_id,
@@ -426,6 +428,19 @@ def prepare_handoff_draft(
             else "referenced_sources_unavailable" if item.get("evidence_ids")
             else "no_evidence_linked"
         )
+
+    lineage_relationships = []
+    if inspector.has_table("evidence_source_relationships") and referenced_evidence_ids:
+        from app.models.care_continuity import EvidenceSourceRelationship
+        lineage_relationships = db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == person_id,
+            (EvidenceSourceRelationship.source_evidence_id.in_(referenced_evidence_ids))
+            | (EvidenceSourceRelationship.related_evidence_id.in_(referenced_evidence_ids)),
+        ).all()
+    from app.services.evidence_lineage import summarize_evidence_lineage
+    evidence_lineage = summarize_evidence_lineage(
+        evidence_rows, lineage_relationships, evidence_by_id.keys()
+    )
 
     # These modules are intentionally not represented as read when no verified
     # persistent, person-scoped adapter is available.
@@ -489,6 +504,7 @@ def prepare_handoff_draft(
             {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning", "evidence_ids", "evidence_sources", "evidence_reference_status")}
             for item in records
         ],
+        "evidence_lineage": evidence_lineage,
         "limitations": gaps,
         "warning": "This is a draft from the listed saved records only. Unavailable sources were not read. Verify every item and resolve uncertainty before sharing.",
     }
