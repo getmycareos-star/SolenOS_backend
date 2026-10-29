@@ -1,7 +1,7 @@
 """Persist idempotency keys and source provenance for Companion turns.
 
 Revision ID: 20261029_26_comp_turn_id
-Revises: 20261029_22_conflict_hist
+Revises: 20261029_25_freshness
 """
 from alembic import op
 import sqlalchemy as sa
