@@ -2029,7 +2029,7 @@ def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_a
             if superseded_by:
                 payload["superseded_by_claim_id"] = superseded_by
             response = client.post(endpoint, json=payload)
-            assert response.status_code == 200, f"{status}: {response.status_code} {response.text}"
+            assert response.status_code == 201, f"{status}: {response.status_code} {response.text}"
             created_versions.append(response.json())
         assert [row["status"] for row in created_versions] == [item[0] for item in statuses]
         assert [row["claim_version"] for row in created_versions] == list(range(1, 11))
