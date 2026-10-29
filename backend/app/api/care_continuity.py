@@ -1668,6 +1668,12 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         quality_blockers.append("some_records_lack_explicit_evidence_links")
     if not baseline_items:
         quality_blockers.append("individual_baseline_not_established")
+    if temporally_unanchored_count:
+        quality_blockers.append("trajectory_entries_without_any_timestamp")
+    if record_time_only_count:
+        quality_blockers.append("some_trajectory_entries_have_record_time_only")
+    if not trajectory_entries:
+        quality_blockers.append("no_attributable_trajectory_entries_returned")
     if open_loops or uncertainty_items or missing_items:
         quality_blockers.append("unresolved_information_requires_review")
     assessment_quality = {
