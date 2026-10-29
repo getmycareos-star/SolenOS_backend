@@ -301,11 +301,6 @@ class EvidenceObservation(Base):
     """Structured, source-span-bound observation; never replaces its original evidence."""
     __tablename__ = "evidence_observations"
     __table_args__ = (
-        UniqueConstraint(
-            "person_id", "evidence_id", "source_span_start", "source_span_end",
-            "attribute", "observation_kind", "epistemic_status",
-            name="uq_evidence_observation_source_span",
-        ),
         Index("ix_evidence_observations_person_subject", "person_id", "subject_label", "attribute"),
         Index("ix_evidence_observations_person_time", "person_id", "occurred_at", "recorded_at"),
     )
@@ -313,6 +308,7 @@ class EvidenceObservation(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     evidence_id = Column(String, ForeignKey("evidence.id", ondelete="RESTRICT"), nullable=False, index=True)
+    supersedes_observation_id = Column(String, ForeignKey("evidence_observations.id"), nullable=True)
     observation_kind = Column(String(40), nullable=False)
     epistemic_status = Column(String(24), nullable=False)
     subject_label = Column(String(160), nullable=False)
