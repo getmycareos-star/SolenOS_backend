@@ -1809,7 +1809,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "status": "limitations_present" if quality_blockers else "source_checks_passed",
         "dimensions": quality_dimensions,
         "blocking_limitations": quality_blockers,
-        "high_impact_conclusion_gate": "restricted" if quality_blockers else "source_quality_only; human review and clinical judgement remain outside this scorecard",
+        "high_impact_conclusion_gate": "human_review_required",
+        "assessment_use_status": "restricted_by_recorded_limitations" if quality_blockers else "bounded_source_review_only",
         "numeric_confidence": "not_provided; this deterministic scorecard is not a calibrated probability",
         "interpretation_policy": "No-records is not evidence of absence; source availability and record counts do not establish clinical truth.",
     }
