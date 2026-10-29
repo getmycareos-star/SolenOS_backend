@@ -53,6 +53,54 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_idempotent_retry_replays_original_response_and_provenance(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = {"count": 0}
+
+    def fake_qwen(base, model, messages, options=None):
+        calls["count"] += 1
+        return "The record contains one sleep observation. It does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "c61e7f15-b6aa-4f2c-9b85-cf8d31dd7211"
+        payload = {
+            "person_id": person_id,
+            "text": "What did we record about sleep?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+
+        # Simulate a retry after the original response was lost before the client
+        # received its new session ID.
+        replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_data = replay.json()
+        assert replay_data["session_id"] == first_data["session_id"]
+        assert replay_data["reply"] == first_data["reply"]
+        assert replay_data["source_record_refs"] == first_data["source_record_refs"]
+        assert replay_data["written_to_lcr"] is False
+        assert calls["count"] == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
+            assert len(rows) == 2
+            user_rows = [row for row in rows if row.role == "user"]
+            assistant_rows = [row for row in rows if row.role == "assistant"]
+            assert len(user_rows) == 1 and user_rows[0].client_turn_id == turn_id
+            assert len(assistant_rows) == 1 and assistant_rows[0].response_metadata_json
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
