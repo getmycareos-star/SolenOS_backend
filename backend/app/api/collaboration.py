@@ -1308,7 +1308,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             logger.exception("Companion conversation session failed to persist")
             raise HTTPException(
                 status_code=503,
-                detail="Companion session could not be confirmed as persisted; please retry.",
+                detail="Companion session could not be confirmed as persisted. No saved response is confirmed; please retry.",
             ) from exc
 
     lowered = user_text.casefold()
