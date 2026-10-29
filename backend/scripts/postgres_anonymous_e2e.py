@@ -122,6 +122,73 @@ def main():
         )
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
+        person_b = second["person"]["id"]
+
+        # Companion idempotency is exercised against the real PostgreSQL schema
+        # over HTTP without depending on Qwen availability: emergency-language
+        # handling is deterministic and must still persist conversation-only turns.
+        companion_turn_id = "e8b2c1ad-4d8f-4f5c-9a42-000000000001"
+        companion_payload = {
+            "person_id": person_a,
+            "text": "Synthetic test only: she is unconscious and unresponsive.",
+            "client_turn_id": companion_turn_id,
+        }
+        status, companion_first = request(
+            "POST", "/api/v1/conversation/message", token=token_a, body=companion_payload,
+        )
+        require(status == 200, f"PostgreSQL Companion first turn failed: {status}: {companion_first}")
+        require(companion_first.get("written_to_lcr") is False
+                and companion_first.get("persistence") == "conversation_only",
+                f"Companion emergency turn must remain conversation-only: {companion_first}")
+        status, companion_replay = request(
+            "POST", "/api/v1/conversation/message", token=token_a, body=companion_payload,
+        )
+        require(status == 200, f"PostgreSQL Companion retry replay failed: {status}: {companion_replay}")
+        require(companion_replay.get("session_id") == companion_first.get("session_id")
+                and companion_replay.get("reply") == companion_first.get("reply")
+                and companion_replay.get("messages") == companion_first.get("messages"),
+                f"Companion retry did not replay the exact committed turn: {companion_replay}")
+        companion_session_id = companion_first["session_id"]
+
+        status, changed_turn_reuse = request(
+            "POST", "/api/v1/conversation/message", token=token_a,
+            body={**companion_payload, "text": "Synthetic test only: a different message."},
+        )
+        require(status == 409,
+                f"Companion must reject a turn key reused with changed text: {status}: {changed_turn_reuse}")
+        status, cross_person_turn_reuse = request(
+            "POST", "/api/v1/conversation/message", token=token_b,
+            body={
+                "person_id": person_b,
+                "text": companion_payload["text"],
+                "client_turn_id": companion_turn_id,
+            },
+        )
+        require(status == 409 and companion_first.get("reply") not in json.dumps(cross_person_turn_reuse),
+                f"Cross-person Companion retry key must not disclose the original reply: {status}: {cross_person_turn_reuse}")
+
+        concurrent_turn_id = "e8b2c1ad-4d8f-4f5c-9a42-000000000002"
+        concurrent_companion_payload = {
+            "person_id": person_a,
+            "text": "Synthetic concurrency test only: she is unconscious and unresponsive.",
+            "client_turn_id": concurrent_turn_id,
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            companion_race = list(pool.map(
+                lambda _: request(
+                    "POST", "/api/v1/conversation/message",
+                    token=token_a, body=concurrent_companion_payload,
+                ),
+                range(2),
+            ))
+        require(all(status == 200 for status, _ in companion_race),
+                f"Concurrent same-key Companion submissions must both succeed by replay: {companion_race}")
+        concurrent_sessions = {body.get("session_id") for _, body in companion_race}
+        concurrent_replies = {body.get("reply") for _, body in companion_race}
+        require(len(concurrent_sessions) == 1 and None not in concurrent_sessions
+                and len(concurrent_replies) == 1,
+                f"Concurrent Companion submissions did not converge to one committed turn: {companion_race}")
+        concurrent_companion_session_id = next(iter(concurrent_sessions))
 
         # Professional-input evidence must resolve to a real source row in the
         # same PostgreSQL-backed care record; caregiver prose alone is not proof.
@@ -858,6 +925,22 @@ def main():
 
         stop_server(server)
         server = start_server()
+        status, companion_history_after_restart = request(
+            "GET", f"/api/v1/conversation/{companion_session_id}", token=token_a,
+        )
+        companion_messages = companion_history_after_restart.get("messages", [])
+        require(status == 200 and [message.get("role") for message in companion_messages] == ["user", "assistant"]
+                and companion_messages[0].get("text") == companion_payload["text"]
+                and companion_messages[1].get("text") == companion_first.get("reply"),
+                f"Companion turn did not persist in order across PostgreSQL/Uvicorn restart: {status}: {companion_history_after_restart}")
+        status, concurrent_history_after_restart = request(
+            "GET", f"/api/v1/conversation/{concurrent_companion_session_id}", token=token_a,
+        )
+        concurrent_messages = concurrent_history_after_restart.get("messages", [])
+        require(status == 200 and [message.get("role") for message in concurrent_messages] == ["user", "assistant"]
+                and concurrent_messages[0].get("text") == concurrent_companion_payload["text"]
+                and concurrent_messages[1].get("text") in concurrent_replies,
+                f"Concurrent Companion turn duplicated or lost order across restart: {status}: {concurrent_history_after_restart}")
         status, professional_after_restart = request(
             "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
         )

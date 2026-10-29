@@ -51,6 +51,9 @@ class ConversationMessage(Base):
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
     source_record_refs_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    # Only assistant rows carry the client turn key and replay-safe response metadata.
+    client_turn_id = Column(String(36), nullable=True, unique=True)
+    response_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 

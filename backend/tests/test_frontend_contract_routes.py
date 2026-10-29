@@ -625,7 +625,12 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
             assert response.status_code == 200, f"{workflow}: {response.text}"
             data = response.json()
             assert data["workflow"] == workflow
-            assert data["ai_generated"] is True
+            if workflow == "evidence_provenance":
+                assert data["ai_generated"] is False
+                assert data["provider_status"] == "not_required_deterministic"
+                assert "not established from the supplied text" in data["reply"]
+            else:
+                assert data["ai_generated"] is True
             assert data["review_required"] is True
             assert data["written_to_lcr"] is False
             assert data["persistence"] == "read_only_assistance"

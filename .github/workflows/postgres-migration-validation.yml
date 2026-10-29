@@ -116,7 +116,7 @@ jobs:
               "evidence_freshness_assessments": {"id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status", "source_time", "source_time_kind", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id"},
               "evidence_completeness_policies": {"id", "person_id", "domain_key", "purpose_key", "policy_version", "required_fields", "rationale", "created_by_caregiver_id", "created_at"},
               "evidence_completeness_assessments": {"id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "field_evidence_json", "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at"},
-              "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "created_at"},
+              "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "client_turn_id", "response_metadata_json", "created_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -124,6 +124,16 @@ jobs:
               missing = required - actual
               assert not missing, f"{table} missing columns: {sorted(missing)}"
               print(f"PASS {table}: {len(required)} required columns")
+          turn_indexes = inspector.get_indexes("conversation_messages")
+          turn_constraints = inspector.get_unique_constraints("conversation_messages")
+          assert any(
+              item.get("name") == "uq_conversation_messages_client_turn_id"
+              or (
+                  item.get("unique", True)
+                  and set(item.get("column_names") or []) == {"client_turn_id"}
+              )
+              for item in turn_indexes + turn_constraints
+          ), "conversation_messages client_turn_id unique index/constraint is missing"
           question_claim_fks = inspector.get_foreign_keys("open_questions")
           assert any(
               "claim_id" in (item.get("constrained_columns") or [])
@@ -805,3 +815,42 @@ jobs:
           else
             echo "Alembic version table rolled back with failed upgrade transaction; legacy data and schema checks passed."
           fi
+
+
+      - name: Rehearse Companion schema rollback and re-upgrade without data loss
+        working-directory: backend
+        run: |
+          before_turns="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")"
+          before_metadata="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")"
+          test "$before_turns" -ge 2
+          test "$before_metadata" -ge 2
+          python -m alembic downgrade 20261029_29_ev_rel_scope
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_29_ev_rel_scope"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")" = "$before_turns"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")" = "$before_metadata"
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='conversation_messages'
+                  AND column_name='client_turn_id'
+              ) THEN RAISE EXCEPTION 'client_turn_id was dropped during rollback'; END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='conversation_messages'
+                  AND column_name='response_metadata_json'
+              ) THEN RAISE EXCEPTION 'response_metadata_json was dropped during rollback'; END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname='public' AND tablename='conversation_messages'
+                  AND indexdef ILIKE '%UNIQUE%'
+                  AND indexdef ILIKE '%(client_turn_id)%'
+              ) THEN RAISE EXCEPTION 'Companion client_turn_id uniqueness index/constraint was lost during rollback'; END IF;
+            END
+            \$\$;
+          "
+          python -m alembic upgrade head
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_30_comp_turn_idem"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")" = "$before_turns"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")" = "$before_metadata"

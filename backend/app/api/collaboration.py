@@ -68,6 +68,66 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
+
+
+def _companion_request_sha256(person_id: str, caregiver_id: str, text: str) -> str:
+    canonical = json.dumps(
+        {"person_id": person_id, "caregiver_id": caregiver_id, "text": text},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _companion_replay_response(
+    db: Session,
+    assistant_row: ConversationMessage,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    request_sha256: str,
+    supplied_session_id: Optional[str],
+) -> dict:
+    """Replay only a committed, same-identity turn with the same request content."""
+    conversation = db.query(ConversationSession).filter_by(
+        id=assistant_row.session_id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+    ).first()
+    if not conversation or (supplied_session_id and supplied_session_id != conversation.id):
+        raise HTTPException(status_code=409, detail="This turn key is already associated with another conversation")
+    try:
+        metadata = json.loads(assistant_row.response_metadata_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        metadata = {}
+    if metadata.get("request_sha256") != request_sha256:
+        raise HTTPException(status_code=409, detail="This turn key was already used for different message content")
+    response = metadata.get("response")
+    if not isinstance(response, dict) or response.get("reply") != assistant_row.content:
+        raise HTTPException(
+            status_code=503,
+            detail="The original Companion response is recorded but its replay metadata is unavailable. No new turn was generated.",
+        )
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=conversation.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    replay_messages = []
+    for row in history:
+        replay_messages.append({
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        })
+        if row.id == assistant_row.id:
+            break
+    return {**response, "session_id": conversation.id, "person_id": person_id, "messages": replay_messages}
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -1135,6 +1195,76 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     ):
         context_lines.append("No authoritative reminder delivery receipt or notification state is available to this request.")
 
+    if payload.workflow == "evidence_provenance":
+        # Source attribution is a bounded deterministic classification task.
+        # Do not ask a small language model to invent or upgrade a source label.
+        claim_text = payload.text.strip()
+        caregiver_observation = re.search(
+            r"\bcaregiver\s+(?:observed|reported|noticed|said|states|stated)\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_absent = re.search(
+            r"\bno\b.{0,60}\bprofessional\b.{0,40}\b"
+            r"(?:assessment|report|note|information)\b.{0,40}\b"
+            r"(?:supplied|provided|available|recorded|included)\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_present = bool(re.search(
+            r"\b(?:professional|clinician|doctor|nurse)\s+"
+            r"(?:assessment|report|note)\b",
+            claim_text,
+            re.IGNORECASE,
+        )) and not professional_absent
+        recorded_source_labels = []
+        for line in context_lines:
+            match = re.search(
+                r"Caregiver-provided evidence \[([^\]]+)\] \(([^,]+), status=([^)]+)\)",
+                line,
+            )
+            if match:
+                recorded_source_labels.append(
+                    f"evidence {match.group(1)}: type={match.group(2)}, status={match.group(3)}"
+                )
+        if caregiver_observation:
+            source_label = "caregiver-reported observation"
+            source_explanation = "The supplied text explicitly says the caregiver observed the claim."
+        else:
+            source_label = "not established from the supplied text"
+            source_explanation = "The supplied text does not explicitly establish who or what source originated the claim."
+        if recorded_source_labels:
+            source_explanation += (
+                " Authorized evidence metadata (preserved as recorded, not independently verified): "
+                + "; ".join(recorded_source_labels[:5]) + "."
+            )
+        if professional_absent:
+            professional_label = "No professional assessment is supplied in the provided text."
+        elif professional_present:
+            professional_label = "A professional assessment is referenced in the provided text; its content and authority are not independently verified here."
+        else:
+            professional_label = "Professional-assessment status is not established by the provided text."
+        reply = (
+            f"Source label: {source_label}. {source_explanation} "
+            f"{professional_label} This identifies provenance only; it does not verify the underlying observation."
+        )
+        return {
+            "workflow": payload.workflow,
+            "reply": reply,
+            "ai_generated": False,
+            "authority": "solenos_care_record_and_caregiver",
+            "review_required": True,
+            "written_to_lcr": False,
+            "persistence": "read_only_assistance",
+            "source_event_ids": source_event_ids,
+            "source_evidence_ids": source_evidence_ids,
+            "source_appointment_ids": source_appointment_ids,
+            "source_handoff_ids": source_handoff_ids,
+            "source_notification_ids": source_notification_ids,
+            "source_freshness_assessment_ids": source_freshness_assessment_ids,
+            "provider_status": "not_required_deterministic",
+        }
+
     guidance = {
         "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed care-record entry or correction from supplied words. Identify missing date, source or detail as unknown; never claim anything was saved.",
@@ -1288,6 +1418,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    request_sha256 = _companion_request_sha256(person_id, caregiver_id, user_text)
+    if payload.client_turn_id:
+        prior_assistant_row = (
+            db.query(ConversationMessage)
+            .filter_by(client_turn_id=payload.client_turn_id, role="assistant")
+            .first()
+        )
+        if prior_assistant_row:
+            return _companion_replay_response(
+                db,
+                prior_assistant_row,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                request_sha256=request_sha256,
+                supplied_session_id=payload.session_id,
+            )
+
+    created_session = False
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
@@ -1299,6 +1447,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
+        created_session = True
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
         db.commit()
@@ -1771,35 +1920,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
-    assistant_row = ConversationMessage(
-        session_id=session.id, role="assistant", content=reply,
-        guard_verdict=verdict, safety_note=safety_note,
-        evidence_ids_json=json.dumps(evidence_ids),
-        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
-    )
-    try:
-        db.add(ConversationMessage(
-            session_id=session.id, role="user", content=user_text,
-            guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
-        ))
-        db.add(assistant_row)
-        db.commit()
-        db.refresh(assistant_row)
-    except Exception as exc:
-        db.rollback()
-        logger.exception("Companion conversation pair failed to persist")
-        raise HTTPException(
-            status_code=503,
-            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
-        ) from exc
-    history = (
-        db.query(ConversationMessage)
-        .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
-        .all()
-    )
-    return {
+    response_body = {
         "session_id": session.id,
         "person_id": person_id,
         "reply": reply,
@@ -1819,6 +1940,86 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
+    }
+    turn_time = datetime.now(timezone.utc)
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "response": response_body,
+    }
+    user_row = ConversationMessage(
+        session_id=session.id, role="user", content=user_text,
+        guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        source_record_refs_json="[]", created_at=turn_time,
+    )
+    assistant_row = ConversationMessage(
+        session_id=session.id, role="assistant", content=reply,
+        guard_verdict=verdict, safety_note=safety_note,
+        evidence_ids_json=json.dumps(evidence_ids),
+        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=payload.client_turn_id,
+        response_metadata_json=(
+            json.dumps(response_metadata, ensure_ascii=False, separators=(",", ":"))
+            if payload.client_turn_id else None
+        ),
+        created_at=turn_time + timedelta(microseconds=1),
+    )
+    try:
+        db.add(user_row)
+        db.add(assistant_row)
+        db.commit()
+        db.refresh(assistant_row)
+    except IntegrityError as exc:
+        db.rollback()
+        # Concurrent duplicate submissions can both miss the preflight lookup.
+        # The unique index makes one transaction the winner; the loser replays
+        # that committed result rather than writing a second message pair.
+        if payload.client_turn_id:
+            prior_assistant_row = (
+                db.query(ConversationMessage)
+                .filter_by(client_turn_id=payload.client_turn_id, role="assistant")
+                .first()
+            )
+            if prior_assistant_row:
+                if created_session and session.id != prior_assistant_row.session_id:
+                    # The losing concurrent request may have committed an empty
+                    # session before inference. Remove that orphan if it has no turns.
+                    try:
+                        orphan = db.query(ConversationSession).filter_by(
+                            id=session.id, person_id=person_id, caregiver_id=caregiver_id
+                        ).first()
+                        if orphan and not db.query(ConversationMessage).filter_by(session_id=orphan.id).first():
+                            db.delete(orphan)
+                            db.commit()
+                    except Exception:
+                        db.rollback()
+                return _companion_replay_response(
+                    db,
+                    prior_assistant_row,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    request_sha256=request_sha256,
+                    supplied_session_id=payload.session_id,
+                )
+        logger.exception("Companion conversation pair violated a persistence constraint")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Companion conversation pair failed to persist")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    return {
+        **response_body,
         "messages": [{
             "role": row.role,
             "text": row.content,
