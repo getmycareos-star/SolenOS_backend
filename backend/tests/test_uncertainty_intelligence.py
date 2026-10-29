@@ -35,6 +35,25 @@ def test_persisted_evidence_projection_keeps_time_provenance_separate_from_times
     assert item["extraction_status"] == "partial"
 
 
+def test_persisted_source_lineage_is_projected_into_uncertainty_item():
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(
+        id="evidence-lineage",
+        source_type="derived_summary",
+        source_text="Breakfast intake was reported.",
+        evidence_status="verified",
+        extra_metadata="{}",
+    )
+    item = evidence_record_to_uncertainty_item(
+        row,
+        source_lineage_id="persisted-lineage:evidence-original",
+        source_independence_status="shared_origin",
+    )
+    assert item["source_lineage_id"] == "persisted-lineage:evidence-original"
+    assert item["source_independence_status"] == "shared_origin"
+
+
 def test_no_evidence_is_unknown_not_negative():
     result = analyze_uncertainty(
         claim="Medication status is not recorded.",
