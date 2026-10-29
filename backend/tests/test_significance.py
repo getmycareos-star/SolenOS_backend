@@ -11,6 +11,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Change
+from app.models.observation_coverage import ObservationCoverage
 from app.models.significance import SignificanceAssessment
 
 from app.core.change_enums import SignificanceVerdict, EvidenceStatus
@@ -340,10 +341,23 @@ def test_gradual_decline_detected_via_trend_requires_persisted_evidence_and_comp
                     confidence=None,
                     evidence_ids=[event.id],
                     magnitude=magnitude,
+                    baseline_coverage_status="covered",
+                    current_coverage_status="covered",
                     explanation=f"Recorded change magnitude {magnitude}",
                     created_at=event_time,
                 )
             )
+        db.add(ObservationCoverage(
+            id="trend-explicit-coverage",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=now - timedelta(days=220),
+            window_end=now,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The care domain was explicitly observed throughout the trend comparison span.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
         db.commit()
         from app.services.pattern_detection import detect_patterns
         patterns = detect_patterns(db, person.id, "fall", None, now)
