@@ -610,6 +610,27 @@ def test_referential_follow_up_uses_caregiver_turns_not_assistant_claims_for_ret
     assert "changed her medication" not in query.casefold()
 
 
+def test_referential_follow_up_uses_latest_caregiver_turns_from_newest_first_history():
+    # Endpoint history is queried newest-first. Older turns must not displace
+    # the latest caregiver references when the bounded transcript has >4 turns.
+    prior_newest_first = [
+        SimpleNamespace(role="assistant", content="Assistant response 8"),
+        SimpleNamespace(role="user", content="Caregiver topic 7"),
+        SimpleNamespace(role="assistant", content="Assistant response 6"),
+        SimpleNamespace(role="user", content="Caregiver topic 5"),
+        SimpleNamespace(role="assistant", content="Assistant response 4"),
+        SimpleNamespace(role="user", content="Caregiver topic 3"),
+        SimpleNamespace(role="assistant", content="Assistant response 2"),
+        SimpleNamespace(role="user", content="Caregiver topic 1"),
+    ]
+    query = collaboration._context_query_with_history("What about that?", prior_newest_first)
+    assert "Caregiver topic 7" in query
+    assert "Caregiver topic 5" in query
+    assert "Caregiver topic 3" in query
+    assert "Caregiver topic 1" in query
+    assert "Assistant response" not in query
+
+
 def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
     prior = [SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?")]
     query = collaboration._context_query_with_history(
