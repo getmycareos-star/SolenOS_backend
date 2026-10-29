@@ -300,6 +300,24 @@ def test_unreadable_evidence_reduces_sufficiency_without_confidence_inflation():
     assert result["conclusion_confidence"] is None
 
 
+def test_malformed_optional_metadata_does_not_crash_or_create_certainty():
+    result = analyze_uncertainty(
+        claim="The care status is current.",
+        task="summarize",
+        evidence=[{
+            "id": "malformed-metadata",
+            "text": "Caregiver report exists.",
+            "source_type": "caregiver_report",
+            "verified": False,
+            "temporal_scope": ["unexpected", "shape"],
+            "extraction_status": {"unexpected": "shape"},
+        }],
+    )
+    assert result["epistemic_state"] == "partially_known"
+    assert result["conclusion_confidence"] is None
+    assert "source_verification_uncertainty" in result["classifications"]
+
+
 def test_assessment_never_claims_the_retrieved_evidence_set_is_complete():
     result = analyze_uncertainty(
         claim="The available note describes an appointment.",
