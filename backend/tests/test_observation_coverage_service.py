@@ -224,3 +224,40 @@ def test_conflicting_coverage_records_do_not_inflate_covered_fraction():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_recurrence_pattern_persists_inter_event_interval_metrics():
+    from app.models.care import CareEvent
+    from app.services.pattern_detection import detect_patterns
+
+    db, person, caregiver = _db()
+    try:
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        for i, days in enumerate((0, 2, 7, 8)):
+            db.add(CareEvent(
+                id=f"interval-event-{i}",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=start + timedelta(days=days),
+                title=f"Recorded mobility event {i}",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"source-{i}"],
+            ))
+        db.commit()
+        patterns = detect_patterns(db, person.id, "mobility", None, start + timedelta(days=10))
+        recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
+        metrics = recurrence.pattern_metrics
+        assert metrics["metric_version"] == "inter-event-intervals-v1"
+        assert metrics["distinct_observation_times"] == 4
+        assert metrics["inter_event_interval_count"] == 3
+        assert metrics["inter_event_intervals_days"] == [2.0, 5.0, 1.0]
+        assert metrics["minimum_interval_days"] == 1.0
+        assert metrics["median_interval_days"] == 2.0
+        assert metrics["maximum_interval_days"] == 5.0
+        assert metrics["normalized_rate_available"] is False
+        assert metrics["observation_coverage_status"] == "unknown"
+        assert "no calibrated regularity threshold" in metrics["regularity_interpretation"]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
