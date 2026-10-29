@@ -1058,3 +1058,125 @@ def test_analyze_endpoint_does_not_accept_assumption_from_unverified_persisted_e
         assert analysis["conclusion_confidence"] is None
     finally:
         teardown_db()
+
+
+
+def test_source_lineage_rejects_false_independence_and_cross_record_links():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="lineage-person", name="Lineage Person")
+        other_person = Person(id="lineage-other-person", name="Other Person")
+        caregiver = Caregiver(id="lineage-caregiver", name="Lineage Caregiver", email="lineage@example.com", relationship="Family", person_id=person.id)
+        other_caregiver = Caregiver(id="lineage-other-caregiver", name="Other Caregiver", email="lineage-other@example.com", relationship="Family", person_id=other_person.id)
+        db.add_all([person, other_person, caregiver, other_caregiver])
+        db.flush()
+        db.add_all([
+            Evidence(id="lineage-origin", person_id=person.id, type="message", source_text="Original report", uploaded_by_caregiver_id=caregiver.id),
+            Evidence(id="lineage-forward", person_id=person.id, type="message", source_text="Forwarded report", uploaded_by_caregiver_id=caregiver.id),
+            Evidence(id="lineage-cross-record", person_id=other_person.id, type="message", source_text="Other record report", uploaded_by_caregiver_id=other_caregiver.id),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        dependent = client.post("/api/v1/care-continuity/evidence/lineage-forward/relationships", json={
+            "related_evidence_id": "lineage-origin",
+            "relationship_type": "forwarded_from",
+            "source_independence_status": "shared_origin",
+            "origin_group_key": "message-thread-1",
+            "rationale": "Forwarded from the original message.",
+        })
+        assert dependent.status_code == 201, dependent.text
+        assert dependent.json()["source_independence_status"] == "shared_origin"
+        assert dependent.json()["reviewed_by_caregiver_id"] == caregiver.id
+
+        false_independence = client.post("/api/v1/care-continuity/evidence/lineage-forward/relationships", json={
+            "related_evidence_id": "lineage-origin",
+            "relationship_type": "copied_from",
+            "source_independence_status": "independent",
+            "rationale": "Attempt to mark a copy independent.",
+        })
+        assert false_independence.status_code == 422
+
+        cross_record = client.post("/api/v1/care-continuity/evidence/lineage-forward/relationships", json={
+            "related_evidence_id": "lineage-cross-record",
+            "relationship_type": "related_to",
+            "source_independence_status": "unknown",
+            "rationale": "Should not cross care records.",
+        })
+        assert cross_record.status_code == 404
+
+        listed = client.get("/api/v1/care-continuity/evidence/lineage-origin/relationships")
+        assert listed.status_code == 200, listed.text
+        assert len(listed.json()) == 1
+        assert listed.json()[0]["source_evidence_id"] == "lineage-forward"
+    finally:
+        teardown_db()
+
+
+def test_structured_observation_requires_exact_source_and_preserves_correction_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import EvidenceObservation
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="observation-person", name="Observation Person")
+        caregiver = Caregiver(id="observation-caregiver", name="Observation Caregiver", email="observation@example.com", relationship="Family", person_id=person.id)
+        db.add_all([person, caregiver])
+        db.flush()
+        db.add(Evidence(
+            id="observation-evidence", person_id=person.id, type="caregiver_report",
+            source_text="Caregiver reports three awakenings last night.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        ))
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        payload = {
+            "observation_kind": "caregiver_report",
+            "epistemic_status": "reported",
+            "subject_label": "person receiving care",
+            "attribute": "sleep_awakenings",
+            "value_text": "three",
+            "source_passage": "three awakenings last night",
+            "extraction_method": "human_entered",
+            "extraction_version": "test-v1",
+        }
+        invalid = client.post("/api/v1/care-continuity/evidence/observation-evidence/observations", json={
+            **payload, "source_passage": "four awakenings last night",
+        })
+        assert invalid.status_code == 422
+
+        created = client.post("/api/v1/care-continuity/evidence/observation-evidence/observations", json=payload)
+        assert created.status_code == 201, created.text
+        first = created.json()
+        assert first["source_passage"] == payload["source_passage"]
+        assert first["epistemic_status"] == "reported"
+        assert first["source_span_end"] - first["source_span_start"] == len(payload["source_passage"])
+
+        correction = client.post("/api/v1/care-continuity/evidence/observation-evidence/observations", json={
+            **payload,
+            "value_text": "two",
+            "supersedes_observation_id": first["id"],
+            "correction_rationale": "Caregiver corrected the count.",
+        })
+        assert correction.status_code == 201, correction.text
+        second = correction.json()
+        assert second["supersedes_observation_id"] == first["id"]
+        assert second["correction_rationale"] == "Caregiver corrected the count."
+
+        db = TestingSessionLocal()
+        original = db.query(EvidenceObservation).filter(EvidenceObservation.id == first["id"]).one()
+        with pytest.raises(ValueError, match="append-only"):
+            original.value_text = "two"
+            db.commit()
+        db.rollback()
+        assert db.query(EvidenceObservation).filter(EvidenceObservation.id == first["id"]).one().value_text == "three"
+        db.close()
+    finally:
+        teardown_db()
