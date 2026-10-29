@@ -1277,6 +1277,140 @@ def create_record_version(payload: dict, request: Request, db: Session = Depends
             "tables_captured": sorted(tables_payload.keys())}
 
 
+def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Session, limit: int = 100):
+    scoped_person_id, _ = _scoped_identity(request, db)
+    if str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    table_name = RESOURCES.get(resource)
+    if not table_name:
+        raise HTTPException(status_code=404, detail="Unknown care-continuity resource")
+    table = _table(db, table_name)
+    if "person_id" not in table.c:
+        raise HTTPException(status_code=422, detail="Resource is not person-scoped")
+    query = select(table).where(table.c.person_id == scoped_person_id)
+    for key in ("recorded_at", "changed_at", "created_at", "updated_at"):
+        if key in table.c:
+            query = query.order_by(desc(table.c[key]))
+            break
+    rows = db.execute(query.limit(max(1, min(limit, 200)))).mappings().all()
+    return [_jsonable(dict(row)) for row in rows]
+
+
+@router.get("/assertions/{person_id}")
+def list_person_assertions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    return _person_scoped_rows("assertions", person_id, request, db, limit)
+
+
+@router.get("/revisions/{person_id}")
+def list_person_revisions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    return _person_scoped_rows("state-revisions", person_id, request, db, limit)
+
+
+@router.get("/outcomes/{person_id}")
+def list_person_outcomes(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    return _person_scoped_rows("action-outcomes", person_id, request, db, limit)
+
+
+@router.get("/contradictions/{person_id}")
+def list_person_contradictions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    return _person_scoped_rows("contradictions", person_id, request, db, limit)
+
+
+@router.get("/freshness/{person_id}")
+def list_person_assertion_freshness(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
+    rows = _person_scoped_rows("assertions", person_id, request, db, limit)
+    now = datetime.now(timezone.utc)
+    output = []
+    for row in rows:
+        kind = str(row.get("assertion_kind") or "current_state")
+        status = str(row.get("assertion_status") or "reported")
+        window = row.get("review_after_days")
+        timestamp = row.get("recorded_at") or row.get("observed_at")
+        age_days = None
+        if timestamp:
+            try:
+                parsed = timestamp if isinstance(timestamp, datetime) else datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                age_days = max(0, int((now - parsed.astimezone(timezone.utc)).total_seconds() // 86400))
+            except (TypeError, ValueError):
+                age_days = None
+        if status in {"retracted", "superseded"}:
+            freshness_status = "historical"
+            explanation = "This assertion is explicitly marked as retracted or superseded in the persisted record."
+        elif kind == "time_bound_observation":
+            freshness_status = "time_bound_observation"
+            explanation = "This is a time-bound observation, not a claim of current state."
+        elif age_days is None:
+            freshness_status = "undetermined"
+            explanation = "The persisted assertion has no parseable recorded time; freshness cannot be determined."
+        elif window is None:
+            freshness_status = "undetermined"
+            explanation = "No caregiver-selected review interval is recorded; freshness is undetermined."
+        elif age_days <= int(window):
+            freshness_status = "within_review_window"
+            explanation = "The assertion is within its explicitly recorded caregiver-selected review window; this does not independently verify the assertion."
+        else:
+            freshness_status = "needs_confirmation"
+            explanation = "The caregiver-selected review interval has elapsed; confirmation is needed before treating this as current."
+        output.append({
+            "assertion_id": row.get("id"),
+            "status": freshness_status,
+            "age_days": age_days,
+            "review_after_days": window,
+            "explanation": explanation,
+        })
+    return output
+
+
+@router.post("/next-questions/{person_id}")
+def list_persisted_next_questions(person_id: str, request: Request, db: Session = Depends(get_db)):
+    scoped_person_id, _ = _scoped_identity(request, db)
+    if str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    output = []
+    if inspect(db.get_bind()).has_table("open_questions"):
+        questions = _table(db, "open_questions")
+        rows = db.execute(select(questions).where(questions.c.person_id == scoped_person_id)).mappings().all()
+        for raw in rows:
+            row = _jsonable(dict(raw))
+            if str(row.get("status") or "open").casefold() not in {"open", "unanswered", "pending"}:
+                continue
+            output.append({
+                "question": row.get("question") or "Persisted open question",
+                "subject_type": row.get("subject_type") or "care_record",
+                "subject_id": row.get("subject_id") or scoped_person_id,
+                "priority": str(row.get("priority") or "informational"),
+                "reason": "This question is persisted as open; no answer is recorded.",
+                "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
+                "source_kind": "open_question",
+                "source_id": row.get("id"),
+                "source_ids": [row.get("id")],
+                "persisted_question_id": row.get("id"),
+            })
+    if inspect(db.get_bind()).has_table("information_gaps"):
+        gaps = _table(db, "information_gaps")
+        rows = db.execute(select(gaps).where(gaps.c.person_id == scoped_person_id)).mappings().all()
+        for raw in rows:
+            row = _jsonable(dict(raw))
+            if str(row.get("lifecycle_status") or "open").casefold() not in {"open", "unresolved", "pending"}:
+                continue
+            description = row.get("description") or f"Information gap for {row.get('subject_type') or 'care record'}: {row.get('field') or 'unspecified field'}"
+            output.append({
+                "question": description,
+                "subject_type": row.get("subject_type") or "care_record",
+                "subject_id": row.get("subject_id") or scoped_person_id,
+                "priority": str(row.get("priority") or "informational"),
+                "reason": str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
+                "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
+                "source_kind": "information_gap",
+                "source_id": row.get("id"),
+                "source_ids": [row.get("id")],
+                "persisted_question_id": None,
+            })
+    return output
+
+
 @router.get("/{resource}")
 def list_resource(resource: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
     if resource not in RESOURCES:
