@@ -1999,7 +1999,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 replay = _replay_companion_turn(db, session.id, duplicate_turn)
                 if replay is not None:
                     return replay
-        logger.exception("Companion conversation pair failed to persist")
+        logger.error("Companion conversation pair failed to persist: error_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry with the same turn ID.",
