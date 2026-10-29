@@ -283,6 +283,60 @@ def analyze_and_persist_uncertainty(
     else:
         evidence_rows = []
 
+    # Bring persisted source-lineage review into the analyzer. A lineage
+    # relationship is person-scoped and never inferred from cross-person IDs.
+    from app.models.care_continuity import EvidenceSourceRelationship
+
+    lineage_parent = {evidence_id: evidence_id for evidence_id in requested_evidence_ids}
+    independence_by_id = {}
+    def lineage_find(evidence_id):
+        parent = lineage_parent[evidence_id]
+        if parent != evidence_id:
+            lineage_parent[evidence_id] = lineage_find(parent)
+        return lineage_parent[evidence_id]
+
+    def lineage_union(left, right):
+        left_root, right_root = lineage_find(left), lineage_find(right)
+        if left_root != right_root:
+            # Deterministic root selection makes generated lineage IDs stable.
+            first, second = sorted((left_root, right_root))
+            lineage_parent[second] = first
+
+    if requested_evidence_ids:
+        relationships = engine.db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == request.person_id,
+            (EvidenceSourceRelationship.source_evidence_id.in_(requested_evidence_ids))
+            | (EvidenceSourceRelationship.related_evidence_id.in_(requested_evidence_ids)),
+        ).all()
+        selected_ids = set(requested_evidence_ids)
+        independent_statuses = {"independent", "independent_source", "independently_observed"}
+        for relationship in relationships:
+            status = str(relationship.source_independence_status or "").strip().lower()
+            for evidence_id in (relationship.source_evidence_id, relationship.related_evidence_id):
+                if evidence_id in selected_ids:
+                    # Only an explicit independence review can override the
+                    # conservative text-only duplicate fallback.
+                    if status in independent_statuses:
+                        independence_by_id[evidence_id] = "independent"
+                    elif evidence_id not in independence_by_id:
+                        independence_by_id[evidence_id] = "shared_origin"
+            left, right = relationship.source_evidence_id, relationship.related_evidence_id
+            if (
+                left in selected_ids and right in selected_ids
+                and status not in independent_statuses
+            ):
+                lineage_union(left, right)
+
+    lineage_groups = {}
+    for evidence_id in requested_evidence_ids:
+        root = lineage_find(evidence_id)
+        lineage_groups.setdefault(root, []).append(evidence_id)
+    lineage_by_id = {
+        evidence_id: "persisted-lineage:" + min(group)
+        for group in lineage_groups.values() if len(group) > 1
+        for evidence_id in group
+    }
+
     try:
         analysis = analyze_uncertainty(
             claim=request.claim,
@@ -292,6 +346,8 @@ def analyze_and_persist_uncertainty(
                     row,
                     role="baseline" if row.id in requested_baseline_ids else "current",
                     is_baseline=row.id in requested_baseline_ids,
+                    source_lineage_id=lineage_by_id.get(row.id),
+                    source_independence_status=independence_by_id.get(row.id),
                 )
                 for row in evidence_rows
             ],
