@@ -64,6 +64,9 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Add API regression coverage for persisted source lineage, server-derived reviewer identity, false-independence rejection, cross-record relationship denial, and reverse endpoint listing. (Test added to `backend/tests/test_uncertainty.py`; current-main CI result pending.)
 - [ ] Current-main CI and deployed PostgreSQL execution must pass before this capability is considered verified.
 - [ ] Add automated source-family clustering for copied/forwarded content and claim/event/observation-level corroboration assessments; human-declared lineage is not automatic source discovery.
+- [x] Add a shared bounded provenance-closure loader that follows parent links, normalized original-source references, and persisted relationship edges across selected records and unselected ancestors; traversal is person-scoped and exposes depth/node/relationship truncation.
+- [x] Wire the shared loader into uncertainty analysis, shared LCR context, appointment preparation briefs, and handoff drafts; add API/route regression assertions for shared-origin evidence and person isolation.
+- [ ] Exact latest-main CI must pass for the new closure and workflow integration before this increment is marked verified.
 - [ ] Distinguish no corroboration from attempted-but-failed corroboration in a canonical state model.
 
 ### F. Conflict detection, comparison, and resolution — PARTIAL
@@ -144,6 +147,8 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Safety evaluation references are rebound to persisted source text in the authorized care record; invalid/foreign evidence IDs fail closed, and client-submitted source spans are discarded when they do not match persisted text.
 - [ ] Validate every factual output claim against persisted claim/evidence links, freshness, conflicts, and source independence across all consumers.
 - [ ] Ensure citation integrity, no fabricated quotations, dependency-aware invalidation, and safe abstention across companion, summaries, appointments, LCR, and handoffs.
+- [x] Propagate explicit source-lineage metadata into the shared LCR prompt projection and bounded appointment/handoff evidence summaries; lineage is explicitly not proof of factual truth.
+- [ ] Validate every generated factual claim and quotation against persisted evidence spans and claim scope at runtime across every AI consumer; this is not complete.
 
 ### Q. Frontend evidence workflows — PARTIAL
 - [x] The persisted EvidenceReviewPanel is connected to current-care understanding and displays the backend-computed source-text hash status (match/mismatch/unavailable), exact hash scope, and explicit limitation that the hash does not authenticate the original binary.
@@ -338,3 +343,11 @@ Automatic source-family discovery, full dependency invalidation/re-review, unive
 - Frontend commit [connect impact review to the LCR claim panel](https://github.com/getmycareos-star/SolenOS-landing/commit/637d5f1e96995ace0ae8ff520c5295f14e335e21) retrieves and displays persisted impact results, reasons, missing/unassessed evidence IDs, changed prerequisite claims, and unresolved conflicts. Failed reads explicitly do not imply the assessment is current.
 - Frontend commit [assert impact workflow contract](https://github.com/getmycareos-star/SolenOS-landing/commit/147eeaae6a8d9720ad5fedee8b166b77a18324bf) checks the UI connection and interpretation limits.
 - [ ] Current-main CI for the backend test commit and both frontend commits must pass. This endpoint is a deterministic review trigger, not a full semantic claim validator; policy-driven expiry, complete source freshness checks, and dependency-wide automatic invalidation remain incomplete.
+## Latest shared-provenance implementation increment — 2026-10-29
+
+- [x] Added bounded same-person lineage closure: [loader](https://github.com/getmycareos-star/SolenOS_backend/commit/f2a2a8e5f704975ac75f26bebeb99b1c5022a752) and [depth-bound reporting](https://github.com/getmycareos-star/SolenOS_backend/commit/40272176135f15ce8a1c7d08f3f1514aa4d99c27), refined to use reflected schema columns for legacy/partial-schema compatibility in [the compatibility fix](https://github.com/getmycareos-star/SolenOS_backend/commit/f2a2a8e5f704975ac75f26bebeb99b1c5022a752).
+- [x] Wired the closure into [LCR context](https://github.com/getmycareos-star/SolenOS_backend/commit/ae454a5f9ffff4e0795903147f375ceadd3a4b04), [uncertainty analysis](https://github.com/getmycareos-star/SolenOS_backend/commit/87cead2ce300b0218d8a2ba912912f1c774e3f65), [appointment preparation](https://github.com/getmycareos-star/SolenOS_backend/commit/7a24dba7d5d6b3974c6b8f1c625f2b170b663c6d), and [handoff drafts](https://github.com/getmycareos-star/SolenOS_backend/commit/aaea2eea5ae95786f739a718e846dcff34d164df).
+- [x] Added regression coverage for [unselected ancestor lineage and person isolation](https://github.com/getmycareos-star/SolenOS_backend/commit/f33153a9396f1d4243a99132a6fae08f40f70c27), [the authenticated uncertainty API's corroboration count](https://github.com/getmycareos-star/SolenOS_backend/commit/a9981f06022c4d489655ccec3ef74766da9bfb24), and [handoff shared-source lineage](https://github.com/getmycareos-star/SolenOS_backend/commit/1aa7541485b470b69ad95384f706399afb367313).
+- [ ] **Verification pending:** the current-main backend test and PostgreSQL migration workflows must pass on the exact latest SHA. Older workflow failures from before the reflected-schema compatibility fix are not counted as passes.
+- [ ] Still missing: automatic source-family discovery from external provenance, a canonical attempted/failed/no-corroboration state model, semantic claim entailment validation, and exhaustive concurrency/DB-failure/rollback tests across all four workflows.
+- This increment does not change the overall A–R classification: no capability group is declared fully complete.
