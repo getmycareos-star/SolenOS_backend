@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Union
 from app.core.change_enums import (
     ChangeType,
     ChangeDirection,
@@ -103,7 +103,7 @@ class PatternBase(BaseModel):
     direction: Optional[ChangeDirection] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_count: int = 0
-    alternative_interpretations: Optional[List[Any]] = None
+    alternative_interpretations: Optional[List[Union[str, dict[str, Any]]]] = None
 
 
 class PatternCreate(PatternBase):
