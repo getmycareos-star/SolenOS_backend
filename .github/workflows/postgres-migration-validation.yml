@@ -5,12 +5,26 @@ on:
     paths:
       - "backend/alembic/**"
       - "backend/app/models/**"
+      - "backend/app/core/database.py"
+      - "backend/app/api/open_loops.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/services/qwen_background_worker.py"
+      - "backend/tests/test_evidence_freshness_policy.py"
+      - "backend/tests/test_companion_response_contract.py"
+      - "backend/tests/test_qwen_background_worker.py"
       - ".github/workflows/postgres-migration-validation.yml"
   push:
     branches: [main]
     paths:
       - "backend/alembic/**"
       - "backend/app/models/**"
+      - "backend/app/core/database.py"
+      - "backend/app/api/open_loops.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/services/qwen_background_worker.py"
+      - "backend/tests/test_evidence_freshness_policy.py"
+      - "backend/tests/test_companion_response_contract.py"
+      - "backend/tests/test_qwen_background_worker.py"
       - ".github/workflows/postgres-migration-validation.yml"
 
 permissions:
