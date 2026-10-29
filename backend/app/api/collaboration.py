@@ -1307,6 +1307,41 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _replay_companion_turn(db: Session, session_id: str, user_row: ConversationMessage) -> Optional[dict]:
+    """Reconstruct the original committed response for a safe idempotent retry."""
+    assistant_row = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.session_id == session_id,
+            ConversationMessage.role == "assistant",
+            ConversationMessage.request_fingerprint == user_row.request_fingerprint,
+            ConversationMessage.created_at > user_row.created_at,
+        )
+        .order_by(ConversationMessage.created_at.asc())
+        .first()
+    )
+    if not assistant_row or not assistant_row.response_metadata_json:
+        return None
+    try:
+        replay = json.loads(assistant_row.response_metadata_json)
+    except (TypeError, ValueError):
+        return None
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session_id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    replay["messages"] = [{
+        "role": row.role,
+        "text": row.content,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "guard_verdict": row.guard_verdict,
+        "safety_note": row.safety_note,
+    } for row in history]
+    return replay
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1368,35 +1403,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.commit()
 
     if existing_turn:
-        assistant_row = (
-            db.query(ConversationMessage)
-            .filter(
-                ConversationMessage.session_id == session.id,
-                ConversationMessage.role == "assistant",
-                ConversationMessage.created_at >= existing_turn.created_at,
-            )
-            .order_by(ConversationMessage.created_at.asc())
-            .first()
-        )
-        if not assistant_row or not assistant_row.response_metadata_json:
+        replay = _replay_companion_turn(db, session.id, existing_turn)
+        if replay is None:
             raise HTTPException(status_code=503, detail="The original turn is not fully committed; retry later with the same turn ID")
-        try:
-            replay = json.loads(assistant_row.response_metadata_json)
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=503, detail="The original turn response could not be recovered; retry later with the same turn ID")
-        history = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
-            .all()
-        )
-        replay["messages"] = [{
-            "role": row.role,
-            "text": row.content,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-            "guard_verdict": row.guard_verdict,
-            "safety_note": row.safety_note,
-        } for row in history]
         return replay
 
     lowered = user_text.casefold()
@@ -1956,6 +1965,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        request_fingerprint=request_fingerprint if client_turn_id else None,
         response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
         created_at=turn_time + timedelta(microseconds=1),
     )
@@ -1972,10 +1982,27 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.refresh(assistant_row)
     except Exception as exc:
         db.rollback()
+        # A concurrent retry can finish inference at the same time. The unique
+        # index allows only one user turn; if another request committed it first,
+        # return that exact response instead of reporting a false persistence failure.
+        if client_turn_id:
+            duplicate_turn = (
+                db.query(ConversationMessage)
+                .filter_by(
+                    session_id=session.id,
+                    role="user",
+                    client_turn_id=client_turn_id,
+                )
+                .first()
+            )
+            if duplicate_turn and duplicate_turn.request_fingerprint == request_fingerprint:
+                replay = _replay_companion_turn(db, session.id, duplicate_turn)
+                if replay is not None:
+                    return replay
         logger.exception("Companion conversation pair failed to persist")
         raise HTTPException(
             status_code=503,
-            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry with the same turn ID.",
         ) from exc
     history = (
         db.query(ConversationMessage)
