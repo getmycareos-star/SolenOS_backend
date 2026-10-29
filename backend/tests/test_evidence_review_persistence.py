@@ -205,6 +205,8 @@ def test_evidence_capture_preserves_distinct_provenance_and_hash(review_records)
     response = client_a.post("/api/v1/evidence", json={
         "person_id": "review-person-a",
         "type": "caregiver_report",
+        "evidence_kind": "caregiver_report",
+        "epistemic_status": "unverified",
         "source_text": source_text,
         "uploaded_by_caregiver_id": "review-caregiver-a",
         "original_author": "Caregiver's handwritten note",
@@ -221,6 +223,8 @@ def test_evidence_capture_preserves_distinct_provenance_and_hash(review_records)
     assert response.status_code == 200, response.text
     saved = response.json()
     assert saved["source_text"] == source_text
+    assert saved["evidence_kind"] == "caregiver_report"
+    assert saved["epistemic_status"] == "unverified"
     assert saved["source_text_sha256"] == hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     assert saved["ingested_at"]
     assert saved["uploaded_by_caregiver_id"] == "review-caregiver-a"
@@ -266,3 +270,15 @@ def test_evidence_creation_requires_server_authorized_record_identity(review_rec
         "uploaded_by_caregiver_id": "review-caregiver-b",
     }
     assert client_a.post("/api/v1/evidence", json=foreign_payload).status_code == 403
+
+
+def test_evidence_kind_rejects_unregistered_classifications(review_records):
+    client_a, _ = review_records
+    response = client_a.post("/api/v1/evidence", json={
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "evidence_kind": "trusted_verified_fact",
+        "source_text": "An unsupported kind must not be silently accepted.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+    })
+    assert response.status_code == 422, response.text
