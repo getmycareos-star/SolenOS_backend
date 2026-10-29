@@ -1961,7 +1961,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
     return {
@@ -1997,7 +1997,7 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
+    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
     return {"session_id": session.id, "person_id": person_id, "messages": [{"role": row.role, "text": row.content, "created_at": row.created_at.isoformat() if row.created_at else None} for row in rows]}
 
 
