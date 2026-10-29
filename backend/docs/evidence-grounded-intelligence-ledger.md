@@ -287,3 +287,30 @@ The failing run that revealed these defects is [PostgreSQL migration validation 
 - Netlify deployment did **not** happen: [run 40859533059](https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40859533059) stopped because the required Netlify credentials are not configured. This is a deployment blocker, not a successful deployment.
 - The latest backend test suite and validation runs for the documentation-updated current backend `main` are still queued at this point; do not infer they passed from the PostgreSQL migration workflow.
 
+
+
+## Exact-main verification update — 2026-10-29 14:20 UTC
+
+**Verified backend main SHA:** `511f16a62155a04ff04783b385493d7a49135afb`  
+**Latest commit:** `Match evidence-reference tests to non-enumerating 404 validation`
+
+Evidence:
+- [Backend tests — PASS](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40880944452) on the exact SHA above. The full backend test job and measured uncertainty benchmark completed successfully.
+- [Backend validation — PASS](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40880944505) on the exact SHA above. Backend tests, compile and ASGI startup/health steps passed; the container-build smoke job also completed successfully.
+- The PostgreSQL migration job in [Backend tests run 40880944452](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40880944452) passed on that exact SHA. It upgraded a fresh PostgreSQL database and the legacy caregivers schema to Alembic head, verified expected schema/constraints, and passed the real HTTP + PostgreSQL identity/persistence E2E step.
+- Earlier intermediate commits `61ac5178e0f53e20cfd987d274dbc0434fc2abd4` and `5d653c570ec0000b62df0f6c75790ca39ffb48c6` had failing runs; the later SHA above passed. Do not cite the earlier failures as current status or erase them from history.
+
+**Scope of this proof:** these runs prove the configured automated checks passed for backend main at the stated SHA. They do not prove every capability in the 18-group inventory is complete, that the live Railway deployment is running this SHA, that all media are authentic, or that every user-facing flow has been browser-tested against production.
+
+### Remaining implementation gaps that must stay visible
+
+- Source-family discovery is not yet automatic: copied/forwarded/shared-origin relationships are persistable and near-duplicate candidates are generated, but candidate similarity does not establish common origin.
+- Task-specific confidence calibration has not been supplied; unsupported numeric confidence remains unavailable.
+- Full claim-dependency invalidation and automatic re-review when source evidence changes are incomplete.
+- A universal typed link across every event, claim, observation, decision, outcome, handoff and review target is not yet proven complete; current modules use several existing relationship fields and specialized link tables.
+- Automated document/media authenticity and tamper detection cannot be claimed from source-text hashes. Original upload byte hashes are checked for stored-upload integrity, not authenticity of the originating author or capture.
+- Formal baseline/comparable-window change measurement, persistence/reversal classification, and state-at-time reconstruction remain partial.
+- Reviewer authority and professional verification need policy-backed authorization, not a caller-provided label.
+- Current frontend main is newer than the previously passing frontend checks. Its in-progress runs must finish before exact-head frontend verification is claimed. The Netlify deploy workflow has previously failed because deployment credentials were unavailable; a green frontend build is not a live deployment.
+
+No item above is promoted to COMPLETE based only on this verification run. The 18 groups remain PARTIAL/UNVERIFIED where their individual acceptance criteria and end-to-end proof are still open.
