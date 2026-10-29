@@ -751,6 +751,26 @@ def test_unreviewed_or_failed_source_access_fails_closed(source_access):
                for limitation in result["limitations"])
 
 
+def test_unknown_source_access_status_fails_closed():
+    result = analyze_uncertainty(
+        claim="The current care status is verified.",
+        task="recommendation",
+        evidence=[{
+            "id": "care-status",
+            "text": "Care status was reported.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        source_access="provider_returned_unrecognized_state",
+    )
+    assert result["source_access_status"] == "provider_returned_unrecognized_state"
+    assert result["epistemic_state"] == "unknown"
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["retrieval_scope"]["completeness_verified"] is False
+    assert result["conclusion_confidence"] is None
+    assert any("nonstandard access status" in item for item in result["limitations"])
+
+
 def test_future_evidence_timestamp_is_flagged_instead_of_treated_as_fresh():
     result = analyze_uncertainty(
         claim="The care status is current.",
