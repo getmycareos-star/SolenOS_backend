@@ -86,11 +86,16 @@ def main():
         }
 
         def send():
-            return client.post(
-                "/api/v1/conversation/message",
-                headers={"Authorization": f"Bearer {token_a}"},
-                json=payload,
-            )
+            # Separate sync ASGI portals allow both requests to reach inference concurrently.
+            request_client = TestClient(app)
+            try:
+                return request_client.post(
+                    "/api/v1/conversation/message",
+                    headers={"Authorization": f"Bearer {token_a}"},
+                    json=payload,
+                )
+            finally:
+                request_client.close()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             results = list(pool.map(lambda _: send(), range(2)))
