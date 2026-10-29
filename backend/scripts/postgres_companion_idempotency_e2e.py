@@ -67,11 +67,11 @@ def main():
     try:
         created_a = client.post(
             "/api/v1/sessions/anonymous",
-            json={"name": "CI Companion person A", "caregiver_name": "CI Companion caregiver A"},
+            json={"caregiver_name": "CI Companion caregiver A"},
         )
         created_b = client.post(
             "/api/v1/sessions/anonymous",
-            json={"name": "CI Companion person B", "caregiver_name": "CI Companion caregiver B"},
+            json={"caregiver_name": "CI Companion caregiver B"},
         )
         require(created_a.status_code == 201, f"anonymous session A failed: {created_a.status_code}: {created_a.text}")
         require(created_b.status_code == 201, f"anonymous session B failed: {created_b.status_code}: {created_b.text}")
