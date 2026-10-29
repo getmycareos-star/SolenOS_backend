@@ -158,6 +158,10 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [ ] Ensure citation integrity, no fabricated quotations, dependency-aware invalidation, and safe abstention across companion, summaries, appointments, LCR, and handoffs.
 - [x] Propagate explicit source-lineage metadata into the shared LCR prompt projection and bounded appointment/handoff evidence summaries; lineage is explicitly not proof of factual truth.
 - [ ] Validate every generated factual claim and quotation against persisted evidence spans and claim scope at runtime across every AI consumer; this is not complete.
+- [x] Add runtime rejection of generated UUID-shaped or explicitly labelled record identifiers that do not occur in the caregiver request or authorized source context; apply this guard to the shared Qwen support flow and Companion's primary/revision attempts.
+- [x] Include appointment, handoff, and notification record IDs in Qwen support results and persist them in immutable-per-output provenance metadata for background jobs.
+- [x] Add tests for fabricated versus authorized record identifiers and durable appointment/handoff/notification source metadata.
+- [ ] This guard catches unsupported record identifiers only; it does not semantically prove that every natural-language claim is entailed by the cited source, nor does it validate arbitrary quotations. The full claim-by-claim grounding requirement remains incomplete.
 
 ### Q. Frontend evidence workflows — PARTIAL
 - [x] The persisted EvidenceReviewPanel is connected to current-care understanding and displays the backend-computed source-text hash status (match/mismatch/unavailable), exact hash scope, and explicit limitation that the hash does not authenticate the original binary.
@@ -169,9 +173,12 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Add a caregiver-facing conflict-resolution panel with scoped partial resolution, selected evidence references, and append-only transition history; failures are not displayed as successful saves.
 - [ ] Complete broader source/claim detail navigation, full provenance identities/times across all surfaces, correction/retraction UI, clarification workflow, and accessible error/retry/rollback states across every consuming workflow.
 
-### R. Testing, verification, and operations — UNVERIFIED
+### R. Testing, verification, and operations — PARTIAL; exact-current-main checks pending
 - [x] Existing backend tests cover evidence-review persistence, cross-record denial, append-only history, contradiction scope, and uncertainty behavior.
 - [x] PostgreSQL migration workflow validates a fresh schema, migration head, core table/column contracts, and several identity/persistence workflows.
+- [x] Fix the circular import between database bootstrap and open-loop API models by moving Open Loop ORM records into a dedicated model module; migration validation now imports the database/model layer without importing an API router.
+- [x] PostgreSQL migration workflow path filters now include the database bootstrap, open-loop/collaboration routes, background worker, and relevant tests so these changes retrigger the database verification gate.
+- [ ] Latest exact-main PostgreSQL migration validation and backend/frontend checks must pass after these fixes before verification is complete.
 - [x] Added tests for evidence provenance fields, source-text hashing, and evidence-create authorization.
 - [x] Add source-lineage API tests for create/list persistence, cross-record denial, duplicate prevention, and cycle prevention.
 - [ ] Current-main test and PostgreSQL migration runs must pass before these latest additions are considered verified.
