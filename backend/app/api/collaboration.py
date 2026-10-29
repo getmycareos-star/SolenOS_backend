@@ -531,25 +531,29 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
 
 
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
-    """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
+    """Resolve explicit follow-ups from caregiver turns only; chat is not evidence."""
     current = (current_text or "").strip()
-    if not prior_messages:
+    if not current or not prior_messages:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # Shortness alone is not a follow-up. A new, concise question must not
+    # inherit an unrelated topic from the previous turn.
+    if not referential:
         return current
-    recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
-    ]
-    return "\n".join([current, *recent]) if recent else current
+    # The endpoint fetches newest-first. Restore chronological order and keep
+    # the latest four caregiver turns, excluding assistant-generated claims.
+    recent_user_turns = [
+        f"user: {(message.content or '')[:500]}"
+        for message in reversed(prior_messages[:8])
+        if getattr(message, "role", None) == "user"
+    ][-4:]
+    return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
