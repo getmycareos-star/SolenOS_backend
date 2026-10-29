@@ -217,6 +217,35 @@ def test_contradictory_observations_preserved_not_collapsed():
         teardown_db()
 
 
+def test_professional_claim_in_source_text_does_not_verify_authority():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db, person, caregiver = _seed_person()
+        _add_event(
+            db,
+            person,
+            caregiver,
+            "mobility",
+            "Doctor confirmed mobility is reduced",
+            days_ago=0,
+            evidence_text="Doctor confirmed mobility is reduced.",
+        )
+
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "mobility", None, datetime.now(timezone.utc))
+        assert len(changes) == 1
+        assessment = db.query(SignificanceAssessment).filter(
+            SignificanceAssessment.id == changes[0].significance_assessment_id
+        ).first()
+        assert assessment is not None
+        assert assessment.evidence_status == EvidenceStatus.REPORTED
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_documentation_density_spike_not_treated_as_real_event():
     setup_db()
     try:
