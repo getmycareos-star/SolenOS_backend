@@ -66,9 +66,10 @@ def test_lcr_context_includes_only_person_scoped_structured_evidence_observation
         ])
 
     try:
-        context = build_lcr_context(
-            __import__("sqlalchemy").orm.Session(engine), "person-a", limit_per_source=10
-        )
+        from sqlalchemy.orm import Session
+
+        with Session(engine) as db:
+            context = build_lcr_context(db, "person-a", limit_per_source=10)
         rows = context["sources"]["evidence_observations"]["items"]
         assert [row["id"] for row in rows] == ["owner-observation"]
         assert rows[0]["evidence_id"] == "evidence-a"
