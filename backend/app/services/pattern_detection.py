@@ -64,11 +64,18 @@ def detect_patterns(
         CareEvent.occurred_at <= now,
     )
     if subject_id:
-        # CareEvent.situation_id is the event's persisted subject relationship.
-        # Evidence IDs referenced by Change rows are not CareEvent IDs and must
-        # never be used as a substitute filter; doing so could mix occurrences
-        # from different care situations into one pattern.
-        event_query = event_query.filter(CareEvent.situation_id == subject_id)
+        # For subject-scoped assessments, the persisted Change rows identify
+        # the exact source CareEvent IDs eligible for this subject. subject_id
+        # is not the same thing as CareEvent.situation_id; do not conflate them.
+        linked_event_ids = sorted({
+            event_id
+            for change in changes
+            for event_id in (change.evidence_ids or [])
+        })
+        # An empty linkage set means no eligible events for this subject. Keep
+        # the query empty so stale patterns can be retired when their evidence
+        # was invalidated or no longer supports the assessment.
+        event_query = event_query.filter(CareEvent.id.in_(linked_event_ids))
     queried_events = (
         event_query
         .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
