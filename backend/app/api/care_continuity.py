@@ -1300,6 +1300,55 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         value["source_names"] = sorted(set(value["source_names"]))
         value["source_statuses"] = sorted(set(value["source_statuses"]))
         value["evidence_state"] = "supported_by_persisted_records" if value["record_count"] else "no_records_returned"
+    # Link records across assessment domains only when they explicitly share a
+    # persisted evidence ID. This is provenance linkage, not corroboration,
+    # causation, or proof that the claims agree.
+    records_by_evidence: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+    for item in all_items:
+        linked_ids = item.get("evidence_ids")
+        if not isinstance(linked_ids, list):
+            linked_ids = [item["evidence_id"]] if item.get("source") == "evidence_observations" and item.get("evidence_id") else []
+        for evidence_id in linked_ids:
+            if not evidence_id:
+                continue
+            record_key = (str(item.get("source") or "unknown_source"), str(item.get("id") or ""))
+            records_by_evidence.setdefault(str(evidence_id), {})[record_key] = item
+    cross_domain_source_groups = []
+    for evidence_id, linked_records in sorted(records_by_evidence.items()):
+        records = list(linked_records.values())
+        domains = sorted({
+            source_domains.get(str(item.get("source") or ""), "unmapped_source")
+            for item in records
+        })
+        if len(records) < 2 or len(domains) < 2:
+            continue
+        cross_domain_source_groups.append({
+            "evidence_id": evidence_id,
+            "domains": domains,
+            "records": [
+                {
+                    "source": str(item.get("source") or "unknown_source"),
+                    "record_id": str(item.get("id") or ""),
+                    "title": str(item.get("title") or item.get("attribute") or item.get("event_type") or item.get("source") or "Care record")[:240],
+                    "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or "not_specified",
+                    "event_time": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
+                    "record_time": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
+                }
+                for item in sorted(records, key=lambda value: (str(value.get("source") or ""), str(value.get("id") or "")))[:25]
+            ],
+            "record_count": len(records),
+            "has_more_records": len(records) > 25,
+            "link_type": "shared_source_evidence",
+            "interpretation_limit": "Shared evidence establishes a provenance link only; it does not establish independent corroboration, factual agreement, temporal causation, or a clinical relationship.",
+        })
+    cross_domain_source_links = {
+        "groups": cross_domain_source_groups[:100],
+        "count": len(cross_domain_source_groups),
+        "has_more": len(cross_domain_source_groups) > 100,
+        "source_of_truth": "explicit_persisted_evidence_ids",
+        "relationship_policy": "No relationship is inferred when records do not explicitly share a persisted evidence reference.",
+    }
+
     open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending"}
     closed_statuses = {"resolved", "closed", "completed", "answered", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "dismissed", "not_applicable", "known"}
     attention_items = []
@@ -1702,6 +1751,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "is_complete": not required_missing and not optional_missing and not any(value.get("has_more") for value in sources.values()),
         },
         "domains": domain_sources,
+        "cross_domain_source_links": cross_domain_source_links,
         "capabilities": capabilities,
         "assessment_quality": assessment_quality,
         "freshness_assessment": {"sources": source_freshness, "policy": "Report recency metadata; do not label records stale without a domain-specific rule."},
