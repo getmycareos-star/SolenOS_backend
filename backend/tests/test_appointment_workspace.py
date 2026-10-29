@@ -440,6 +440,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert changed.status_code == 200, changed.text
     changed_body = changed.json()
     assert changed_body["status"] == "created"
+    assert changed_body["source_freshness"]["status"] == "current_for_bounded_source_view"
+    assert changed_body["source_freshness"]["reassessment_recommended"] is False
     evolution = changed_body["assessment"]["evolution_since_previous_assessment"]
     assert evolution["comparison_available"] is True
     assert evolution["previous_assessment_id"] == body["assessment_id"]
