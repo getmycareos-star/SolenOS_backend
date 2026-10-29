@@ -294,3 +294,32 @@ def test_coverage_schema_rejects_nonpositive_window():
             coverage_status="covered",
             rationale="Invalid interval.",
         )
+
+
+def test_lower_record_count_without_coverage_does_not_claim_decrease():
+    from app.models.care import CareEvent
+    from app.services.change_detection import detect_event_changes
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime.now(timezone.utc)
+        for i, days_ago in enumerate((120, 100, 80, 60, 7)):
+            db.add(CareEvent(
+                id=f"uncovered-fall-{i}",
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded fall {i}",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"uncovered-source-{i}"],
+            ))
+        db.commit()
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        assert not [row for row in changes if row.change_type.value == "decrease"], (
+            "A lower recorded count is not a defensible decrease without complete "
+            "observation coverage for both comparison windows."
+        )
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
