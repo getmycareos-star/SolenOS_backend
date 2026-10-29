@@ -1268,11 +1268,12 @@ def test_coverage_assessment_api_rejects_naive_query_timestamps():
         db.add_all([person, caregiver])
         db.commit()
         token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
         db.close()
 
         client = TestClient(app)
         response = client.get(
-            f"/change/coverage/{person.id}",
+            f"/change/coverage/{person_id}",
             params={
                 "subject_type": "mobility",
                 "window_start": "2026-10-01T00:00:00",
