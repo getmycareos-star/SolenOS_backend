@@ -1109,3 +1109,57 @@ def test_structured_assertion_transition_is_persisted_idempotently_and_returns_s
     finally:
         teardown_db()
 
+
+
+def test_recurrence_rate_requires_complete_explicit_observation_coverage():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-coverage-rate", name="Coverage rate test")
+        caregiver = Caregiver(
+            id="caregiver-coverage-rate",
+            name="Coverage Rate Caregiver",
+            email="coverage-rate@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        earlier = now - timedelta(days=60)
+        later = now - timedelta(days=30)
+        for i, occurred_at in enumerate((earlier, later)):
+            db.add(CareEvent(
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=occurred_at,
+                title=f"Covered recurrence event {i + 1}",
+                created_by_caregiver_id=caregiver.id,
+            ))
+        db.add(ObservationCoverage(
+            id="coverage-rate-window",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=earlier,
+            window_end=later,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The caregiver explicitly recorded observation coverage for this interval.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "fall", None, now)
+        db.commit()
+        recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
+        assert recurrence.rate_per_period is not None
+        assert recurrence.rate_per_period == pytest.approx(2.0)
+        assert not any(
+            "rate is withheld" in note.lower()
+            for note in (recurrence.alternative_interpretations or [])
+        )
+        db.close()
+    finally:
+        teardown_db()
