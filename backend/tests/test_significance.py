@@ -431,6 +431,52 @@ def test_trend_analysis_never_combines_different_subject_ids():
         teardown_db()
 
 
+def test_pattern_source_ids_must_belong_to_requested_person():
+    setup_db()
+    try:
+        db, person, caregiver = _seed_person()
+        other = Person(id="p-2", name="Other Person")
+        other_caregiver = Caregiver(
+            id="cg-2", name="Other Caregiver", email="cg2@example.com",
+            relationship="Family", person_id=other.id,
+        )
+        db.add_all([other, other_caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        from app.core.change_enums import ChangeType, ChangeDirection
+        for index, days_ago in enumerate((90, 60, 30), start=1):
+            source_event = _add_event(
+                db, other, other_caregiver, "mobility", f"Observation {index}", days_ago
+            )
+            window_end = now - timedelta(days=days_ago)
+            db.add(Change(
+                person_id=person.id, subject_type="mobility", subject_id="",
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state=str(index - 1), current_state=str(index),
+                previous_count=index - 1, current_count=index,
+                baseline_id=None,
+                comparison_window_start=window_end - timedelta(days=20),
+                comparison_window_end=window_end, confidence=None,
+                evidence_ids=[source_event.id], magnitude=float(index),
+                explanation="Source event scope test", created_at=window_end,
+            ))
+        db.commit()
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        db.commit()
+        assert all(pattern.pattern_type.value != "trend" for pattern in patterns)
+        assert all(
+            event_id not in {
+                row[0] for row in db.query(CareEvent.id).filter(CareEvent.person_id == other.id).all()
+            }
+            for pattern in patterns for event_id in (pattern.event_ids or [])
+        )
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_cold_start_no_baseline_no_false_positive():
     setup_db()
     try:
