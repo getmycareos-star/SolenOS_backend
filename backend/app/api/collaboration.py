@@ -1412,7 +1412,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.refresh(session)
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
-        db.commit()
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Companion session creation failed before inference")
+            raise HTTPException(
+                status_code=503,
+                detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+            ) from exc
 
     # Resolve follow-up references before all retrieval passes, not only before
     # final context ranking. Prior dialogue remains retrieval context, never evidence.
@@ -2013,7 +2021,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         logger.exception("Companion conversation pair failed to persist")
         raise HTTPException(
             status_code=503,
-            detail="Companion response could not be confirmed as persisted. Please retry.",
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
     except Exception as exc:
         db.rollback()
