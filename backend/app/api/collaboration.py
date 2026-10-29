@@ -1371,6 +1371,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        # Resolve an explicit follow-up before retrieval. Only caregiver-authored
+        # prior turns may add retrieval terms; previous assistant output is not evidence.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        direct_terms = [
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ]
+        expanded_terms = _expanded_context_terms(retrieval_query)
+        retrieval_terms = list(dict.fromkeys([
+            *direct_terms,
+            *sorted(expanded_terms - set(direct_terms)),
+        ]))[:24]
+
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -1380,7 +1400,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        matching_event_rows = []
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        selected_events = []
+        seen_event_ids = set()
+        # Matching older records are retrieved independently of the recent-event
+        # window. Recency is only a tie-breaker, never a reason to omit a match.
+        for event in [*matching_event_rows[:12], *recent_events]:
+            if str(event.id) not in seen_event_ids:
+                seen_event_ids.add(str(event.id))
+                selected_events.append(event)
+        for event in selected_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
@@ -1431,13 +1476,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
-            .order_by(Appointment.scheduled_at.asc())
-            .limit(30)
-            .all()
+        appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                appointments_query.filter(or_(
+                    *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(20)
+                .all()
+            )
+        recent_appointments = (
+            appointments_query.order_by(Appointment.scheduled_at.desc()).limit(20).all()
         )
+        appointments = []
+        seen_appointment_ids = set()
+        for appointment in [*matching_appointments[:12], *recent_appointments]:
+            if str(appointment.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(appointment.id))
+                appointments.append(appointment)
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
@@ -1457,7 +1518,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # retaining event-linked and other recent evidence within a strict bound.
         linked_ids = list(dict.fromkeys(
             str(evidence_id)
-            for event in recent_events
+            for event in selected_events
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
@@ -1472,6 +1533,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
             if linked_ids else []
         )
+        matching_evidence_rows = []
+        if retrieval_terms:
+            matching_evidence_rows = (
+                evidence_query.filter(or_(
+                    *[EvidenceModel.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.extra_metadata.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.type.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         document_rows = (
             evidence_query.filter(EvidenceModel.type == "document")
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -1485,7 +1558,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        for row in [*matching_evidence_rows[:12], *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
@@ -1519,17 +1592,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }, ensure_ascii=False)
             )
         source_context.extend(evidence_context)
-
-        # Prior conversation can resolve a follow-up reference, but it remains
-        # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
