@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from app.models.care_continuity import CareAssertion as CareAssertionModel
 from app.models.uncertainty import (
     InformationGap as InformationGapModel,
     OpenQuestion as OpenQuestionModel,
@@ -168,6 +169,16 @@ class UncertaintyEngine:
         payload["evidence_ids"] = self._validate_person_evidence(
             scoped_person_id, payload.get("evidence_ids")
         ) or None
+        claim_id = payload.get("claim_id")
+        if claim_id:
+            claim = self.db.query(CareAssertionModel).filter(
+                CareAssertionModel.id == claim_id,
+                CareAssertionModel.person_id == scoped_person_id,
+            ).first()
+            if claim is None:
+                raise ValueError("A linked claim must belong to the same care record.")
+            if claim.subject_type != payload["subject_type"] or claim.subject_id != payload["subject_id"]:
+                raise ValueError("A clarification question must use the linked claim's subject scope.")
         question_text = (payload.get("question") or "").strip()
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
