@@ -243,3 +243,26 @@ def test_evidence_provenance_rejects_reporter_from_another_care_record(review_re
     })
     assert response.status_code == 422, response.text
     assert "reported_by_caregiver_id" in response.text
+
+
+def test_evidence_creation_requires_server_authorized_record_identity(review_records):
+    from fastapi.testclient import TestClient
+
+    client_a, _ = review_records
+    payload = {
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "source_text": "Evidence must be bound to the authorized session.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+    }
+    unauthenticated = TestClient(app)
+    assert unauthenticated.post("/api/v1/evidence", json=payload).status_code == 401
+
+    # A valid session for person A cannot create evidence in person B's record,
+    # even when the request body supplies a valid caregiver B identity.
+    foreign_payload = {
+        **payload,
+        "person_id": "review-person-b",
+        "uploaded_by_caregiver_id": "review-caregiver-b",
+    }
+    assert client_a.post("/api/v1/evidence", json=foreign_payload).status_code == 403
