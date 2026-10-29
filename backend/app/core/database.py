@@ -131,6 +131,7 @@ import app.models.qwen_background_job  # register Qwen jobs before local create_
 import app.models.improvement_training_example  # register consent-gated improvement examples
 import app.models.privacy_delivery  # register privacy and handoff lifecycle tables
 import app.models.appointment_workspace  # register durable appointment workflow records before local schema bootstrap
+import app.api.open_loops  # register persistent open-loop tables before local schema bootstrap
 
 
 if not RAILWAY_RUNTIME:
