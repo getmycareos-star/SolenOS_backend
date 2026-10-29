@@ -3682,7 +3682,8 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
     if policy is None:
         raise HTTPException(status_code=404, detail="Freshness policy not found")
     now = datetime.now(timezone.utc)
-    source_time = evidence.occurred_at or evidence.collected_at or evidence.uploaded_at
+    # Upload/ingestion time is not evidence of when the underlying care event occurred.
+    source_time = evidence.occurred_at or evidence.collected_at
     age_days = None
     if source_time is None:
         status = "unknown_source_time"
