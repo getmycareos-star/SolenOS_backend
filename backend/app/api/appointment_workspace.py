@@ -164,9 +164,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "source_id": str(row["id"]),
                 "fact_type": row["fact_type"],
                 "value": row["fact_value"],
-                "epistemic_status": row["epistemic_status"] or "unknown",
-                "effective_at": _iso(row["effective_at"]),
-                "recorded_at": _iso(row["created_at"]),
+                "epistemic_status": (row["epistemic_status"] or "unknown") if "epistemic_status" in row else "unknown",
+                "effective_at": _iso(row["effective_at"]) if "effective_at" in row else None,
+                "recorded_at": _iso(row["created_at"]) if "created_at" in row else None,
                 "updated_at": _iso(row["updated_at"]) if "updated_at" in row else None,
                 "evidence_ids": _evidence_ids_from_row(row),
             })
