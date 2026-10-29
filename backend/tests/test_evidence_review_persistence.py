@@ -439,3 +439,60 @@ def test_claim_assessments_require_exact_source_passages_and_preserve_version_hi
         db.rollback()
     finally:
         db.close()
+
+
+def test_source_relationships_persist_lineage_and_reject_cross_record_or_cycle(review_records):
+    client_a, client_b = review_records
+    # Add a second evidence item to person A; person B already owns review-evidence-b.
+    db = SessionLocal()
+    try:
+        caregiver = db.query(Caregiver).filter(Caregiver.person_id == "review-person-a").one()
+        db.add(Evidence(
+            id="review-evidence-a-copy", person_id="review-person-a", type="forwarded_message",
+            source_text="Forwarded copy of the original appointment message.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="imported",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    created = client_a.post("/api/v1/care-continuity/evidence/review-evidence-a-copy/relationships", json={
+        "related_evidence_id": "review-evidence-a",
+        "relationship_type": "forwarded_from",
+        "source_independence_status": "shared_origin",
+        "origin_group_key": "appointment-message-1",
+        "rationale": "This record was forwarded from the original message.",
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["reviewed_by_caregiver_id"] == "review-caregiver-a"
+    assert created.json()["source_independence_status"] == "shared_origin"
+
+    listed = client_a.get("/api/v1/care-continuity/evidence/review-evidence-a/relationships")
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()) == 1
+    assert listed.json()[0]["source_evidence_id"] == "review-evidence-a-copy"
+
+    cross_record = client_a.post("/api/v1/care-continuity/evidence/review-evidence-a/relationships", json={
+        "related_evidence_id": "review-evidence-b",
+        "relationship_type": "corroborates",
+        "source_independence_status": "independent",
+        "rationale": "Must not cross care records.",
+    })
+    assert cross_record.status_code == 404
+
+    cycle = client_a.post("/api/v1/care-continuity/evidence/review-evidence-a/relationships", json={
+        "related_evidence_id": "review-evidence-a-copy",
+        "relationship_type": "derived_from",
+        "source_independence_status": "shared_origin",
+        "rationale": "Would make a cycle in the source lineage graph.",
+    })
+    assert cycle.status_code == 409
+
+    duplicate = client_a.post("/api/v1/care-continuity/evidence/review-evidence-a-copy/relationships", json={
+        "related_evidence_id": "review-evidence-a",
+        "relationship_type": "forwarded_from",
+        "source_independence_status": "shared_origin",
+        "origin_group_key": "appointment-message-1",
+        "rationale": "Duplicate relationship.",
+    })
+    assert duplicate.status_code == 409
