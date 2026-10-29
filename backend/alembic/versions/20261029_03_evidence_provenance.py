@@ -52,19 +52,22 @@ def upgrade() -> None:
         ("fk_evidence_collected_by_caregiver_id", "collected_by_caregiver_id", "caregivers", "id", None),
         ("fk_evidence_parent_evidence_id", "parent_evidence_id", "evidence", "id", "SET NULL"),
     ]
-    for name, column, target, target_column, ondelete in constraints:
-        if column not in existing and column not in {c["name"] for c in inspector.get_columns("evidence")}:
-            continue
-        if any(fk.get("constrained_columns") == [column] for fk in foreign_keys):
-            continue
-        op.create_foreign_key(
-            name,
-            "evidence",
-            target,
-            [column],
-            [target_column],
-            ondelete=ondelete,
-        )
+    missing_constraints = [
+        (name, column, target, target_column, ondelete)
+        for name, column, target, target_column, ondelete in constraints
+        if not any(fk.get("constrained_columns") == [column] for fk in foreign_keys)
+    ]
+    if bind.dialect.name == "sqlite" and missing_constraints:
+        with op.batch_alter_table("evidence") as batch:
+            for name, column, target, target_column, ondelete in missing_constraints:
+                batch.create_foreign_key(
+                    name, target, [column], [target_column], ondelete=ondelete
+                )
+    else:
+        for name, column, target, target_column, ondelete in missing_constraints:
+            op.create_foreign_key(
+                name, "evidence", target, [column], [target_column], ondelete=ondelete
+            )
 
     # Backfill a deterministic hash for every existing text source. This hash
     # covers the stored UTF-8 text only; it is not a claim about source authenticity
