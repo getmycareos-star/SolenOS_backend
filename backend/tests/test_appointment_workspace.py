@@ -596,6 +596,12 @@ def test_structured_source_observation_appears_in_current_care_projection(client
     assert item["source_collection"] == "evidence_observations"
     assert item["title"] == "sleep"
     assert item["evidence_ids"] == ["sleep-source-evidence"]
+    foreign_link_item = next(
+        row for row in response.json()["items"]
+        if row["id"] == "foreign-evidence-link-event"
+    )
+    assert foreign_link_item["evidence_ids"] == []
+    assert "private-evidence-other" not in response.text
     assert item["source_span_start"] == 20
     assert item["source_span_end"] == 40
     assert item["source_passage"] == "woke twice overnight"
