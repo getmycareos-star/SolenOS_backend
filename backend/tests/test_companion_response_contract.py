@@ -142,6 +142,28 @@ def test_companion_idempotent_retry_replays_committed_turn_without_second_infere
         assert replay_data["source_event_ids"] == first_data["source_event_ids"]
         assert replay_data["written_to_lcr"] is False
         assert len(calls) == 1
+
+        changed_text = {**body, "text": "Tell me about a medication change."}
+        mismatch = client.post(
+            "/api/v1/conversation/message", headers=headers, json=changed_text
+        )
+        assert mismatch.status_code == 409, mismatch.text
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "person_id": other_person_id,
+                "text": body["text"],
+                "client_turn_id": turn_id,
+            },
+        )
+        assert cross_person.status_code == 409, cross_person.text
+        assert first_data["reply"] not in cross_person.text
+        assert first_data["session_id"] not in cross_person.text
+        assert len(calls) == 1
+
         db = TestingSessionLocal()
         try:
             rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
