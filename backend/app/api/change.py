@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 import hashlib
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -288,12 +288,19 @@ def get_change_detail(
 
 
 @router.get("/changes/{person_id}", response_model=List[ChangeSchema])
-def list_changes(person_id: str, request: Request, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+def list_changes(
+    person_id: str,
+    request: Request,
+    subject_type: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     _require_person_scope(request, db, person_id)
     query = db.query(Change).filter(Change.person_id == person_id)
     if subject_type:
         query = query.filter(Change.subject_type == subject_type)
-    return query.order_by(Change.created_at.desc()).limit(100).all()
+    return query.order_by(Change.created_at.desc(), Change.id.asc()).offset(offset).limit(limit).all()
 
 
 @router.get("/patterns/detect", response_model=List[PatternSchema])
@@ -314,12 +321,19 @@ def detect_patterns_endpoint(
 
 
 @router.get("/patterns/{person_id}", response_model=List[PatternSchema])
-def list_patterns(person_id: str, request: Request, subject_type: Optional[str] = None, db: Session = Depends(get_db)):
+def list_patterns(
+    person_id: str,
+    request: Request,
+    subject_type: Optional[str] = None,
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
     _require_person_scope(request, db, person_id)
     query = db.query(Pattern).filter(Pattern.person_id == person_id)
     if subject_type:
         query = query.filter(Pattern.subject_type == subject_type)
-    return query.order_by(Pattern.created_at.desc()).all()
+    return query.order_by(Pattern.created_at.desc(), Pattern.id.asc()).offset(offset).limit(limit).all()
 
 
 @router.get("/situations/detect", response_model=List[SituationResponse])
