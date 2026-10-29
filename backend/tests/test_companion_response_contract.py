@@ -286,7 +286,7 @@ def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeyp
                 status="recorded",
                 occurred_at=now - timedelta(hours=index + 1),
                 title=f"Unrelated household note {index}",
-                description=f"Routine household observation {index}; no sleep details.",
+                description=f"Routine household observation {index}; no additional details.",
                 evidence_ids=[],
                 created_by_caregiver_id=caregiver_id,
                 time_provenance="caregiver_reported",
