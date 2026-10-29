@@ -971,7 +971,7 @@ def detect_cross_domain_patterns(
                 len(candidate) > len(best_cluster)
                 or (
                     len(candidate) == len(best_cluster)
-                    and candidate[-1].occurred_at > best_cluster[-1].occurred_at
+                    and _ensure_utc(candidate[-1].occurred_at) > _ensure_utc(best_cluster[-1].occurred_at)
                 )
             ):
                 best_cluster = candidate
