@@ -392,3 +392,13 @@ Automatic source-family discovery, full dependency invalidation/re-review, unive
 - Verification rule: the failed first PostgreSQL run identified duplicate-table creation when legacy schema paths pre-create current ORM metadata. The migration was changed to validate/reconcile existing tables and create missing indexes/triggers only. The corrected run and all exact-current-main workflows must pass before this work is marked verified.
 
 This slice does **not** close the full evidence capability map. Groups A–J and L–R retain their existing partial/missing/verification states unless separately proven by current-main integration evidence.
+
+## Direct-main security increment — safety escalation evidence scope (2026-10-29)
+
+- [x] Require a valid server-issued bearer session for safety escalation creation, listing, and update.
+- [x] Reject caller-selected person_id / affected_person_id values that differ from the authenticated care record.
+- [x] Validate each linked evidence ID against the same authorized person; reject duplicate IDs and bounded-list overflow.
+- [x] Scope escalation updates by both escalation ID and authenticated person; do not reveal another care record's escalation.
+- [x] Derive reviewer attribution from the authenticated caregiver instead of trusting a caller-supplied reviewer label.
+- [x] Add an integration regression test for authenticated creation, cross-person read/update denial, foreign evidence rejection, forged person scope, and missing bearer credentials.
+- [ ] Verification pending: run the new regression test and full backend validation on the exact latest main SHA. This hardens the escalation endpoints only; it does not establish that every safety-related endpoint is authorization-complete.
