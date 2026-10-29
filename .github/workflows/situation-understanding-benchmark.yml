@@ -2,15 +2,26 @@ name: Situation-understanding benchmark
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/longitudinal-benchmark-mainline]
     paths:
       - "backend/app/services/uncertainty_intelligence.py"
+      - "backend/app/services/baseline.py"
+      - "backend/app/services/change_detection.py"
+      - "backend/app/services/pattern_detection.py"
+      - "backend/app/api/change.py"
       - "backend/tests/test_situation_understanding_benchmark.py"
+      - "backend/tests/test_longitudinal_change_benchmark.py"
+      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
       - ".github/workflows/situation-understanding-benchmark.yml"
   pull_request:
     paths:
       - "backend/app/services/uncertainty_intelligence.py"
+      - "backend/app/services/baseline.py"
+      - "backend/app/services/change_detection.py"
+      - "backend/app/services/pattern_detection.py"
+      - "backend/app/api/change.py"
       - "backend/tests/test_situation_understanding_benchmark.py"
+      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
       - ".github/workflows/situation-understanding-benchmark.yml"
   workflow_dispatch:
 
@@ -38,7 +49,7 @@ jobs:
       - name: Run situation-understanding benchmark
         id: benchmark
         continue-on-error: true
-        run: python -m pytest backend/tests/test_situation_understanding_benchmark.py -q --junitxml=/tmp/situation-understanding-benchmark.xml
+        run: python -m pytest backend/tests/test_situation_understanding_benchmark.py backend/tests/test_longitudinal_change_benchmark.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/situation-understanding-benchmark.xml
 
       - name: Publish measured benchmark score and enforce gate
         if: always()
@@ -74,3 +85,62 @@ jobs:
               raise SystemExit("Situation benchmark gate failed: zero executed, failures/errors, or skipped cases.")
           PY
           test "${{ steps.benchmark.outcome }}" = "success"
+
+
+  # Keep PostgreSQL integration as a distinct gate; migration success is not an API test.
+  postgres-longitudinal-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_benchmark
+          POSTGRES_PASSWORD: solenos_benchmark_ci
+          POSTGRES_DB: solenos_benchmark
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_benchmark -d solenos_benchmark"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
+      - name: Run longitudinal and downstream integration benchmark on PostgreSQL
+        run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml
+      - name: Enforce PostgreSQL integration gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          path = "/tmp/postgres-longitudinal.xml"
+          if not os.path.exists(path):
+              raise SystemExit("PostgreSQL integration report missing; no pass can be claimed.")
+          root = ET.parse(path).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
+          failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
+          errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
+          skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          print(f"POSTGRES_LONGITUDINAL_TESTS={tests}")
+          print(f"POSTGRES_LONGITUDINAL_FAILURES={failures}")
+          print(f"POSTGRES_LONGITUDINAL_ERRORS={errors}")
+          print(f"POSTGRES_LONGITUDINAL_SKIPPED={skipped}")
+          if not tests or failures or errors or skipped:
+              raise SystemExit("PostgreSQL longitudinal integration gate failed.")
+          PY
+
+# PR branch push trigger ensures a new run is created for every benchmark fix commit.
