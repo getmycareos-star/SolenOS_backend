@@ -50,6 +50,9 @@ class ConversationMessage(Base):
     guard_verdict = Column(String, nullable=True)
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
+    # The assistant row stores the idempotency key and source metadata for safe retry replay.
+    client_turn_id = Column(String(36), nullable=True, unique=True)
+    response_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
