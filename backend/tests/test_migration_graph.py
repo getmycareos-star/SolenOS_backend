@@ -36,3 +36,4 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     assert "20261029_27_completeness" in revision_ids
     assert "20261029_28_conflict_remainder" in revision_ids
     assert "20261029_29_ev_rel_scope" in revision_ids
+    assert "20261029_30_comp_turns" in revision_ids
