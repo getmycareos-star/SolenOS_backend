@@ -1,13 +1,13 @@
 """Add explicit acquisition and transfer provenance to evidence.
 
-Revision ID: 20261029_18_acquisition_provenance
+Revision ID: 20261029_18_acq_provenance
 Revises: 20261029_17_pattern_metrics
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_18_acquisition_provenance"
+revision = "20261029_18_acq_provenance"
 down_revision = "20261029_17_pattern_metrics"
 branch_labels = None
 depends_on = None
