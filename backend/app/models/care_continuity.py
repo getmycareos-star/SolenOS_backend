@@ -263,6 +263,37 @@ def _enforce_claim_assessment_append_only(session, flush_context, instances):
         raise ValueError("Evidence claim assessments are append-only and cannot be deleted")
 
 
+class EvidenceClaimDependency(Base):
+    """Append-only dependency edge between two claims in the same care record."""
+    __tablename__ = "evidence_claim_dependencies"
+    __table_args__ = (
+        UniqueConstraint(
+            "person_id", "claim_id", "depends_on_claim_id", "dependency_type",
+            name="uq_evidence_claim_dependency",
+        ),
+        Index("ix_evidence_claim_dependencies_person_claim", "person_id", "claim_id"),
+        Index("ix_evidence_claim_dependencies_person_depends", "person_id", "depends_on_claim_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    claim_id = Column(String, ForeignKey("care_assertions.id", ondelete="CASCADE"), nullable=False)
+    depends_on_claim_id = Column(String, ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=False)
+    dependency_type = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_evidence_claim_dependency_append_only(session, flush_context, instances):
+    cls = EvidenceClaimDependency
+    if any(isinstance(obj, cls) for obj in session.dirty):
+        raise ValueError("Claim dependencies are append-only; create a new relationship instead")
+    if any(isinstance(obj, cls) for obj in session.deleted):
+        raise ValueError("Claim dependencies are append-only and cannot be deleted")
+
+
 class EvidenceSourceRelationship(Base):
     """Append-only, person-scoped source lineage and corroboration review."""
     __tablename__ = "evidence_source_relationships"
