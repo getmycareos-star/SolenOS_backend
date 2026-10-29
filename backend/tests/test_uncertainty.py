@@ -439,6 +439,40 @@ def test_clarification_question_requires_same_record_claim_and_matching_subject_
             json={**base, "claim_id": "question-claim-foreign"},
         )
         assert foreign_claim.status_code == 422, foreign_claim.text
+
+        missing_necessity_rationale = client.post(
+            "/api/v1/uncertainty/questions",
+            json={
+                **base,
+                "question": "Who can confirm the medication list?",
+                "necessity": "necessary",
+                "intended_answerer_role": "professional",
+            },
+        )
+        assert missing_necessity_rationale.status_code == 422, missing_necessity_rationale.text
+
+        with_intent = client.post(
+            "/api/v1/uncertainty/questions",
+            json={
+                **base,
+                "question": "Who can confirm the medication list?",
+                "intended_answerer_role": "professional",
+                "intended_answerer_label": "Cardiology clinic",
+                "necessity": "necessary",
+                "necessity_rationale": "The current medication status is disputed and is needed for the appointment handoff.",
+            },
+        )
+        assert with_intent.status_code == 200, with_intent.text
+        assert with_intent.json()["intended_answerer_role"] == "professional"
+        assert with_intent.json()["intended_answerer_label"] == "Cardiology clinic"
+        assert with_intent.json()["necessity"] == "necessary"
+        assert "needed for the appointment handoff" in with_intent.json()["necessity_rationale"]
+
+        invalid_answerer = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**base, "question": "Who can confirm this?", "intended_answerer_role": "ai_model"},
+        )
+        assert invalid_answerer.status_code == 422, invalid_answerer.text
     finally:
         teardown_db()
 
