@@ -17,7 +17,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
-from app.models.care_continuity import EvidenceSourceRelationship
+from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
@@ -235,7 +235,52 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             }
             for row in evidence_rows
         }
+    freshness_assessments = []
+    freshness_by_evidence: dict[str, list[dict]] = {}
+    if referenced_evidence_ids:
+        freshness_rows = (
+            db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
+            .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
+            .filter(
+                EvidenceFreshnessAssessment.person_id == person_id,
+                EvidenceFreshnessAssessment.evidence_id.in_(sorted(referenced_evidence_ids)),
+            )
+            .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
+            .limit(100)
+            .all()
+        )
+        seen_policy_evidence_pairs = set()
+        for assessment, policy in freshness_rows:
+            pair = (str(assessment.evidence_id), str(assessment.policy_id))
+            if pair in seen_policy_evidence_pairs:
+                continue
+            seen_policy_evidence_pairs.add(pair)
+            item = {
+                "assessment_id": str(assessment.id),
+                "evidence_id": str(assessment.evidence_id),
+                "policy_id": str(policy.id),
+                "domain_key": policy.domain_key,
+                "policy_version": assessment.policy_version,
+                "freshness_status": assessment.freshness_status,
+                "source_time": _iso(assessment.source_time),
+                "source_time_kind": assessment.source_time_kind,
+                "assessed_at": _iso(assessment.assessed_at),
+                "age_days": assessment.age_days,
+                "rationale": assessment.rationale,
+                "interpretation_limit": "This is a policy application, not a truth judgment or clinical currentness guarantee.",
+            }
+            freshness_assessments.append(item)
+            freshness_by_evidence.setdefault(str(assessment.evidence_id), []).append(item)
+
+    for evidence_id, source in evidence_sources.items():
+        source["freshness_assessments"] = freshness_by_evidence.get(str(evidence_id), [])
+
     for row in facts + event_items + appointment_items:
+        row["freshness_assessments"] = [
+            assessment
+            for evidence_id in row.get("evidence_ids", [])
+            for assessment in freshness_by_evidence.get(str(evidence_id), [])
+        ]
         row["evidence_sources"] = [
             evidence_sources[evidence_id]
             for evidence_id in row.get("evidence_ids", [])
@@ -272,10 +317,19 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "events": event_items,
         "appointments": appointment_items,
         "evidence_lineage": evidence_lineage,
+        "freshness_assessments": freshness_assessments,
+        "freshness_assessment_scope": {
+            "status": "latest_per_policy_for_linked_evidence",
+            "bounded": True,
+            "limit": 100,
+            "history_complete": False,
+            "interpretation_limit": "Full assessment history is available through the evidence-freshness history endpoint; this preparation view shows only the latest result per policy and linked evidence.",
+        },
         "source_coverage": {
             "care_facts": "available" if fact_rows is not None else "unavailable",
             "care_events": "available" if event_items else "no_records_returned",
             "appointments": "available" if appointment_items else "no_records_returned",
+            "evidence_freshness_assessments": "available" if freshness_assessments else ("no_records_returned" if referenced_evidence_ids else "not_applicable_no_linked_evidence"),
             "medications_and_allergies": "unavailable",
             "documents": "unavailable",
             "community": "not_authorized",
