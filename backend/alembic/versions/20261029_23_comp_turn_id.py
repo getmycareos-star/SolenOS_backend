@@ -48,10 +48,10 @@ def downgrade() -> None:
         return
     indexes = inspector.get_indexes("conversation_messages")
     constraints = inspector.get_unique_constraints("conversation_messages")
-    if any(index.get("name") == "uq_conversation_session_client_turn" for index in indexes):
-        op.drop_index("uq_conversation_session_client_turn", table_name="conversation_messages")
-    elif any(constraint.get("name") == "uq_conversation_session_client_turn" for constraint in constraints):
-        op.drop_constraint("uq_conversation_session_client_turn", "conversation_messages", type_="unique")
+    if any(index.get("name") == "uq_conversation_messages_client_turn_id" for index in indexes):
+        op.drop_index("uq_conversation_messages_client_turn_id", table_name="conversation_messages")
+    elif any(constraint.get("name") == "uq_conversation_messages_client_turn_id" for constraint in constraints):
+        op.drop_constraint("uq_conversation_messages_client_turn_id", "conversation_messages", type_="unique")
     columns = {column["name"] for column in inspect(bind).get_columns("conversation_messages")}
     if "response_metadata_json" in columns:
         op.drop_column("conversation_messages", "response_metadata_json")
