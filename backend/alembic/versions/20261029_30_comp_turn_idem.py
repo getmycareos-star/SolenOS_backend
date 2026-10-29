@@ -44,7 +44,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError(
-        "Refusing to remove Companion idempotency and response provenance. "
-        "Use a forward-only compatibility migration to preserve retry audit history."
-    )
+    # This is an additive compatibility migration. During an application rollback,
+    # move Alembic's version back while retaining the nullable columns/index and
+    # any already-recorded retry provenance. Older application code ignores these
+    # extra columns; dropping them would destroy audit/replay history.
+    pass
