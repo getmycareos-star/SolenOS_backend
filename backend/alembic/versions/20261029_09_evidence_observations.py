@@ -26,6 +26,7 @@ def upgrade() -> None:
             sa.Column("id", sa.String(), primary_key=True),
             sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
             sa.Column("evidence_id", sa.String(), sa.ForeignKey("evidence.id", ondelete="RESTRICT"), nullable=False),
+            sa.Column("supersedes_observation_id", sa.String(), sa.ForeignKey("evidence_observations.id"), nullable=True),
             sa.Column("observation_kind", sa.String(length=40), nullable=False),
             sa.Column("epistemic_status", sa.String(length=24), nullable=False),
             sa.Column("subject_label", sa.String(length=160), nullable=False),
@@ -51,22 +52,23 @@ def upgrade() -> None:
             sa.Column("extraction_run_id", sa.String(length=128), nullable=True),
             sa.Column("created_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("recorded_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-            sa.UniqueConstraint(
-                "person_id", "evidence_id", "source_span_start", "source_span_end",
-                "attribute", "observation_kind", "epistemic_status",
-                name="uq_evidence_observation_source_span",
-            ),
         )
     else:
         columns = {c["name"] for c in inspect(bind).get_columns("evidence_observations")}
         expected = {
-            "id", "person_id", "evidence_id", "observation_kind", "epistemic_status",
+            "id", "person_id", "evidence_id", "supersedes_observation_id", "observation_kind", "epistemic_status",
             "subject_label", "attribute", "value_text", "normalized_value", "units", "context",
             "occurred_at", "observed_at", "reported_at", "observer_label", "observer_caregiver_id",
             "observation_method", "source_passage", "source_span_start", "source_span_end", "negated",
             "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version",
             "extraction_run_id", "created_by_caregiver_id", "recorded_at",
         }
+        if "supersedes_observation_id" not in columns:
+            op.add_column("evidence_observations", sa.Column(
+                "supersedes_observation_id", sa.String(),
+                sa.ForeignKey("evidence_observations.id"), nullable=True,
+            ))
+            columns.add("supersedes_observation_id")
         if expected - columns:
             raise RuntimeError(f"Existing evidence_observations table is incomplete: {sorted(expected - columns)}")
     indexes = {i["name"] for i in inspect(bind).get_indexes("evidence_observations")}
