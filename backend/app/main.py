@@ -1,6 +1,4 @@
 from contextlib import asynccontextmanager
-
-logger = logging.getLogger(__name__)
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -48,6 +46,8 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
+
+logger = logging.getLogger(__name__)
 
 class RequestBodySizeLimitMiddleware:
     # Bound request buffering before FastAPI parses JSON or multipart bodies.
