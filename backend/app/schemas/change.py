@@ -63,6 +63,10 @@ class ChangeBase(BaseModel):
     persistence_days: Optional[int] = None
     is_persistent: Optional[bool] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    baseline_coverage_status: Optional[str] = None
+    current_coverage_status: Optional[str] = None
+    baseline_coverage_fraction: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+    current_coverage_fraction: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_ids: List[str]
     explanation: Optional[str] = None
     time_provenance: Optional[str] = None
