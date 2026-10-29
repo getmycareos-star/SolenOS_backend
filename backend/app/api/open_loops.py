@@ -527,11 +527,11 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
         raise HTTPException(status_code=409, detail="A response must be recorded before closure")
     if loop.loop_type == "professional_input" and not any(item.get("evidence") for item in (loop.response_evidence or []) if isinstance(item, dict)):
         raise HTTPException(status_code=409, detail="Professional input has not been substantiated by source evidence")
-    if loop.loop_type == "missing_information" and loop.missing_information:
-        raise HTTPException(status_code=409, detail="Required information remains missing")
-    if loop.loop_type == "contradiction" and not any("reconciliation" in str(e).lower() for e in payload.evidence):
-        raise HTTPException(status_code=409, detail="Contradiction closure requires explicit reconciliation evidence")
-    if loop.outcome_status != "outcome_verified" and loop.loop_type in {"pending_action", "unconfirmed_outcome", "follow_up", "unresolved_concern"}:
+    if loop.loop_type == "missing_information" and (loop.missing_information or loop.outcome_status != "outcome_verified"):
+        raise HTTPException(status_code=409, detail="Required information must be obtained, validated, and recorded as a verified outcome")
+    if loop.loop_type == "contradiction" and (loop.outcome_status != "outcome_verified" or not any("reconciliation" in str(e).lower() for e in payload.evidence)):
+        raise HTTPException(status_code=409, detail="Contradiction closure requires verified, explicit reconciliation evidence")
+    if loop.outcome_status != "outcome_verified" and loop.loop_type in {"pending_action", "pending_decision", "deferred_decision", "unconfirmed_outcome", "follow_up", "unresolved_concern", "missing_information", "contradiction"}:
         raise HTTPException(status_code=409, detail="This loop requires a verified outcome before closure")
     before = _snapshot(loop)
     loop.status = "closed"
