@@ -22,6 +22,12 @@ from app.schemas.change import (
 from app.services.change_detection import detect_event_changes, detect_assertion_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
+from app.models.care import Evidence
+from app.models.observation_coverage import ObservationCoverage
+from app.schemas.observation_coverage import (
+    ObservationCoverageCreate, ObservationCoverageRecord, CoverageAssessment,
+)
+from app.services.observation_coverage import assess_observation_coverage
 
 router = APIRouter(prefix="/change", tags=["change"])
 
@@ -535,14 +541,6 @@ def _coverage_record_out(row) -> dict:
         "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
         "created_at": utc(row.created_at),
     }
-
-from app.models.care import Evidence
-from app.models.observation_coverage import ObservationCoverage
-from app.schemas.observation_coverage import (
-    ObservationCoverageCreate, ObservationCoverageRecord, CoverageAssessment,
-)
-from app.services.observation_coverage import assess_observation_coverage
-
 
 @router.post("/coverage", response_model=ObservationCoverageRecord, status_code=201)
 def record_observation_coverage(
