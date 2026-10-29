@@ -959,6 +959,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     context_lines: list[str] = []
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
+    source_appointment_ids: list[str] = []
+    source_handoff_ids: list[str] = []
+    source_notification_ids: list[str] = []
 
     # Data minimization: do not send private LCR events or appointments to
     # Daily Capture, document-only or Community assistance. Each workflow gets
@@ -999,6 +1002,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if payload.appointment_id and not appointments:
             raise HTTPException(status_code=404, detail="Appointment not found in this care record")
         for appointment in appointments:
+            source_appointment_ids.append(str(appointment.id))
             context_lines.append(
                 f"Recorded appointment [{appointment.id}]: {appointment.title}; status={appointment.status}; "
                 f"scheduled={appointment.scheduled_at.isoformat() if appointment.scheduled_at else 'unknown'}"
@@ -1026,6 +1030,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             CaregiverHandoff.person_id == person_id
         ).order_by(CaregiverHandoff.timestamp.desc()).limit(5).all()
         for handoff in handoffs:
+            source_handoff_ids.append(str(handoff.id))
             context_lines.append(
                 f"Recorded handoff [{handoff.id}]: responsibility={handoff.responsibility_type}; "
                 f"scope={handoff.scope or 'not specified'}; completed={bool(handoff.is_completed)}; "
@@ -1038,6 +1043,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             CareNotification.caregiver_id == caregiver_id,
         ).order_by(CareNotification.created_at.desc()).limit(10).all()
         for notification in notifications:
+            source_notification_ids.append(str(notification.id))
             context_lines.append(
                 f"Recorded notification [{notification.id}]: title={notification.title}; "
                 f"category={notification.category}; priority={notification.priority}; "
@@ -1191,6 +1197,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "persistence": "read_only_assistance",
         "source_event_ids": source_event_ids,
         "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_handoff_ids": source_handoff_ids,
+        "source_notification_ids": source_notification_ids,
         "provider_status": "available",
     }
 
