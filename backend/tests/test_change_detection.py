@@ -1230,3 +1230,38 @@ def test_trend_and_instability_patterns_require_persisted_coverage_provenance():
         db.close()
     finally:
         teardown_db()
+
+
+def test_coverage_assessment_api_rejects_naive_query_timestamps():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="coverage-api-person", name="Coverage API test")
+        caregiver = Caregiver(
+            id="coverage-api-caregiver",
+            name="Coverage API Caregiver",
+            email="coverage-api@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        response = client.get(
+            f"/change/coverage/{person.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": "2026-10-01T00:00:00",
+                "window_end": "2026-10-02T00:00:00",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 422
+        assert "explicit timezone offsets" in response.text
+    finally:
+        teardown_db()
