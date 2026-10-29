@@ -1518,7 +1518,39 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
-        for appointment in appointments:
+        appointment_direct_terms = sorted(_base_context_terms(user_text))
+        appointment_query_terms = (
+            appointment_direct_terms
+            + sorted(_expanded_context_terms(user_text) - set(appointment_direct_terms))
+        )[:12]
+        matching_appointments = []
+        if appointment_query_terms:
+            matching_appointments = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.person_id == person_id,
+                    or_(*[
+                        field.ilike(f"%{term}%")
+                        for term in appointment_query_terms
+                        for field in (
+                            Appointment.title, Appointment.provider, Appointment.healthcare_org,
+                            Appointment.location, Appointment.status,
+                        )
+                    ]),
+                )
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(30)
+                .all()
+            )
+        merged_appointments = []
+        seen_appointment_ids = set()
+        for appointment_row in [*matching_appointments, *appointments]:
+            appointment_key = str(appointment_row.id)
+            if appointment_key in seen_appointment_ids:
+                continue
+            seen_appointment_ids.add(appointment_key)
+            merged_appointments.append(appointment_row)
+        for appointment in merged_appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
                 "LCR appointment evidence: "
