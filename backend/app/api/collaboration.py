@@ -547,7 +547,7 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
         direct_overlap = direct_terms & record_terms
         synonym_overlap = synonym_terms & record_terms
         score = 3 * len(direct_overlap) + len(synonym_overlap)
-        for phrase in re.findall(r"[a-z0-9']+(?:\\s+[a-z0-9']+){1,3}", normalized_query):
+        for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
             if len(phrase) >= 8 and phrase in text:
                 score += 3
         scored.append((score, index, line))
@@ -564,7 +564,7 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
         r"what about|how about|what happened|why did that|why|how so|"
         r"the same|same thing|that appointment|this appointment|"
-        r"what was that|and then|and what|what next)\\b",
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
     if not referential:
