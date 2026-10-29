@@ -774,8 +774,8 @@ def detect_numeric_observation_changes(
             explanation += f"Relative numeric change: {relative_percent:.4f}%. "
         explanation += (
             "The values use matching units and observation kind/status. This is a "
-            "descriptive measurement difference only; direction of care impact, "
-            "clinical significance, causation, and urgency are not inferred."
+            "descriptive measurement difference only. This does not establish direction of care impact, "
+            "clinical significance, causation, or urgency; those conclusions are not inferred."
         )
         change = Change(
             person_id=person_id,
