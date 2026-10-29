@@ -1377,3 +1377,63 @@ def test_baseline_is_revised_when_observation_coverage_becomes_known():
         db.close()
     finally:
         teardown_db()
+
+
+def test_zero_baseline_rate_is_explained_without_infinite_percentage():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-zero-baseline", name="Zero baseline test")
+        caregiver = Caregiver(
+            id="caregiver-zero-baseline",
+            name="Zero Baseline Caregiver",
+            email="zero-baseline@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for i, days_ago in enumerate((7, 14)):
+            db.add(CareEvent(
+                id=f"zero-baseline-event-{i}",
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded fall {i + 1}",
+                created_by_caregiver_id=caregiver.id,
+            ))
+        db.add_all([
+            ObservationCoverage(
+                id="zero-baseline-covered",
+                person_id=person.id,
+                subject_type="fall",
+                window_start=now - timedelta(days=180),
+                window_end=now - timedelta(days=42),
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The domain was actively observed throughout the baseline interval.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="zero-current-covered",
+                person_id=person.id,
+                subject_type="fall",
+                window_start=now - timedelta(days=42),
+                window_end=now,
+                coverage_status="covered",
+                source_evidence_ids=[],
+                rationale="The domain was actively observed throughout the current interval.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        emergence = next(item for item in changes if item.change_type.value == "emergence")
+        assert "Relative change is undefined because the baseline rate was zero" in emergence.explanation
+        assert "inf%" not in emergence.explanation.lower()
+        db.close()
+    finally:
+        teardown_db()
