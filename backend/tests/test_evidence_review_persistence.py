@@ -527,3 +527,49 @@ def test_source_relationship_append_only_guard(review_records):
         db.rollback()
     finally:
         db.close()
+
+def test_structured_observation_requires_exact_source_span_and_preserves_epistemic_kind(review_records):
+    client_a, client_b = review_records
+    source_text = "Caregiver reports three awakenings overnight."
+    db = SessionLocal()
+    try:
+        caregiver = db.query(Caregiver).filter(Caregiver.person_id == "review-person-a").one()
+        db.add(Evidence(
+            id="review-observation-evidence", person_id="review-person-a", type="caregiver_report",
+            source_text=source_text, uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    payload = {
+        "observation_kind": "caregiver_report",
+        "epistemic_status": "reported",
+        "subject_label": "care recipient",
+        "attribute": "sleep_awakenings",
+        "value_text": "three awakenings",
+        "source_passage": source_text,
+        "extraction_method": "human_entered",
+        "extraction_version": "manual-v1",
+    }
+    created = client_a.post("/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=payload)
+    assert created.status_code == 201, created.text
+    row = created.json()
+    assert row["epistemic_status"] == "reported"
+    assert row["observation_kind"] == "caregiver_report"
+    assert source_text[row["source_span_start"]:row["source_span_end"]] == row["source_passage"]
+    assert row["created_by_caregiver_id"] == "review-caregiver-a"
+
+    invalid_passage = dict(payload, source_passage="The person slept well.")
+    assert client_a.post("/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=invalid_passage).status_code == 422
+
+    invented_unknown = dict(payload, epistemic_status="unknown", value_text="three awakenings")
+    assert client_a.post("/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=invented_unknown).status_code == 422
+
+    unqualified_observation = dict(payload, observation_kind="direct_observation", epistemic_status="observed")
+    assert client_a.post("/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=unqualified_observation).status_code == 422
+
+    listed = client_a.get("/api/v1/care-continuity/evidence/review-observation-evidence/observations")
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()] == [row["id"]]
+    assert client_b.get("/api/v1/care-continuity/evidence/review-observation-evidence/observations").status_code == 404
