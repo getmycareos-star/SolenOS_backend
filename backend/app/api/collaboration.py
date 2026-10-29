@@ -535,6 +535,16 @@ def _expanded_context_terms(text: str) -> set[str]:
     return expanded
 
 
+def _safe_metadata_list(metadata: dict, key: str) -> list:
+    value = metadata.get(key, [])
+    return value if isinstance(value, list) else []
+
+
+def _safe_metadata_mapping(metadata: dict, key: str) -> dict:
+    value = metadata.get(key, {})
+    return value if isinstance(value, dict) else {}
+
+
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """Put query-relevant authorized records first without changing their meaning.
 
@@ -1389,13 +1399,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "guard_verdict": history_row.guard_verdict,
                     "safety_note": history_row.safety_note,
                     "evidence_ids": history_evidence_ids,
-                    "source_event_ids": history_metadata.get("source_event_ids", []),
-                    "source_evidence_ids": history_metadata.get("source_evidence_ids", []),
-                    "source_appointment_ids": history_metadata.get("source_appointment_ids", []),
-                    "source_assertion_ids": history_metadata.get("source_assertion_ids", []),
-                    "source_freshness_assessment_ids": history_metadata.get("source_freshness_assessment_ids", []),
-                    "source_lcr_context_ids": history_metadata.get("source_lcr_context_ids", []),
-                    "lcr_context_coverage": history_metadata.get("lcr_context_coverage", {}),
+                    "source_event_ids": _safe_metadata_list(history_metadata, "source_event_ids"),
+                    "source_evidence_ids": _safe_metadata_list(history_metadata, "source_evidence_ids"),
+                    "source_appointment_ids": _safe_metadata_list(history_metadata, "source_appointment_ids"),
+                    "source_assertion_ids": _safe_metadata_list(history_metadata, "source_assertion_ids"),
+                    "source_freshness_assessment_ids": _safe_metadata_list(history_metadata, "source_freshness_assessment_ids"),
+                    "source_lcr_context_ids": _safe_metadata_list(history_metadata, "source_lcr_context_ids"),
+                    "lcr_context_coverage": _safe_metadata_mapping(history_metadata, "lcr_context_coverage"),
                     "source_record_refs": history_source_refs,
                     "ai_generated": history_metadata.get("ai_generated", history_row.role == "assistant" and history_row.guard_verdict == "passed"),
                     "written_to_lcr": False,
@@ -1421,14 +1431,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "safety_note": saved_assistant.safety_note,
                 "confidence": None,
                 "evidence_ids": saved_evidence_ids if isinstance(saved_evidence_ids, list) else [],
-                "source_event_ids": saved_metadata.get("source_event_ids", []),
-                "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
-                "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+                "source_event_ids": _safe_metadata_list(saved_metadata, "source_event_ids"),
+                "source_evidence_ids": _safe_metadata_list(saved_metadata, "source_evidence_ids"),
+                "source_appointment_ids": _safe_metadata_list(saved_metadata, "source_appointment_ids"),
                 "source_record_refs": saved_source_record_refs,
-                "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
-                "source_freshness_assessment_ids": saved_metadata.get("source_freshness_assessment_ids", []),
-                "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
-                "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {}),
+                "source_assertion_ids": _safe_metadata_list(saved_metadata, "source_assertion_ids"),
+                "source_freshness_assessment_ids": _safe_metadata_list(saved_metadata, "source_freshness_assessment_ids"),
+                "source_lcr_context_ids": _safe_metadata_list(saved_metadata, "source_lcr_context_ids"),
+                "lcr_context_coverage": _safe_metadata_mapping(saved_metadata, "lcr_context_coverage"),
                 "ai_generated": saved_metadata.get("ai_generated", False),
                 "written_to_lcr": False,
                 "persistence": "conversation_only",
@@ -2152,13 +2162,13 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
             "guard_verdict": row.guard_verdict,
             "safety_note": row.safety_note,
             "evidence_ids": evidence_ids if isinstance(evidence_ids, list) else [],
-            "source_event_ids": metadata.get("source_event_ids", []),
-            "source_evidence_ids": metadata.get("source_evidence_ids", []),
-            "source_appointment_ids": metadata.get("source_appointment_ids", []),
-            "source_assertion_ids": metadata.get("source_assertion_ids", []),
-            "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
-            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
-            "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+            "source_event_ids": _safe_metadata_list(metadata, "source_event_ids"),
+            "source_evidence_ids": _safe_metadata_list(metadata, "source_evidence_ids"),
+            "source_appointment_ids": _safe_metadata_list(metadata, "source_appointment_ids"),
+            "source_assertion_ids": _safe_metadata_list(metadata, "source_assertion_ids"),
+            "source_freshness_assessment_ids": _safe_metadata_list(metadata, "source_freshness_assessment_ids"),
+            "source_lcr_context_ids": _safe_metadata_list(metadata, "source_lcr_context_ids"),
+            "lcr_context_coverage": _safe_metadata_mapping(metadata, "lcr_context_coverage"),
             "source_record_refs": source_record_refs if isinstance(source_record_refs, list) else [],
             "ai_generated": metadata.get("ai_generated", row.role == "assistant" and row.guard_verdict == "passed"),
             "written_to_lcr": False,
