@@ -12,6 +12,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE_URL = "http://127.0.0.1:8012"
@@ -119,6 +121,46 @@ def main():
         )
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
+
+        # Real PostgreSQL observation-coverage persistence, authorization, and
+        # explicit coverage assessment. This never uses the deployed Railway API.
+        coverage_start = datetime.now(timezone.utc) - timedelta(days=14)
+        coverage_end = datetime.now(timezone.utc) - timedelta(minutes=1)
+        coverage_body = {
+            "person_id": person_a,
+            "subject_type": "mobility",
+            "window_start": coverage_start.isoformat(),
+            "window_end": coverage_end.isoformat(),
+            "coverage_status": "covered",
+            "source_evidence_ids": [],
+            "rationale": "CI fixture explicitly declares the mobility domain observed throughout this interval.",
+        }
+        status, saved_coverage = request(
+            "POST", "/api/v1/change/coverage", token=token_a, body=coverage_body,
+        )
+        require(status == 201, f"coverage creation expected 201, got {status}: {saved_coverage}")
+        coverage_query = urlencode({
+            "subject_type": "mobility",
+            "window_start": coverage_start.isoformat(),
+            "window_end": coverage_end.isoformat(),
+        })
+        status, assessed_coverage = request(
+            "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_a,
+        )
+        require(status == 200, f"coverage assessment expected 200, got {status}: {assessed_coverage}")
+        require(
+            assessed_coverage.get("coverage_status") == "covered"
+            and assessed_coverage.get("coverage_fraction") == 1.0
+            and any(row.get("id") == saved_coverage.get("id") for row in assessed_coverage.get("records", [])),
+            f"coverage assessment did not return persisted complete interval: {assessed_coverage}",
+        )
+        status, cross_person_coverage = request(
+            "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_b,
+        )
+        require(
+            status == 403,
+            f"cross-person observation-coverage read must return 403, got {status}: {cross_person_coverage}",
+        )
 
         # Real PostgreSQL uncertainty API persistence and record-isolation checks.
         status, created_uncertainty = request("POST", "/api/v1/uncertainty/assessments", token=token_a, body={
@@ -277,6 +319,14 @@ def main():
             for item in (hydration_after_restart.get("active_care_situation") or {}).get("observations", [])
         ]
         require(observation in observations_after_restart, "care evidence did not survive application restart")
+        status, coverage_after_restart = request(
+            "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_a,
+        )
+        require(status == 200, f"coverage read after application restart expected 200, got {status}: {coverage_after_restart}")
+        require(
+            any(row.get("id") == saved_coverage.get("id") for row in coverage_after_restart.get("records", [])),
+            "observation coverage did not persist across application restart",
+        )
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"record isolation failed after restart; expected 403, got {status}")
 
