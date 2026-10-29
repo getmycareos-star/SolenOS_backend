@@ -905,3 +905,48 @@ def test_appointment_evidence_reference_parser_preserves_only_explicit_ids():
     assert _evidence_ids_from_row({"source_evidence_id": "evidence-c"}) == ["evidence-c"]
     assert _evidence_ids_from_row({"evidence_ids": "not-json"}) == ["not-json"]
     assert _evidence_ids_from_row({"evidence_ids": None, "source_evidence_id": None}) == []
+
+
+
+def test_person_historical_projection_reconstructs_latest_revision_per_target(client):
+    from app.models.care_continuity import CareStateRevision
+
+    test_client, owner, other = client
+    as_of = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+    with TestSessionLocal() as db:
+        db.add_all([
+            CareStateRevision(
+                person_id=owner["person"]["id"], target_type="care_events", target_id="history-event",
+                revision_number=1, change_kind="created", after_state='{"status":"reported"}',
+                evidence_ids=[], changed_at=datetime(2026, 10, 27, 10, 0, tzinfo=timezone.utc),
+            ),
+            CareStateRevision(
+                person_id=owner["person"]["id"], target_type="care_events", target_id="history-event",
+                revision_number=2, change_kind="updated", before_state='{"status":"reported"}',
+                after_state='{"status":"reviewed"}', evidence_ids=[],
+                changed_at=datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc),
+            ),
+            CareStateRevision(
+                person_id=other["person"]["id"], target_type="care_events", target_id="private-event",
+                revision_number=1, change_kind="created", after_state='{"private":"not-visible"}',
+                evidence_ids=[], changed_at=datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc),
+            ),
+        ])
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get(
+        "/api/v1/care-continuity/state-reconstruction/as-of",
+        headers=headers,
+        params={"as_of": as_of.isoformat()},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["coverage_status"] == "partial_revision_history"
+    assert body["truncated"] is False
+    assert len(body["items"]) == 1
+    assert body["items"][0]["target_id"] == "history-event"
+    assert body["items"][0]["revision_number"] == 2
+    assert body["items"][0]["state"] == {"status": "reviewed"}
+    assert "not a complete historical Living Care Record" in body["interpretation_limit"]
+    assert "not-visible" not in response.text
