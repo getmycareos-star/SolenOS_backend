@@ -28,7 +28,7 @@ from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -2558,6 +2558,55 @@ def list_person_assertions(person_id: str, request: Request, limit: int = 100, d
 @router.get("/revisions/{person_id}")
 def list_person_revisions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
     return _person_scoped_rows("state-revisions", person_id, request, db, limit)
+
+
+@router.get("/state-revisions/{target_type}/{target_id}/as-of")
+def reconstruct_state_as_of(
+    target_type: str,
+    target_id: str,
+    request: Request,
+    as_of: datetime = Query(..., description="Return the latest persisted target revision at or before this instant"),
+    db: Session = Depends(get_db),
+):
+    """Reconstruct one target's recorded state from its immutable revision history."""
+    person_id, _caregiver_id = _scoped_identity(request, db)
+    if not target_type.strip() or not target_id.strip():
+        raise HTTPException(status_code=422, detail="Target type and ID are required")
+    row = db.query(CareStateRevision).filter(
+        CareStateRevision.person_id == person_id,
+        CareStateRevision.target_type == target_type,
+        CareStateRevision.target_id == target_id,
+        CareStateRevision.changed_at <= as_of,
+    ).order_by(
+        desc(CareStateRevision.revision_number),
+        desc(CareStateRevision.changed_at),
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No revision is recorded for this target at or before the requested instant; this does not establish that the target did not exist.",
+        )
+    try:
+        reconstructed = json.loads(row.after_state) if row.after_state else None
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.exception("Historical care-state snapshot is not valid JSON")
+        raise HTTPException(status_code=500, detail="Stored historical state could not be reconstructed") from exc
+    return {
+        "person_id": person_id,
+        "target_type": row.target_type,
+        "target_id": row.target_id,
+        "requested_as_of": as_of.isoformat(),
+        "revision_number": row.revision_number,
+        "change_kind": row.change_kind,
+        "state": reconstructed,
+        "evidence_ids": list(row.evidence_ids or []),
+        "recorded_change_at": row.changed_at.isoformat() if row.changed_at else None,
+        "historical_state_source": "persisted_care_state_revision",
+        "interpretation_limit": (
+            "This reconstructs the last recorded revision at or before the requested instant. "
+            "It does not establish facts that were never persisted or prove the truth of the stored content."
+        ),
+    }
 
 
 @router.get("/outcomes/{person_id}")
