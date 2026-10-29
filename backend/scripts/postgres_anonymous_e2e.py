@@ -479,7 +479,7 @@ def main():
         retry_payload = {
             "text": "CI-only action with retry key",
             "evidence": [{"kind": "ci_fixture", "text": "retry evidence"}],
-            "idempotency_key": "postgres-open-loop-action-retry-001",
+            "idempotency_key": "postgres-open-loop-action-retry-002",
         }
         def retry_action(_):
             return request(
