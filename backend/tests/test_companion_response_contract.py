@@ -654,6 +654,23 @@ def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monke
     finally:
         teardown()
 
+def test_generic_record_word_does_not_outvote_specific_historical_evidence():
+    older_sleep = (
+        'LCR event evidence: {"event_id":"older-sleep","status":"recorded",'
+        '"title":"Waking several times overnight"}'
+    )
+    unrelated = (
+        'LCR event evidence: {"event_id":"routine","status":"recorded",'
+        '"title":"Routine household activity"}'
+    )
+    ranked = collaboration._rank_context_lines(
+        "What does the record say about rest?",
+        [unrelated, older_sleep],
+        1,
+    )
+    assert ranked == [older_sleep]
+
+
 def test_companion_paraphrase_ranking_covers_appointments_and_medication_terms():
     appointment = (
         'LCR appointment evidence: {"appointment_id":"visit-older",'
