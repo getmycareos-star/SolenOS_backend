@@ -1,4 +1,6 @@
 from datetime import datetime, timedelta, timezone
+import pytest
+from sqlalchemy.exc import IntegrityError
 import hashlib
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -236,6 +238,25 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         old_pattern = db.query(Pattern).filter(Pattern.id == pattern.id).one()
         assert old_pattern.is_active is False
         assert old_pattern.superseded_by_pattern_id == active_recurrence[0].id
+
+        duplicate_active = Pattern(
+            person_id=person.id,
+            subject_type="fall",
+            subject_id="",
+            pattern_type=PatternType.RECURRENCE,
+            pattern_strength=active_recurrence[0].pattern_strength,
+            event_ids=list(active_recurrence[0].event_ids),
+            change_ids=list(active_recurrence[0].change_ids or []),
+            temporal_start=active_recurrence[0].temporal_start,
+            temporal_end=active_recurrence[0].temporal_end,
+            evidence_count=active_recurrence[0].evidence_count,
+            is_active=True,
+        )
+        db.add(duplicate_active)
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
+
         assert (
             db.query(Pattern)
             .filter(
