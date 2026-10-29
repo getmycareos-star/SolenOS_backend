@@ -16,13 +16,15 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.models.care import Evidence
-from app.models.care_continuity import EvidenceReviewRecord
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
+from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +222,138 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         "uploaded_at": iso(evidence.uploaded_at),
         "ingested_at": iso(evidence.ingested_at),
     }
+
+@router.post(
+    "/claims/{claim_id}/assessments",
+    response_model=EvidenceClaimAssessmentResponse,
+    status_code=201,
+)
+def create_claim_assessment(
+    claim_id: str,
+    payload: EvidenceClaimAssessmentCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Append an explicit claim assessment with source passages and server-derived reviewer identity."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    claim = db.query(CareAssertion).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    links = [item.model_dump() for item in payload.evidence_links]
+    evidence_ids = [item["evidence_id"] for item in links]
+    if len(set(evidence_ids)) != len(evidence_ids):
+        raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed in a claim assessment")
+
+    evidence_rows = {}
+    if evidence_ids:
+        rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+        ).all()
+        evidence_rows = {row.id: row for row in rows}
+        if set(evidence_rows) != set(evidence_ids):
+            raise HTTPException(
+                status_code=422,
+                detail="Every linked evidence ID must exist in the authenticated care record",
+            )
+
+    relationships = {item["relationship"] for item in links}
+    required_relationships = {
+        "supported": {"supports"},
+        "partially_supported": {"supports", "partial_support", "scope_limited"},
+        "contradicted": {"contradicts"},
+        "conflicting": {"supports", "contradicts"},
+    }
+    if payload.status in required_relationships:
+        required = required_relationships[payload.status]
+        if payload.status == "partially_supported":
+            valid_support = bool(relationships & required)
+        elif payload.status == "conflicting":
+            valid_support = "supports" in relationships and "contradicts" in relationships
+        else:
+            valid_support = bool(relationships & required)
+        if not valid_support:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Claim status {payload.status!r} requires matching explicit evidence relationships",
+            )
+
+    for item in links:
+        evidence = evidence_rows[item["evidence_id"]]
+        passage = item.get("source_passage")
+        if passage is not None and passage not in (evidence.source_text or ""):
+            raise HTTPException(
+                status_code=422,
+                detail=f"source_passage must be an exact substring of linked evidence {evidence.id}",
+            )
+
+    latest = (
+        db.query(EvidenceClaimAssessment)
+        .filter(
+            EvidenceClaimAssessment.person_id == person_id,
+            EvidenceClaimAssessment.claim_id == claim_id,
+        )
+        .order_by(EvidenceClaimAssessment.claim_version.desc())
+        .first()
+    )
+    row = EvidenceClaimAssessment(
+        person_id=person_id,
+        claim_id=claim_id,
+        claim_version=(latest.claim_version + 1) if latest else 1,
+        status=payload.status,
+        rationale=payload.rationale.strip(),
+        policy_version=payload.policy_version,
+        evidence_links=links,
+        reviewed_by_caregiver_id=caregiver_id,
+        supersedes_assessment_id=latest.id if latest else None,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A concurrent assessment changed this claim version. Reload the assessment history and retry.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Claim assessment could not be persisted")
+        raise HTTPException(status_code=503, detail="Claim assessment could not be persisted") from exc
+    return row
+
+
+@router.get(
+    "/claims/{claim_id}/assessments",
+    response_model=list[EvidenceClaimAssessmentResponse],
+)
+def list_claim_assessments(
+    claim_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, _ = _scoped_identity(request, db)
+    claim = db.query(CareAssertion.id).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    return (
+        db.query(EvidenceClaimAssessment)
+        .filter(
+            EvidenceClaimAssessment.person_id == person_id,
+            EvidenceClaimAssessment.claim_id == claim_id,
+        )
+        .order_by(EvidenceClaimAssessment.claim_version.asc())
+        .all()
+    )
+
 
 RESOURCES = {
     "facts": "care_facts",
