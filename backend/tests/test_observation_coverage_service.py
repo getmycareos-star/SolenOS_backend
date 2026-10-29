@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 from pydantic import ValidationError
+import pytest
 from app.schemas.observation_coverage import ObservationCoverageCreate
 
 from app.core.database import Base
@@ -161,3 +162,31 @@ def test_coverage_input_rejects_naive_timestamps():
         assert "explicit timezone offset" in str(exc)
     else:
         raise AssertionError("Naive timestamps must be rejected for coverage windows")
+
+
+
+def test_coverage_rows_are_append_only():
+    db, person, caregiver = _db()
+    try:
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 2, tzinfo=timezone.utc)
+        row = ObservationCoverage(
+            id="immutable-coverage", person_id=person.id, subject_type="mobility",
+            window_start=start, window_end=end, coverage_status="covered",
+            source_evidence_ids=[], rationale="Original observation coverage record.",
+            recorded_by_caregiver_id=caregiver.id,
+        )
+        db.add(row)
+        db.commit()
+        row.rationale = "Attempted rewrite of the original coverage record."
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+        row = db.query(ObservationCoverage).filter_by(id="immutable-coverage").one()
+        db.delete(row)
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
