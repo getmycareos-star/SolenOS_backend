@@ -118,3 +118,53 @@ def test_unknown_assessment_persists_and_projects_as_unknown(uncertainty_api_db)
     assert view.status_code == 200, view.text
     assert view.json()["epistemic_state"] == "unknown"
     assert view.json().get("known_value") is None
+
+
+@pytest.mark.session_security
+def test_analysis_propagates_missing_evidence_into_persisted_view_and_open_questions(
+    uncertainty_api_db,
+):
+    client = _client_for(uncertainty_api_db, "a")
+    response = client.post(
+        "/api/v1/uncertainty/analyze",
+        json={
+            "person_id": "benchmark-person-a",
+            "subject_type": "appointment",
+            "subject_id": "appointment-unknown-1",
+            "field": "attendance_status",
+            "claim": "The care recipient attended the appointment.",
+            "task": "recommendation",
+            "evidence_ids": [],
+            "required_fields": ["attendance_status"],
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["analysis"]["epistemic_state"] == "unknown"
+    assert payload["analysis"]["conclusion_confidence"] is None
+    assert payload["analysis"]["review_required"] is True
+
+    persisted = client.get(
+        "/api/v1/uncertainty/assessments/benchmark-person-a",
+        params={"subject_type": "appointment", "subject_id": "appointment-unknown-1"},
+    )
+    assert persisted.status_code == 200, persisted.text
+    rows = persisted.json()
+    assert len(rows) == 1
+    assert rows[0]["epistemic_state"] == "unknown"
+    assert rows[0].get("confidence") is None
+
+    view = client.get(
+        "/api/v1/uncertainty/view/benchmark-person-a/appointment/appointment-unknown-1"
+    )
+    assert view.status_code == 200, view.text
+    view_data = view.json()
+    assert view_data["epistemic_state"] == "unknown"
+    assert view_data.get("known_value") is None
+
+    questions = client.get(
+        "/api/v1/uncertainty/questions/benchmark-person-a",
+        params={"subject_type": "appointment", "subject_id": "appointment-unknown-1"},
+    )
+    assert questions.status_code == 200, questions.text
+    assert any(item.get("status") == "open" for item in questions.json())
