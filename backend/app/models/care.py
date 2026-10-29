@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, event, inspect as sa_inspect
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, UniqueConstraint, event, inspect as sa_inspect
 from sqlalchemy.sql import func
 import hashlib
 import uuid
@@ -28,6 +28,7 @@ class Caregiver(Base):
 
 class Evidence(Base):
     __tablename__ = "evidence"
+    __table_args__ = (UniqueConstraint("person_id", "ingestion_key", name="uq_evidence_person_ingestion_key"),)
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     type = Column(String, nullable=False)
@@ -65,6 +66,9 @@ class Evidence(Base):
     origin_device_ref = Column(String(160), nullable=True)
     transfer_source = Column(String(160), nullable=True)
     transfer_reference = Column(Text, nullable=True)
+    # Optional client-generated idempotency key; its request fingerprint is server-generated.
+    ingestion_key = Column(String(128), nullable=True)
+    ingestion_request_sha256 = Column(String(64), nullable=True)
 
 
 @event.listens_for(Evidence, "before_insert")
