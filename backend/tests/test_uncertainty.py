@@ -776,6 +776,15 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         )
         assert missing_rationale.status_code == 422
 
+        missing_resolution_evidence = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "resolved",
+                "resolution_notes": "Attempted to resolve without linking any source evidence.",
+            },
+        )
+        assert missing_resolution_evidence.status_code == 422, missing_resolution_evidence.text
+
         missing_scope = client.patch(
             f"/api/v1/uncertainty/contradictions/{conflict_id}",
             json={
