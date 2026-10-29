@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import hashlib
+import logging
 import math
 import os
 import re
@@ -33,6 +34,8 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.improvement_training_example import ImprovementTrainingExample
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["community and companion"])
 
@@ -1718,16 +1721,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
         validation_source = user_text + "\n" + "\n".join(source_context)
-        invalid_reply = (
-            not isinstance(reply, str)
-            or not reply.strip()
-            or _companion_message_needs_revision(reply)
-            or _contains_unrequested_saba(reply, validation_source)
-            or _contains_unsupported_care_claim(reply, validation_source)
-            or _contains_unsupported_operational_claim(reply, validation_source, source_context)
-            or _contains_unsupported_record_reference(reply, validation_source)
-            or (greeting_only and _greeting_reply_needs_revision(reply))
-        )
+        def response_guard_failures(candidate) -> list[str]:
+            failures = []
+            if not isinstance(candidate, str) or not candidate.strip():
+                failures.append("empty_or_non_text")
+                return failures
+            if _companion_message_needs_revision(candidate):
+                failures.append("message_shape")
+            if _contains_unrequested_saba(candidate, validation_source):
+                failures.append("unrequested_token")
+            if _contains_unsupported_care_claim(candidate, validation_source):
+                failures.append("unsupported_care_claim")
+            if _contains_unsupported_operational_claim(candidate, validation_source, source_context):
+                failures.append("unsupported_operational_claim")
+            if _contains_unsupported_record_reference(candidate, validation_source):
+                failures.append("unsupported_record_reference")
+            if greeting_only and _greeting_reply_needs_revision(candidate):
+                failures.append("greeting_shape")
+            return failures
+
+        invalid_reply = bool(response_guard_failures(reply))
         if invalid_reply and greeting_only:
             # Let Qwen revise its own output more than once when a small model
             # misses the brevity constraint. Every candidate remains model-
@@ -1761,19 +1774,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         status_code=503,
                         detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
                     ) from exc
-                invalid_reply = (
-                    not isinstance(reply, str)
-                    or not reply.strip()
-                    or _companion_message_needs_revision(reply)
-                    or _contains_unrequested_saba(reply, validation_source)
-                    or _contains_unsupported_care_claim(reply, validation_source)
-                    or _contains_unsupported_operational_claim(reply, validation_source, source_context)
-                    or _contains_unsupported_record_reference(reply, validation_source)
-                    or _greeting_reply_needs_revision(reply)
-                )
+                invalid_reply = bool(response_guard_failures(reply))
                 if not invalid_reply:
                     break
         if invalid_reply:
+            logger.warning(
+                "Companion response rejected by grounding guards: workflow=companion failures=%s",
+                ",".join(response_guard_failures(reply)),
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
