@@ -123,7 +123,7 @@ def test_shared_lcr_context_exposes_provenance_and_explicit_source_lineage():
              "source_text": "Forwarded copy of the report.", "original_author": "Family member",
              "original_source_reference": None, "parent_evidence_id": None},
             {"id": "private-evidence", "person_id": "person-b", "type": "document",
-             "source_text": "Private record.", "original_author": "Private", "original_source_reference": "private/1"},
+             "source_text": "Private record.", "original_author": "Private", "original_source_reference": "private/1", "parent_evidence_id": None},
         ])
         connection.execute(links.insert(), [
             {"id": "link-a-b", "person_id": "person-a", "source_evidence_id": "evidence-b",
