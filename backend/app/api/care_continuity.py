@@ -27,6 +27,7 @@ from app.models.care import Evidence, Caregiver
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from pydantic import ValidationError
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
@@ -2540,7 +2541,20 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
             assertions.c.id == assertion_id,
             assertions.c.person_id == person_id,
         )).mappings().one()
-        return _jsonable(dict(updated))
+        response = _jsonable(dict(updated))
+        change_intelligence_status = "available"
+        try:
+            reconcile_person_change_intelligence(db, person_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Change intelligence reconciliation failed after assertion review %s",
+                assertion_id,
+            )
+            change_intelligence_status = "unavailable"
+        response["change_intelligence_status"] = change_intelligence_status
+        return response
     except HTTPException:
         db.rollback()
         raise
