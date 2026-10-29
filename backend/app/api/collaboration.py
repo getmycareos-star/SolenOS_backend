@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -1265,6 +1266,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        # Resolve explicit follow-up references before retrieval. Prior turns are
+        # dialogue only; they never become evidence and are not written to the LCR.
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1272,7 +1275,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        retrieval_terms = sorted(_expanded_context_terms(retrieval_query))
+        matching_events = []
+        if retrieval_terms:
+            matching_events = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(*[
+                        column.ilike(f"%{term}%")
+                        for column in (CareEvent.title, CareEvent.description, CareEvent.event_type)
+                        for term in retrieval_terms
+                        if len(term) >= 3
+                    ]),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        # Query-matched history is independent of the recent-event window.
+        events_for_context = []
+        seen_event_ids = set()
+        for row in [*matching_events, *recent_events]:
+            if str(row.id) not in seen_event_ids:
+                seen_event_ids.add(str(row.id))
+                events_for_context.append(row)
+        for event in events_for_context:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
