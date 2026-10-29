@@ -2036,6 +2036,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_appointment_ids": source_appointment_ids,
         "source_assertion_ids": source_assertion_ids,
         "source_lcr_context_ids": source_lcr_context_ids,
+        "source_record_refs": source_record_refs,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "written_to_lcr": False,
