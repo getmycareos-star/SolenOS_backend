@@ -105,6 +105,41 @@ def detect_event_changes(
             now=now,
         )
         changes.append(change)
+    elif (
+        baseline.event_count > 0
+        and comparison.get("frequency_delta") is not None
+        and comparison["frequency_delta"] < 0
+        and comparison.get("baseline_coverage_status") == "covered"
+        and comparison.get("current_coverage_status") == "covered"
+    ):
+        # A lower recorded rate is a decrease candidate only when both windows
+        # have explicit complete observation coverage. Without this proof, fewer
+        # records may reflect less observation rather than an actual decrease.
+        current_frequency = current_count / (comparison["current_window_days"] / 30.0)
+        change = _create_change(
+            db=db,
+            person_id=person_id,
+            subject_type=event_type,
+            subject_id=subject_id or "",
+            change_type=ChangeType.DECREASE,
+            change_direction=ChangeDirection.DECREASING,
+            previous_state=(
+                f"{comparison['baseline_frequency_per_period']:.3f} events per 30 days "
+                f"over {comparison['baseline_window_days']} calendar days"
+            ),
+            current_state=(
+                f"{current_count} events over {comparison['current_window_days']} calendar days "
+                f"({current_frequency:.3f} per 30 days)"
+            ),
+            previous_count=baseline.event_count,
+            current_count=current_count,
+            baseline_id=baseline.id,
+            baseline=baseline,
+            comparison=comparison,
+            events=counts["recent_events"],
+            now=now,
+        )
+        changes.append(change)
     # An empty current window is not evidence that a previously observed event
     # stopped. Without explicit observation-coverage data, do not infer cessation.
     if not changes and current_count >= 2:
