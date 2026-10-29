@@ -1298,6 +1298,79 @@ def _person_scoped_rows(resource: str, person_id: str, request: Request, db: Ses
     return [_jsonable(dict(row)) for row in rows]
 
 
+@router.patch("/assertions/{assertion_id}/status")
+def review_assertion_status(assertion_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scoped_identity(request, db)
+    assertions = _table(db, "care_assertions")
+    row = db.execute(select(assertions).where(
+        assertions.c.id == assertion_id,
+        assertions.c.person_id == person_id,
+    ).with_for_update()).mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Assertion not found")
+    previous = _jsonable(dict(row))
+    requested_status = str(payload.get("assertion_status") or "").strip()
+    if requested_status != "accepted":
+        raise HTTPException(status_code=422, detail="This workflow only records an explicit caregiver review as accepted")
+    if previous.get("assertion_status") in {"retracted", "superseded"}:
+        raise HTTPException(status_code=409, detail="Retracted or superseded assertions cannot be accepted; preserve them and create a new assertion")
+    review_days = payload.get("review_after_days", previous.get("review_after_days"))
+    if review_days is not None:
+        try:
+            review_days = int(review_days)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="review_after_days must be a positive integer") from exc
+        if review_days < 1 or review_days > 3650:
+            raise HTTPException(status_code=422, detail="review_after_days must be between 1 and 3650")
+    if previous.get("assertion_kind") == "current_state" and review_days is None:
+        raise HTTPException(status_code=422, detail="Current-state assertions require a caregiver-selected review window")
+
+    current = dict(previous)
+    current["assertion_status"] = "accepted"
+    current["review_after_days"] = review_days
+    current["updated_by_caregiver_id"] = caregiver_id
+    try:
+        values = {"assertion_status": "accepted", "review_after_days": review_days}
+        if "updated_by_caregiver_id" in assertions.c:
+            values["updated_by_caregiver_id"] = caregiver_id
+        if "updated_at" in assertions.c:
+            values["updated_at"] = datetime.now(timezone.utc)
+        db.execute(update(assertions).where(
+            assertions.c.id == assertion_id,
+            assertions.c.person_id == person_id,
+        ).values(**values))
+        if inspect(db.get_bind()).has_table("care_assertion_revisions"):
+            revisions = _table(db, "care_assertion_revisions")
+            latest = db.execute(select(func.max(revisions.c.revision_number)).where(
+                revisions.c.person_id == person_id,
+                revisions.c.assertion_id == assertion_id,
+            )).scalar()
+            db.execute(insert(revisions).values(
+                id=str(uuid.uuid4()),
+                person_id=person_id,
+                assertion_id=assertion_id,
+                revision_number=int(latest or 0) + 1,
+                previous_payload=previous,
+                current_payload=current,
+                revision_reason="Caregiver explicitly reviewed the source-attributed assertion",
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=datetime.now(timezone.utc),
+            ))
+        db.commit()
+        updated = db.execute(select(assertions).where(
+            assertions.c.id == assertion_id,
+            assertions.c.person_id == person_id,
+        )).mappings().one()
+        return _jsonable(dict(updated))
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Assertion review could not be persisted")
+        raise HTTPException(status_code=503, detail="Assertion review could not be persisted") from exc
+
+
 @router.get("/assertions/{person_id}")
 def list_person_assertions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
     return _person_scoped_rows("assertions", person_id, request, db, limit)
