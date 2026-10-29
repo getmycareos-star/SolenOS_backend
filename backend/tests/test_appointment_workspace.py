@@ -363,7 +363,7 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert freshness["policy"].startswith("Report recency metadata")
     assert freshness["sources"]["facts"]["staleness_assessment"] == "not_assessed_without_domain_specific_threshold"
     assert "not that the information remains current" in freshness["sources"]["facts"]["interpretation_limit"]
-    assert len(body["assessment"]["capabilities"]) == 22
+    assert len(body["assessment"]["capabilities"]) == 23
     loops = body["assessment"]["open_loops"]
     assert loops["source_of_truth"] == "persisted_lcr_records"
     assert any(
