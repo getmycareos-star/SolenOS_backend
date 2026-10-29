@@ -428,7 +428,7 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         assert evidence_id in user_payload
         assert "care-letter.txt" in user_payload
         assert "follow-up date is not stated" in user_payload.lower()
-        assert "evidence_lineage" in user_payload
+        assert "Evidence lineage" in user_payload
         assert "interpretation_limit" in user_payload
         assert (
             "does not establish common origin" in user_payload
