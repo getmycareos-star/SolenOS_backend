@@ -255,6 +255,28 @@ def create_claim_assessment(
         ).first()
         if target_claim is None or payload.superseded_by_claim_id == claim_id:
             raise HTTPException(status_code=422, detail="Supersession target must be a different claim in the same care record")
+        # Prevent A -> B -> ... -> A supersession cycles. Only the latest explicit
+        # assessment for each claim participates in this directed relationship.
+        latest_assessments = {}
+        for assessment in (
+            db.query(EvidenceClaimAssessment)
+            .filter(EvidenceClaimAssessment.person_id == person_id)
+            .order_by(EvidenceClaimAssessment.claim_version.asc())
+            .all()
+        ):
+            latest_assessments[assessment.claim_id] = assessment
+        cursor = payload.superseded_by_claim_id
+        visited = set()
+        while cursor and cursor not in visited:
+            if cursor == claim_id:
+                raise HTTPException(status_code=422, detail="Claim supersession would create a cycle")
+            visited.add(cursor)
+            next_assessment = latest_assessments.get(cursor)
+            cursor = (
+                next_assessment.superseded_by_claim_id
+                if next_assessment and next_assessment.status == "superseded"
+                else None
+            )
 
     links = [item.model_dump() for item in payload.evidence_links]
     evidence_ids = [item["evidence_id"] for item in links]
@@ -289,10 +311,14 @@ def create_claim_assessment(
             valid_support = "supports" in relationships and "contradicts" in relationships
         else:
             valid_support = bool(relationships & required)
+        if payload.status == "supported" and "contradicts" in relationships:
+            valid_support = False
+        if payload.status == "contradicted" and "supports" in relationships:
+            valid_support = False
         if not valid_support:
             raise HTTPException(
                 status_code=422,
-                detail=f"Claim status {payload.status!r} requires matching explicit evidence relationships",
+                detail=f"Claim status {payload.status!r} requires matching explicit evidence relationships and cannot conceal incompatible links",
             )
 
     for item in links:
