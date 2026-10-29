@@ -66,6 +66,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=36, max_length=36)
 
 
 class QwenBackgroundJobCreate(BaseModel):
