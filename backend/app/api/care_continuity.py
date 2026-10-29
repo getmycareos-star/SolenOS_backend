@@ -67,7 +67,7 @@ def _near_duplicate_candidates(evidence_rows: list[Any]) -> dict[str, Any]:
         source = getattr(row, "source_text", None)
         if not isinstance(source, str):
             continue
-        text_value = re.sub(r"\\s+", " ", source).strip().casefold()
+        text_value = re.sub(r"\s+", " ", source).strip().casefold()
         if len(text_value) >= NEAR_DUPLICATE_MIN_CHARS:
             normalized[str(row.id)] = text_value
 
