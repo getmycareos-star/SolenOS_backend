@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -140,7 +141,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert "current_message" in calls[0][-1]["content"]
+        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
     finally:
         teardown()
 
@@ -250,6 +251,134 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The record includes a caregiver report of restless sleep."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Household activity note {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert "restless sleep" in data["reply"].casefold()
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_observation_exists(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "Yes, her sleep has been getting worse over the last month."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=120),
+            title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Has her sleep been getting worse over the last month?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert "no dated sleep observations within the last month" in data["reply"].casefold()
+        assert event_id in data["source_event_ids"]
+
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(ConversationMessage).filter_by(session_id=data["session_id"]).all()
+            assert [row.role for row in saved] == ["user", "assistant"]
+            assert "cannot establish" in saved[-1].content.casefold()
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
+def test_trend_evidence_requires_two_distinct_dated_topic_observations():
+    now = datetime.now(timezone.utc)
+    one = (
+        'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history",'
+        f'"description":"Caregiver reported restless sleep.","occurred_at":"{(now - timedelta(days=2)).isoformat()}"' + "}"
+    )
+    two = (
+        'LCR event evidence: {"event_id":"sleep-2","title":"Sleep history",'
+        f'"description":"Caregiver reported waking overnight.","occurred_at":"{(now - timedelta(days=1)).isoformat()}"' + "}"
+    )
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?", [one, two]
+    )
+    assert assessment["sufficient"] is True
+    assert assessment["distinct_days"] == 2
+    assert collaboration._contains_unsupported_trend_claim(
+        "Sleep has been getting worse.", {"sufficient": False}
+    ) is True
+    assert collaboration._contains_unsupported_trend_claim(
+        "There is not enough information to establish whether sleep is worsening.",
+        {"sufficient": False},
+    ) is False
 
 
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
