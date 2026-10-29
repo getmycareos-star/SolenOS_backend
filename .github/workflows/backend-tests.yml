@@ -318,6 +318,11 @@ jobs:
           APP_ENV: test
         run: python backend/scripts/postgres_anonymous_e2e.py
 
+      - name: Run longitudinal messy-care benchmark against PostgreSQL
+        env:
+          SOLENOS_BENCHMARK_DATABASE_URL: ${{ env.DATABASE_URL }}
+        run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s
+
 
   qwen-image-build:
     # The full model-image/inference check is only needed for Qwen-specific PRs.
