@@ -551,6 +551,8 @@ def test_structured_observation_requires_exact_source_span_and_preserves_epistem
         "attribute": "sleep_awakenings",
         "value_text": "three awakenings",
         "source_passage": source_text,
+        "source_span_start": 0,
+        "source_span_end": len(source_text),
         "extraction_method": "human_entered",
         "extraction_version": "manual-v1",
     }
