@@ -183,6 +183,78 @@ def test_delta_finding_evidence_requires_matching_stored_excerpt():
     assert _match_finding_evidence(evidence, "reported dose changed to 10mg") == []
 
 
+def test_duplicate_source_text_is_not_independent_corroboration():
+    result = analyze_uncertainty(
+        claim="The appointment is confirmed.",
+        task="summarize",
+        evidence=[
+            {"id": "copy-a", "text": "Appointment scheduled for Tuesday.", "source_type": "caregiver_report", "verified": False},
+            {"id": "copy-b", "text": "Appointment scheduled for Tuesday.", "source_type": "copied_summary", "verified": False},
+        ],
+    )
+    assert result["evidence_record_count"] == 2
+    assert result["independent_evidence_record_count"] == 1
+    assert len(result["duplicate_evidence_groups"]) == 1
+    assert result["duplicate_evidence_groups"][0]["independent_corroboration"] is False
+    assert "duplicate_evidence" in result["classifications"]
+    assert result["conclusion_confidence"] is None
+
+
+def test_change_assessment_without_explicit_baseline_is_insufficient():
+    result = analyze_uncertainty(
+        claim="Appetite changed.",
+        task="identify_change",
+        evidence=[{"id": "new-observation", "text": "Ate less at breakfast.", "source_type": "caregiver_report"}],
+    )
+    assert "missing_baseline" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["conclusion_confidence"] is None
+
+
+def test_explicit_baseline_allows_only_a_possible_change_assessment():
+    result = analyze_uncertainty(
+        claim="Appetite may have changed.",
+        task="identify_change",
+        evidence=[
+            {"id": "baseline", "text": "Ate usual breakfast yesterday.", "source_type": "caregiver_report", "role": "baseline"},
+            {"id": "current", "text": "Ate less at breakfast today.", "source_type": "caregiver_report"},
+        ],
+    )
+    assert "missing_baseline" not in result["classifications"]
+    assert result["sufficiency"] == "possible_change_only"
+    assert result["conclusion_confidence"] is None
+
+
+def test_failed_or_truncated_source_is_not_a_negative_finding():
+    result = analyze_uncertainty(
+        claim="No appointment is listed.",
+        task="summarize",
+        evidence=[],
+        source_access="truncated",
+    )
+    assert result["epistemic_state"] == "unknown"
+    assert "knowledge_boundary" in result["classifications"]
+    assert any("truncated" in limitation for limitation in result["limitations"])
+
+
+def test_unreadable_evidence_reduces_sufficiency_without_confidence_inflation():
+    result = analyze_uncertainty(
+        claim="The document establishes the current instruction.",
+        task="recommendation",
+        evidence=[{
+            "id": "unreadable-doc",
+            "text": "",
+            "source_type": "document",
+            "verified": False,
+            "readable": False,
+            "extraction_status": "unreadable",
+        }],
+    )
+    assert "low_quality_evidence" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["conclusion_confidence"] is None
+
+
 def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
     """Exercise the real mapped tables and SQLAlchemy transaction semantics on SQLite."""
     from sqlalchemy.orm import Session
