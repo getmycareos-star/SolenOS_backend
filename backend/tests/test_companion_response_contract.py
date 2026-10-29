@@ -345,12 +345,12 @@ def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeyp
         db.add(older)
         db.flush()
         older_id = str(older.id)
-        for index in range(45):
+        for index in range(260):
             db.add(CareEvent(
                 person_id=person_id, event_type="daily_note", status="recorded",
                 occurred_at=now - timedelta(hours=index + 1),
                 title=f"Unrelated household note {index}",
-                description=f"Routine household observation {index}; no additional details.",
+                description=f"Routine sleep observation {index}; no additional details.",
                 evidence_ids=[], created_by_caregiver_id=caregiver_id,
                 time_provenance="caregiver_reported",
             ))
@@ -398,10 +398,10 @@ def test_historical_document_beyond_recent_upload_window_is_retrieved(monkeypatc
         db.add(older)
         db.flush()
         older_id = str(older.id)
-        for index in range(25):
+        for index in range(260):
             db.add(EvidenceModel(
                 person_id=person_id, type="document",
-                source_text=f"Unrelated household paperwork {index}.",
+                source_text=f"Routine sleep paperwork {index}; no additional details.",
                 original_file_path=None, uploaded_at=now - timedelta(hours=index + 1),
                 uploaded_by_caregiver_id=caregiver_id,
                 extra_metadata='{"filename":"household-paperwork.pdf"}',
