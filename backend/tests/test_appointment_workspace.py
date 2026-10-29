@@ -634,7 +634,7 @@ def test_structured_source_observation_appears_in_current_care_projection(client
         if row.get("id") == "foreign-evidence-link-event"
     )
     assert foreign_linked_event["evidence_ids"] == []
-    assert "private-evidence-other" not in response.text
+    assert "private-evidence-other" not in str(assessment)
 
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_response = test_client.get("/api/v1/care-continuity/current-care", headers=other_headers)
