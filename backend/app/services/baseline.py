@@ -55,9 +55,10 @@ def get_longitudinal_event_counts(
         CareEvent.person_id == person_id,
         CareEvent.event_type == event_type,
         CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
-        # Future-dated records may be scheduled items or timestamp errors; they
-        # must not be counted as events that have already occurred.
-        CareEvent.occurred_at <= now,
+        # Exclude future-dated records, while allowing a one-second timestamp
+        # tolerance for capture/reference-time ordering at the instant of entry.
+        # Scheduled items days ahead must never inflate an occurrence count.
+        CareEvent.occurred_at <= now + timedelta(seconds=1),
     )
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
