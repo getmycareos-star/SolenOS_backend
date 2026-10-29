@@ -742,3 +742,25 @@ def test_evidence_acquisition_provenance_persists_and_is_scoped(review_records):
         payload["source_text"].encode("utf-8")
     ).hexdigest()
 
+
+
+def test_evidence_capture_rejects_unvalidated_numeric_confidence(review_records):
+    client_a, _ = review_records
+    response = client_a.post("/api/v1/evidence", json={
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "source_text": "Caregiver reported two awakenings.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+        "confidence": 0.99,
+    })
+    assert response.status_code == 422, response.text
+    assert "calibrated assessment method" in response.json()["detail"]
+    # Rejection occurs before persistence: no record with this source is created.
+    db = SessionLocal()
+    try:
+        assert db.query(Evidence).filter(
+            Evidence.person_id == "review-person-a",
+            Evidence.source_text == "Caregiver reported two awakenings.",
+        ).count() == 0
+    finally:
+        db.close()
