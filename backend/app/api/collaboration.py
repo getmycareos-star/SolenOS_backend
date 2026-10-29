@@ -1803,15 +1803,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
         source_lcr_record_refs = _context_record_refs(shared_lcr_lines)
         lineage_context_line = (
-            "Evidence source lineage metadata (explicit provenance only; not proof of truth or independence): "
-            + json.dumps(evidence_lineage_context, ensure_ascii=False, default=str)
-        )
-        source_context = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context, *shared_lcr_lines,
-            *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
-        ]
-        lineage_context_line = (
             "Evidence lineage (provenance only, not proof of truth): "
             + json.dumps(evidence_lineage_context, ensure_ascii=False, default=str)[:350]
         )
@@ -1820,13 +1811,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *freshness_context, *shared_lcr_lines,
             *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
         ]
-        lcr_context_coverage = {
-            "schema_status": shared_lcr_context["schema_status"],
-            "history_coverage": shared_lcr_context["history_coverage"],
-            "query_applied": shared_lcr_context["query_applied"],
-            "missing_required_sources": shared_lcr_context["missing_required_sources"],
-            "missing_optional_sources": shared_lcr_context["missing_optional_sources"],
-        }
         system_prompt = (
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
             "in plain natural language. Use only relevant authorized care-record context. Distinguish recorded facts, "
