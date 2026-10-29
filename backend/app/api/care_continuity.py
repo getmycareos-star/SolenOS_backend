@@ -284,6 +284,25 @@ def create_evidence_observation(
     if source_text[start:end] != passage:
         raise HTTPException(status_code=422, detail="Source passage must exactly match the linked evidence at the supplied character offsets")
 
+    text_limits = {
+        "observation_kind": 40, "epistemic_status": 24, "subject_label": 160,
+        "attribute": 160, "units": 80, "observer_label": 2000,
+        "observation_method": 120, "extraction_method": 80,
+        "extraction_version": 80, "extraction_run_id": 128,
+    }
+    for field, maximum in text_limits.items():
+        value = payload.get(field)
+        if value is not None and (not isinstance(value, str) or not value.strip() or len(value.strip()) > maximum):
+            raise HTTPException(status_code=422, detail=f"{field} must be nonblank text of at most {maximum} characters")
+    for field in ("value_text", "normalized_value", "context", "source_passage", "hedge_marker", "ambiguity_note", "correction_rationale"):
+        value = payload.get(field)
+        if value is not None and not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{field} must be text or null")
+    if payload.get("negated") is not None and not isinstance(payload.get("negated"), bool):
+        raise HTTPException(status_code=422, detail="negated must be a boolean or null")
+    if observer_caregiver_id is not None and not isinstance(observer_caregiver_id, str):
+        raise HTTPException(status_code=422, detail="observer_caregiver_id must be a string identifier")
+
     epistemic_status = str(payload["epistemic_status"]).strip().lower()
     allowed_epistemic = {
         "directly_observed", "caregiver_reported", "person_reported",
