@@ -260,6 +260,10 @@ def test_companion_context_filter_excludes_unrelated_records_for_specific_questi
         "What did we record about sleep?", [household, sleep]
     )
     assert selected == [sleep]
+    rendered = collaboration._humanize_model_context_line(sleep)
+    assert "sleep" in rendered.casefold()
+    assert "sleep-1" not in rendered
+    assert "event_id" not in rendered
 
 def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(monkeypatch):
     client = setup_client(monkeypatch)
