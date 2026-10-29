@@ -562,6 +562,67 @@ def main():
             event.get("event_type") == "response_recorded" for event in open_loop_history
         ), f"Open Loop response audit event missing: {status}: {open_loop_history}")
 
+        # Conflicting terminal transitions must serialize. Exactly one of close
+        # and cancel may win; the loser must receive 409 rather than overwrite it.
+        status, lifecycle_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body={
+                "loop_type": "awaiting_response",
+                "title": "CI-only terminal transition race",
+                "description": "Synthetic concurrency test for close versus cancel.",
+                "request_text": "Confirm the synthetic outcome before closing.",
+                "recipient_label": "CI-only test recipient",
+                "idempotency_key": "postgres-open-loop-terminal-race-create",
+                "evidence": [{"kind": "ci_fixture", "text": "Terminal transition race fixture."}],
+            },
+        )
+        require(status == 201, f"Terminal race loop creation failed: {status}: {lifecycle_loop}")
+        lifecycle_loop_id = lifecycle_loop["id"]
+        status, _ = request(
+            "POST", f"/api/v1/open-loops/{lifecycle_loop_id}/responses", token=token_a,
+            body={"text": "CI-only response before terminal race",
+                  "evidence": [{"kind": "ci_fixture", "text": "Response recorded before competing transitions."}],
+                  "idempotency_key": "postgres-open-loop-terminal-race-response"},
+        )
+        require(status == 200, f"Terminal race prerequisite response failed: {status}")
+        close_payload = {
+            "text": "CI-only close attempt",
+            "evidence": [{"kind": "ci_fixture", "text": "Close attempt evidence."}],
+            "idempotency_key": "postgres-open-loop-terminal-race-close",
+        }
+        cancel_payload = {
+            "text": "CI-only cancel attempt",
+            "evidence": [{"kind": "ci_fixture", "text": "Cancel attempt evidence."}],
+            "idempotency_key": "postgres-open-loop-terminal-race-cancel",
+        }
+        def terminal_transition(item):
+            endpoint, payload = item
+            return request(
+                "POST", f"/api/v1/open-loops/{lifecycle_loop_id}/{endpoint}",
+                token=token_a, body=payload,
+            )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            terminal_results = list(pool.map(
+                terminal_transition, [("close", close_payload), ("cancel", cancel_payload)],
+            ))
+        terminal_statuses = sorted(status for status, _ in terminal_results)
+        require(terminal_statuses == [200, 409],
+                f"Concurrent close/cancel must have exactly one winner and one conflict: {terminal_results}")
+        status, lifecycle_after_race = request(
+            "GET", f"/api/v1/open-loops/{lifecycle_loop_id}", token=token_a,
+        )
+        final_status = lifecycle_after_race.get("loop", {}).get("status")
+        require(status == 200 and final_status in {"closed", "cancelled"},
+                f"Concurrent terminal transitions left an invalid state: {status}: {lifecycle_after_race}")
+        status, lifecycle_history = request(
+            "GET", f"/api/v1/open-loops/{lifecycle_loop_id}/history", token=token_a,
+        )
+        terminal_events = [
+            event.get("event_type") for event in lifecycle_history
+            if event.get("event_type") in {"closure_verified", "cancelled"}
+        ]
+        require(status == 200 and len(terminal_events) == 1,
+                f"Conflicting terminal transitions must produce exactly one terminal audit event: {status}: {lifecycle_history}")
+
         stop_server(server)
         server = start_server()
         status, open_loop_after_restart = request(
