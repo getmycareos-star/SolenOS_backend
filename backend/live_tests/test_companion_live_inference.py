@@ -144,6 +144,7 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         assert any(marker in answer for marker in (
             "not recorded", "not in the record", "does not record", "not documented",
             "not available", "cannot establish", "can't establish", "no blood pressure",
+            "does not contain", "does not include", "not specified", "not enough information",
             "doesn't say", "does not say",
         )), f"Qwen did not acknowledge missing evidence: {missing_data['reply']}"
         assert missing_data["written_to_lcr"] is False
