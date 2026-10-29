@@ -64,14 +64,11 @@ def detect_patterns(
         CareEvent.occurred_at <= now,
     )
     if subject_id:
-        linked_ids = sorted({
-            evidence_id
-            for change in changes
-            for evidence_id in (change.evidence_ids or [])
-        })
-        # An empty linkage set means no eligible events for this subject, not
-        # "skip reconciliation". Let the empty query flow through so stale active
-        # patterns can be retired when their source evidence was invalidated.
+        # CareEvent.situation_id is the event's persisted subject relationship.
+        # Evidence IDs referenced by Change rows are not CareEvent IDs and must
+        # never be used as a substitute filter; doing so could mix occurrences
+        # from different care situations into one pattern.
+        event_query = event_query.filter(CareEvent.situation_id == subject_id)
     queried_events = (
         event_query
         .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
