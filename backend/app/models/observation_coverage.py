@@ -1,6 +1,6 @@
 """Auditable observation coverage for longitudinal care comparisons."""
 import uuid
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, String, Text, event
 from sqlalchemy.sql import func
 from app.core.database import Base
 from app.core.types import JSONList
@@ -19,3 +19,18 @@ class ObservationCoverage(Base):
     rationale = Column(Text, nullable=False)
     recorded_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+
+@event.listens_for(ObservationCoverage, "before_update")
+def _prevent_coverage_update(mapper, connection, target):
+    raise ValueError(
+        "Observation coverage is append-only; record a correction as a new coverage record."
+    )
+
+
+@event.listens_for(ObservationCoverage, "before_delete")
+def _prevent_coverage_delete(mapper, connection, target):
+    raise ValueError(
+        "Observation coverage is append-only; preserve the original record and audit history."
+    )
