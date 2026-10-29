@@ -501,9 +501,9 @@ def main():
         )
         require(status == 200, f"Open Loop read after concurrent actions failed: {status}: {open_loop_after_actions}")
         saved_actions = open_loop_after_actions["loop"].get("action_evidence", [])
-        require(len(saved_actions) == 3 and
+        require(len(saved_actions) == 4 and
                 {item.get("text") for item in saved_actions} >= {
-                    "CI-only action with stable retry key", "CI-only action A", "CI-only action B"
+                    "CI-only action with stable retry key", "CI-only concurrent retry action", "CI-only action A", "CI-only action B"
                 },
                 f"Concurrent Open Loop updates lost an append or idempotent retry duplicated one: {saved_actions}")
 
@@ -633,7 +633,7 @@ def main():
         persisted_loop = open_loop_after_restart.get("loop", {})
         require(persisted_loop.get("id") == open_loop_id
                 and persisted_loop.get("status") == "open"
-                and len(persisted_loop.get("action_evidence", [])) == 3
+                and len(persisted_loop.get("action_evidence", [])) == 5
                 and len(persisted_loop.get("response_evidence", [])) == 1,
                 f"Open Loop lifecycle/evidence did not persist across Uvicorn restart: {persisted_loop}")
         status, open_loop_history_after_restart = request(
