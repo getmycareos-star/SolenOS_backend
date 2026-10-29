@@ -212,38 +212,69 @@ def _build_trend_pattern(
     changes: List[Change],
     now: datetime,
 ) -> Optional[Pattern]:
-    if len(changes) < 3:
+    """Detect a direction-consistent sequence only from comparable, evidenced windows."""
+    comparable = [
+        change for change in changes
+        if change.magnitude is not None
+        and change.comparison_window_start is not None
+        and change.comparison_window_end is not None
+        and change.change_direction in (ChangeDirection.INCREASING, ChangeDirection.DECREASING)
+    ]
+    if len(comparable) < 3:
         return None
-    changes_with_magnitude = [c for c in changes if c.magnitude is not None]
-    if len(changes_with_magnitude) < 3:
+
+    directions = {change.change_direction for change in comparable}
+    if len(directions) != 1:
         return None
-    magnitudes = [c.magnitude for c in changes_with_magnitude]
-    if all(magnitudes[i] <= magnitudes[i + 1] for i in range(len(magnitudes) - 1)):
-        direction = ChangeDirection.INCREASING
-    elif all(magnitudes[i] >= magnitudes[i + 1] for i in range(len(magnitudes) - 1)):
-        direction = ChangeDirection.DECREASING
-    else:
+
+    ordered = sorted(
+        comparable,
+        key=lambda change: (
+            _ensure_utc(change.comparison_window_end),
+            change.id,
+        ),
+    )
+    window_ends = [_ensure_utc(change.comparison_window_end) for change in ordered]
+    if len(set(window_ends)) < 3:
         return None
-    event_ids = []
-    for c in changes:
-        event_ids.extend(c.evidence_ids or [])
-    event_ids = sorted(set(event_ids))
-    temporal_start = min(c.created_at for c in changes)
-    temporal_end = max(c.created_at for c in changes)
+
+    # A trend without source evidence is not an evidence-backed pattern.
+    event_ids = sorted({
+        evidence_id
+        for change in ordered
+        for evidence_id in (change.evidence_ids or [])
+    })
+    if len(event_ids) < 3:
+        return None
+
+    change_ids = [change.id for change in ordered]
+    temporal_start = min(_ensure_utc(change.comparison_window_start) for change in ordered)
+    temporal_end = max(_ensure_utc(change.comparison_window_end) for change in ordered)
+    overlapping_windows = any(
+        _ensure_utc(ordered[index].comparison_window_end)
+        > _ensure_utc(ordered[index + 1].comparison_window_start)
+        for index in range(len(ordered) - 1)
+    )
+    alternatives = []
+    if overlapping_windows:
+        alternatives.append(
+            "Comparison windows overlap; successive assessments are not statistically independent."
+        )
+
     pattern = Pattern(
         person_id=person_id,
         subject_type=subject_type,
         subject_id=subject_id,
         pattern_type=PatternType.TREND,
-        pattern_strength=PatternStrength.ESTABLISHED,
+        pattern_strength=PatternStrength.ESTABLISHED if len(ordered) >= 5 else PatternStrength.EMERGING,
         event_ids=event_ids,
-        change_ids=[c.id for c in changes],
+        change_ids=change_ids,
         temporal_start=temporal_start,
         temporal_end=temporal_end,
-        direction=direction,
+        direction=next(iter(directions)),
         confidence=None,
         evidence_count=len(event_ids),
-        alternative_interpretations=[],
+        alternative_interpretations=alternatives,
     )
     return _persist_pattern(db, pattern)
 
