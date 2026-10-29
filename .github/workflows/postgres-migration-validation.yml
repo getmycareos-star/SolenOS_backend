@@ -99,6 +99,7 @@ jobs:
               "appointment_workspace_records": {"person_id", "appointment_id", "status", "version_number", "payload", "updated_at"},
               "appointment_workspace_revisions": {"record_id", "person_id", "revision_number", "payload", "changed_at"},
               "contradictions": {"event_id", "context_key", "effective_from", "effective_to", "matching_candidate_ids"},
+              "evidence": {"person_id", "type", "source_text", "uploaded_by_caregiver_id", "original_author", "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id", "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel", "original_source_reference", "parent_evidence_id", "source_text_sha256", "ingested_at"},
               "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
           }
           for table, required in expected.items():
