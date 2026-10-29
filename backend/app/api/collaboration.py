@@ -1200,27 +1200,27 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         # Do not ask a small language model to invent or upgrade a source label.
         claim_text = payload.text.strip()
         caregiver_observation = re.search(
-            r"\\bcaregiver\\s+(?:observed|reported|noticed|said|states|stated)\\b",
+            r"\bcaregiver\s+(?:observed|reported|noticed|said|states|stated)\b",
             claim_text,
             re.IGNORECASE,
         )
         professional_absent = re.search(
-            r"\\bno\\b.{0,60}\\bprofessional\\b.{0,40}\\b"
-            r"(?:assessment|report|note|information)\\b.{0,40}\\b"
-            r"(?:supplied|provided|available|recorded|included)\\b",
+            r"\bno\b.{0,60}\bprofessional\b.{0,40}\b"
+            r"(?:assessment|report|note|information)\b.{0,40}\b"
+            r"(?:supplied|provided|available|recorded|included)\b",
             claim_text,
             re.IGNORECASE,
         )
         professional_present = bool(re.search(
-            r"\\b(?:professional|clinician|doctor|nurse)\\s+"
-            r"(?:assessment|report|note)\\b",
+            r"\b(?:professional|clinician|doctor|nurse)\s+"
+            r"(?:assessment|report|note)\b",
             claim_text,
             re.IGNORECASE,
         )) and not professional_absent
         recorded_source_labels = []
         for line in context_lines:
             match = re.search(
-                r"Caregiver-provided evidence \\[([^\\]]+)\\] \\(([^,]+), status=([^)]+)\\)",
+                r"Caregiver-provided evidence \[([^\]]+)\] \(([^,]+), status=([^)]+)\)",
                 line,
             )
             if match:
