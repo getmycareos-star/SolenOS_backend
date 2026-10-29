@@ -11,7 +11,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
-from app.models.care_continuity import EvidenceReviewRecord
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -316,5 +316,83 @@ def test_original_evidence_source_text_and_hash_cannot_be_changed_through_orm(re
         restored = db.query(Evidence).filter(Evidence.id == "review-evidence-a").one()
         assert restored.source_text == original_text
         assert restored.source_text_sha256 == original_hash
+    finally:
+        db.close()
+
+
+def test_claim_assessments_require_exact_source_passages_and_preserve_version_history(review_records):
+    client_a, client_b = review_records
+    claim_response = client_a.post("/api/v1/care-continuity/assertions", json={
+        "subject_type": "appointment",
+        "subject_id": "appointment-evidence-test",
+        "field": "attendance",
+        "assertion_kind": "current_state",
+        "asserted_value": "The appointment occurred.",
+        "source_label": "Caregiver report",
+        "source_text": "Caregiver reports that the appointment occurred.",
+        "evidence_ids": ["review-evidence-a"],
+    })
+    assert claim_response.status_code == 201, claim_response.text
+    claim_id = claim_response.json()["id"]
+
+    payload = {
+        "status": "supported",
+        "rationale": "The linked source passage explicitly supports the narrow attendance claim; this does not independently verify the reporter.",
+        "policy_version": "claim-assessment-v1",
+        "evidence_links": [{
+            "evidence_id": "review-evidence-a",
+            "relationship": "supports",
+            "source_passage": "Caregiver reports that the appointment occurred.",
+            "scope_note": "Supports what was reported, not independent attendance verification.",
+        }],
+    }
+    created = client_a.post(f"/api/v1/care-continuity/claims/{claim_id}/assessments", json=payload)
+    assert created.status_code == 201, created.text
+    first = created.json()
+    assert first["status"] == "supported"
+    assert first["claim_version"] == 1
+    assert first["reviewed_by_caregiver_id"] == "review-caregiver-a"
+    assert first["evidence_links"][0]["source_passage"] == "Caregiver reports that the appointment occurred."
+
+    bad_passage = {
+        **payload,
+        "evidence_links": [{
+            "evidence_id": "review-evidence-a",
+            "relationship": "supports",
+            "source_passage": "The source says something else.",
+        }],
+    }
+    rejected = client_a.post(f"/api/v1/care-continuity/claims/{claim_id}/assessments", json=bad_passage)
+    assert rejected.status_code == 422, rejected.text
+
+    second_payload = {
+        **payload,
+        "status": "partially_supported",
+        "rationale": "The passage supports only that the caregiver reported attendance; it does not independently establish attendance.",
+        "evidence_links": [{
+            "evidence_id": "review-evidence-a",
+            "relationship": "scope_limited",
+            "source_passage": "Caregiver reports that the appointment occurred.",
+            "scope_note": "Reporter attribution is supported; the underlying event is not independently confirmed.",
+        }],
+    }
+    second_response = client_a.post(f"/api/v1/care-continuity/claims/{claim_id}/assessments", json=second_payload)
+    assert second_response.status_code == 201, second_response.text
+    second = second_response.json()
+    assert second["claim_version"] == 2
+    assert second["supersedes_assessment_id"] == first["id"]
+
+    history = client_a.get(f"/api/v1/care-continuity/claims/{claim_id}/assessments")
+    assert history.status_code == 200, history.text
+    assert [item["id"] for item in history.json()] == [first["id"], second["id"]]
+    assert client_b.get(f"/api/v1/care-continuity/claims/{claim_id}/assessments").status_code == 404
+
+    db = SessionLocal()
+    try:
+        saved = db.query(EvidenceClaimAssessment).filter(EvidenceClaimAssessment.id == first["id"]).one()
+        saved.rationale = "Attempted history rewrite"
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
     finally:
         db.close()
