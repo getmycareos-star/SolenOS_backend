@@ -2,7 +2,7 @@ name: Situation-understanding benchmark
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/longitudinal-benchmark-main-reconciled]
     paths:
       - "backend/app/services/uncertainty_intelligence.py"
       - "backend/app/services/baseline.py"
