@@ -1331,8 +1331,34 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
+        matching_assertions = []
+        if retrieval_terms:
+            matching_assertions = (
+                db.query(CareAssertion)
+                .filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.assertion_status == "caregiver_reviewed",
+                    or_(*[
+                        column.ilike(f"%{term}%")
+                        for column in (
+                            CareAssertion.field, CareAssertion.asserted_value,
+                            CareAssertion.source_label, CareAssertion.source_text,
+                        )
+                        for term in retrieval_terms if len(term) >= 3
+                    ]),
+                )
+                .order_by(CareAssertion.recorded_at.desc())
+                .limit(20)
+                .all()
+            )
+        combined_assertions = []
+        seen_assertion_ids = set()
+        for row in [*matching_assertions, *approved_assertions]:
+            if str(row.id) not in seen_assertion_ids:
+                seen_assertion_ids.add(str(row.id))
+                combined_assertions.append(row)
         assertion_context: list[str] = []
-        for assertion in approved_assertions:
+        for assertion in combined_assertions:
             source_assertion_ids.append(str(assertion.id))
             assertion_context.append(
                 "Caregiver-approved LCR assertion (source-attributed): "
