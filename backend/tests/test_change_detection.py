@@ -1635,7 +1635,7 @@ def test_observation_coverage_api_persists_and_enforces_person_scope():
         teardown_db()
 
 
-def test_pattern_detection_does_not_mix_events_from_different_situations():
+def test_pattern_detection_does_not_mix_source_events_across_subjects():
     setup_db()
     try:
         db = TestingSessionLocal()
@@ -1650,13 +1650,14 @@ def test_pattern_detection_does_not_mix_events_from_different_situations():
         db.add_all([person, caregiver])
         db.commit()
         now = datetime.now(timezone.utc)
-        situation_a_ids = {"scope-a-1", "scope-a-2"}
-        situation_b_ids = {"scope-b-1", "scope-b-2"}
-        for event_id, situation_id, days_ago in (
-            ("scope-a-1", "situation-a", 20),
-            ("scope-a-2", "situation-a", 5),
-            ("scope-b-1", "situation-b", 18),
-            ("scope-b-2", "situation-b", 3),
+        subject_a_ids = {"scope-a-1", "scope-a-2"}
+        subject_b_ids = {"scope-b-1", "scope-b-2"}
+        from app.core.change_enums import ChangeType, ChangeDirection
+        for event_id, subject_id, days_ago in (
+            ("scope-a-1", "subject-a", 20),
+            ("scope-a-2", "subject-a", 5),
+            ("scope-b-1", "subject-b", 18),
+            ("scope-b-2", "subject-b", 3),
         ):
             db.add(CareEvent(
                 id=event_id,
@@ -1666,92 +1667,25 @@ def test_pattern_detection_does_not_mix_events_from_different_situations():
                 occurred_at=now - timedelta(days=days_ago),
                 title=f"Recorded mobility event {event_id}",
                 created_by_caregiver_id=caregiver.id,
-                situation_id=situation_id,
                 evidence_ids=[],
+            ))
+            db.add(Change(
+                id=f"change-{event_id}",
+                person_id=person.id,
+                subject_type="mobility_change",
+                subject_id=subject_id,
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state="Earlier recorded state",
+                current_state="Later recorded state",
+                evidence_ids=[event_id],
             ))
         db.commit()
         from app.services.pattern_detection import detect_patterns
-        patterns = detect_patterns(db, person.id, "mobility_change", "situation-a", now)
-        assert patterns, "Two distinct, source-persisted events should allow recurrence assessment"
-        assert all(set(pattern.event_ids).issubset(situation_a_ids) for pattern in patterns)
-        assert all(not set(pattern.event_ids).intersection(situation_b_ids) for pattern in patterns)
+        patterns = detect_patterns(db, person.id, "mobility_change", "subject-a", now)
+        assert patterns, "Two linked source events should allow a scoped recurrence assessment"
+        assert all(set(pattern.event_ids).issubset(subject_a_ids) for pattern in patterns)
+        assert all(not set(pattern.event_ids).intersection(subject_b_ids) for pattern in patterns)
         db.close()
-    finally:
-        teardown_db()
-
-
-def test_observation_coverage_api_persists_and_enforces_person_scope():
-    setup_db()
-    try:
-        from app.core.database import get_db
-        app.dependency_overrides[get_db] = override_get_db
-        db = TestingSessionLocal()
-        person = Person(id="coverage-write-person", name="Coverage writer")
-        caregiver = Caregiver(
-            id="coverage-write-caregiver",
-            name="Coverage writer caregiver",
-            email="coverage-write@example.com",
-            relationship="Family",
-            person_id=person.id,
-        )
-        other_person = Person(id="coverage-other-person-api", name="Other care record")
-        other_caregiver = Caregiver(
-            id="coverage-other-caregiver-api",
-            name="Other caregiver",
-            email="coverage-other-api@example.com",
-            relationship="Family",
-            person_id=other_person.id,
-        )
-        db.add_all([person, caregiver, other_person, other_caregiver])
-        db.commit()
-        token = issue_scoped_session(db, person, caregiver)
-        other_token = issue_scoped_session(db, other_person, other_caregiver)
-        db.close()
-
-        client = TestClient(app)
-        now = datetime.now(timezone.utc).replace(microsecond=0)
-        start = now - timedelta(days=7)
-        payload = {
-            "person_id": "coverage-write-person",
-            "subject_type": "mobility",
-            "window_start": start.isoformat(),
-            "window_end": now.isoformat(),
-            "coverage_status": "covered",
-            "source_evidence_ids": [],
-            "rationale": "Caregiver explicitly observed the mobility domain throughout this interval.",
-        }
-        created = client.post(
-            "/api/v1/change/coverage",
-            json=payload,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert created.status_code == 201, created.text
-        assert created.json()["coverage_status"] == "covered"
-        assert created.json()["recorded_by_caregiver_id"] == "coverage-write-caregiver"
-
-        assessed = client.get(
-            "/api/v1/change/coverage/coverage-write-person",
-            params={
-                "subject_type": "mobility",
-                "window_start": start.isoformat(),
-                "window_end": now.isoformat(),
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert assessed.status_code == 200, assessed.text
-        assert assessed.json()["coverage_status"] == "covered"
-        assert assessed.json()["coverage_fraction"] == pytest.approx(1.0)
-        assert len(assessed.json()["records"]) == 1
-
-        denied = client.get(
-            "/api/v1/change/coverage/coverage-write-person",
-            params={
-                "subject_type": "mobility",
-                "window_start": start.isoformat(),
-                "window_end": now.isoformat(),
-            },
-            headers={"Authorization": f"Bearer {other_token}"},
-        )
-        assert denied.status_code == 403
     finally:
         teardown_db()
