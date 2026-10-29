@@ -61,8 +61,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         captured["messages"] = messages
         captured["options"] = options
         return (
-            "The record contains one sleep observation from last night. "
-            "That is not enough information to establish a trend."
+            "The record contains one sleep observation: one report of poor sleep is not enough to determine whether sleep has been getting worse."
         )
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
