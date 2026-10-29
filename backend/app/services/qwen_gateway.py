@@ -117,6 +117,31 @@ def qwen_chat(
     try:
         with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # Ollama uses HTTP 404 for an absent model. Preserve this actionable
+        # operational distinction without exposing upstream response contents.
+        if exc.code == 404:
+            try:
+                upstream_error = json.loads(exc.read().decode("utf-8")).get("error", "")
+            except (ValueError, UnicodeError, OSError):
+                upstream_error = ""
+            if "model" in str(upstream_error).casefold() and any(
+                marker in str(upstream_error).casefold()
+                for marker in ("not found", "not installed", "does not exist")
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="SolenOS local Qwen model is not installed; no model response was generated.",
+                ) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="SolenOS local Qwen is unavailable; no model response was generated.",
+        ) from exc
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="SolenOS local Qwen returned an invalid response; no model response was generated.",
+        ) from exc
     except TimeoutError as exc:
         raise HTTPException(
             status_code=504,
