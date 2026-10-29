@@ -240,6 +240,7 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
                 event_type="mobility",
                 status="recorded",
                 occurred_at=start + timedelta(days=days),
+                occurred_at_timezone="America/New_York",
                 title=f"Recorded mobility event {i}",
                 created_by_caregiver_id=caregiver.id,
                 evidence_ids=[f"source-{i}"],
@@ -270,6 +271,8 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
         assert metrics["maximum_interval_days"] == 5.0
         assert metrics["normalized_rate_available"] is False
         assert metrics["observation_coverage_status"] == "partial"
+        assert metrics["local_time_distribution_status"] == "descriptive_only_no_causal_association"
+        assert metrics["local_time_distribution"]["hour_of_day_counts"] == {"20": 4}
         assert "no calibrated regularity threshold" in metrics["regularity_interpretation"]
         # Expire ORM state and reload to prove the metrics were serialized to
         # the database, not merely attached to the in-memory result.
