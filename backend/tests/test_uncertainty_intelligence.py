@@ -122,6 +122,55 @@ def test_evidence_backed_assumption_keeps_explicit_status_and_provenance():
     assert assumption["status"] == "accepted"
     assert assumption["evidence_references_valid"] is True
     assert assumption["supporting_evidence_ids"] == ["evidence-breakfast"]
+    assert assumption["verified_supporting_evidence_ids"] == ["evidence-breakfast"]
+    assert assumption["has_verified_supporting_evidence"] is True
+
+
+def test_unverified_support_cannot_accept_an_assumption():
+    result = analyze_uncertainty(
+        claim="The care instruction is confirmed.",
+        task="recommendation",
+        evidence=[{
+            "id": "reported-only",
+            "text": "A care instruction was reported.",
+            "source_type": "caregiver_report",
+            "verified": False,
+        }],
+        assumptions=[{
+            "statement": "The report confirms the current instruction.",
+            "status": "accepted",
+            "supporting_evidence_ids": ["reported-only"],
+            "reviewed_by_caregiver_id": "test-caregiver-reviewer",
+            "resolution_rationale": "The report was reviewed.",
+        }],
+    )
+    assumption = result["assumptions"][0]
+    assert assumption["status"] == "unresolved"
+    assert assumption["has_verified_supporting_evidence"] is False
+    assert "unresolved_assumptions" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+
+
+def test_generic_evidence_reference_is_not_a_supporting_evidence_decision():
+    result = analyze_uncertainty(
+        claim="The care instruction is confirmed.",
+        task="recommendation",
+        evidence=[{
+            "id": "verified-report",
+            "text": "A care instruction was reported.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        assumptions=[{
+            "statement": "The report confirms the current instruction.",
+            "status": "accepted",
+            "evidence_ids": ["verified-report"],
+            "reviewed_by_caregiver_id": "test-caregiver-reviewer",
+            "resolution_rationale": "The report was reviewed.",
+        }],
+    )
+    assert result["assumptions"][0]["status"] == "unresolved"
+    assert result["assumptions"][0]["has_verified_supporting_evidence"] is False
 
 
 def test_alternative_with_unavailable_evidence_reference_fails_closed():
