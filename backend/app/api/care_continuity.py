@@ -1051,6 +1051,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "events": "current_state_reconstruction",
         "facts": "current_care_reality",
         "assertions": "care_context_reconstruction",
+        "evidence_observations": "evidence_grounded_situation_understanding",
         "caregiver_observations": "functional_status_understanding",
         "caregiver_contexts": "caregiver_capacity_understanding",
         "caregiver_perspectives": "care_needs_understanding",
@@ -1077,6 +1078,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             ids = row.get("evidence_ids")
             if isinstance(ids, list):
                 evidence_ids.update(str(value) for value in ids if value)
+            if source_name == "evidence_observations" and row.get("evidence_id"):
+                evidence_ids.add(str(row["evidence_id"]))
         domain = source_domains.get(source_name)
         if domain:
             domain_sources.setdefault(domain, {"source_names": [], "record_count": 0, "source_statuses": []})
@@ -1132,8 +1135,27 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
             "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
-            "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
+            "evidence_ids": (
+                item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list)
+                else [str(item["evidence_id"])] if source == "evidence_observations" and item.get("evidence_id")
+                else []
+            ),
         }
+        if source == "evidence_observations":
+            summary_item["subject_label"] = item.get("subject_label")
+            summary_item["attribute"] = item.get("attribute")
+            summary_item["observed_value"] = item.get("normalized_value") or item.get("value_text")
+            summary_item["units"] = item.get("units")
+            summary_item["source_passage"] = item.get("source_passage")
+            summary_item["source_span"] = {
+                "start": item.get("source_span_start"),
+                "end": item.get("source_span_end"),
+            }
+            summary_item["negated"] = item.get("negated")
+            summary_item["hedge_marker"] = item.get("hedge_marker")
+            summary_item["ambiguity_note"] = item.get("ambiguity_note")
+            summary_item["extraction_method"] = item.get("extraction_method")
+            summary_item["extraction_version"] = item.get("extraction_version")
         if uncertainty_analysis is not None:
             summary_item["uncertainty_analysis"] = uncertainty_analysis
         baseline_marker = (
@@ -1215,7 +1237,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "absence_rule": "No coverage record means unknown, not no events.",
     }
     capability_specs = {
-        "situation_understanding": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "uncertainty_assessments", "information_gaps", "conflicts"],
+        "situation_understanding": ["events", "facts", "assertions", "evidence_observations", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "uncertainty_assessments", "information_gaps", "conflicts"],
+        "evidence_grounded_situation_understanding": ["evidence", "evidence_observations", "assertions", "provenance"],
         "current_care_reality": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts"],
         "care_context_reconstruction": ["assertions", "evidence", "provenance", "events", "facts"],
         "whole_situation_reasoning": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "appointments", "conflicts", "reconciliations"],
@@ -1267,7 +1290,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     # A source-linked chronology is not a causal explanation. Preserve event time and
     # record time separately, and leave temporal anchors unknown when not recorded.
     trajectory_sources = {
-        "events", "timeline", "facts", "caregiver_observations", "caregiver_contexts",
+        "events", "timeline", "facts", "evidence_observations", "caregiver_observations", "caregiver_contexts",
         "caregiver_perspectives", "decisions", "decision_outcomes",
     }
     trajectory_entries = []
@@ -1290,7 +1313,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "event_time": event_time,
             "recorded_at": recorded_time,
             "temporal_basis": temporal_basis,
-            "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
+            "evidence_ids": (item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [str(item["evidence_id"])] if item["source"] == "evidence_observations" and item.get("evidence_id") else []),
+            "source_span": {"start": item.get("source_span_start"), "end": item.get("source_span_end")} if item["source"] == "evidence_observations" else None,
+            "subject_label": item.get("subject_label") if item["source"] == "evidence_observations" else None,
+            "attribute": item.get("attribute") if item["source"] == "evidence_observations" else None,
+            "observed_value": (item.get("normalized_value") or item.get("value_text")) if item["source"] == "evidence_observations" else None,
             "interpretation_limit": "Source-linked chronology only; sequence does not establish causation.",
         })
     for row in coverage_rows:
