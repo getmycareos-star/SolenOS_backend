@@ -212,6 +212,41 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
             .count()
             == 1
         )
+
+        # New persisted evidence must supersede the prior pattern rather than
+        # creating a second active pattern for the same subject.
+        new_event = CareEvent(
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=now - timedelta(days=1),
+            title="Persisted fall event 3",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add(new_event)
+        db.commit()
+        updated_patterns = detect_patterns(db, person.id, "fall", None, now)
+        db.commit()
+        active_recurrence = [
+            item for item in updated_patterns
+            if item.pattern_type.value == "recurrence" and item.is_active
+        ]
+        assert len(active_recurrence) == 1
+        assert active_recurrence[0].id != pattern.id
+        old_pattern = db.query(Pattern).filter(Pattern.id == pattern.id).one()
+        assert old_pattern.is_active is False
+        assert old_pattern.superseded_by_pattern_id == active_recurrence[0].id
+        assert (
+            db.query(Pattern)
+            .filter(
+                Pattern.person_id == person.id,
+                Pattern.subject_type == "fall",
+                Pattern.is_active.is_(True),
+                Pattern.pattern_type == PatternType.RECURRENCE,
+            )
+            .count()
+            == 1
+        )
         db.close()
     finally:
         teardown_db()
