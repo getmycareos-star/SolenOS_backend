@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.api.care_delta import _scoped_identity
 from app.core.database import get_db
 from app.models.privacy_delivery import AuditLogEvent
+from app.models.care import Evidence
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 POLICY_VERSION = "handoff-draft-v1"
@@ -197,6 +198,23 @@ def _iso(value):
         return value.isoformat()
     return value
 
+def _explicit_evidence_ids(row: dict) -> list[str]:
+    """Return only IDs explicitly linked by the source record."""
+    values = row.get("evidence_ids")
+    if isinstance(values, str):
+        try:
+            import json
+            values = json.loads(values)
+        except (TypeError, ValueError):
+            values = [values] if values.strip() else []
+    if not isinstance(values, (list, tuple, set)):
+        values = [values] if isinstance(values, str) and values.strip() else []
+    result = [str(value).strip() for value in values if isinstance(value, str) and value.strip()]
+    singular = row.get("source_evidence_id")
+    if isinstance(singular, str) and singular.strip():
+        result.append(singular.strip())
+    return list(dict.fromkeys(result))
+
 
 def _detail_value(value):
     if value is None or isinstance(value, dict):
@@ -282,7 +300,10 @@ def prepare_handoff_draft(
                 }
                 continue
 
-        selected = [table.c[name] for name in spec["fields"] if name in table.c]
+        # Add source-reference fields opportunistically when a canonical table has
+        # them; schema variants without these fields remain explicitly unlinked.
+        selected_names = list(spec["fields"]) + ["evidence_ids", "source_evidence_id"]
+        selected = [table.c[name] for name in dict.fromkeys(selected_names) if name in table.c]
         if not selected:
             statuses[table_name] = {
                 "status": "unavailable",
@@ -352,9 +373,59 @@ def prepare_handoff_draft(
                 "details": details,
                 "epistemic_status": str(epistemic_value) if epistemic_value is not None else "not_recorded",
                 "record_status": str(record_status) if record_status is not None else "not_recorded",
+                "evidence_ids": _explicit_evidence_ids(row),
                 "text": text,
                 "stale_warning": bool(recorded_time is not None and _iso(recorded_time) < (now - timedelta(days=30)).isoformat()),
             })
+
+    # Resolve only explicitly linked evidence and keep author/reporter/uploader,
+    # event time and ingestion time distinct. Missing or cross-person IDs are not
+    # copied into the handoff as if their source had been inspected.
+    referenced_evidence_ids = sorted({
+        evidence_id
+        for item in records
+        for evidence_id in item.get("evidence_ids", [])
+    })
+    evidence_by_id = {}
+    if referenced_evidence_ids:
+        evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(referenced_evidence_ids),
+        ).all()
+        evidence_by_id = {
+            row.id: {
+                "evidence_id": row.id,
+                "type": row.type,
+                "evidence_kind": row.evidence_kind,
+                "epistemic_status": row.epistemic_status or "unknown",
+                "source_type": row.source_type,
+                "source_text": (row.source_text or "")[:1200],
+                "original_author": row.original_author,
+                "reported_by_label": row.reported_by_label,
+                "uploaded_by_caregiver_id": row.uploaded_by_caregiver_id,
+                "reported_by_caregiver_id": row.reported_by_caregiver_id,
+                "collected_by_caregiver_id": row.collected_by_caregiver_id,
+                "occurred_at": _iso(row.occurred_at),
+                "occurred_at_timezone": row.occurred_at_timezone,
+                "collected_at": _iso(row.collected_at),
+                "ingested_at": _iso(row.ingested_at),
+                "original_source_reference": row.original_source_reference,
+                "parent_evidence_id": row.parent_evidence_id,
+                "source_text_sha256": row.source_text_sha256,
+            }
+            for row in evidence_rows
+        }
+    for item in records:
+        item["evidence_sources"] = [
+            evidence_by_id[evidence_id]
+            for evidence_id in item.get("evidence_ids", [])
+            if evidence_id in evidence_by_id
+        ]
+        item["evidence_reference_status"] = (
+            "linked_sources_available" if item["evidence_sources"]
+            else "referenced_sources_unavailable" if item.get("evidence_ids")
+            else "no_evidence_linked"
+        )
 
     # These modules are intentionally not represented as read when no verified
     # persistent, person-scoped adapter is available.
@@ -415,7 +486,7 @@ def prepare_handoff_draft(
         "source_statuses": statuses,
         "sections": sections,
         "source_references": [
-            {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning")}
+            {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning", "evidence_ids", "evidence_sources", "evidence_reference_status")}
             for item in records
         ],
         "limitations": gaps,
