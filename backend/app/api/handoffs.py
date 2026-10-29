@@ -74,6 +74,7 @@ def _validate_summary_source_record_ids(db: Session, person_id: str, source_ids:
         existing_tables = set(inspector.get_table_names())
         metadata = MetaData()
         resolved: dict[str, list[str]] = {source_id: [] for source_id in source_ids}
+        requested_ids = set(source_ids)
         for table_name in allowed_tables:
             if table_name not in existing_tables:
                 continue
@@ -81,13 +82,15 @@ def _validate_summary_source_record_ids(db: Session, person_id: str, source_ids:
             if not {"id", "person_id"}.issubset(columns):
                 continue
             table = Table(table_name, metadata, autoload_with=db.get_bind())
-            for source_id in source_ids:
-                found = db.execute(
-                    select(table.c.id)
-                    .where(table.c.id == source_id, table.c.person_id == person_id)
-                    .limit(1)
-                ).first()
-                if found is not None:
+            rows = db.execute(
+                select(table.c.id).where(
+                    table.c.id.in_(source_ids),
+                    table.c.person_id == person_id,
+                )
+            ).scalars().all()
+            for matched_id in rows:
+                source_id = str(matched_id)
+                if source_id in requested_ids:
                     resolved[source_id].append(table_name)
         missing = [source_id for source_id, tables in resolved.items() if not tables]
         if missing:
