@@ -3091,6 +3091,13 @@ def create_evidence_observation(
             raise HTTPException(status_code=422, detail="The superseded observation must belong to this evidence and care record")
         if superseded_observation.attribute != attribute.strip():
             raise HTTPException(status_code=422, detail="A correction must retain the same observation attribute")
+        existing_correction = db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.supersedes_observation_id == supersedes_id,
+        ).first()
+        if existing_correction is not None:
+            raise HTTPException(status_code=409, detail="This observation already has a correction; correct the latest version instead")
     correction_rationale = payload.get("correction_rationale")
     if superseded_observation is not None and (not isinstance(correction_rationale, str) or len(correction_rationale.strip()) < 3):
         raise HTTPException(status_code=422, detail="A correction rationale of at least 3 characters is required when superseding an observation")
