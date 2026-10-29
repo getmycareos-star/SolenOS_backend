@@ -449,3 +449,56 @@ def test_recurrence_uses_full_included_event_span_for_coverage_denominator():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_pattern_reassessment_is_idempotent_and_deduplicates_same_source_occurrence():
+    """Repeated reconciliation must not multiply patterns or copied source rows."""
+    Base.metadata.create_all(bind=engine)
+    db = Session()
+    try:
+        person, caregiver = _case_identity(db, "idempotent-pattern-reassessment")
+        # Three distinct source-backed occurrences are needed for a cluster.
+        for event_id, days, source_ids in (
+            ("idem-original-1", 6, ["shared-source-a"]),
+            ("idem-copy-1", 6, ["shared-source-a"]),
+            ("idem-event-2", 4, ["shared-source-b"]),
+            ("idem-event-3", 2, ["shared-source-c"]),
+        ):
+            _record_event(db, person, caregiver, event_id, days, source_ids)
+        db.flush()
+
+        first = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        db.flush()
+        first_cluster = next(
+            (pattern for pattern in first if pattern.pattern_type.value == "clustering"),
+            None,
+        )
+        assert first_cluster is not None
+        assert set(first_cluster.event_ids) == {
+            "idem-original-1", "idem-event-2", "idem-event-3"
+        }
+
+        first_id = first_cluster.id
+        second = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        db.flush()
+        second_cluster = next(
+            (pattern for pattern in second if pattern.pattern_type.value == "clustering"),
+            None,
+        )
+        assert second_cluster is not None
+        assert second_cluster.id == first_id
+
+        active_clusters = (
+            db.query(Pattern)
+            .filter(
+                Pattern.person_id == person.id,
+                Pattern.subject_type == "fall",
+                Pattern.pattern_type == second_cluster.pattern_type,
+                Pattern.is_active.is_(True),
+            )
+            .all()
+        )
+        assert len(active_clusters) == 1
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
