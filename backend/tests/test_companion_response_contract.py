@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import json
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -287,7 +288,7 @@ def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(
             assert [row.role for row in rows] == ["user", "assistant"]
             assert rows[0].created_at < rows[1].created_at
             assert {row.client_turn_id for row in rows} == {"retry-turn-0001"}
-            assert rows[1].source_record_refs_json == retry_data["source_record_refs"] and isinstance(rows[1].source_record_refs_json, str)
+            assert json.loads(rows[1].source_record_refs_json) == retry_data["source_record_refs"]
         finally:
             db.close()
 
