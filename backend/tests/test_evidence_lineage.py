@@ -91,3 +91,30 @@ def test_lineage_summary_keeps_reviewed_independent_sources_separate_from_shared
     assert result["groups"][0]["source_independence_status"] == "independent"
     assert result["groups"][0]["basis"] == "explicit_independence_review"
     assert "does not prove" in result["groups"][0]["interpretation_limit"]
+
+
+def test_selected_siblings_join_through_real_unselected_parent_and_multi_hop_lineage():
+    rows = [
+        SimpleNamespace(id="root", parent_evidence_id=None, original_source_reference=""),
+        SimpleNamespace(id="middle", parent_evidence_id="root", original_source_reference=""),
+        SimpleNamespace(id="child-a", parent_evidence_id="middle", original_source_reference=""),
+        SimpleNamespace(id="child-b", parent_evidence_id="root", original_source_reference=""),
+    ]
+    lineage, independence = build_evidence_lineage(
+        rows, [], ["child-a", "child-b"]
+    )
+    assert lineage["child-a"] == lineage["child-b"]
+    assert independence == {"child-a": "shared_origin", "child-b": "shared_origin"}
+
+
+def test_source_reference_on_unselected_ancestor_connects_selected_derivative():
+    rows = [
+        SimpleNamespace(id="source", parent_evidence_id=None, original_source_reference="record://shared/1"),
+        SimpleNamespace(id="derivative", parent_evidence_id="source", original_source_reference=None),
+        SimpleNamespace(id="other-copy", parent_evidence_id=None, original_source_reference=" RECORD://SHARED/1 "),
+    ]
+    lineage, independence = build_evidence_lineage(
+        rows, [], ["derivative", "other-copy"]
+    )
+    assert lineage["derivative"] == lineage["other-copy"]
+    assert independence["derivative"] == independence["other-copy"] == "shared_origin"
