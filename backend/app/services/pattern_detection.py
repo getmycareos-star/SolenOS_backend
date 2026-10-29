@@ -141,11 +141,14 @@ def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
     # replacement; the surrounding request transaction keeps both changes atomic.
     for candidate in existing:
         candidate.is_active = False
-        candidate.superseded_by_pattern_id = pattern.id
     if existing:
         db.flush()
     db.add(pattern)
     db.flush()
+    for candidate in existing:
+        candidate.superseded_by_pattern_id = pattern.id
+    if existing:
+        db.flush()
     return pattern
 
 
