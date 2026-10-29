@@ -472,7 +472,7 @@ def _build_recurrence_pattern(
     )
     rate_per_30_days = (
         len(ordered_events) / (coverage_window_days / 30.0)
-        if fully_observed and coverage_window_days > 0 else None
+        if rate_supported and coverage_window_days > 0 else None
     )
     interval_mean = mean(interval_days) if interval_days else None
     interval_std_dev = pstdev(interval_days) if len(interval_days) >= 2 else None
