@@ -2,7 +2,7 @@
 
 **Scope:** canonical `main` only. Pull requests are not modified.  
 **Purpose:** a verification ledger, not a declaration that the entire capability map is complete.  
-**Last audited:** 2026-10-29. Latest targeted regression additions: `backend/tests/test_uncertainty.py` commit `c1dde21ec8628c6bf5cfa6f048c19f8ea14850f6`; not considered verified until the exact-main workflow completes.  
+**Last audited:** 2026-10-29. Latest direct-main changes include uncertainty session-scope middleware hardening, explicit temporal evidence in the possible-change regression, and a persisted claim-dependency graph API/UI. Current CI for these latest commits is still pending; no new capability is considered verified until its exact-main workflow completes.  
 **Rule:** a capability is not marked complete merely because a model, helper, endpoint, UI panel, or unit test exists. Completion requires persistence, authorization, migrations, real workflow integration, and relevant automated verification.
 
 ## Status definitions
@@ -45,8 +45,11 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Evidence integrity endpoint returns linked evidence and duplicate-content candidates.
 - [x] Add an append-only, versioned claim assessment API for all ten explicit statuses; each assessment records the reviewer from the server-authorized session, rationale, policy version, linked evidence relationships, and superseded assessment ID.
 - [x] Validate source passages as exact substrings of linked evidence and require explicit supporting/contradicting relationships for supported, partially supported, contradicted, and conflicting statuses.
-- [ ] Add a full dependency graph across derived claims, cross-claim supersession target, re-review triggers, and a complete correction/withdrawal workflow; current assessment history is versioned per source-attributed care assertion.
-- [ ] Current-main backend tests and PostgreSQL migration validation must pass before this capability is marked verified.
+- [x] Add an append-only, same-person claim dependency API with explicit dependency types, rationale, server-derived reviewer, duplicate rejection, claim existence validation, and cycle prevention.
+- [x] Expose dependency/dependent graph reads with a limitation statement that declared links do not prove semantic entailment or truth.
+- [x] Connect dependency creation and graph inspection to the LCR claim-assessment panel with authenticated session scope and failure-safe UI messaging.
+- [x] Add backend persistence/isolation/cycle regression coverage and a frontend contract assertion for the connected workflow.
+- [ ] Full dependency-aware invalidation/re-review triggers, cross-claim supersession lifecycle, correction/withdrawal workflows, and exact-main CI verification remain outstanding.
 
 ### E. Corroboration and source independence — PARTIAL
 - [x] Evidence integrity endpoint detects identical normalized source text and explicitly warns against counting duplicates as independent corroboration.
