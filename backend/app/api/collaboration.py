@@ -68,6 +68,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -496,35 +497,63 @@ _CONTEXT_STOPWORDS = {
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+    # Generic record vocabulary causes false retrieval hits (e.g. every status="recorded").
+    "record", "records", "recorded", "event", "events", "history", "care", "note", "notes",
 }
 
 
-def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
-    """Put query-relevant authorized records first without changing their meaning.
+_CONTEXT_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food", "intake"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
 
-    Recency is already represented by the input order and is only a tie-breaker;
-    keyword overlap selects context, never establishes truth or source authority.
-    """
-    if limit <= 0 or not lines:
-        return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
+
+def _base_context_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
         if token not in _CONTEXT_STOPWORDS
     }
-    if not query_terms:
+
+
+def _expanded_context_terms(text: str) -> set[str]:
+    direct = _base_context_terms(text)
+    expanded = set(direct)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    return expanded
+
+
+def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
+    """Rank direct matches above transparent synonym matches; never establish truth."""
+    if limit <= 0 or not lines:
+        return []
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    if not direct_terms and not synonym_terms:
         return lines[:limit]
 
     scored = []
+    normalized_query = " ".join((query or "").casefold().split())
     for index, line in enumerate(lines):
         text = (line or "").casefold()
-        record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
-        # A matched multiword phrase is stronger than incidental single words.
-        normalized_query = " ".join((query or "").casefold().split())
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", text))
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = 3 * len(direct_overlap) + len(synonym_overlap)
+        # Exact phrases strengthen a match, but cannot override source authority.
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
             if len(phrase) >= 8 and phrase in text:
-                score += 2
+                score += 3
         scored.append((score, index, line))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [line for _, _, line in scored[:limit]]
@@ -537,19 +566,26 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # Shortness alone does not imply a follow-up; require an explicit reference.
+    if not referential:
         return current
-    recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
-    ]
-    return "\n".join([current, *recent]) if recent else current
+    # Retrieval query expansion must not treat an earlier assistant-generated
+    # claim as evidence. Use caregiver-authored turns only to resolve references;
+    # the full transcript can still be supplied separately as conversation context.
+    # The endpoint loads newest-first. Reverse the bounded window to keep
+    # chronological order, then retain the *latest* four caregiver turns;
+    # slicing before the tail would silently discard the most recent context.
+    recent_user_turns = [
+        f"user: {(message.content or '')[:500]}"
+        for message in reversed(prior_messages[:8])
+        if getattr(message, "role", None) == "user"
+    ][-4:]
+    return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
@@ -564,23 +600,6 @@ def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
         except (ValueError, TypeError, json.JSONDecodeError):
             continue
     return list(dict.fromkeys(identifiers))
-
-
-def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
-    """Extract typed source references from only the context lines selected for inference."""
-    references = []
-    for line in lines:
-        try:
-            payload = json.loads(line[line.index("{"):])
-            record_id = payload.get("source_id")
-            record_type = payload.get("source_type")
-            if record_id is not None and record_type:
-                reference = {"record_type": str(record_type), "record_id": str(record_id)}
-                if reference not in references:
-                    references.append(reference)
-        except (ValueError, TypeError, json.JSONDecodeError):
-            continue
-    return references
 
 
 def _is_casual_greeting(text: str) -> bool:
@@ -1272,6 +1291,41 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _conversation_message_payload(row: ConversationMessage) -> dict:
+    """Return transcript text with the exact source references persisted for that turn."""
+    try:
+        metadata = json.loads(row.response_metadata_json or "{}")
+    except (TypeError, ValueError):
+        metadata = {}
+    try:
+        source_refs = json.loads(row.source_record_refs_json or "[]")
+    except (TypeError, ValueError):
+        source_refs = []
+    try:
+        evidence_ids = json.loads(row.evidence_ids_json or "[]")
+    except (TypeError, ValueError):
+        evidence_ids = []
+    return {
+        "role": row.role,
+        "text": row.content,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "guard_verdict": row.guard_verdict,
+        "safety_note": row.safety_note,
+        "evidence_ids": evidence_ids,
+        "source_record_refs": source_refs,
+        "source_event_ids": metadata.get("source_event_ids", []),
+        "source_evidence_ids": metadata.get("source_evidence_ids", []),
+        "source_appointment_ids": metadata.get("source_appointment_ids", []),
+        "source_assertion_ids": metadata.get("source_assertion_ids", []),
+        "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+        "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+        "freshness_source_status": metadata.get("freshness_source_status", "not_retrieved"),
+        "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+    }
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1287,6 +1341,66 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+    # A retry may arrive after the server committed its response but before the
+    # client received the session ID. Resolve that case before opening a new session.
+    if client_turn_id:
+        existing_pair = (
+            db.query(ConversationMessage, ConversationSession)
+            .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+            .filter(
+                ConversationMessage.client_turn_id == client_turn_id,
+                ConversationMessage.role == "assistant",
+            )
+            .first()
+        )
+        if existing_pair:
+            saved_assistant, saved_session = existing_pair
+            if (
+                saved_session.person_id != person_id
+                or saved_session.caregiver_id != caregiver_id
+                or saved_session.status != "active"
+            ):
+                raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+            if payload.session_id and payload.session_id != saved_session.id:
+                raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+            try:
+                saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+            except (TypeError, ValueError):
+                saved_metadata = {}
+            if saved_metadata.get("request_sha256") != request_sha256:
+                raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+            saved_history = (
+                db.query(ConversationMessage)
+                .filter_by(session_id=saved_session.id)
+                .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+                .all()
+            )
+            return {
+                "session_id": saved_session.id,
+                "person_id": person_id,
+                "reply": saved_assistant.content,
+                "guard_verdict": saved_assistant.guard_verdict,
+                "safety_note": saved_assistant.safety_note,
+                "confidence": None,
+                "evidence_ids": json.loads(saved_assistant.evidence_ids_json or "[]"),
+                "source_event_ids": saved_metadata.get("source_event_ids", []),
+                "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
+                "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+                "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
+                "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
+                "source_freshness_assessment_ids": saved_metadata.get("source_freshness_assessment_ids", []),
+                "freshness_source_status": saved_metadata.get("freshness_source_status", "not_retrieved"),
+                "source_record_refs": json.loads(saved_assistant.source_record_refs_json or "[]"),
+                "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {}),
+                "ai_generated": saved_metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
+                "written_to_lcr": False,
+                "persistence": "conversation_only",
+                "idempotent_replay": True,
+                "messages": [_conversation_message_payload(row) for row in saved_history],
+            }
 
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
@@ -1337,8 +1451,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
-        # Retrieve a bounded but broader care history. All queries are server-scoped
-        # to the bearer session's person; the request body never selects another record.
+        # Resolve explicit follow-up references before retrieval. Dialogue helps
+        # formulate a search but is never itself evidence for a care fact.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        # Keep current-message terms first in their original order. History terms
+        # supplement only when a follow-up explicitly references prior dialogue.
+        direct_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:8]
+        synonym_terms = sorted(
+            _expanded_context_terms(retrieval_query) - set(direct_terms)
+        )[:16]
+        retrieval_terms = list(dict.fromkeys([*direct_terms, *synonym_terms]))
+
+        # Retrieve recent events plus independently query-matched historical
+        # events; relevance is not constrained by the newest-40-event window.
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1346,7 +1481,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        matching_event_rows = []
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        all_events = []
+        seen_event_ids = set()
+        for event in [*matching_event_rows[:12], *recent_events]:
+            if str(event.id) not in seen_event_ids:
+                seen_event_ids.add(str(event.id))
+                all_events.append(event)
+        for event in all_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
@@ -1367,16 +1525,38 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Daily Care Qwen assertions enter Companion only after explicit caregiver
         # approval. Pending proposals and model-only interpretations are excluded.
-        approved_assertions = (
-            db.query(CareAssertion)
-            .filter(
-                CareAssertion.person_id == person_id,
-                CareAssertion.assertion_status == "caregiver_reviewed",
-            )
-            .order_by(CareAssertion.recorded_at.desc())
+        approved_assertion_query = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_status == "caregiver_reviewed",
+        )
+        recent_assertions = (
+            approved_assertion_query.order_by(CareAssertion.recorded_at.desc())
             .limit(30)
             .all()
         )
+        matching_assertions = []
+        if retrieval_terms:
+            matching_assertions = (
+                approved_assertion_query.filter(or_(
+                    *[CareAssertion.field.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.asserted_value.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_label.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(CareAssertion.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        approved_assertions = []
+        seen_assertion_ids = set()
+        # Keep older query-matched, caregiver-reviewed assertions even when the
+        # newest-30 assertion window no longer contains them.
+        for assertion in [*matching_assertions[:12], *recent_assertions]:
+            if str(assertion.id) not in seen_assertion_ids:
+                seen_assertion_ids.add(str(assertion.id))
+                approved_assertions.append(assertion)
+            if len(approved_assertions) >= 30:
+                break
         assertion_context: list[str] = []
         for assertion in approved_assertions:
             source_assertion_ids.append(str(assertion.id))
@@ -1397,13 +1577,37 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
-            .order_by(Appointment.scheduled_at.asc())
+        appointment_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        recent_appointments = (
+            appointment_query.order_by(Appointment.scheduled_at.desc())
             .limit(30)
             .all()
         )
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                appointment_query.filter(or_(
+                    *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.healthcare_org.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.preparation_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.travel_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(30)
+                .all()
+            )
+        appointments = []
+        seen_appointment_ids = set()
+        # Search older matching appointments separately from the recent timeline.
+        for appointment in [*matching_appointments[:12], *recent_appointments]:
+            if str(appointment.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(appointment.id))
+                appointments.append(appointment)
+            if len(appointments) >= 30:
+                break
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
@@ -1431,6 +1635,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
+        matching_evidence_rows = []
+        if retrieval_terms:
+            matching_evidence_rows = (
+                evidence_query.filter(or_(
+                    *[EvidenceModel.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.extra_metadata.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.type.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         linked_rows = (
             evidence_query.filter(EvidenceModel.id.in_(linked_ids))
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -1451,7 +1667,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        # Relevant older evidence is retrieved independently of newest-upload windows.
+        for row in [*matching_evidence_rows[:12], *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
@@ -1771,11 +1988,27 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
     )
     try:
         db.add(ConversationMessage(
@@ -1819,13 +2052,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
-        "messages": [{
-            "role": row.role,
-            "text": row.content,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-            "guard_verdict": row.guard_verdict,
-            "safety_note": row.safety_note,
-        } for row in history],
+        "messages": [_conversation_message_payload(row) for row in history],
     }
 
 
@@ -1836,13 +2063,7 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-    } for row in rows]}
+    return {"session_id": session.id, "person_id": person_id, "messages": [_conversation_message_payload(row) for row in rows]}
 
 
 class NotificationPreferenceUpdate(BaseModel):
