@@ -640,6 +640,45 @@ def test_near_duplicate_candidates_fail_closed_when_comparison_limit_is_exceeded
     assert "no conclusion" in result["interpretation_limit"]
 
 
+
+def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(review_records):
+    client_a, _client_b = review_records
+    foreign = client_a.post(
+        "/api/v1/care-continuity/action-outcomes",
+        json={
+            "action_id": "appointment-action-a",
+            "action_type": "appointment",
+            "outcome_status": "reported",
+            "evidence_ids": ["review-evidence-b"],
+        },
+    )
+    assert foreign.status_code == 422, foreign.text
+    assert "All evidence IDs must belong" in foreign.text
+
+    missing = client_a.post(
+        "/api/v1/care-continuity/action-outcomes",
+        json={
+            "action_id": "appointment-action-a",
+            "action_type": "appointment",
+            "outcome_status": "reported",
+            "evidence_ids": ["evidence-that-does-not-exist"],
+        },
+    )
+    assert missing.status_code == 422, missing.text
+
+    valid = client_a.post(
+        "/api/v1/care-continuity/action-outcomes",
+        json={
+            "action_id": "appointment-action-a",
+            "action_type": "appointment",
+            "outcome_status": "reported",
+            "evidence_ids": ["review-evidence-a"],
+        },
+    )
+    assert valid.status_code == 201, valid.text
+    assert valid.json()["evidence_ids"] == ["review-evidence-a"]
+
+
 def test_evidence_ingestion_key_is_idempotent_and_payload_bound(review_records):
     client_a, client_b = review_records
     payload = {
