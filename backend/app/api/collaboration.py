@@ -497,6 +497,9 @@ _CONTEXT_STOPWORDS = {
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+    # Generic record-language must not dominate semantic retrieval. In particular,
+    # searching for "record" must not match every row whose status is "recorded".
+    "record", "records", "recorded", "note", "notes", "information", "event", "events",
 }
 
 
@@ -1483,7 +1486,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     CareEvent.person_id == person_id,
                     or_(*[
                         column.ilike(f"%{term}%")
-                        for column in (CareEvent.title, CareEvent.description, CareEvent.event_type, CareEvent.status)
+                        for column in (CareEvent.title, CareEvent.description)
                         for term in retrieval_terms
                     ]),
                 ).order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()).limit(30).all()
@@ -1524,7 +1527,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if retrieval_terms:
             matching_assertions = approved_assertion_query.filter(or_(*[
                 column.ilike(f"%{term}%")
-                for column in (CareAssertion.field, CareAssertion.asserted_value, CareAssertion.source_label, CareAssertion.source_text)
+                for column in (CareAssertion.field, CareAssertion.asserted_value, CareAssertion.source_text)
                 for term in retrieval_terms
             ])).order_by(CareAssertion.recorded_at.desc()).limit(30).all()
         approved_assertions = []
@@ -1612,7 +1615,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if retrieval_terms:
             matching_evidence_rows = evidence_query.filter(or_(*[
                 column.ilike(f"%{term}%")
-                for column in (EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type)
+                for column in (EvidenceModel.source_text, EvidenceModel.extra_metadata)
                 for term in retrieval_terms
             ])).order_by(EvidenceModel.uploaded_at.desc()).limit(30).all()
         recent_rows = (
