@@ -1,13 +1,13 @@
 """Add immutable, attributed answer history for clarification questions.
 
-Revision ID: 20261029_14_question_answer_history
+Revision ID: 20261029_14_q_answer_hist
 Revises: 20261029_13_conflict_scope
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_14_question_answer_history"
+revision = "20261029_14_q_answer_hist"
 down_revision = "20261029_13_conflict_scope"
 branch_labels = None
 depends_on = None
