@@ -189,6 +189,172 @@ def main():
         require(status == 200 and closed_professional_loop.get("loop", {}).get("status") == "closed",
                 f"Source-backed professional loop did not close correctly: {status}: {closed_professional_loop}")
 
+        # Frontend-aligned complete workflow against the real PostgreSQL-backed API:
+        # create -> response/action -> outcome -> explicit verification -> close -> history.
+        workflow_source = [{"kind": "care_record_source", "evidence_id": professional_source_id}]
+        status, workflow_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body={
+                "loop_type": "follow_up",
+                "title": "CI-only end-to-end follow-up workflow",
+                "description": "Synthetic API workflow covering every persisted handoff stage.",
+                "idempotency_key": "postgres-open-loop-full-workflow-001",
+                "evidence": [{"kind": "ci_fixture", "text": "Synthetic workflow only."}],
+                "verification_rule": "The linked synthetic source record is present and was reviewed.",
+            },
+        )
+        require(status == 201, f"Full Open Loop workflow creation failed: {status}: {workflow_loop}")
+        workflow_loop_id = workflow_loop["id"]
+        status, workflow_response = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/responses", token=token_a,
+            body={"text": "Synthetic response recorded", "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-full-response-001"},
+        )
+        require(status == 200, f"Full workflow response recording failed: {status}: {workflow_response}")
+        status, workflow_action = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/actions", token=token_a,
+            body={"text": "Synthetic follow-up action recorded", "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-full-action-001"},
+        )
+        require(status == 200, f"Full workflow action recording failed: {status}: {workflow_action}")
+        status, workflow_outcome = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/outcomes", token=token_a,
+            body={"text": "Synthetic outcome reported", "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-full-outcome-001"},
+        )
+        require(status == 200, f"Full workflow outcome recording failed: {status}: {workflow_outcome}")
+        status, workflow_verified = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/verify-outcome", token=token_a,
+            body={"text": "Synthetic outcome reviewed against the linked record",
+                  "evidence": workflow_source,
+                  "verification_rule": "The linked synthetic source record is present and was reviewed.",
+                  "idempotency_key": "postgres-open-loop-full-verify-001"},
+        )
+        require(status == 200 and workflow_verified.get("outcome_status") == "outcome_verified",
+                f"Full workflow outcome verification failed: {status}: {workflow_verified}")
+        status, workflow_closed = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/close", token=token_a,
+            body={"text": "Synthetic closure after recorded verification",
+                  "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-full-close-001"},
+        )
+        require(status == 200 and workflow_closed.get("loop", {}).get("status") == "closed",
+                f"Full workflow closure failed: {status}: {workflow_closed}")
+        status, workflow_history = request(
+            "GET", f"/api/v1/open-loops/{workflow_loop_id}/history?limit=100", token=token_a,
+        )
+        workflow_event_types = {event.get("event_type") for event in workflow_history}
+        require(status == 200 and {
+            "created", "response_recorded", "action_recorded", "outcome_reported",
+            "outcome_verified", "closure_verified",
+        }.issubset(workflow_event_types),
+                f"Full workflow audit history is incomplete: {status}: {workflow_history}")
+
+        # Conflicting terminal transitions must serialize: exactly one of close
+        # or cancel may win, and the loser must receive a conflict rather than
+        # silently replacing the first terminal decision.
+        status, conflict_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body={
+                "loop_type": "follow_up",
+                "title": "CI-only competing terminal transitions",
+                "description": "Synthetic race between verified closure and cancellation.",
+                "idempotency_key": "postgres-open-loop-terminal-race-001",
+                "evidence": [{"kind": "ci_fixture", "text": "Synthetic lifecycle race only."}],
+                "verification_rule": "The linked synthetic source record is present and was reviewed.",
+            },
+        )
+        require(status == 201, f"Terminal race loop creation failed: {status}: {conflict_loop}")
+        conflict_loop_id = conflict_loop["id"]
+        for path, payload, label in [
+            ("outcomes", {"text": "Synthetic outcome", "evidence": workflow_source}, "outcome"),
+            ("verify-outcome", {"text": "Synthetic verification", "evidence": workflow_source,
+                                "verification_rule": "The linked synthetic source record is present and was reviewed."}, "verification"),
+        ]:
+            status, result = request(
+                "POST", f"/api/v1/open-loops/{conflict_loop_id}/{path}", token=token_a,
+                body={**payload, "idempotency_key": f"postgres-open-loop-terminal-race-{label}-001"},
+            )
+            require(status == 200, f"Terminal race preparation {label} failed: {status}: {result}")
+        terminal_actions = [
+            ("close", {"text": "Closure won if accepted", "evidence": workflow_source,
+                       "idempotency_key": "postgres-open-loop-terminal-race-close-001"}),
+            ("cancel", {"text": "Cancellation won if accepted", "evidence": workflow_source,
+                        "idempotency_key": "postgres-open-loop-terminal-race-cancel-001"}),
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            terminal_results = list(pool.map(
+                lambda item: request(
+                    "POST", f"/api/v1/open-loops/{conflict_loop_id}/{item[0]}",
+                    token=token_a, body=item[1],
+                ),
+                terminal_actions,
+            ))
+        terminal_statuses = [status for status, _ in terminal_results]
+        require(sorted(terminal_statuses) == [200, 409],
+                f"Conflicting close/cancel transitions must have one winner and one 409 conflict: {terminal_results}")
+        status, terminal_final = request(
+            "GET", f"/api/v1/open-loops/{conflict_loop_id}", token=token_a,
+        )
+        require(status == 200 and terminal_final.get("loop", {}).get("status") in {"closed", "cancelled"},
+                f"Terminal race did not leave one durable terminal state: {status}: {terminal_final}")
+        status, terminal_history = request(
+            "GET", f"/api/v1/open-loops/{conflict_loop_id}/history?limit=100", token=token_a,
+        )
+        terminal_events = [event.get("event_type") for event in terminal_history
+                           if event.get("event_type") in {"closure_verified", "cancelled"}]
+        require(status == 200 and len(terminal_events) == 1,
+                f"Terminal race must persist exactly one terminal audit event: {status}: {terminal_history}")
+
+        # Contradiction reconciliation and verification are separate explicit
+        # steps; closing without both must not be inferred from narrative alone.
+        status, contradiction_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body={
+                "loop_type": "contradiction",
+                "title": "CI-only conflicting reports",
+                "description": "Synthetic conflict requiring explicit reconciliation.",
+                "idempotency_key": "postgres-open-loop-reconciliation-001",
+                "evidence": [{"kind": "ci_fixture", "text": "Synthetic contradiction workflow only."}],
+            },
+        )
+        require(status == 201, f"Contradiction loop creation failed: {status}: {contradiction_loop}")
+        contradiction_id = contradiction_loop["id"]
+        status, premature_close = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
+            body={"text": "Premature close attempt", "evidence": workflow_source},
+        )
+        require(status == 409, f"Unreconciled contradiction must not close: {status}: {premature_close}")
+        status, reconciliation = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/reconcile", token=token_a,
+            body={"text": "Synthetic explicit reconciliation review; disagreement is not treated as semantic proof.",
+                  "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-reconciliation-event-001"},
+        )
+        require(status == 200, f"Contradiction reconciliation failed: {status}: {reconciliation}")
+        status, contradiction_verified = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/verify-outcome", token=token_a,
+            body={"text": "Reconciliation reviewed against the linked source",
+                  "evidence": workflow_source,
+                  "verification_rule": "The linked synthetic source record is present and was reviewed.",
+                  "idempotency_key": "postgres-open-loop-reconciliation-verify-001"},
+        )
+        require(status == 200 and contradiction_verified.get("outcome_status") == "outcome_verified",
+                f"Contradiction verification failed: {status}: {contradiction_verified}")
+        status, contradiction_closed = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
+            body={"text": "Synthetic closure after reconciliation and verification",
+                  "evidence": workflow_source,
+                  "idempotency_key": "postgres-open-loop-reconciliation-close-001"},
+        )
+        require(status == 200 and contradiction_closed.get("loop", {}).get("status") == "closed",
+                f"Reconciled contradiction did not close: {status}: {contradiction_closed}")
+        status, contradiction_history = request(
+            "GET", f"/api/v1/open-loops/{contradiction_id}/history?limit=100", token=token_a,
+        )
+        contradiction_event_types = {event.get("event_type") for event in contradiction_history}
+        require(status == 200 and {
+            "created", "contradiction_reconciled", "outcome_verified", "closure_verified",
+        }.issubset(contradiction_event_types),
+                f"Contradiction audit history is incomplete: {status}: {contradiction_history}")
+
         # Real PostgreSQL observation-coverage persistence, authorization, and
         # explicit coverage assessment. This never uses the deployed Railway API.
         coverage_start = datetime.now(timezone.utc) - timedelta(days=14)
