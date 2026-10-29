@@ -14,7 +14,7 @@ import hashlib
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -1611,8 +1611,30 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     if "reviewed_by_caregiver_id" in table.c and resource == "reconciliations":
         data["reviewed_by_caregiver_id"] = caregiver_id
         data["reviewed_at"] = datetime.now().astimezone()
-    if "evidence_ids" in data and isinstance(data["evidence_ids"], str):
-        raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
+    if "evidence_ids" in data:
+        if not isinstance(data["evidence_ids"], list):
+            raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
+        if len(data["evidence_ids"]) != len(set(data["evidence_ids"])):
+            raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
+        if any(not isinstance(item, str) or not item.strip() for item in data["evidence_ids"]):
+            raise HTTPException(status_code=422, detail="Every evidence ID must be a non-empty string")
+
+    # Reflected legacy tables store JSONList fields as TEXT. Normalize structured
+    # payloads and ISO-8601 timestamps to their actual database column types
+    # before INSERT; never depend on a driver silently coercing browser strings.
+    for key, value in list(data.items()):
+        column = table.c.get(key)
+        if column is None or value is None:
+            continue
+        if isinstance(column.type, SQLDateTime) and isinstance(value, str):
+            try:
+                data[key] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"{key} must be a valid ISO-8601 datetime") from exc
+        elif isinstance(value, (list, dict)) and not isinstance(column.type, SQLJSON):
+            if not isinstance(column.type, SQLText):
+                raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
+            data[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     try:
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
