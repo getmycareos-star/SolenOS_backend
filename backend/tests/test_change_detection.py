@@ -1992,3 +1992,116 @@ def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
         db.close()
     finally:
         teardown_db()
+
+
+def test_observation_coverage_api_persists_and_assesses_scoped_intervals():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="coverage-api-person", name="Coverage API Person")
+        caregiver = Caregiver(
+            id="coverage-api-caregiver", name="Coverage API Caregiver",
+            email="coverage-api@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        end = datetime.now(timezone.utc) - timedelta(hours=1)
+        start = end - timedelta(days=7)
+        payload = {
+            "person_id": person.id,
+            "subject_type": "mobility",
+            "window_start": start.isoformat(),
+            "window_end": end.isoformat(),
+            "coverage_status": "covered",
+            "source_evidence_ids": [],
+            "rationale": "Caregiver explicitly observed this domain during the interval.",
+        }
+        saved = client.post(
+            "/api/v1/change/coverage",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert saved.status_code == 201, saved.text
+        assert saved.json()["coverage_status"] == "covered"
+        assert saved.json()["recorded_by_caregiver_id"] == caregiver.id
+
+        assessed = client.get(
+            f"/api/v1/change/coverage/{person.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": end.isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert assessed.status_code == 200, assessed.text
+        assert assessed.json()["coverage_status"] == "covered"
+        assert assessed.json()["coverage_fraction"] == 1.0
+        assert len(assessed.json()["records"]) == 1
+
+        forbidden = client.get(
+            "/api/v1/change/coverage/another-person",
+            params={
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": end.isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert forbidden.status_code == 403
+    finally:
+        teardown_db()
+
+
+def test_observation_coverage_api_rejects_future_or_invalid_windows():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="coverage-window-person", name="Coverage Window Person")
+        caregiver = Caregiver(
+            id="coverage-window-caregiver", name="Coverage Window Caregiver",
+            email="coverage-window@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        client = TestClient(app)
+        now = datetime.now(timezone.utc)
+        future_payload = {
+            "person_id": person.id,
+            "subject_type": "mobility",
+            "window_start": now.isoformat(),
+            "window_end": (now + timedelta(hours=1)).isoformat(),
+            "coverage_status": "covered",
+            "source_evidence_ids": [],
+            "rationale": "Attempted future coverage.",
+        }
+        future = client.post(
+            "/api/v1/change/coverage",
+            json=future_payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert future.status_code == 422
+
+        invalid = client.get(
+            f"/api/v1/change/coverage/{person.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": now.isoformat(),
+                "window_end": (now - timedelta(hours=1)).isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert invalid.status_code == 422
+    finally:
+        teardown_db()
