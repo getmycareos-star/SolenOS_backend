@@ -1997,14 +1997,45 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-    } for row in rows]}
+    rows = (
+        db.query(ConversationMessage).filter_by(session_id=session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
+    )
+    messages = []
+    for row in rows:
+        try:
+            metadata = json.loads(row.response_metadata_json or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        try:
+            evidence_ids = json.loads(row.evidence_ids_json or "[]")
+        except (TypeError, ValueError):
+            evidence_ids = []
+        try:
+            source_record_refs = json.loads(row.source_record_refs_json or "[]")
+        except (TypeError, ValueError):
+            source_record_refs = []
+        messages.append({
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+            "evidence_ids": evidence_ids if isinstance(evidence_ids, list) else [],
+            "source_record_refs": source_record_refs if isinstance(source_record_refs, list) else [],
+            "source_event_ids": metadata.get("source_event_ids", []),
+            "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+            "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+            "freshness_source_status": metadata.get("freshness_source_status", "not_retrieved"),
+            "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+            "ai_generated": metadata.get("ai_generated", row.role == "assistant" and row.guard_verdict == "passed"),
+            "written_to_lcr": False,
+            "persistence": "conversation_only",
+        })
+    return {"session_id": session.id, "person_id": person_id, "messages": messages}
 
 
 class NotificationPreferenceUpdate(BaseModel):
