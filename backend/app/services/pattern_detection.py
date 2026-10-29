@@ -137,13 +137,15 @@ def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
         ):
             return candidate
 
-    db.add(pattern)
-    db.flush()
+    # Release the active-key uniqueness constraint before inserting its
+    # replacement; the surrounding request transaction keeps both changes atomic.
     for candidate in existing:
         candidate.is_active = False
         candidate.superseded_by_pattern_id = pattern.id
     if existing:
         db.flush()
+    db.add(pattern)
+    db.flush()
     return pattern
 
 
