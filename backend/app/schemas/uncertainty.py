@@ -59,6 +59,7 @@ class OpenQuestionBase(BaseModel):
     question: str
     subject_type: str
     subject_id: str
+    claim_id: Optional[str] = None
     status: str = "open"
     priority: Priority = Priority.INFORMATIONAL
     evidence_ids: Optional[List[str]] = None
