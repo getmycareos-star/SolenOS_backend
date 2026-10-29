@@ -530,6 +530,31 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     return [line for _, _, line in scored[:limit]]
 
 
+
+def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
+    """Remove unrelated records from model context after ranking, preserving broad queries."""
+    query_terms = {
+        token for token in re.findall(r"[a-z0-9']{3,}", (query or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+    generic_terms = {
+        "record", "records", "recorded", "history", "information", "care", "caregiver",
+        "caregivers", "person", "people", "observation", "observations", "note", "notes",
+        "current", "recent", "exact", "about", "happened", "happen", "occurred", "occur",
+        "more", "please", "actually", "today", "yesterday", "tomorrow", "last", "past",
+        "week", "weeks", "month", "months", "year", "years", "day", "days",
+    }
+    topic_terms = query_terms - generic_terms
+    if not topic_terms:
+        return lines
+    matching = []
+    for line in lines:
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", (line or "").casefold()))
+        if topic_terms & record_terms:
+            matching.append(line)
+    return matching
+
+
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
     current = (current_text or "").strip()
@@ -1750,10 +1775,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Select context by the current question and, for referential follow-ups,
         # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
-        event_context = _rank_context_lines(retrieval_query, event_context, 5)
-        assertion_context = _rank_context_lines(retrieval_query, assertion_context, 4)
-        appointment_context = _rank_context_lines(retrieval_query, appointment_context, 3)
-        evidence_context = _rank_context_lines(retrieval_query, evidence_context, 4)
+        event_context = _filter_context_lines_to_query(
+            retrieval_query, _rank_context_lines(retrieval_query, event_context, 5)
+        )
+        assertion_context = _filter_context_lines_to_query(
+            retrieval_query, _rank_context_lines(retrieval_query, assertion_context, 4)
+        )
+        appointment_context = _filter_context_lines_to_query(
+            retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 3)
+        )
+        evidence_context = _filter_context_lines_to_query(
+            retrieval_query, _rank_context_lines(retrieval_query, evidence_context, 4)
+        )
+        shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
@@ -1900,7 +1934,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
-        validation_source = user_text + "\n" + "\n".join(source_context)
+        validation_source = user_text + "\n" + "\n".join(bounded_context)
         unsupported_trend = _contains_unsupported_trend_claim(reply, trend_assessment)
         if unsupported_trend:
             # A model-generated directional claim is withheld when the source set
