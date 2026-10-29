@@ -345,6 +345,7 @@ class UncertaintyEngine:
             return None
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
+        resolution_scope = (update_data.pop("resolution_scope", None) or "").strip() or None
         requested_status = update_data.get("resolution_status", db_contradiction.resolution_status)
         status_changed = requested_status != db_contradiction.resolution_status
         resolution_statuses = {"resolved", "partially_resolved", "qualified", "superseded", "reopened", "unresolved"}
@@ -352,8 +353,14 @@ class UncertaintyEngine:
             raise ValueError("Unsupported conflict resolution status")
         rationale = (update_data.get("resolution_notes") or "").strip()
         evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
+        if requested_status == "partially_resolved":
+            if not resolution_scope:
+                raise ValueError("A partial conflict resolution requires an explicit scope describing exactly what was resolved")
+            if not evidence_ids:
+                raise ValueError("A partial conflict resolution requires linked evidence for the resolved detail")
         audit_event_required = (
             status_changed
+            or resolution_scope is not None
             or ("resolution_notes" in update_data and update_data.get("resolution_notes") != db_contradiction.resolution_notes)
             or ("evidence_ids" in update_data and evidence_ids != (db_contradiction.evidence_ids or []))
         )
@@ -381,6 +388,7 @@ class UncertaintyEngine:
                     previous_status=db_contradiction.resolution_status,
                     new_status=requested_status,
                     rationale=rationale,
+                    resolution_scope=resolution_scope,
                     evidence_ids=list(evidence_ids),
                 )
                 self.db.add(event)
