@@ -842,3 +842,55 @@ def test_companion_session_and_idempotency_key_cannot_cross_person(monkeypatch):
             db.close()
     finally:
         teardown()
+
+
+def test_standalone_new_topic_does_not_send_previous_chat_to_qwen(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = []
+
+    def fake_qwen(base, model, messages, options=None):
+        captured.append(messages)
+        if "blood pressure" in messages[-1]["content"].casefold():
+            return "The record does not contain a blood pressure reading."
+        return "The caregiver reported waking several times overnight and restless sleep."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=3),
+            title="Sleep observation",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        db.close()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(
+            "/api/v1/conversation/message", headers=headers,
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert first.status_code == 200, first.text
+        second = client.post(
+            "/api/v1/conversation/message", headers=headers,
+            json={
+                "person_id": person_id, "session_id": first.json()["session_id"],
+                "text": "What exact blood pressure was recorded last Tuesday?",
+            },
+        )
+        assert second.status_code == 200, second.text
+        second_messages = captured[-1]
+        assert len(second_messages) == 2
+        assert "blood pressure" in second_messages[-1]["content"].casefold()
+        assert "sleep" not in second_messages[-1]["content"].casefold()
+        assert "waking several times" not in second_messages[-1]["content"].casefold()
+        assert "not contain a blood pressure" in second.json()["reply"].casefold()
+        assert second.json()["written_to_lcr"] is False
+    finally:
+        teardown()
