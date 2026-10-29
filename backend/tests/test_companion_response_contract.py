@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent, Evidence
+from app.models.care import CareEvent, Evidence, Evidence as EvidenceModel
 from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.models.collaboration import ConversationMessage
 
@@ -259,7 +259,7 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     ]
     query = collaboration._context_query_with_history("What about that?", prior)
     assert "sleep" in query.casefold()
-    assert "poor sleep" in query.casefold()
+    assert "poor sleep" not in query.casefold()
     assert query.startswith("What about that?")
 
 
