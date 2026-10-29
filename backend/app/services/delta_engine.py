@@ -205,6 +205,47 @@ def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: s
     ]
 
 
+def _match_source_references(
+    excerpt: str,
+    *,
+    new_content: str,
+    source_event_id: str | None,
+    active_state: list[dict[str, Any]],
+    prior_events: list[Any],
+    evidence_rows: list[Any],
+) -> list[dict[str, str]]:
+    """Return exact-excerpt references only; never attach every run-level ID to every finding."""
+    normalized_excerpt = _normalise(excerpt)
+    excerpt_tokens = [token for token in normalized_excerpt.split() if any(char.isalnum() for char in token)]
+    if len(normalized_excerpt) < 16 or len(excerpt_tokens) < 3:
+        return []
+
+    references: list[dict[str, str]] = []
+
+    def add(record_type: str, record_id: Any, source_text: Any) -> None:
+        if record_id and normalized_excerpt in _normalise(source_text):
+            references.append({
+                "record_type": record_type,
+                "record_id": str(record_id),
+                "match_basis": "exact_normalized_excerpt",
+            })
+
+    if source_event_id:
+        add("care_event", source_event_id, new_content)
+    for assertion in active_state:
+        add("care_assertion", assertion.get("assertion_id"), assertion.get("value"))
+    for event in prior_events:
+        add("care_event", getattr(event, "id", None),
+            f"{getattr(event, 'title', '') or ''} {getattr(event, 'description', '') or ''}")
+    for evidence in evidence_rows:
+        add("evidence", getattr(evidence, "id", None), getattr(evidence, "source_text", None))
+
+    unique: dict[tuple[str, str], dict[str, str]] = {}
+    for reference in references:
+        unique[(reference["record_type"], reference["record_id"])] = reference
+    return list(unique.values())
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -566,21 +607,63 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
 
-            def add_open_loop(subject_type: str, subject_id: str, field: str, description: str, question_text: str, priority: Priority) -> None:
-                gap = db.query(InformationGap).filter(
-                    InformationGap.person_id == person_id,
-                    InformationGap.subject_type == subject_type,
-                    InformationGap.subject_id == subject_id,
-                    InformationGap.field == field,
-                    InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
-                ).first()
-                if gap is None:
-                    db.add(InformationGap(
-                        person_id=person_id, subject_type=subject_type, subject_id=subject_id,
-                        field=field, epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
-                        priority=priority, lifecycle_status=GapLifecycleStatus.OPEN,
-                        description=description, evidence_ids=evidence_ids,
-                    ))
+            # Use exact, person-scoped source records for loop provenance. A run-level
+            # evidence ID is not automatically support for every model-generated finding.
+            source_evidence_rows = list(prior_evidence)
+            if evidence_ids:
+                source_evidence_rows.extend(db.query(Evidence).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(evidence_ids),
+                ).all())
+            source_evidence_rows = list({str(row.id): row for row in source_evidence_rows}.values())
+            persisted_evidence = [
+                evidence_record_to_uncertainty_item(row)
+                for row in source_evidence_rows
+            ]
+
+            def loop_provenance(item: dict[str, Any]) -> tuple[list[str], list[dict[str, str]]]:
+                excerpt = str(item.get("evidence_excerpt") or "").strip()
+                references = _match_source_references(
+                    excerpt,
+                    new_content=content,
+                    source_event_id=source_event_id,
+                    active_state=active_state,
+                    prior_events=prior_events,
+                    evidence_rows=source_evidence_rows,
+                )
+                linked_evidence_ids = list(dict.fromkeys(
+                    ref["record_id"] for ref in references if ref["record_type"] == "evidence"
+                ))
+                return linked_evidence_ids, references
+
+            def add_open_loop(
+                subject_type: str,
+                subject_id: str,
+                field: str,
+                description: str,
+                question_text: str,
+                priority: Priority,
+                linked_evidence_ids: list[str],
+                source_record_refs: list[dict[str, str]],
+                evidence_excerpt: str,
+            ) -> None:
+                if not source_record_refs:
+                    return
+                if linked_evidence_ids:
+                    gap = db.query(InformationGap).filter(
+                        InformationGap.person_id == person_id,
+                        InformationGap.subject_type == subject_type,
+                        InformationGap.subject_id == subject_id,
+                        InformationGap.field == field,
+                        InformationGap.lifecycle_status.in_([GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED, GapLifecycleStatus.PARTIALLY_RESOLVED]),
+                    ).first()
+                    if gap is None:
+                        db.add(InformationGap(
+                            person_id=person_id, subject_type=subject_type, subject_id=subject_id,
+                            field=field, epistemic_state=EpistemicState.UNKNOWN, gap_reason=GapReason.ABSENT,
+                            priority=priority, lifecycle_status=GapLifecycleStatus.OPEN,
+                            description=description, evidence_ids=linked_evidence_ids,
+                        ))
                 question = db.query(OpenQuestion).filter(
                     OpenQuestion.person_id == person_id, OpenQuestion.subject_type == subject_type,
                     OpenQuestion.subject_id == subject_id, OpenQuestion.question == question_text,
@@ -589,42 +672,41 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 if question is None:
                     db.add(OpenQuestion(
                         person_id=person_id, question=question_text, subject_type=subject_type,
-                        subject_id=subject_id, status="open", priority=priority, evidence_ids=evidence_ids,
-                        context=[{"source": source, "source_event_id": source_event_id}],
+                        subject_id=subject_id, status="open", priority=priority, evidence_ids=linked_evidence_ids,
+                        context=[{
+                            "source": source,
+                            "source_event_id": source_event_id,
+                            "source_record_refs": source_record_refs,
+                            "evidence_excerpt": evidence_excerpt,
+                            "grounding_status": "exact_source_excerpt_verified; semantic_entailment_not_automatically_verified",
+                        }],
                     ))
 
             for item in result["tests"]:
-                if item.get("evidence_supported") and item.get("result_present") is False:
+                linked_evidence_ids, source_refs = loop_provenance(item)
+                if item.get("evidence_supported") and source_refs and item.get("result_present") is False:
                     name = str(item.get("name") or "ordered test").strip()
                     add_open_loop("test", name, "result_missing",
                         f"{name} is referenced but no result is present in the supplied record.",
-                        f"Has the result for {name} been received and reviewed?", Priority.HIGH)
+                        f"Has the result for {name} been received and reviewed?", Priority.HIGH,
+                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
             for item in result["follow_ups"]:
                 status = str(item.get("status") or "unknown").casefold()
-                if item.get("evidence_supported") and status not in {"completed", "done", "cancelled", "canceled"}:
+                linked_evidence_ids, source_refs = loop_provenance(item)
+                if item.get("evidence_supported") and source_refs and status not in {"completed", "done", "cancelled", "canceled"}:
                     action = str(item.get("action") or "follow-up action").strip()
                     add_open_loop("follow_up", action, "follow_up_status",
                         f"Follow-up is reported as {status}; completion is not established.",
-                        f"Has this follow-up been completed: {action}?", Priority.MEDIUM)
+                        f"Has this follow-up been completed: {action}?", Priority.MEDIUM,
+                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
             for item in result["clinical_gaps"]:
-                if item.get("evidence_supported"):
+                linked_evidence_ids, source_refs = loop_provenance(item)
+                if item.get("evidence_supported") and source_refs:
                     gap = str(item.get("gap") or "missing care information").strip()
                     question_text = str(item.get("next_question") or f"What is known about {gap}?").strip()
                     add_open_loop("care_gap", gap, "missing_information",
-                        str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM)
-            # Persist a per-finding epistemic assessment alongside the care loops.
-            # Evidence is loaded from the authenticated person's persisted evidence rows;
-            # model-generated prose alone is never treated as proof.
-            persisted_evidence = []
-            if evidence_ids:
-                evidence_rows = db.query(Evidence).filter(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(evidence_ids),
-                ).all()
-                persisted_evidence = [
-                    evidence_record_to_uncertainty_item(row)
-                    for row in evidence_rows
-                ]
+                        str(item.get("why_it_matters") or gap), question_text, Priority.MEDIUM,
+                        linked_evidence_ids, source_refs, str(item.get("evidence_excerpt") or ""))
 
             for finding in computed:
                 finding_name = str(finding.get("name") or "").strip()
