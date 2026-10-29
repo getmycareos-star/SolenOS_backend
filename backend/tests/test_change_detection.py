@@ -558,9 +558,11 @@ def test_reassessment_persists_recurrence_pattern_from_real_care_events():
         assert len(recurrence) == 1
         assert recurrence[0]["evidence_count"] == 3
         assert recurrence[0]["confidence"] is None
-        assert "observation coverage is not measured" in " ".join(
+        recurrence_limitations = " ".join(
             recurrence[0].get("alternative_interpretations") or []
         ).lower()
+        assert "observation coverage across the event span is not explicitly complete" in recurrence_limitations
+        assert "no complete observation-coverage record" in recurrence_limitations
     finally:
         teardown_db()
 
