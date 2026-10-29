@@ -539,6 +539,28 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
     return _snapshot(loop)
 
 
+@router.post("/{loop_id}/reconcile")
+def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    loop = _get_scoped(db, person_id, caregiver_id, loop_id)
+    if loop.loop_type != "contradiction":
+        raise HTTPException(status_code=409, detail="Only contradiction loops can be reconciled")
+    if not payload.evidence:
+        raise HTTPException(status_code=422, detail="Reconciliation requires supporting evidence")
+    before = _snapshot(loop)
+    reconciliation = {
+        "kind": "explicit_reconciliation",
+        "decision": payload.text,
+        "evidence": payload.evidence,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    loop.outcome_evidence = [*(loop.outcome_evidence or []), reconciliation]
+    loop.outcome_status = "outcome_verified"
+    _audit(db, loop, "contradiction_reconciled", before, payload.evidence, payload.idempotency_key)
+    db.commit()
+    db.refresh(loop)
+    return _snapshot(loop)
+
 @router.post("/{loop_id}/outcomes")
 def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
