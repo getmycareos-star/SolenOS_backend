@@ -417,6 +417,13 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
                         "shared_origin" if any(independence_by_id.get(eid) == "shared_origin" for eid in ids)
                         else "unassessed"
                     ),
+                    "origin_group_keys": sorted({
+                        str(getattr(link, "origin_group_key", "") or "").strip()
+                        for link in [SimpleNamespace(**dict(row)) for row in relationship_rows]
+                        if str(getattr(link, "origin_group_key", "") or "").strip()
+                        and str(getattr(link, "source_evidence_id", "") or "") in ids
+                        or str(getattr(link, "related_evidence_id", "") or "") in ids
+                    }),
                     "basis": "explicit_persisted_provenance",
                     "interpretation_limit": "A lineage link is not proof that the linked claim is true.",
                 }
