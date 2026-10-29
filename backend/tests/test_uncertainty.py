@@ -740,6 +740,14 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
             person_id=other_person.id,
         )
         db.add_all([person, caregiver, other_person, other_caregiver])
+        db.add(Evidence(
+            id="resolution-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="The source resolves the reported date only.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        ))
         db.commit()
         db.close()
 
@@ -768,6 +776,28 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         )
         assert missing_rationale.status_code == 422
 
+        missing_scope = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_notes": "Reviewed the source.",
+                "evidence_ids": ["resolution-evidence"],
+            },
+        )
+        assert missing_scope.status_code == 422, missing_scope.text
+
+        partial = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_notes": "The date detail is established, but the medication status remains disputed.",
+                "resolution_scope": "Resolve only the reported date; leave medication status unresolved.",
+                "evidence_ids": ["resolution-evidence"],
+            },
+        )
+        assert partial.status_code == 200, partial.text
+        assert partial.json()["resolution_status"] == "partially_resolved"
+
         resolved = client.patch(
             f"/api/v1/uncertainty/contradictions/{conflict_id}",
             json={"resolution_status": "resolved", "resolution_notes": "Reviewed the two source records; discrepancy remains documented."},
@@ -785,7 +815,8 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         history = client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history")
         assert history.status_code == 200, history.text
         events = history.json()
-        assert [event["new_status"] for event in events] == ["resolved", "reopened"]
+        assert [event["new_status"] for event in events] == ["partially_resolved", "resolved", "reopened"]
+        assert events[0]["resolution_scope"] == "Resolve only the reported date; leave medication status unresolved."
         assert all(event["rationale"] for event in events)
         assert all(event["person_id"] == "resolution-person" for event in events)
 
