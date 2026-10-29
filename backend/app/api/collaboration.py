@@ -1315,6 +1315,81 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _companion_replay_response(
+    db: Session,
+    *,
+    client_turn_id: str | None,
+    request_sha256: str,
+    person_id: str,
+    caregiver_id: str,
+    requested_session_id: str | None,
+) -> dict | None:
+    """Replay a committed turn only to its original authorized caregiver."""
+    if not client_turn_id:
+        return None
+    pair = (
+        db.query(ConversationMessage, ConversationSession)
+        .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationMessage.client_turn_id == client_turn_id,
+            ConversationMessage.role == "assistant",
+        )
+        .first()
+    )
+    if not pair:
+        return None
+    saved_assistant, saved_session = pair
+    if (
+        saved_session.person_id != person_id
+        or saved_session.caregiver_id != caregiver_id
+        or saved_session.status != "active"
+    ):
+        raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+    if requested_session_id and requested_session_id != saved_session.id:
+        raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+    try:
+        metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+        source_record_refs = json.loads(saved_assistant.source_record_refs_json or "[]")
+        evidence_ids = json.loads(saved_assistant.evidence_ids_json or "[]")
+    except (TypeError, ValueError):
+        metadata, source_record_refs, evidence_ids = {}, [], []
+    if metadata.get("request_sha256") != request_sha256:
+        raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+    saved_history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=saved_session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    return {
+        "session_id": saved_session.id,
+        "person_id": person_id,
+        "reply": saved_assistant.content,
+        "guard_verdict": saved_assistant.guard_verdict,
+        "safety_note": saved_assistant.safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": metadata.get("source_event_ids", []),
+        "source_evidence_ids": metadata.get("source_evidence_ids", []),
+        "source_appointment_ids": metadata.get("source_appointment_ids", []),
+        "source_assertion_ids": metadata.get("source_assertion_ids", []),
+        "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+        "ai_generated": metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+        "idempotent_replay": True,
+        "messages": [{
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        } for row in saved_history],
+    }
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1330,6 +1405,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+
+    client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
+    if payload.client_turn_id and not client_turn_id:
+        raise HTTPException(status_code=422, detail="client_turn_id cannot be blank")
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+    replay = _companion_replay_response(
+        db,
+        client_turn_id=client_turn_id,
+        request_sha256=request_sha256,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        requested_session_id=payload.session_id,
+    )
+    if replay is not None:
+        return replay
 
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
@@ -1869,17 +1959,63 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
     # new message pair and the uncommitted new session is rolled back by the request.
+    turn_timestamp = datetime.now(timezone.utc)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        client_turn_id=client_turn_id,
+        created_at=turn_timestamp,
     ))
+    source_record_refs = (
+        [{"source_type": "care_event", "source_id": value} for value in source_event_ids]
+        + [{"source_type": "care_assertion", "source_id": value} for value in source_assertion_ids]
+        + [{"source_type": "appointment", "source_id": value} for value in source_appointment_ids]
+        + [{"source_type": "evidence", "source_id": value} for value in source_evidence_ids]
+        + [{"source_type": "shared_lcr", "source_id": value} for value in source_lcr_context_ids]
+    )
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
+        created_at=turn_timestamp + timedelta(microseconds=1),
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        replay = _companion_replay_response(
+            db,
+            client_turn_id=client_turn_id,
+            request_sha256=request_sha256,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=payload.session_id,
+        )
+        if replay is not None:
+            return replay
+        raise HTTPException(
+            status_code=409 if client_turn_id else 503,
+            detail=(
+                "This turn ID is already in use; retry with the same message and turn ID"
+                if client_turn_id else
+                "The conversation could not be saved. Please retry."
+            ),
+        ) from exc
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
