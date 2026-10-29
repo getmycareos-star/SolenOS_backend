@@ -95,6 +95,20 @@ def detect_patterns(
         canonical_events.append(event)
 
     patterns: List[Pattern] = []
+    # Frequency comparisons are emitted only when both adjacent 30-day windows
+    # have explicit complete observation coverage. They remain descriptive
+    # candidates, not proof of cause or clinical significance.
+    frequency_pattern = _build_frequency_pattern(
+        db=db,
+        person_id=person_id,
+        subject_type=subject_type,
+        subject_id=subject_id or "",
+        events=canonical_events,
+        now=now,
+    )
+    if frequency_pattern:
+        patterns.append(frequency_pattern)
+
     if len(canonical_events) >= 2:
         pattern = _build_recurrence_pattern(
             db=db,
@@ -273,6 +287,90 @@ def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
     if existing:
         db.flush()
     return pattern
+
+
+
+def _build_frequency_pattern(
+    db: Session,
+    person_id: str,
+    subject_type: str,
+    subject_id: str,
+    events: List[CareEvent],
+    now: datetime,
+) -> Optional[Pattern]:
+    """Compare adjacent 30-day event rates only with complete observation coverage."""
+    current_start = now - timedelta(days=30)
+    prior_start = now - timedelta(days=60)
+    prior_coverage = assess_observation_coverage(
+        db, person_id, subject_type, prior_start, current_start
+    )
+    current_coverage = assess_observation_coverage(
+        db, person_id, subject_type, current_start, now
+    )
+    if prior_coverage["coverage_status"] != "covered" or current_coverage["coverage_status"] != "covered":
+        return None
+
+    prior_events = [
+        event for event in events
+        if prior_start <= _ensure_utc(event.occurred_at) < current_start
+    ]
+    current_events = [
+        event for event in events
+        if current_start <= _ensure_utc(event.occurred_at) <= now
+    ]
+    prior_count = len(prior_events)
+    current_count = len(current_events)
+    if prior_count == current_count:
+        return None
+
+    increase = current_count > prior_count
+    event_ids = sorted({event.id for event in prior_events + current_events})
+    if not event_ids:
+        return None
+    metrics = {
+        "comparison": "adjacent_equal_30_day_windows",
+        "prior_window_start": prior_start.isoformat(),
+        "prior_window_end": current_start.isoformat(),
+        "current_window_start": current_start.isoformat(),
+        "current_window_end": now.isoformat(),
+        "prior_event_count": prior_count,
+        "current_event_count": current_count,
+        "prior_events_per_30_days": float(prior_count),
+        "current_events_per_30_days": float(current_count),
+        "absolute_rate_delta_per_30_days": float(current_count - prior_count),
+        "prior_coverage_status": prior_coverage["coverage_status"],
+        "current_coverage_status": current_coverage["coverage_status"],
+        "prior_coverage_fraction": prior_coverage["coverage_fraction"],
+        "current_coverage_fraction": current_coverage["coverage_fraction"],
+    }
+    return _persist_pattern(db, Pattern(
+        person_id=person_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        pattern_type=PatternType.FREQUENCY_INCREASE if increase else PatternType.FREQUENCY_DECREASE,
+        pattern_strength=PatternStrength.EMERGING if len(event_ids) >= 3 else PatternStrength.WEAK,
+        event_ids=event_ids,
+        change_ids=sorted({
+            change.id for change in db.query(Change).filter(
+                Change.person_id == person_id,
+                Change.subject_type == subject_type,
+                Change.is_active.is_(True),
+                Change.evidence_ids != None,
+            ).all()
+            if set(change.evidence_ids or []).intersection(event_ids)
+        }),
+        temporal_start=prior_start,
+        temporal_end=now,
+        frequency=float(current_count),
+        rate_per_period=float(current_count),
+        direction=ChangeDirection.INCREASING if increase else ChangeDirection.DECREASING,
+        confidence=None,
+        evidence_count=len(event_ids),
+        alternative_interpretations=[
+            "Recorded-event frequency changed between adjacent 30-day windows with explicit complete coverage in both windows. This is descriptive and does not establish cause, clinical significance, or a forecast."
+        ],
+        pattern_metrics=metrics,
+    ))
 
 
 def _build_recurrence_pattern(
