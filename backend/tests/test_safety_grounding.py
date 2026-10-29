@@ -648,7 +648,19 @@ def test_public_safety_input_cannot_self_certify_reviewed_evidence():
         user_role="caregiver",
         person_id="test-person",
     )
-    sanitized = _sanitize_client_review_flags(supplied)
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = [
+        SimpleNamespace(
+            id="evidence-1",
+            source_text="The note confirms the claim.",
+            occurred_at=None,
+            uploaded_at=None,
+        )
+    ]
+    sanitized = _sanitize_client_review_flags(supplied, db, "test-person")
     assert sanitized.evidence_references[0].supports_claim is False
     assert sanitized.evidence_references[0].reviewed_support is None
     assert sanitized.evidence_references[0].contradicts_claim is False
