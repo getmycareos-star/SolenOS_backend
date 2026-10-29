@@ -209,6 +209,53 @@ def detect_event_changes(
                     now=now,
                 )
                 changes.append(change)
+
+    # Coverage and source records are append-only, so a previously valid rate
+    # assessment can become unsupported after new conflicting/unknown coverage
+    # is recorded. Do not leave that stale increase/decrease visible as current.
+    # Preserve the row and its explanation for audit; only retire machine-detected
+    # assessments, never caregiver-confirmed or caregiver-rejected decisions.
+    current_rate_types = {change.change_type for change in changes}
+    stale_rate_candidates = (
+        db.query(Change)
+        .filter(
+            Change.person_id == person_id,
+            Change.subject_type == event_type,
+            Change.subject_id == (subject_id or ""),
+            Change.is_active.is_(True),
+            Change.change_type.in_((ChangeType.INCREASE, ChangeType.DECREASE)),
+            Change.confirmation_status.in_(("detected", "awaiting_confirmation")),
+        )
+        .order_by(Change.created_at.asc(), Change.id.asc())
+        .all()
+    )
+    for stale in stale_rate_candidates:
+        if stale.change_type in current_rate_types:
+            continue
+        # Do not retire a still-supported same-direction assessment merely because
+        # this invocation emitted a different candidate (e.g. recurrence).
+        coverage_is_complete = (
+            comparison.get("baseline_coverage_status") == "covered"
+            and comparison.get("current_coverage_status") == "covered"
+        )
+        rate_delta = comparison.get("frequency_delta")
+        direction_still_supported = (
+            coverage_is_complete
+            and rate_delta is not None
+            and (
+                (stale.change_type == ChangeType.INCREASE and rate_delta > 0)
+                or (stale.change_type == ChangeType.DECREASE and rate_delta < 0)
+            )
+        )
+        if direction_still_supported:
+            continue
+        stale.is_active = False
+        stale.explanation = (
+            (stale.explanation or "Longitudinal rate assessment.")
+            + " This assessment is no longer active: reassessment could not reproduce its rate-change claim from the current source evidence and explicit observation coverage. The historical assessment is retained; retirement does not prove that the real-world event stopped."
+        )
+    if stale_rate_candidates:
+        db.flush()
     return changes
 
 
