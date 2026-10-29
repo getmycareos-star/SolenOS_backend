@@ -2610,6 +2610,97 @@ def reconstruct_state_as_of(
     }
 
 
+@router.get("/state-reconstruction/as-of")
+def reconstruct_recorded_state_as_of(
+    request: Request,
+    as_of: datetime = Query(..., description="Reconstruct the latest persisted revision per target at or before this instant"),
+    limit: int = Query(default=200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """Return a bounded historical projection from recorded target revisions.
+
+    This is deliberately labelled partial: targets or changes that never created
+    a CareStateRevision cannot be reconstructed from this endpoint.
+    """
+    person_id, _caregiver_id = _scoped_identity(request, db)
+    as_of = as_of.replace(tzinfo=timezone.utc) if as_of.tzinfo is None else as_of.astimezone(timezone.utc)
+    ranked = (
+        db.query(
+            CareStateRevision.id.label("revision_id"),
+            func.row_number().over(
+                partition_by=(CareStateRevision.target_type, CareStateRevision.target_id),
+                order_by=(desc(CareStateRevision.changed_at), desc(CareStateRevision.revision_number)),
+            ).label("target_rank"),
+        )
+        .filter(
+            CareStateRevision.person_id == person_id,
+            CareStateRevision.changed_at <= as_of,
+        )
+        .subquery()
+    )
+    rows = (
+        db.query(CareStateRevision)
+        .join(ranked, CareStateRevision.id == ranked.c.revision_id)
+        .filter(ranked.c.target_rank == 1)
+        .order_by(CareStateRevision.target_type.asc(), CareStateRevision.target_id.asc())
+        .limit(limit + 1)
+        .all()
+    )
+    truncated = len(rows) > limit
+    rows = rows[:limit]
+    linked_ids = sorted({
+        str(evidence_id)
+        for row in rows
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    })
+    authorized_ids = set()
+    if linked_ids:
+        authorized_ids = set(
+            db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(linked_ids),
+            ).all()
+        )
+        authorized_ids = {str(item[0]) for item in authorized_ids}
+
+    items = []
+    for row in rows:
+        try:
+            state = json.loads(row.after_state) if row.after_state else None
+        except (TypeError, json.JSONDecodeError) as exc:
+            logger.exception("Historical care-state snapshot is not valid JSON")
+            raise HTTPException(status_code=500, detail="Stored historical state could not be reconstructed") from exc
+        evidence_ids = [str(value) for value in (row.evidence_ids or []) if str(value) in authorized_ids]
+        items.append({
+            "target_type": row.target_type,
+            "target_id": row.target_id,
+            "revision_number": row.revision_number,
+            "change_kind": row.change_kind,
+            "state": None if row.change_kind == "deleted" else state,
+            "evidence_ids": evidence_ids,
+            "evidence_link_validation": (
+                "same_care_record_evidence_reference_verified"
+                if evidence_ids else "no_authorized_evidence_reference_returned"
+            ),
+            "recorded_change_at": row.changed_at.isoformat() if row.changed_at else None,
+            "changed_by_caregiver_id": row.changed_by_caregiver_id,
+        })
+    return {
+        "person_id": person_id,
+        "requested_as_of": as_of.isoformat(),
+        "reconstruction_type": "bounded_latest_revision_per_target",
+        "coverage_status": "partial_revision_history",
+        "target_count": len(items),
+        "truncated": truncated,
+        "items": items,
+        "interpretation_limit": (
+            "This projection reconstructs only targets with persisted care_state_revisions at or before the requested instant. "
+            "It is not a complete historical Living Care Record, does not establish unrecorded facts, and does not prove the truth of stored content."
+        ),
+    }
+
+
 @router.get("/outcomes/{person_id}")
 def list_person_outcomes(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
     return _person_scoped_rows("action-outcomes", person_id, request, db, limit)
