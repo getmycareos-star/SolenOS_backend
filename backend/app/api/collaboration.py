@@ -1307,6 +1307,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        direct_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:8]
+        synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(direct_terms))[:16]
+        retrieval_terms = list(dict.fromkeys([*direct_terms, *synonym_terms]))
+
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1314,7 +1329,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        matching_event_rows = []
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        all_events = []
+        seen_event_ids = set()
+        for event in [*matching_event_rows[:12], *recent_events]:
+            if str(event.id) not in seen_event_ids:
+                seen_event_ids.add(str(event.id))
+                all_events.append(event)
+        for event in all_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
@@ -1335,16 +1372,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Daily Care Qwen assertions enter Companion only after explicit caregiver
         # approval. Pending proposals and model-only interpretations are excluded.
-        approved_assertions = (
-            db.query(CareAssertion)
-            .filter(
-                CareAssertion.person_id == person_id,
-                CareAssertion.assertion_status == "caregiver_reviewed",
-            )
-            .order_by(CareAssertion.recorded_at.desc())
-            .limit(30)
-            .all()
+        approved_assertion_query = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_status == "caregiver_reviewed",
         )
+        recent_assertions = approved_assertion_query.order_by(CareAssertion.recorded_at.desc()).limit(30).all()
+        matching_assertions = []
+        if retrieval_terms:
+            matching_assertions = (
+                approved_assertion_query.filter(or_(
+                    *[CareAssertion.field.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.asserted_value.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_label.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(CareAssertion.recorded_at.desc()).limit(30).all()
+            )
+        approved_assertions = []
+        seen_assertion_ids = set()
+        for assertion in [*matching_assertions[:12], *recent_assertions]:
+            if str(assertion.id) not in seen_assertion_ids:
+                seen_assertion_ids.add(str(assertion.id))
+                approved_assertions.append(assertion)
+            if len(approved_assertions) >= 30:
+                break
         assertion_context: list[str] = []
         for assertion in approved_assertions:
             source_assertion_ids.append(str(assertion.id))
@@ -1365,13 +1416,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
-            .order_by(Appointment.scheduled_at.asc())
-            .limit(30)
-            .all()
-        )
+        appointment_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        recent_appointments = appointment_query.order_by(Appointment.scheduled_at.desc()).limit(30).all()
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                appointment_query.filter(or_(
+                    *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.healthcare_org.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.preparation_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.travel_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(Appointment.scheduled_at.desc()).limit(30).all()
+            )
+        appointments = []
+        seen_appointment_ids = set()
+        for appointment in [*matching_appointments[:12], *recent_appointments]:
+            if str(appointment.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(appointment.id))
+                appointments.append(appointment)
+            if len(appointments) >= 30:
+                break
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
