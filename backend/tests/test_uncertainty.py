@@ -1893,6 +1893,12 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
             f"/api/v1/escalations/{escalation_id}",
             params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
         ).status_code == 404
+        owner_update = client.patch(
+            f"/api/v1/escalations/{escalation_id}",
+            params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
+        )
+        assert owner_update.status_code == 200, owner_update.text
+        assert owner_update.json()["reviewer_identity"] == caregiver.id
         assert client.get(f"/api/v1/escalations/{other_person.id}").status_code == 403
 
         unauthenticated = TestClient(app)
