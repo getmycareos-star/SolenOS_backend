@@ -430,3 +430,53 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert other_view.status_code == 200, other_view.text
     assert other_view.json()["status"] == "not_assessed"
     assert "Caregiver-reported mobility change" not in other_view.text
+
+def test_observation_coverage_api_persists_and_isolates_person_records(client):
+    test_client, owner, other = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    window_end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+    window_start = window_end - timedelta(days=14)
+    payload = {
+        "subject_type": "mobility",
+        "window_start": window_start.isoformat(),
+        "window_end": window_end.isoformat(),
+        "coverage_status": "covered",
+        "source_evidence_ids": [],
+        "rationale": "Caregiver explicitly recorded that mobility was observed throughout this interval.",
+    }
+
+    created = test_client.post("/api/v1/care-continuity/observation-coverage", headers=headers, json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["person_id"] == owner["person"]["id"]
+    assert created.json()["coverage_status"] == "covered"
+
+    own_records = test_client.get("/api/v1/care-continuity/observation-coverage?subject_type=mobility", headers=headers)
+    other_records = test_client.get("/api/v1/care-continuity/observation-coverage?subject_type=mobility", headers=other_headers)
+    assert own_records.status_code == 200, own_records.text
+    assert other_records.status_code == 200, other_records.text
+    assert any(item["id"] == created.json()["id"] for item in own_records.json()["items"])
+    assert other_records.json()["items"] == []
+
+    assessment = test_client.get(
+        "/api/v1/care-continuity/observation-coverage/assessment",
+        headers=headers,
+        params={
+            "subject_type": "mobility",
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+        },
+    )
+    assert assessment.status_code == 200, assessment.text
+    assert assessment.json()["coverage_status"] == "covered"
+    assert assessment.json()["coverage_fraction"] == 1.0
+    assert assessment.json()["source_of_truth"] == "persisted_person_scoped_observation_coverage"
+
+    # A client cannot redirect a coverage record into another person's LCR.
+    forged = test_client.post(
+        "/api/v1/care-continuity/observation-coverage",
+        headers=headers,
+        json={**payload, "person_id": other["person"]["id"]},
+    )
+    assert forged.status_code == 422
+
