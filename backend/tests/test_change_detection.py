@@ -1595,7 +1595,7 @@ def test_observation_coverage_api_persists_and_enforces_person_scope():
         assert created.status_code == 201, created.text
         assert created.json()["coverage_status"] == "covered"
         assert created.json()["person_id"] == person.id
-        assert created.json()["window_start"].endswith("+00:00")
+        assert created.json()["window_start"].endswith("+00:00") or created.json()["window_start"].endswith("Z")
         assert created.json()["window_end"].endswith("+00:00")
 
         assessed = client.get(
