@@ -239,8 +239,13 @@ def test_documentation_density_spike_not_treated_as_real_event():
         ).first()
         assert sig is not None
         assert sig.evidence_status == EvidenceStatus.REPORTED
-        # Single reporter => low evidence confidence, no corroboration.
+        # Single reporter => low evidence confidence and zero independent corroboration.
         assert sig.evidence_confidence < 0.6
+        corroboration = next(d for d in sig.dimensions if d["name"] == "corroboration")
+        assert corroboration["score"] == 0.0
+        persistence = next(d for d in sig.dimensions if d["name"] == "persistence")
+        assert persistence["score"] == 0.0
+        assert persistence["measurement_status"] == "unknown"
         # NOT an alert: two same-time reports of a low-signal observation from
         # one reporter do not earn attention, even if flagged for follow-up.
         assert sig.attention_candidate is False
