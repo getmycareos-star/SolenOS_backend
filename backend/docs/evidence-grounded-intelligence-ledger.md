@@ -26,6 +26,7 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [ ] Verify migration upgrade against fresh and pre-existing PostgreSQL schemas, direct-SQL mutation rejection, and create/retrieve/hash/classification behavior on the exact current `main` commit in CI.
 - [x] Original uploaded-file bytes, SHA-256, size, filename, and MIME type are persisted in `evidence_uploads`; download verifies byte count and recomputed SHA-256 before returning content.
 - [ ] Complete device identity, import/transfer lineage, and explicit evidence links to every event, claim, observation, decision, outcome, and review type; the source-text hash and uploaded-binary hash remain distinct integrity domains.
+- [x] Extend evidence acquisition provenance with reported-at time, collection method, privacy-minimizing opaque device label, transfer source/reference, and an optional client idempotency key backed by a per-person unique constraint and server-computed canonical request fingerprint. These are persisted fields; end-to-end verification remains pending.
 
 ### B. Evidence and knowledge classification — PARTIAL
 - [x] Existing source type, event/assertion kind, evidence status, and epistemic-state structures distinguish several source and knowledge types.
@@ -100,7 +101,8 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Existing evidence integrity logic identifies exact normalized-text duplicate candidates without deleting records.
 - [x] Evidence source text now has a deterministic SHA-256 fingerprint field for exact stored text.
 - [x] Add bounded normalized-text near-duplicate candidates (minimum text length, explicit algorithm version, comparison cap, and no confidence score); candidate output explicitly does not establish copying, common origin, truth, or independence. Frontend LCR now displays candidate groups and analysis limitations. Current-main CI verification is pending.
-- [ ] Document-version/semantic candidates, idempotent ingestion keys, event identity resolution, authorized person/entity merge proposals, and false-match review remain missing.
+- [ ] Document-version/semantic candidates, event identity resolution, authorized person/entity merge proposals, and false-match review remain missing.
+- [x] Add an optional per-person evidence ingestion key. An exact retry returns the existing record; reuse with a different canonical request payload returns HTTP 409; concurrent duplicate keys are handled through the database uniqueness constraint. Current-main API and PostgreSQL migration verification is pending.
 - [ ] Do not destructively merge people or evidence solely on similarity.
 
 ### K. Evidence completeness, freshness, and gaps — PARTIAL
@@ -163,6 +165,14 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [ ] Current-main backend tests and PostgreSQL migration validation must pass before these additions are considered verified; broader E2E/property/concurrency/failure tests remain incomplete.
 - [x] Add route regressions for rejecting unpersisted safety evidence IDs and cross-record audit reads, plus a sanitizer regression proving caller-supplied source text is replaced by persisted source text. The exact latest-main run remains pending.
 - [x] Add unit tests for bounded near-duplicate candidate semantics, short-text exclusion, explicit non-independence interpretation, and fail-closed behavior above the comparison cap; these are unit-level tests, not proof of the full HTTP/PostgreSQL workflow.
+
+## Latest direct-main increment — 2026-10-29
+
+- Backend [fix SQLAlchemy 2 evidence-scope query](https://github.com/getmycareos-star/SolenOS_backend/commit/4ee32cdb3a30759085aad5a44176482bb1c5d4cd) addresses the observed `Query.scalars()` failure in the situation assessment. Rerun proof was pending at the time of this update.
+- Backend [persist acquisition provenance](https://github.com/getmycareos-star/SolenOS_backend/commit/326919315219b32ae49d396436051a911e8a0bb2), [add acquisition migration](https://github.com/getmycareos-star/SolenOS_backend/commit/b2b11612c698d4327768cdad98b5d63d5a1471af), [expose the idempotency key](https://github.com/getmycareos-star/SolenOS_backend/commit/a738f015fe0bde52d1dc7e7db4c8b55747104cc1), [add the idempotency migration](https://github.com/getmycareos-star/SolenOS_backend/commit/b0e868383caff421ff4e0ef34ebb87d0527fd03f), and [bind ingestion retries to a canonical request fingerprint](https://github.com/getmycareos-star/SolenOS_backend/commit/bd512e5cee7624d38f833f1af74e5919ca860cad).
+- Backend [add idempotency regression tests](https://github.com/getmycareos-star/SolenOS_backend/commit/3b07785082c8db1a41709cc1ac7e910fb7ff335c) and [verify migration schema](https://github.com/getmycareos-star/SolenOS_backend/commit/4fbe6f8d2f22728e9ff60382fa652efcdad675a3).
+- Frontend [show acquisition provenance in LCR](https://github.com/getmycareos-star/SolenOS-landing/commit/66c8243f7e957dd640a4581d330db5f6f3b1e5e8) and [guard it with a frontend contract assertion](https://github.com/getmycareos-star/SolenOS-landing/commit/f4d7af1038fb2761886c2181ac628e1e0b49d5fd).
+- Migration revisions `20261029_18_acq_provenance` and `20261029_19_evidence_idem` extend the canonical chain. They are not considered production-verified until the latest-main PostgreSQL workflow succeeds.
 
 ## Current implementation commits
 
