@@ -256,6 +256,59 @@ def test_review_is_required_even_when_supplied_evidence_metadata_has_no_detected
     assert result["calibration_status"] == "not_calibrated"
 
 
+def test_unverified_evidence_cannot_be_labeled_sufficient_for_recommendation():
+    result = analyze_uncertainty(
+        claim="The current care instruction should be followed.",
+        task="recommendation",
+        evidence=[{
+            "id": "unverified-instruction",
+            "text": "A reported instruction exists.",
+            "source_type": "caregiver_report",
+            "verified": False,
+        }],
+    )
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["epistemic_state"] == "partially_known"
+    assert result["conclusion_confidence"] is None
+    assert any("verified" in question["reason"] for question in result["clarification_questions"])
+
+
+def test_future_dated_evidence_cannot_be_labeled_sufficient_for_recommendation():
+    result = analyze_uncertainty(
+        claim="The care status is current.",
+        task="recommendation",
+        evidence=[{
+            "id": "future-instruction",
+            "text": "A care instruction was reported.",
+            "source_type": "caregiver_report",
+            "verified": True,
+            "observed_at": "2030-01-01T00:00:00Z",
+        }],
+        now=datetime(2026, 10, 29, tzinfo=timezone.utc),
+    )
+    assert "temporal_uncertainty" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert any("Temporal validity" in question["reason"] for question in result["clarification_questions"])
+    assert result["conclusion_confidence"] is None
+
+
+def test_causal_claim_requires_evidence_review_before_recommendation():
+    result = analyze_uncertainty(
+        claim="The fall was caused by the medication.",
+        task="recommendation",
+        evidence=[{
+            "id": "fall-report",
+            "text": "A fall was reported after a medication was taken.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+    )
+    assert "causal_inference_review" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert any("causal relationship" in question["question"] for question in result["clarification_questions"])
+    assert result["conclusion_confidence"] is None
+
+
 def test_duplicate_source_text_is_not_independent_corroboration():
     result = analyze_uncertainty(
         claim="The appointment is confirmed.",
