@@ -1,14 +1,14 @@
 """Align conflict resolution evidence storage with the JSONList ORM type.
 
-Revision ID: 20261029_02_conflict_evidence_text
-Revises: 20261029_01_active_pattern_unique
+Revision ID: 20261029_02_conflict_text
+Revises: 20261029_01_pattern_unique
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_02_conflict_evidence_text"
-down_revision = "20261029_01_active_pattern_unique"
+revision = "20261029_02_conflict_text"
+down_revision = "20261029_01_pattern_unique"
 branch_labels = None
 depends_on = None
 
