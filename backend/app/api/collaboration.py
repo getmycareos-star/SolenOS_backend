@@ -707,13 +707,14 @@ def _companion_message_needs_revision(text: str) -> bool:
 
 
 _TREND_INTENT_RE = re.compile(
-    r"\b(?:trend|pattern|getting\s+(?:worse|better)|worsen(?:ing)?|improv(?:e|ed|ing)|"
+    r"\b(?:trend|pattern|(?:getting\s+)?(?:worse|better)|worsen(?:ing)?|improv(?:e|ed|ing)|"
     r"declin(?:e|ed|ing)|increas(?:e|ed|ing)|decreas(?:e|ed|ing)|more\s+often|less\s+often|"
     r"change(?:d)?\s+over\s+time)\b",
     re.IGNORECASE,
 )
 _TREND_DIRECTION_RE = re.compile(
-    r"\b(?:getting\s+(?:worse|better)|worsen(?:ed|ing)?|improv(?:ed|ing)|"
+    r"\b(?:(?:is|was|has\s+been|seems|appears|became|become)\s+(?:getting\s+)?(?:worse|better)|"
+    r"getting\s+(?:worse|better)|worsen(?:ed|ing)?|improv(?:ed|ing)|"
     r"declin(?:ed|ing)|increas(?:ed|ing)|decreas(?:ed|ing)|more\s+often|less\s+often|"
     r"(?:upward|downward)\s+trend|(?:increasing|decreasing)\s+trend)\b",
     re.IGNORECASE,
