@@ -279,7 +279,9 @@ def analyze_and_persist_uncertainty(
                     "source_type": row.source_type or row.type,
                     "text": row.source_text,
                     "verified": str(row.evidence_status or "").lower() == "verified",
-                    "observed_at": row.time_provenance,
+                    # time_provenance describes how a time was established; it is
+                    # not itself an event timestamp and must not be parsed as one.
+                    "temporal_provenance": row.time_provenance,
                 }
                 for row in evidence_rows
             ],
