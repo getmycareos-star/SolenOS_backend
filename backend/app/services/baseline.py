@@ -197,6 +197,7 @@ def build_baseline(
             and same_density
             and bool(existing.documentation_bias_flag) == (not baseline_complete)
             and existing.coverage_status == coverage["coverage_status"]
+            and existing.history_completeness == ("truncated" if history_truncated else "complete")
             and existing.analysis_version == BASELINE_ANALYSIS_VERSION
         ):
             return existing
@@ -221,6 +222,7 @@ def build_baseline(
         is_stable=baseline_complete,
         observation_density=observation_density,
         coverage_status=coverage["coverage_status"],
+        history_completeness="truncated" if history_truncated else "complete",
         analysis_version=BASELINE_ANALYSIS_VERSION,
         documentation_bias_flag=not baseline_complete,
         state_value=(
