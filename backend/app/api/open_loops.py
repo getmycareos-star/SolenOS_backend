@@ -218,7 +218,7 @@ def _snapshot(loop):
     now = datetime.now(timezone.utc)
     def iso(value):
         return value.isoformat() if value is not None else None
-    deadline = _utc(loop.deadline_at) if loop.deadline_at and loop.deadline_at.tzinfo else loop.deadline_at
+    deadline = (loop.deadline_at.replace(tzinfo=timezone.utc) if loop.deadline_at and loop.deadline_at.tzinfo is None else _utc(loop.deadline_at) if loop.deadline_at else None)
     deps = getattr(loop, "_mandatory_blockers", [])
     return {
         "id": loop.id, "person_id": loop.person_id, "caregiver_id": loop.caregiver_id,
@@ -450,6 +450,8 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
     loop = _get_scoped(db, person_id, caregiver_id, loop_id)
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
+    if loop.loop_type == "professional_input" and not payload.evidence:
+        raise HTTPException(status_code=422, detail="Professional input requires source evidence; caregiver text alone cannot establish it")
     before = _snapshot(loop)
     loop.response_evidence = [*(loop.response_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     loop.last_contact_at = datetime.now(timezone.utc)
@@ -523,6 +525,8 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
         raise HTTPException(status_code=409, detail="Closure requires evidence")
     if loop.loop_type in {"awaiting_response", "professional_input"} and not loop.response_evidence:
         raise HTTPException(status_code=409, detail="A response must be recorded before closure")
+    if loop.loop_type == "professional_input" and not any(item.get("evidence") for item in (loop.response_evidence or []) if isinstance(item, dict)):
+        raise HTTPException(status_code=409, detail="Professional input has not been substantiated by source evidence")
     if loop.loop_type == "missing_information" and loop.missing_information:
         raise HTTPException(status_code=409, detail="Required information remains missing")
     if loop.loop_type == "contradiction" and not any("reconciliation" in str(e).lower() for e in payload.evidence):
