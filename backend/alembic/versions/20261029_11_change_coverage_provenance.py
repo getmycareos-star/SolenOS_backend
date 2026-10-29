@@ -1,12 +1,12 @@
 """Persist coverage provenance directly on longitudinal change assessments.
-Revision ID: 20261029_11_change_coverage_provenance
+Revision ID: 20261029_11_cov_prov
 Revises: 20261029_10_coverage_immutable
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_11_change_coverage_provenance"
+revision = "20261029_11_cov_prov"
 down_revision = "20261029_10_coverage_immutable"
 branch_labels = None
 depends_on = None
