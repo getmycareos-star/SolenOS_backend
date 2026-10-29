@@ -588,7 +588,15 @@ jobs:
                 http://127.0.0.1:8080/api/v1/assistant/assist 2>/tmp/qwen-workflow-error || true)
               workflow_response=$(cat /tmp/qwen-workflow-response.json 2>/dev/null || true)
               if [ "$workflow_status" = "200" ]; then
-                if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow" 2>/dev/null; then
+                if [ "$workflow" = "evidence_provenance" ]; then
+                  # Source labeling is deterministic when the supplied text explicitly
+                  # identifies provenance; this workflow must not fail because a tiny
+                  # language model invents or overstates a source category.
+                  if python -c 'import json,re,sys; d=json.loads(sys.argv[1]); reply=d.get("reply","").casefold(); assert d["workflow"] == "evidence_provenance"; assert d["ai_generated"] is False; assert d["provider_status"] == "not_required_deterministic"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert "caregiver-reported observation" in reply; assert re.search(r"no professional assessment is supplied", reply); assert "does not verify the underlying observation" in reply, d' "$workflow_response" 2>/dev/null; then
+                    workflow_ready=1
+                    break
+                  fi
+                elif python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow" 2>/dev/null; then
                   workflow_ready=1
                   break
                 fi
