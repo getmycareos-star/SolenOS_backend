@@ -6,7 +6,9 @@ records in an isolated SQLite database and a real Ollama model supplied by CI.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +18,12 @@ from app.models.care import CareEvent
 from app.models.collaboration import ConversationMessage
 from app.main import app
 import app.main as main_module
+
+
+pytestmark = pytest.mark.skipif(
+    os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1",
+    reason="requires the dedicated live-Qwen workflow and a running Ollama model",
+)
 
 
 engine = create_engine(
