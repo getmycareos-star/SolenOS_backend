@@ -244,6 +244,19 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
                 created_by_caregiver_id=caregiver.id,
                 evidence_ids=[f"source-{i}"],
             ))
+        # Complete coverage only between the first and last events is not
+        # enough to calculate a rate over the full 90-day pattern window.
+        db.add(ObservationCoverage(
+            id="event-span-only-coverage",
+            person_id=person.id,
+            subject_type="mobility",
+            window_start=start,
+            window_end=start + timedelta(days=8),
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The event span was observed, but the surrounding 90-day window was not.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
         db.commit()
         patterns = detect_patterns(db, person.id, "mobility", None, start + timedelta(days=10))
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
@@ -256,7 +269,7 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
         assert metrics["median_interval_days"] == 2.0
         assert metrics["maximum_interval_days"] == 5.0
         assert metrics["normalized_rate_available"] is False
-        assert metrics["observation_coverage_status"] == "unknown"
+        assert metrics["observation_coverage_status"] == "partial"
         assert "no calibrated regularity threshold" in metrics["regularity_interpretation"]
         # Expire ORM state and reload to prove the metrics were serialized to
         # the database, not merely attached to the in-memory result.
