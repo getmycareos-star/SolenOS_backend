@@ -779,9 +779,9 @@ def _contains_unsupported_record_reference(reply: str, source_text: str) -> bool
     every natural-language proposition; that remains a separate review requirement.
     """
     candidates = re.findall(
-        r"(?i)\\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|"
+        r"(?i)\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|"
         r"(?:evidence|event|appointment|handoff|record|claim|assertion|source|decision|outcome)"
-        r"[\\s:_#-]+[a-z0-9][a-z0-9_-]{5,})\\b",
+        r"[\s:_#-]+[a-z0-9][a-z0-9_-]{5,})\b",
         reply or "",
     )
     normalized_source = (source_text or "").casefold()
