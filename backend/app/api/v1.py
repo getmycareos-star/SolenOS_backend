@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone
 import json
+import logging
 import hashlib
 from app.core.database import get_db
 from app.services.qwen_gateway import extract_review_candidates
@@ -129,6 +130,8 @@ from app.services.temporal_intelligence import (
     check_temporal_conflict,
 )
 from app.api.actions import router as actions_router
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
