@@ -114,7 +114,7 @@ jobs:
               "evidence_freshness_assessments": {"id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status", "source_time", "source_time_kind", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id"},
               "evidence_completeness_policies": {"id", "person_id", "domain_key", "purpose_key", "policy_version", "required_fields", "rationale", "created_by_caregiver_id", "created_at"},
               "evidence_completeness_assessments": {"id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "field_evidence_json", "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at"},
-              "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "created_at"},
+              "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "client_turn_id", "response_metadata_json", "created_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -122,6 +122,15 @@ jobs:
               missing = required - actual
               assert not missing, f"{table} missing columns: {sorted(missing)}"
               print(f"PASS {table}: {len(required)} required columns")
+          conversation_unique_constraints = inspector.get_unique_constraints("conversation_messages")
+          conversation_unique_indexes = inspector.get_indexes("conversation_messages")
+          has_turn_id_uniqueness = (
+              any(set(item.get("column_names") or []) == {"client_turn_id"} for item in conversation_unique_constraints)
+              or any(item.get("unique") and set(item.get("column_names") or []) == {"client_turn_id"} for item in conversation_unique_indexes)
+          )
+          assert has_turn_id_uniqueness, "Companion client_turn_id must be unique for idempotent replay"
+          print("PASS Companion client turn idempotency uniqueness")
+
           question_claim_fks = inspector.get_foreign_keys("open_questions")
           assert any(
               "claim_id" in (item.get("constrained_columns") or [])
