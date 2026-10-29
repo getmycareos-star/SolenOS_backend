@@ -614,14 +614,30 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     "conditions": "condition",
                     "symptoms": "symptom",
                 }.get(finding_domain, "care_finding")
+                source_items = [
+                    item for item in result.get(finding_domain, [])
+                    if _normalise(item.get("name")) == _normalise(finding_name)
+                ]
+                source_item = source_items[0] if len(source_items) == 1 else {}
+                # Run-level evidence IDs are not automatically evidence for every finding.
+                # Link only persisted evidence whose stored text contains the finding's
+                # explicit excerpt; otherwise preserve the finding as unsupported/unknown.
+                excerpt = str(source_item.get("evidence_excerpt") or "").strip()
+                normalized_excerpt = _normalise(excerpt)
+                finding_evidence = [
+                    row for row in persisted_evidence
+                    if normalized_excerpt
+                    and normalized_excerpt in _normalise(str(row.get("text") or ""))
+                ]
+                finding_evidence_ids = [str(row["id"]) for row in finding_evidence if row.get("id")]
                 analysis = analyze_uncertainty(
                     claim=(str(finding.get("current") or "") or str(finding.get("change_type") or "Change not established")),
                     task="identify_change",
-                    evidence=persisted_evidence,
+                    evidence=finding_evidence,
                     unresolved_conflicts=([{
                         "field": finding_field,
                         "description": finding.get("comparison_warning") or "Competing state values were found.",
-                        "evidence_ids": evidence_ids,
+                        "evidence_ids": finding_evidence_ids,
                     }] if finding.get("change_type") == "conflicting" else []),
                 )
                 if finding.get("change_type") == "conflicting":
@@ -664,7 +680,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         "analysis": analysis,
                         "finding": finding,
                     }],
-                    evidence_ids=evidence_ids or None,
+                    evidence_ids=finding_evidence_ids or None,
                     assessed_by_caregiver_id=created_by_caregiver_id,
                     is_active=True,
                 ))
