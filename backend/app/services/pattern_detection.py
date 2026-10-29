@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from statistics import mean, median, pstdev
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from app.models.change import Change, Pattern
@@ -302,8 +303,40 @@ def _build_recurrence_pattern(
     fully_observed = coverage["coverage_status"] == "covered"
     # Event recurrence is supported by multiple distinct source events, but a
     # rate requires an explicit observation denominator across the comparison span.
+    interval_days = [
+        (right - left).total_seconds() / 86400.0
+        for left, right in zip(distinct_times, distinct_times[1:])
+    ]
     frequency_per_day = len(ordered_events) / span_days if fully_observed else None
     rate_per_30_days = len(ordered_events) / (span_days / 30.0) if fully_observed else None
+    interval_mean = mean(interval_days) if interval_days else None
+    interval_std_dev = pstdev(interval_days) if len(interval_days) >= 2 else None
+    interval_cv = (
+        interval_std_dev / interval_mean
+        if interval_std_dev is not None and interval_mean and interval_mean > 0
+        else None
+    )
+    pattern_metrics = {
+        "metric_version": "inter-event-intervals-v1",
+        "distinct_observation_times": len(distinct_times),
+        "distinct_event_records": len(ordered_events),
+        "span_days": round(span_days, 6),
+        "inter_event_interval_count": len(interval_days),
+        "inter_event_intervals_days": [round(value, 6) for value in interval_days],
+        "minimum_interval_days": round(min(interval_days), 6) if interval_days else None,
+        "median_interval_days": round(median(interval_days), 6) if interval_days else None,
+        "maximum_interval_days": round(max(interval_days), 6) if interval_days else None,
+        "mean_interval_days": round(interval_mean, 6) if interval_mean is not None else None,
+        "interval_population_std_dev_days": round(interval_std_dev, 6) if interval_std_dev is not None else None,
+        "interval_coefficient_of_variation": round(interval_cv, 6) if interval_cv is not None else None,
+        "regularity_interpretation": (
+            "Descriptive interval variability only; no calibrated regularity threshold or forecast is applied."
+            if len(interval_days) >= 3
+            else "Too few inter-event intervals for even a descriptive variability estimate."
+        ),
+        "observation_coverage_status": coverage["coverage_status"],
+        "normalized_rate_available": fully_observed,
+    }
     alternatives = []
     if not fully_observed:
         alternatives.append(
@@ -331,6 +364,7 @@ def _build_recurrence_pattern(
         confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=alternatives,
+        pattern_metrics=pattern_metrics,
     )
     return _persist_pattern(db, pattern)
 
