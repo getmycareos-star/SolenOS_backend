@@ -176,6 +176,7 @@ def list_safety_audits(person_id: str, request: Request, limit: int = 50, db: Se
 
 @router.post("/escalations", response_model=EscalationObject)
 def create_escalation(
+    request: Request,
     person_id: str,
     affected_person_id: str,
     trigger: str,
@@ -187,16 +188,31 @@ def create_escalation(
     provenance: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
+    authorized_person_id, caregiver_id = _scoped_identity(request, db)
+    if person_id != authorized_person_id or affected_person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Escalation is scoped to the authenticated care record")
+    linked_ids = list(evidence_ids or [])
+    if len(linked_ids) != len(set(linked_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
+    if len(linked_ids) > 100:
+        raise HTTPException(status_code=422, detail="At most 100 evidence references may be linked")
+    if linked_ids:
+        found = db.query(Evidence.id).filter(
+            Evidence.person_id == authorized_person_id,
+            Evidence.id.in_(linked_ids),
+        ).count()
+        if found != len(linked_ids):
+            raise HTTPException(status_code=404, detail="One or more evidence records were not found in this care record")
     escalation_engine = EscalationEngine()
-    escalation_data = escalation_engine.determine_escalation(risk_category, trigger, person_id)
+    escalation_data = escalation_engine.determine_escalation(risk_category, trigger, authorized_person_id)
 
     db_escalation = EscalationModel(
         id=str(uuid.uuid4()),
-        person_id=person_id,
-        affected_person_id=affected_person_id,
+        person_id=authorized_person_id,
+        affected_person_id=authorized_person_id,
         trigger=trigger,
         risk_category=risk_category,
-        evidence_ids=evidence_ids or [],
+        evidence_ids=linked_ids,
         uncertainty=uncertainty,
         recommended_reviewer=escalation_data["destination"],
         urgency=escalation_data["urgency"],
@@ -211,8 +227,11 @@ def create_escalation(
 
 
 @router.get("/escalations/{person_id}", response_model=List[EscalationObject])
-def list_escalations(person_id: str, status: Optional[EscalationStatus] = None, db: Session = Depends(get_db)):
-    query = db.query(EscalationModel).filter(EscalationModel.person_id == person_id)
+def list_escalations(person_id: str, request: Request, status: Optional[EscalationStatus] = None, db: Session = Depends(get_db)):
+    authorized_person_id, _ = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Escalation history is scoped to the authenticated care record")
+    query = db.query(EscalationModel).filter(EscalationModel.person_id == authorized_person_id)
     if status:
         query = query.filter(EscalationModel.status == status)
     return query.order_by(EscalationModel.timestamp.desc()).all()
@@ -221,21 +240,26 @@ def list_escalations(person_id: str, status: Optional[EscalationStatus] = None, 
 @router.patch("/escalations/{escalation_id}")
 def update_escalation(
     escalation_id: str,
+    request: Request,
     status: EscalationStatus,
     decision: Optional[str] = None,
     reviewer_identity: Optional[str] = None,
     resolution: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    db_escalation = db.query(EscalationModel).filter(EscalationModel.id == escalation_id).first()
+    authorized_person_id, caregiver_id = _scoped_identity(request, db)
+    db_escalation = db.query(EscalationModel).filter(
+        EscalationModel.id == escalation_id,
+        EscalationModel.person_id == authorized_person_id,
+    ).first()
     if not db_escalation:
-        raise HTTPException(status_code=404, detail="Escalation not found")
+        raise HTTPException(status_code=404, detail="Escalation not found in this care record")
 
     db_escalation.status = status
     if decision:
         db_escalation.decision = decision
-    if reviewer_identity:
-        db_escalation.reviewer_identity = reviewer_identity
+    # Never accept a caller-supplied reviewer identity as audit attribution.
+    db_escalation.reviewer_identity = caregiver_id
     if resolution:
         db_escalation.resolution = resolution
     if status in (EscalationStatusEnum.RESOLVED, EscalationStatusEnum.DISMISSED):

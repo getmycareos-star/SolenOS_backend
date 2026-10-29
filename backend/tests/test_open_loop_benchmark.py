@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from test_open_loops import (
     create_loop,
+    create_source_evidence,
     session,
     setup_function as setup_open_loop_db,
     teardown_function as teardown_open_loop_db,
@@ -126,12 +127,13 @@ def test_ol08_reused_create_idempotency_key_does_not_duplicate_records(authentic
 def test_ol09_contradiction_cannot_close_without_reconciliation(authenticated):
     client, headers = authenticated
     loop = create_loop(client, headers, "contradiction", title="Conflicting reports")
+    source_id = create_source_evidence(loop, "Persisted source comparison for contradiction benchmark")
     premature = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
                             json={"text": "Reviewed", "evidence": [{"kind": "closure_review"}]})
     assert premature.status_code == 409
     reconciled = client.post(f"/api/v1/open-loops/{loop['id']}/reconcile", headers=headers,
                              json={"text": "Reports refer to different dates; preserve both.",
-                                   "evidence": [{"kind": "source_comparison"}]})
+                                   "evidence": [{"evidence_id": source_id, "kind": "source_comparison"}]})
     assert reconciled.status_code == 200
 
 

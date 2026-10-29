@@ -443,6 +443,7 @@ def analyze_and_persist_uncertainty(
     # walking misses shared original-source references and reviewed relationships
     # that connect selected records through unselected ancestors or siblings.
     from app.services.evidence_lineage import (
+        assess_corroboration,
         build_evidence_lineage,
         find_exact_content_duplicate_candidates,
         load_evidence_lineage_scope,
@@ -494,6 +495,12 @@ def analyze_and_persist_uncertainty(
         lineage_scope["evidence_rows"], requested_evidence_ids
     )
     analysis["exact_content_duplicate_candidates"] = exact_duplicate_candidates
+    analysis["corroboration_assessment"] = assess_corroboration(
+        lineage_scope["evidence_rows"],
+        lineage_scope["relationships"],
+        requested_evidence_ids,
+        lineage_truncated=bool(lineage_scope["truncated"]),
+    )
     if exact_duplicate_candidates and not lineage_scope["truncated"]:
         # Matching hashes prove identical stored text, not a shared author or
         # common origin. Until a human reviews source independence, do not let

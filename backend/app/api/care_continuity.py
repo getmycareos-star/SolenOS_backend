@@ -3256,7 +3256,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
 
 SOURCE_RELATIONSHIP_TYPES = {
     "same_origin", "copied_from", "forwarded_from", "derived_from",
-    "corroborates", "contradicts", "duplicates", "related_to",
+    "corroborates", "corroboration_attempt_failed", "contradicts", "duplicates", "related_to",
 }
 SOURCE_INDEPENDENCE_STATUSES = {"independent", "shared_origin", "unknown", "not_assessed"}
 LINEAGE_RELATIONSHIP_TYPES = {"copied_from", "forwarded_from", "derived_from"}

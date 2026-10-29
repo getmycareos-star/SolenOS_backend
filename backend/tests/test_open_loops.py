@@ -51,6 +51,23 @@ def session(client, name):
     return body, {"Authorization": f"Bearer {body['access_token']}"}
 
 
+def create_source_evidence(loop, text="Persisted source record for outcome verification"):
+    db = TestSessionLocal()
+    try:
+        evidence = Evidence(
+            person_id=loop["person_id"],
+            type="documented_record",
+            source_text=text,
+            uploaded_by_caregiver_id=loop["caregiver_id"],
+        )
+        db.add(evidence)
+        db.commit()
+        db.refresh(evidence)
+        return evidence.id
+    finally:
+        db.close()
+
+
 def create_loop(client, headers, loop_type="unresolved_concern", **overrides):
     payload = {
         "loop_type": loop_type,
@@ -126,12 +143,38 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     assert reported.status_code == 200, reported.text
     assert reported.json()["outcome_status"] == "outcome_reported"
 
-    verified = client.post(
+    ungrounded = client.post(
         f"/api/v1/open-loops/{loop['id']}/verify-outcome",
         headers=headers,
         json={
             "text": "Outcome checked against the stated verification rule",
             "evidence": [{"kind": "supporting_record", "reference": "recorded-by-caregiver"}],
+            "verification_rule": "The recorded intended outcome is corroborated by the linked source record.",
+        },
+    )
+    assert ungrounded.status_code == 422, ungrounded.text
+
+    _, other_headers = session(client, "Different care recipient")
+    other_loop = create_loop(client, other_headers, "pending_action")
+    other_source_id = create_source_evidence(other_loop, "Evidence from another care record")
+    cross_person = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers,
+        json={
+            "text": "Attempt to verify using another person's source",
+            "evidence": [{"evidence_id": other_source_id, "kind": "supporting_record"}],
+            "verification_rule": "The outcome must be supported by this care record.",
+        },
+    )
+    assert cross_person.status_code == 404, cross_person.text
+
+    source_id = create_source_evidence(loop)
+    verified = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers,
+        json={
+            "text": "Outcome checked against the stated verification rule",
+            "evidence": [{"evidence_id": source_id, "kind": "supporting_record"}],
             "verification_rule": "The recorded intended outcome is corroborated by the linked source record.",
         },
     )
@@ -324,6 +367,7 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
     client = TestClient(app)
     _, headers = session(client, "Dependency recipient")
     prerequisite = create_loop(client, headers, "pending_action", title="Complete prerequisite")
+    source_id = create_source_evidence(prerequisite, "Persisted evidence for prerequisite outcome")
     dependent = create_loop(client, headers, "pending_decision", title="Continue dependent work")
 
     edge = client.post(
@@ -345,7 +389,7 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
         headers=headers,
         json={
             "text": "The prerequisite outcome was checked",
-            "evidence": [{"kind": "supporting_record"}],
+            "evidence": [{"evidence_id": source_id, "kind": "supporting_record"}],
             "verification_rule": "The recorded outcome is corroborated by the source record.",
         },
     )
@@ -367,6 +411,7 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     client = TestClient(app)
     _, headers = session(client, "Contradiction recipient")
     loop = create_loop(client, headers, "contradiction", title="Two conflicting reports")
+    source_id = create_source_evidence(loop, "Persisted source comparison for contradiction")
 
     premature = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
@@ -375,12 +420,22 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     )
     assert premature.status_code == 409, premature.text
 
-    reconciled = client.post(
+    ungrounded_reconciliation = client.post(
         f"/api/v1/open-loops/{loop['id']}/reconcile",
         headers=headers,
         json={
             "text": "The two reports refer to different dates; neither is discarded.",
             "evidence": [{"kind": "source_comparison"}],
+        },
+    )
+    assert ungrounded_reconciliation.status_code == 422, ungrounded_reconciliation.text
+
+    reconciled = client.post(
+        f"/api/v1/open-loops/{loop['id']}/reconcile",
+        headers=headers,
+        json={
+            "text": "The two reports refer to different dates; neither is discarded.",
+            "evidence": [{"evidence_id": source_id, "kind": "source_comparison"}],
         },
     )
     assert reconciled.status_code == 200, reconciled.text

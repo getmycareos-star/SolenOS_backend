@@ -1811,5 +1811,261 @@ def test_exact_duplicate_source_text_does_not_inflate_independent_corroboration(
         assert candidates[0]["evidence_ids"] == ["exact-duplicate-a", "exact-duplicate-b"]
         assert candidates[0]["common_origin_established"] is False
         assert "exact_content_duplicate_candidate_review" in analysis["classifications"]
+
+        relationship_response = client.post(
+            "/api/v1/care-continuity/evidence/exact-duplicate-a/relationships",
+            json={
+                "related_evidence_id": "exact-duplicate-b",
+                "relationship_type": "corroboration_attempt_failed",
+                "source_independence_status": "unknown",
+                "rationale": "The reports were compared but did not independently establish the claimed detail.",
+            },
+        )
+        assert relationship_response.status_code == 201, relationship_response.text
+        reassessed = client.post(
+            "/api/v1/uncertainty/analyze",
+            json={
+                "person_id": "exact-duplicate-person",
+                "subject_type": "sleep",
+                "subject_id": "overnight",
+                "field": "awakenings",
+                "claim": "Two independent sources confirm three awakenings.",
+                "task": "summarize",
+                "evidence_ids": ["exact-duplicate-a", "exact-duplicate-b"],
+            },
+        )
+        assert reassessed.status_code == 200, reassessed.text
+        corroboration = reassessed.json()["analysis"]["corroboration_assessment"]
+        assert corroboration["status"] == "attempted_but_not_corroborated"
+        assert corroboration["independent_corroboration_established"] is False
+        assert corroboration["failed_corroboration_pairs"] == [["exact-duplicate-a", "exact-duplicate-b"]]
     finally:
         teardown_db()
+
+
+def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="safety-scope-person", name="Safety Scope Person")
+        caregiver = Caregiver(
+            id="safety-scope-caregiver",
+            name="Safety Scope Caregiver",
+            email="safety-scope@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="safety-scope-other", name="Safety Scope Other")
+        other_caregiver = Caregiver(
+            id="safety-scope-other-caregiver",
+            name="Safety Scope Other Caregiver",
+            email="safety-scope-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.add(Evidence(
+            id="safety-scope-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="A documented event requiring review.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        ))
+        db.add(Evidence(
+            id="safety-scope-other-evidence",
+            person_id=other_person.id,
+            type="document",
+            source_text="Evidence from another care record.",
+            uploaded_by_caregiver_id=other_caregiver.id,
+            source_type="document",
+        ))
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
+        params = {
+            "person_id": person.id,
+            "affected_person_id": person.id,
+            "trigger": "Documented event requires review",
+            "risk_category": "moderate_risk",
+            "recommended_reviewer": "caregiver",
+            "evidence_ids": ["safety-scope-evidence"],
+        }
+        created = client.post("/api/v1/escalations", params=params)
+        assert created.status_code == 200, created.text
+        escalation_id = created.json()["id"]
+        assert created.json()["person_id"] == person.id
+        assert created.json()["evidence_ids"] == ["safety-scope-evidence"]
+
+        forged_scope = client.post(
+            "/api/v1/escalations",
+            params={**params, "person_id": other_person.id, "affected_person_id": other_person.id},
+        )
+        assert forged_scope.status_code == 403, forged_scope.text
+
+        cross_record_evidence = client.post(
+            "/api/v1/escalations",
+            params={**params, "evidence_ids": ["safety-scope-other-evidence"]},
+        )
+        assert cross_record_evidence.status_code == 404, cross_record_evidence.text
+
+        listed = client.get(f"/api/v1/escalations/{person.id}")
+        assert listed.status_code == 200, listed.text
+        assert all(row["person_id"] == person.id for row in listed.json())
+        assert other_client.get(f"/api/v1/escalations/{person.id}").status_code == 403
+        assert other_client.patch(
+            f"/api/v1/escalations/{escalation_id}",
+            params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
+        ).status_code == 404
+        owner_update = client.patch(
+            f"/api/v1/escalations/{escalation_id}",
+            params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
+        )
+        assert owner_update.status_code == 200, owner_update.text
+        assert owner_update.json()["reviewer_identity"] == caregiver.id
+        assert client.get(f"/api/v1/escalations/{other_person.id}").status_code == 403
+
+        unauthenticated = TestClient(app)
+        denied = unauthenticated.get(f"/api/v1/escalations/{person.id}")
+        assert denied.status_code in (401, 403), denied.text
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+
+
+def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_and_preserve_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="claim-status-person", name="Claim Status Person")
+        caregiver = Caregiver(
+            id="claim-status-caregiver",
+            name="Claim Status Caregiver",
+            email="claim-status@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        claim = CareAssertion(
+            id="claim-status-main",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep-1",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="Three awakenings were reported overnight.",
+            source_label="caregiver report",
+            source_text="Three awakenings were reported overnight.",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        replacement_claim = CareAssertion(
+            id="claim-status-replacement",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep-1",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="A later report records a different count.",
+            source_label="caregiver report",
+            source_text="A later report records a different count.",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, claim, replacement_claim])
+        db.add_all([
+            Evidence(
+                id="claim-status-evidence-a",
+                person_id=person.id,
+                type="document",
+                source_text="Three awakenings were reported overnight.",
+                source_type="document",
+                uploaded_by_caregiver_id=caregiver.id,
+            ),
+            Evidence(
+                id="claim-status-evidence-b",
+                person_id=person.id,
+                type="document",
+                source_text="A later source records one awakening.",
+                source_type="document",
+                uploaded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        endpoint = f"/api/v1/care-continuity/claims/{claim.id}/assessments"
+        statuses = [
+            ("supported", [{"evidence_id": "claim-status-evidence-a", "relationship": "supports", "source_passage": "Three awakenings were reported overnight."}], None),
+            ("partially_supported", [{"evidence_id": "claim-status-evidence-a", "relationship": "partial_support", "source_passage": "Three awakenings were reported overnight."}], None),
+            ("contradicted", [{"evidence_id": "claim-status-evidence-b", "relationship": "contradicts", "source_passage": "A later source records one awakening."}], None),
+            ("unverified", [], None),
+            ("uncertain", [{"evidence_id": "claim-status-evidence-a", "relationship": "neutral", "source_passage": None}], None),
+            ("conflicting", [
+                {"evidence_id": "claim-status-evidence-a", "relationship": "supports", "source_passage": "Three awakenings were reported overnight."},
+                {"evidence_id": "claim-status-evidence-b", "relationship": "contradicts", "source_passage": "A later source records one awakening."},
+            ], None),
+            ("missing_evidence", [], None),
+            ("stale", [{"evidence_id": "claim-status-evidence-a", "relationship": "neutral", "source_passage": None}], None),
+            ("superseded", [], replacement_claim.id),
+            ("withdrawn", [], None),
+        ]
+        created_versions = []
+        for status, evidence_links, superseded_by in statuses:
+            payload = {
+                "status": status,
+                "rationale": f"Explicit review for status {status}; this is a recorded assessment, not proof of clinical truth.",
+                "policy_version": "claim-assessment-v1",
+                "evidence_links": evidence_links,
+            }
+            if superseded_by:
+                payload["superseded_by_claim_id"] = superseded_by
+            response = client.post(endpoint, json=payload)
+            assert response.status_code == 200, f"{status}: {response.status_code} {response.text}"
+            created_versions.append(response.json())
+        assert [row["status"] for row in created_versions] == [item[0] for item in statuses]
+        assert [row["claim_version"] for row in created_versions] == list(range(1, 11))
+        assert created_versions[-2]["superseded_by_claim_id"] == replacement_claim.id
+
+        history = client.get(endpoint)
+        assert history.status_code == 200, history.text
+        assert len(history.json()) == 10
+        assert all(row["person_id"] == person.id for row in history.json())
+
+        # The backend must reject a paraphrase as a source quote and must not
+        # allow a substantive relationship with no exact source passage.
+        wrong_quote = client.post(endpoint, json={
+            "status": "supported",
+            "rationale": "Attempted to attach a paraphrase as source evidence.",
+            "policy_version": "claim-assessment-v1",
+            "evidence_links": [{
+                "evidence_id": "claim-status-evidence-a",
+                "relationship": "supports",
+                "source_passage": "Three or more awakenings happened overnight.",
+            }],
+        })
+        assert wrong_quote.status_code == 422, wrong_quote.text
+
+        missing_quote = client.post(endpoint, json={
+            "status": "supported",
+            "rationale": "Attempted support without a source passage.",
+            "policy_version": "claim-assessment-v1",
+            "evidence_links": [{
+                "evidence_id": "claim-status-evidence-a",
+                "relationship": "supports",
+                "source_passage": None,
+            }],
+        })
+        assert missing_quote.status_code == 422, missing_quote.text
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+

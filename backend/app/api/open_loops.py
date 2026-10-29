@@ -115,6 +115,45 @@ def _utc(value):
     return value.astimezone(timezone.utc)
 
 
+
+
+def _validate_source_evidence_references(db: Session, person_id: str, evidence: list[dict[str, Any]], *, required: bool = False) -> set[str]:
+    """Validate cited evidence IDs against the authenticated person's persisted evidence.
+
+    Descriptive report payloads may be recorded without a source ID, but they
+    cannot verify an outcome or reconcile a contradiction.
+    """
+    from app.models.care import Evidence
+
+    evidence_ids: set[str] = set()
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="Evidence entries must be structured objects")
+        if "evidence_id" not in item:
+            continue
+        raw_id = item.get("evidence_id")
+        if not isinstance(raw_id, str) or not raw_id.strip():
+            raise HTTPException(status_code=422, detail="evidence_id must be a non-empty persisted evidence identifier")
+        evidence_ids.add(raw_id.strip())
+
+    if required and not evidence_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="Verification requires at least one persisted source evidence ID from this care record; descriptive labels are not source evidence",
+        )
+    if evidence_ids:
+        found = {
+            str(row.id)
+            for row in db.query(Evidence.id).filter(
+                Evidence.person_id == str(person_id),
+                Evidence.id.in_(sorted(evidence_ids)),
+            ).all()
+        }
+        if found != evidence_ids:
+            raise HTTPException(status_code=404, detail="Referenced source evidence was not found in this care record")
+    return evidence_ids
+
+
 def _scope(request: Request, db: Session) -> tuple[str, str]:
     authorization = request.headers.get("authorization", "")
     scheme, _, token = authorization.partition(" ")
@@ -490,6 +529,7 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
         return replay
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
+    _validate_source_evidence_references(db, person_id, payload.evidence, required=loop.loop_type == "professional_input")
     if loop.loop_type == "professional_input":
         # Import lazily: database.py registers the Open Loop ORM during startup,
         # while app.models.care imports database.Base. A module-level import here
@@ -538,6 +578,7 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key)
     if replay is not None:
         return replay
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     before = _snapshot(loop)
     loop.action_evidence = [*(loop.action_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     _reassess(db, loop)
@@ -558,6 +599,7 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
         raise HTTPException(status_code=409, detail="Only contradiction loops can be reconciled")
     if not payload.evidence:
         raise HTTPException(status_code=422, detail="Reconciliation requires supporting evidence")
+    _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
     before = _snapshot(loop)
     reconciliation = {
         "kind": "explicit_reconciliation",
@@ -579,6 +621,7 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key)
     if replay is not None:
         return replay
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     before = _snapshot(loop)
     loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     loop.outcome_status = "outcome_reported"
@@ -595,8 +638,9 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_verified", payload.idempotency_key)
     if replay is not None:
         return replay
-    if not payload.evidence or not payload.verification_rule or not (loop.verification_rule or payload.verification_rule):
-        raise HTTPException(status_code=409, detail="Outcome verification requires evidence and an explicit verification rule")
+    if not payload.evidence or not (loop.verification_rule or payload.verification_rule):
+        raise HTTPException(status_code=409, detail="Outcome verification requires source evidence and an explicit verification rule")
+    _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
     before = _snapshot(loop)
     loop.verification_rule = loop.verification_rule or payload.verification_rule
     loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "verification_rule": loop.verification_rule, "recorded_at": datetime.now(timezone.utc).isoformat()}]
