@@ -26,6 +26,7 @@ from app.api.capture_review import router as capture_review_router
 from app.api.daily_care_intelligence import router as daily_care_intelligence_router
 from app.api.handoff_drafts import router as handoff_drafts_router
 from app.api.appointment_workspace import router as appointment_workspace_router
+from app.api.open_loops import router as open_loops_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.core.config import get_settings
@@ -167,6 +168,7 @@ app.include_router(reminders_router, prefix="/api/v1")
 app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(handoff_drafts_router, prefix="/api/v1")
 app.include_router(appointment_workspace_router, prefix="/api/v1")
+app.include_router(open_loops_router, prefix="/api/v1")
 app.include_router(capture_review_router, prefix="/api/v1")
 app.include_router(daily_care_intelligence_router, prefix="/api/v1")
 
