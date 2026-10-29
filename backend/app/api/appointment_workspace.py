@@ -17,6 +17,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.care import CareEvent, Evidence
+from app.models.care_continuity import EvidenceSourceRelationship
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
@@ -205,6 +206,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             str(value) for value in row.get("evidence_ids", []) if isinstance(value, str)
         )
     evidence_sources = {}
+    evidence_rows = []
     if referenced_evidence_ids:
         evidence_rows = db.query(Evidence).filter(
             Evidence.person_id == person_id,
@@ -245,6 +247,18 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             else "no_evidence_linked"
         )
 
+    lineage_relationships = []
+    if inspect(db.get_bind()).has_table("evidence_source_relationships") and referenced_evidence_ids:
+        lineage_relationships = db.query(EvidenceSourceRelationship).filter(
+            EvidenceSourceRelationship.person_id == person_id,
+            (EvidenceSourceRelationship.source_evidence_id.in_(sorted(referenced_evidence_ids)))
+            | (EvidenceSourceRelationship.related_evidence_id.in_(sorted(referenced_evidence_ids))),
+        ).all()
+    from app.services.evidence_lineage import summarize_evidence_lineage
+    evidence_lineage = summarize_evidence_lineage(
+        evidence_rows, lineage_relationships, evidence_sources.keys()
+    )
+
     return {
         "person_scope_verified": True,
         "snapshot_at": now.isoformat(),
@@ -254,6 +268,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "facts": facts,
         "events": event_items,
         "appointments": appointment_items,
+        "evidence_lineage": evidence_lineage,
         "source_coverage": {
             "care_facts": "available" if fact_rows is not None else "unavailable",
             "care_events": "available" if event_items else "no_records_returned",
