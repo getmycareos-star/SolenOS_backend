@@ -16,6 +16,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
 from app.models.care import Caregiver, Person
+from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 
 
@@ -171,3 +172,57 @@ def test_analysis_propagates_missing_evidence_into_persisted_view_and_open_quest
     )
     assert questions.status_code == 200, questions.text
     assert any(item.get("status") == "open" for item in questions.json())
+
+
+@pytest.mark.session_security
+def test_claim_dependency_graph_persists_and_rejects_cross_record_and_cycles(uncertainty_api_db):
+    client = _client_for(uncertainty_api_db, "a")
+    with uncertainty_api_db() as db:
+        for claim_id, person_id, value in (
+            ("claim-a", "benchmark-person-a", "Appetite changed"),
+            ("claim-b", "benchmark-person-a", "Breakfast intake recorded"),
+            ("claim-c", "benchmark-person-a", "Usual breakfast baseline"),
+            ("claim-other", "benchmark-person-b", "Unrelated person's claim"),
+        ):
+            db.add(CareAssertion(
+                id=claim_id,
+                person_id=person_id,
+                subject_type="daily_care",
+                subject_id="breakfast",
+                field="intake",
+                assertion_kind="reported_state",
+                asserted_value=value,
+                source_label="caregiver report",
+                source_text=value,
+                evidence_ids=[],
+                assertion_status="reported",
+            ))
+        db.commit()
+
+    def add_dependency(claim_id, depends_on_claim_id):
+        return client.post("/api/v1/uncertainty/claims/dependencies", json={
+            "person_id": "benchmark-person-a",
+            "claim_id": claim_id,
+            "depends_on_claim_id": depends_on_claim_id,
+            "dependency_type": "derived_from",
+            "rationale": "Declared relationship for dependency-graph regression test.",
+        })
+
+    first = add_dependency("claim-a", "claim-b")
+    assert first.status_code == 200, first.text
+    second = add_dependency("claim-b", "claim-c")
+    assert second.status_code == 200, second.text
+
+    graph = client.get("/api/v1/uncertainty/claims/claim-b/dependencies")
+    assert graph.status_code == 200, graph.text
+    graph_data = graph.json()
+    assert any(row["depends_on_claim_id"] == "claim-c" for row in graph_data["dependencies"])
+    assert any(row["claim_id"] == "claim-a" for row in graph_data["dependents"])
+    assert "do not prove semantic entailment" in graph_data["notice"]
+
+    cycle = add_dependency("claim-c", "claim-a")
+    assert cycle.status_code == 422, cycle.text
+    assert "cycle" in cycle.json()["detail"].lower()
+
+    cross_record = add_dependency("claim-a", "claim-other")
+    assert cross_record.status_code == 404, cross_record.text
