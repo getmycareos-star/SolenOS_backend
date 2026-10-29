@@ -1463,7 +1463,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # retaining event-linked and other recent evidence within a strict bound.
         linked_ids = list(dict.fromkeys(
             str(evidence_id)
-            for event in recent_events
+            for event in merged_events
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
