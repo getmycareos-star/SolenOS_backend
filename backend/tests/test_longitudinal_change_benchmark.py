@@ -502,3 +502,53 @@ def test_pattern_reassessment_is_idempotent_and_deduplicates_same_source_occurre
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_pattern_reconciliation_retires_corrected_evidence_without_cross_person_leakage():
+    """Invalidated sources must retire dependent patterns; another person's events stay isolated."""
+    Base.metadata.create_all(bind=engine)
+    db = Session()
+    try:
+        person_a, caregiver_a = _case_identity(db, "corrected-pattern-owner")
+        person_b, caregiver_b = _case_identity(db, "unrelated-pattern-owner")
+        for event_id, days in (
+            ("owner-a-1", 6), ("owner-a-2", 4), ("owner-a-3", 2),
+            ("owner-b-1", 5), ("owner-b-2", 3), ("owner-b-3", 1),
+        ):
+            owner, caregiver = (
+                (person_a, caregiver_a) if event_id.startswith("owner-a")
+                else (person_b, caregiver_b)
+            )
+            _record_event(db, owner, caregiver, event_id, days, [f"source-{event_id}"])
+        db.flush()
+
+        patterns_a = detect_patterns(db, person_a.id, "fall", None, REFERENCE_TIME)
+        db.flush()
+        cluster_a = next(
+            (pattern for pattern in patterns_a if pattern.pattern_type.value == "clustering"),
+            None,
+        )
+        assert cluster_a is not None
+        assert set(cluster_a.event_ids) == {"owner-a-1", "owner-a-2", "owner-a-3"}
+        assert not (set(cluster_a.event_ids) & {"owner-b-1", "owner-b-2", "owner-b-3"})
+
+        corrected = db.query(CareEvent).filter(CareEvent.id == "owner-a-3").one()
+        corrected.status = "invalidated"
+        db.flush()
+        patterns_after_correction = detect_patterns(db, person_a.id, "fall", None, REFERENCE_TIME)
+        db.flush()
+        assert all(
+            "owner-a-3" not in set(pattern.event_ids or [])
+            for pattern in patterns_after_correction
+        )
+        retired = db.query(Pattern).filter(Pattern.id == cluster_a.id).one()
+        assert retired.is_active is False
+
+        patterns_b = detect_patterns(db, person_b.id, "fall", None, REFERENCE_TIME)
+        assert all(
+            set(pattern.event_ids or []).issubset({"owner-b-1", "owner-b-2", "owner-b-3"})
+            for pattern in patterns_b
+        )
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
