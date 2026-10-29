@@ -114,6 +114,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("open_loop_dependencies")
-    op.drop_table("open_loop_events")
-    op.drop_table("open_loop_records")
+    raise RuntimeError(
+        "Refusing to discard persisted open-loop records, audit history, or dependencies during downgrade."
+    )
