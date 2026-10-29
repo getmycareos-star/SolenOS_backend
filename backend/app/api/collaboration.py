@@ -1898,21 +1898,55 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    turn_created_at = datetime.now(timezone.utc)
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+        "written_to_lcr": False,
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=turn_created_at + timedelta(microseconds=1),
     )
     try:
         db.add(ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
+            source_record_refs_json="[]", created_at=turn_created_at,
         ))
         db.add(assistant_row)
         db.commit()
         db.refresh(assistant_row)
+    except IntegrityError as exc:
+        db.rollback()
+        if client_turn_id:
+            # A concurrent same-key request may have won the unique-index race.
+            # Never claim success or run a second response; client retries same key.
+            logger.warning("Companion idempotency collision; client retry required")
+            raise HTTPException(
+                status_code=503,
+                detail="This turn may already have been committed. Retry the same message with the same turn ID.",
+                headers={"Retry-After": "1"},
+            ) from exc
+        logger.exception("Companion conversation pair failed to persist")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
     except Exception as exc:
         db.rollback()
         logger.exception("Companion conversation pair failed to persist")
@@ -1946,6 +1980,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
+        "idempotent_replay": False,
         "messages": [{
             "role": row.role,
             "text": row.content,
