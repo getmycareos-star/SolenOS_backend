@@ -549,6 +549,30 @@ def test_structured_source_observation_appears_in_current_care_projection(client
             "caregiver_id": owner["caregiver"]["id"],
         })
         connection.execute(text("""
+            INSERT INTO evidence (
+                id, person_id, type, source_text, uploaded_by_caregiver_id
+            ) VALUES (
+                'private-evidence-other', :other_person_id, 'caregiver_note',
+                'Private information belonging to another care recipient.', :other_caregiver_id
+            )
+        """), {
+            "other_person_id": other["person"]["id"],
+            "other_caregiver_id": other["caregiver"]["id"],
+        })
+        connection.execute(text("""
+            INSERT INTO care_events (
+                id, person_id, event_type, status, occurred_at, title,
+                evidence_ids, created_by_caregiver_id
+            ) VALUES (
+                'foreign-evidence-link-event', :person_id, 'routine', 'recorded',
+                CURRENT_TIMESTAMP, 'Record with unauthorized legacy evidence link',
+                '["private-evidence-other"]', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+        connection.execute(text("""
             INSERT INTO care_events (
                 id, person_id, event_type, status, occurred_at, title,
                 evidence_ids, created_by_caregiver_id
@@ -605,6 +629,12 @@ def test_structured_source_observation_appears_in_current_care_projection(client
         "events", "evidence_observations"
     }
     assert "does not establish independent corroboration" in shared_source_group["interpretation_limit"]
+    foreign_linked_event = next(
+        row for row in assessment["current_care_reality"]["records"]
+        if row.get("id") == "foreign-evidence-link-event"
+    )
+    assert foreign_linked_event["evidence_ids"] == []
+    assert "private-evidence-other" not in response.text
 
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
     other_response = test_client.get("/api/v1/care-continuity/current-care", headers=other_headers)
