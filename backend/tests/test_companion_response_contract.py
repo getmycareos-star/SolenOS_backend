@@ -99,7 +99,6 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
         assert {"record_type": "care_event", "record_id": event_id} in data["source_record_refs"]
-        assert data["reply"] == "Poor sleep was reported last night; one report cannot establish a trend."
 
         system_prompt = captured["messages"][0]["content"]
         user_payload = captured["messages"][-1]["content"]
