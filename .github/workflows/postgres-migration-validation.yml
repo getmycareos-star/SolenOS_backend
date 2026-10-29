@@ -174,13 +174,13 @@ jobs:
                         AND NOT tgisinternal
                   """).first()
                   assert trigger is not None, "evidence review immutability trigger missing"
+                  claim_trigger = connection.exec_driver_sql("""
+                      SELECT 1 FROM pg_trigger
+                      WHERE tgname = 'trg_evidence_claim_assessments_immutable'
+                        AND NOT tgisinternal
+                  """).first()
+                  assert claim_trigger is not None, "claim assessment immutability trigger missing"
               print("PASS evidence review append-only trigger")
-              claim_trigger = connection.exec_driver_sql("""
-                  SELECT 1 FROM pg_trigger
-                  WHERE tgname = 'trg_evidence_claim_assessments_immutable'
-                    AND NOT tgisinternal
-              """).first()
-              assert claim_trigger is not None, "claim assessment immutability trigger missing"
               print("PASS claim assessment append-only trigger")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
