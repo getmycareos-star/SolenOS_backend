@@ -270,6 +270,10 @@ def analyze_uncertainty(
         "recommendation": "qualified_only" if items and not conflicts else "insufficient",
     }
     sufficiency = task_thresholds.get(task, "task_rule_not_defined")
+    if task not in task_thresholds:
+        classifications.append("unsupported_assessment_task")
+        limitations.append("No sufficiency rule is defined for this assessment task; no downstream conclusion should be treated as established.")
+        sufficiency = "insufficient_pending_resolution"
     if (
         conflicts or missing or normalized_access not in {"available", ""}
         or ambiguity_signals or quality_limited
