@@ -1078,10 +1078,12 @@ def test_source_lineage_rejects_false_independence_and_cross_record_links():
             Evidence(id="lineage-forward", person_id=person.id, type="message", source_text="Forwarded report", uploaded_by_caregiver_id=caregiver.id),
             Evidence(id="lineage-cross-record", person_id=other_person.id, type="message", source_text="Other record report", uploaded_by_caregiver_id=other_caregiver.id),
         ])
+        person_id = person.id
+        caregiver_id = caregiver.id
         db.commit()
         db.close()
 
-        client = authorized_client(person.id)
+        client = authorized_client(person_id)
         dependent = client.post("/api/v1/care-continuity/evidence/lineage-forward/relationships", json={
             "related_evidence_id": "lineage-origin",
             "relationship_type": "forwarded_from",
@@ -1091,7 +1093,7 @@ def test_source_lineage_rejects_false_independence_and_cross_record_links():
         })
         assert dependent.status_code == 201, dependent.text
         assert dependent.json()["source_independence_status"] == "shared_origin"
-        assert dependent.json()["reviewed_by_caregiver_id"] == caregiver.id
+        assert dependent.json()["reviewed_by_caregiver_id"] == caregiver_id
 
         false_independence = client.post("/api/v1/care-continuity/evidence/lineage-forward/relationships", json={
             "related_evidence_id": "lineage-origin",
@@ -1133,10 +1135,11 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
             source_text="Caregiver reports three awakenings last night.",
             uploaded_by_caregiver_id=caregiver.id, source_type="caregiver_report",
         ))
+        person_id = person.id
         db.commit()
         db.close()
 
-        client = authorized_client(person.id)
+        client = authorized_client(person_id)
         payload = {
             "observation_kind": "caregiver_report",
             "epistemic_status": "reported",
