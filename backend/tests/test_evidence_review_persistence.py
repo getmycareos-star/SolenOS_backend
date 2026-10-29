@@ -584,5 +584,8 @@ def test_structured_observation_requires_exact_source_span_and_preserves_epistem
 
     listed = client_a.get("/api/v1/care-continuity/evidence/review-observation-evidence/observations")
     assert listed.status_code == 200, listed.text
-    assert [item["id"] for item in listed.json()] == [row["id"]]
+    history = listed.json()
+    assert {item["id"] for item in history} == {row["id"], corrected.json()["id"]}
+    corrected_history_row = next(item for item in history if item["id"] == corrected.json()["id"])
+    assert corrected_history_row["supersedes_observation_id"] == row["id"]
     assert client_b.get("/api/v1/care-continuity/evidence/review-observation-evidence/observations").status_code == 404
