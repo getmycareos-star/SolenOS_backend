@@ -2851,6 +2851,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
         if any(not isinstance(item, str) or not item.strip() for item in data["evidence_ids"]):
             raise HTTPException(status_code=422, detail="Every evidence ID must be a non-empty string")
+        if data["evidence_ids"]:
+            linked_ids = set(
+                row[0] for row in db.query(Evidence.id).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(data["evidence_ids"]),
+                ).all()
+            )
+            if linked_ids != set(data["evidence_ids"]):
+                # Do not disclose whether a foreign evidence ID exists.
+                raise HTTPException(
+                    status_code=422,
+                    detail="All evidence IDs must belong to this authenticated care record",
+                )
 
     # Reflected legacy tables store JSONList fields as TEXT. Normalize structured
     # payloads and ISO-8601 timestamps to their actual database column types
