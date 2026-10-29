@@ -98,7 +98,8 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 ### J. Duplicate detection, entity resolution, and identity integrity — PARTIAL
 - [x] Existing evidence integrity logic identifies exact normalized-text duplicate candidates without deleting records.
 - [x] Evidence source text now has a deterministic SHA-256 fingerprint field for exact stored text.
-- [ ] Add near-duplicate/document-version/semantic candidates, idempotent ingestion keys, event identity resolution, authorized person/entity merge proposals, and false-match review.
+- [x] Add bounded normalized-text near-duplicate candidates (minimum text length, explicit algorithm version, comparison cap, and no confidence score); candidate output explicitly does not establish copying, common origin, truth, or independence. Frontend LCR now displays candidate groups and analysis limitations. Current-main CI verification is pending.
+- [ ] Document-version/semantic candidates, idempotent ingestion keys, event identity resolution, authorized person/entity merge proposals, and false-match review remain missing.
 - [ ] Do not destructively merge people or evidence solely on similarity.
 
 ### K. Evidence completeness, freshness, and gaps — PARTIAL
@@ -156,6 +157,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [ ] Current-main test and PostgreSQL migration runs must pass before these latest additions are considered verified.
 - [x] Add tests for source relationship persistence/isolation/cycle rejection/duplicate rejection and exact-source-span observation persistence, classification boundaries, invalid source passages, and cross-record denial.
 - [ ] Current-main backend tests and PostgreSQL migration validation must pass before these additions are considered verified; broader E2E/property/concurrency/failure tests remain incomplete.
+- [x] Add unit tests for bounded near-duplicate candidate semantics, short-text exclusion, explicit non-independence interpretation, and fail-closed behavior above the comparison cap; these are unit-level tests, not proof of the full HTTP/PostgreSQL workflow.
 
 ## Current implementation commits
 
