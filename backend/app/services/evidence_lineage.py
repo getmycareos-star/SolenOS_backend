@@ -68,6 +68,16 @@ def build_evidence_lineage(
                 if evidence_id in selected:
                     shared_ids.add(evidence_id)
 
+        # Explicit transfer metadata is a provenance assertion. Require both
+        # transfer source and reference so generic channel labels do not merge
+        # unrelated records. This establishes shared lineage, not truth.
+        transfer_source = " ".join(str(getattr(row, "transfer_source", "") or "").split()).casefold()
+        transfer_reference = " ".join(str(getattr(row, "transfer_reference", "") or "").split()).casefold()
+        if transfer_source and transfer_reference:
+            union(evidence_id, "transfer-ref:" + transfer_source + ":" + transfer_reference)
+            if evidence_id in selected:
+                shared_ids.add(evidence_id)
+
     independence: dict[str, str] = {}
     for relationship in relationships:
         left = str(getattr(relationship, "source_evidence_id", "") or "").strip()
@@ -196,7 +206,10 @@ def load_evidence_lineage_scope(
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
 
     evidence_fields = [
-        name for name in ("id", "person_id", "parent_evidence_id", "original_source_reference", "source_text_sha256")
+        name for name in (
+            "id", "person_id", "parent_evidence_id", "original_source_reference",
+            "source_text_sha256", "transfer_source", "transfer_reference",
+        )
         if name in evidence.c
     ]
     evidence_by_id: dict[str, Any] = {}
@@ -233,6 +246,7 @@ def load_evidence_lineage_scope(
         current_ids = set(evidence_by_id)
         next_ids: set[str] = set()
         source_refs: set[str] = set()
+        transfer_refs: set[tuple[str, str]] = set()
         expansion_rows = [evidence_by_id[evidence_id] for evidence_id in sorted(frontier) if evidence_id in evidence_by_id]
         for row in expansion_rows:
             parent_id = str(getattr(row, "parent_evidence_id", "") or "").strip()
@@ -241,6 +255,10 @@ def load_evidence_lineage_scope(
             source_ref = " ".join(str(getattr(row, "original_source_reference", "") or "").split()).casefold()
             if source_ref:
                 source_refs.add(source_ref)
+            transfer_source = " ".join(str(getattr(row, "transfer_source", "") or "").split()).casefold()
+            transfer_reference = " ".join(str(getattr(row, "transfer_reference", "") or "").split()).casefold()
+            if transfer_source and transfer_reference:
+                transfer_refs.add((transfer_source, transfer_reference))
 
         if source_refs and "original_source_reference" in evidence.c:
             available = node_limit - len(evidence_by_id)
@@ -259,6 +277,34 @@ def load_evidence_lineage_scope(
                 truncated = True
                 ref_rows = ref_rows[:available]
             for row in ref_rows:
+                evidence_id = str(row["id"])
+                if evidence_id not in evidence_by_id:
+                    evidence_by_id[evidence_id] = SimpleNamespace(**row)
+                    next_ids.add(evidence_id)
+
+        if transfer_refs and {"transfer_source", "transfer_reference"}.issubset(evidence.c.keys()):
+            available = node_limit - len(evidence_by_id)
+            if available <= 0:
+                has_more = True
+                truncated = True
+                break
+            transfer_conditions = [
+                (func.lower(func.trim(evidence.c.transfer_source)) == source_name)
+                & (func.lower(func.trim(evidence.c.transfer_reference)) == source_reference)
+                for source_name, source_reference in sorted(transfer_refs)
+            ]
+            transfer_statement = select(*(evidence.c[name] for name in evidence_fields)).where(
+                evidence.c.person_id == str(person_id),
+                evidence.c.transfer_source.isnot(None),
+                evidence.c.transfer_reference.isnot(None),
+                or_(*transfer_conditions),
+            ).limit(available + 1)
+            transfer_rows = [dict(row) for row in db.execute(transfer_statement).mappings().all()]
+            if len(transfer_rows) > available:
+                has_more = True
+                truncated = True
+                transfer_rows = transfer_rows[:available]
+            for row in transfer_rows:
                 evidence_id = str(row["id"])
                 if evidence_id not in evidence_by_id:
                     evidence_by_id[evidence_id] = SimpleNamespace(**row)
