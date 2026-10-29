@@ -6,6 +6,7 @@ restarts Uvicorn itself so persistence is verified across an application restart
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
 import sys
@@ -628,7 +629,6 @@ def main():
                 f"Reusing a create idempotency key with a different core payload must return 409: {status}: {changed_retry}")
         # Race two identical create requests. A unique database constraint plus
         # retry recovery must converge on one durable loop instead of returning 500.
-        from concurrent.futures import ThreadPoolExecutor
         concurrent_create_payload = {
             "loop_type": "awaiting_response",
             "title": "CI-only concurrent idempotency callback",
@@ -715,7 +715,6 @@ def main():
         # Concurrent append attempts must not silently overwrite one another.
         # This is intentionally a strict invariant; if it fails, the database-backed
         # test should remain red rather than claiming concurrency safety.
-        from concurrent.futures import ThreadPoolExecutor
         action_payloads = [
             {"text": "CI-only action A", "evidence": [{"kind": "ci_fixture", "text": "action-A"}]},
             {"text": "CI-only action B", "evidence": [{"kind": "ci_fixture", "text": "action-B"}]},
