@@ -155,7 +155,7 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         db.add_all([person, caregiver])
         db.commit()
         now = datetime.now(timezone.utc)
-        from app.core.change_enums import ChangeType, ChangeDirection
+        from app.core.change_enums import ChangeType, ChangeDirection, PatternType
         from app.services.pattern_detection import detect_patterns
         event_ids = []
         for i in range(2):
