@@ -342,3 +342,65 @@ def test_independently_labelled_benchmark_cases_are_not_scored_from_service_self
     }
     assert len(labels) == 10
     assert len(set(labels.values())) == 10
+
+
+
+def test_attention_candidate_confusion_matrix_uses_actual_service_outputs():
+    """Score alert/no-alert decisions against fixed synthetic labels, not test pass count."""
+    cases = []
+    with TestingSessionLocal() as db:
+        # Independently labelled positive: three distinct falls across six weeks.
+        person, caregiver = make_person(db, "score-falls")
+        for day in (35, 21, 7):
+            add_event(db, person, caregiver, "fall", day, f"Distinct fall on day {day}")
+        cases.append(("recurrent_falls", True, person.id, "fall"))
+
+        # Independently labelled negatives: isolated fatigue, ambiguous report,
+        # and same-reporter documentation burst must not trigger attention.
+        person, caregiver = make_person(db, "score-fatigue")
+        add_event(db, person, caregiver, "fatigue", 0, "Seemed tired today")
+        cases.append(("single_fatigue", False, person.id, "fatigue"))
+
+        person, caregiver = make_person(db, "score-ambiguous")
+        add_event(db, person, caregiver, "altered_mental_status", 0, "Wasn't himself today")
+        cases.append(("ambiguous_report", False, person.id, "altered_mental_status"))
+
+        person, caregiver = make_person(db, "score-documentation")
+        add_event(db, person, caregiver, "appetite", 0, "Ate less today")
+        add_event(db, person, caregiver, "appetite", 0, "Ate less today")
+        cases.append(("same_reporter_documentation_burst", False, person.id, "appetite"))
+
+        # Run the real change/significance service and capture its actual
+        # attention_candidate output for every labelled scenario.
+        outcomes = []
+        for name, expected_alert, person_id, event_type in cases:
+            changes = detect_event_changes(db, person_id, event_type, None, NOW)
+            db.flush()
+            actual_alert = any(bool(change.attention_candidate) for change in changes)
+            outcomes.append({
+                "case": name,
+                "expected_alert": expected_alert,
+                "actual_alert": actual_alert,
+            })
+
+    tp = sum(item["expected_alert"] and item["actual_alert"] for item in outcomes)
+    fp = sum((not item["expected_alert"]) and item["actual_alert"] for item in outcomes)
+    fn = sum(item["expected_alert"] and (not item["actual_alert"]) for item in outcomes)
+    tn = sum((not item["expected_alert"]) and (not item["actual_alert"]) for item in outcomes)
+    precision = tp / (tp + fp) if tp + fp else 0.0
+    recall = tp / (tp + fn) if tp + fn else 0.0
+    false_positive_rate = fp / (fp + tn) if fp + tn else 0.0
+    false_negative_rate = fn / (fn + tp) if fn + tp else 0.0
+    print(
+        "MESSY_CARE_CONFUSION_MATRIX="
+        f"TP:{tp},FP:{fp},FN:{fn},TN:{tn};"
+        f"precision:{precision:.4f},recall:{recall:.4f},"
+        f"FPR:{false_positive_rate:.4f},FNR:{false_negative_rate:.4f};"
+        f"n:{len(outcomes)}"
+    )
+    print(f"MESSY_CARE_CASE_OUTCOMES={outcomes}")
+    assert len(outcomes) == 4
+    assert all(item["expected_alert"] == item["actual_alert"] for item in outcomes), (
+        "Actual alert decisions diverged from independently specified synthetic labels; "
+        f"matrix TP={tp}, FP={fp}, FN={fn}, TN={tn}; outcomes={outcomes}"
+    )
