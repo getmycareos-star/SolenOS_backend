@@ -25,6 +25,14 @@ def build_evidence_lineage(
     similarity is used to assert common origin.
     """
     selected = {str(value) for value in selected_evidence_ids}
+    rows = list(evidence_rows)
+    # Index every authorized row, not only selected rows. Otherwise a selected
+    # derivative and a selected sibling fail to meet at their real parent ID.
+    known_ids = {
+        str(getattr(row, "id", "") or "")
+        for row in rows
+        if str(getattr(row, "id", "") or "")
+    }
     parent: dict[str, str] = {}
 
     def find(value: str) -> str:
@@ -40,21 +48,25 @@ def build_evidence_lineage(
             parent[second] = first
 
     shared_ids: set[str] = set()
-    for row in evidence_rows:
+    for row in rows:
         evidence_id = str(getattr(row, "id", "") or "")
-        if evidence_id not in selected:
+        if not evidence_id:
             continue
         parent_id = str(getattr(row, "parent_evidence_id", "") or "").strip()
         if parent_id:
-            union(evidence_id, "parent:" + parent_id)
-            shared_ids.add(evidence_id)
+            # Join to the real parent node when available. Retain an explicit
+            # external node when the parent is outside the authorized query.
+            union(evidence_id, parent_id if parent_id in known_ids else "parent:" + parent_id)
+            if evidence_id in selected:
+                shared_ids.add(evidence_id)
 
         source_ref = str(getattr(row, "original_source_reference", "") or "").strip()
         if source_ref:
             normalized_ref = " ".join(source_ref.split()).casefold()
             if normalized_ref:
                 union(evidence_id, "source-ref:" + normalized_ref)
-                shared_ids.add(evidence_id)
+                if evidence_id in selected:
+                    shared_ids.add(evidence_id)
 
     independence: dict[str, str] = {}
     for relationship in relationships:
