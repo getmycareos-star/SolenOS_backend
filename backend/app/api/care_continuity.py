@@ -246,6 +246,15 @@ def create_claim_assessment(
     ).first()
     if claim is None:
         raise HTTPException(status_code=404, detail="Claim not found")
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to assess a claim")
+    if payload.superseded_by_claim_id:
+        target_claim = db.query(CareAssertion.id).filter(
+            CareAssertion.id == payload.superseded_by_claim_id,
+            CareAssertion.person_id == person_id,
+        ).first()
+        if target_claim is None or payload.superseded_by_claim_id == claim_id:
+            raise HTTPException(status_code=422, detail="Supersession target must be a different claim in the same care record")
 
     links = [item.model_dump() for item in payload.evidence_links]
     evidence_ids = [item["evidence_id"] for item in links]
@@ -314,6 +323,7 @@ def create_claim_assessment(
         evidence_links=links,
         reviewed_by_caregiver_id=caregiver_id,
         supersedes_assessment_id=latest.id if latest else None,
+        superseded_by_claim_id=payload.superseded_by_claim_id,
     )
     try:
         db.add(row)
