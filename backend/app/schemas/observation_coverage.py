@@ -17,6 +17,9 @@ class ObservationCoverageCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_window(self):
+        for name, value in (("window_start", self.window_start), ("window_end", self.window_end)):
+            if value.tzinfo is None or value.utcoffset() is None:
+                raise ValueError(f"{name} must include an explicit timezone offset")
         if self.window_end <= self.window_start:
             raise ValueError("window_end must be later than window_start")
         return self
