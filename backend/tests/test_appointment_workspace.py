@@ -364,6 +364,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     quality = body["assessment"]["assessment_quality"]
     assert quality["numeric_confidence"].startswith("not_provided")
     assert quality["status"] == "limitations_present"
+    assert quality["high_impact_conclusion_gate"] == "human_review_required"
+    assert quality["assessment_use_status"] == "restricted_by_recorded_limitations"
     dimensions = {item["dimension"]: item for item in quality["dimensions"]}
     assert dimensions["individual_baseline"]["status"] == "not_established"
     assert "individual_baseline_not_established" in quality["blocking_limitations"]
