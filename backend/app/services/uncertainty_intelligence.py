@@ -264,21 +264,21 @@ def analyze_uncertainty(
     if duplicate_groups:
         classifications.append("duplicate_evidence")
         limitations.append("Repeated evidence records were detected and are not counted as independent corroboration.")
-    unavailable_reasons = {
-        "unavailable": "A required source is not available; absence from this assessment is not a negative finding.",
-        "inaccessible": "A required source is inaccessible; absence from this assessment is not a negative finding.",
-        "permission_denied": "Source access was denied; the system cannot draw a conclusion from the inaccessible source.",
-        "authentication_failed": "Source authentication failed; retrieval is unverified and the source cannot be treated as reviewed.",
-        "not_configured": "The required source is not configured; its contents are unknown, not negative.",
-        "not_attempted": "The required source was not queried; its contents are unknown, not negative.",
-        "timeout": "Source retrieval timed out; the result is incomplete, not a negative finding.",
-        "rate_limited": "Source retrieval was rate-limited; the result is incomplete, not a negative finding.",
-        "error": "A source operation returned an error; the result is incomplete, not a negative finding.",
-        "failed": "A required retrieval or processing operation failed; the result is incomplete, not a negative finding.",
-        "partial": "Only part of the relevant source material was retrieved; conclusions are bounded to the retrieved subset.",
-        "truncated": "Retrieved source material was truncated; conclusions cannot be treated as a complete review.",
-        "stale_cache": "The available material may be stale because a current source could not be confirmed.",
-    }
+    unavailable_reasons = dict([
+        ("unavailable", "A required source is not available; absence from this assessment is not a negative finding."),
+        ("inaccessible", "A required source is inaccessible; absence from this assessment is not a negative finding."),
+        ("permission_denied", "Source access was denied; the system cannot draw a conclusion from the inaccessible source."),
+        ("authentication_failed", "Source authentication failed; retrieval is unverified and the source cannot be treated as reviewed."),
+        ("not_configured", "The required source is not configured; its contents are unknown, not negative."),
+        ("not_attempted", "The required source was not queried; its contents are unknown, not negative."),
+        ("timeout", "Source retrieval timed out; the result is incomplete, not a negative finding."),
+        ("rate_limited", "Source retrieval was rate-limited; the result is incomplete, not a negative finding."),
+        ("error", "A source operation returned an error; the result is incomplete, not a negative finding."),
+        ("failed", "A required retrieval or processing operation failed; the result is incomplete, not a negative finding."),
+        ("partial", "Only part of the relevant source material was retrieved; conclusions are bounded to the retrieved subset."),
+        ("truncated", "Retrieved source material was truncated; conclusions cannot be treated as a complete review."),
+        ("stale_cache", "The available material may be stale because a current source could not be confirmed."),
+    ])
     normalized_access = _text(source_access).lower()
     if normalized_access in unavailable_reasons:
         classifications.append("knowledge_boundary")
