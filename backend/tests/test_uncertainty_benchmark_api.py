@@ -226,7 +226,7 @@ def test_handoff_draft_preserves_active_unknown_assessment_and_excludes_supersed
     assert len(refs) == 1
     assert refs[0]["source_id"] == "assessment-current-unknown"
     assert refs[0]["epistemic_status"].lower().endswith("unknown")
-    assert refs[0]["details"]["confidence"] is None or "confidence" not in refs[0]["details"]
+    assert refs[0]["details"].get("confidence") is None
     assert "uncertainty_assessments" in next(
         section for section in payload["template_sections"] if section["key"] == "problems_uncertainty"
     )["source_tables"]
