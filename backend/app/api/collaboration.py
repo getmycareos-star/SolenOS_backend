@@ -2087,11 +2087,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # measurement absent from the retrieved authorized sources is withheld
             # deterministically, even if Qwen returns a fabricated numeric value.
             reply = missing_measurement_reply
-        unsupported_trend = _contains_unsupported_trend_claim(reply, trend_assessment)
+        unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
         if unsupported_trend:
-            # A model-generated directional claim is withheld when the source set
-            # lacks two distinct dated observations. Return an evidence-derived
-            # uncertainty statement rather than expose the unsupported claim.
+            # When the source set lacks two distinct dated observations, do not
+            # let the model restate an old observation as a recent trend or imply
+            # direction indirectly. Return the evidence-derived limit directly.
             reply = _trend_uncertainty_response(trend_assessment)
         invalid_reply = (
             not isinstance(reply, str)
