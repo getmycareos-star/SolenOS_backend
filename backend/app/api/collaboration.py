@@ -579,11 +579,14 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     # Retrieval query expansion must not treat an earlier assistant-generated
     # claim as evidence. Use caregiver-authored turns only to resolve references;
     # the full transcript can still be supplied separately as conversation context.
+    # The endpoint loads newest-first. Reverse the bounded window to keep
+    # chronological order, then retain the *latest* four caregiver turns;
+    # slicing before the tail would silently discard the most recent context.
     recent_user_turns = [
         f"user: {(message.content or '')[:500]}"
         for message in reversed(prior_messages[:8])
         if getattr(message, "role", None) == "user"
-    ][:4]
+    ][-4:]
     return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
