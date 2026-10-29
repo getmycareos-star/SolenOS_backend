@@ -436,22 +436,47 @@ def analyze_and_persist_uncertainty(
     else:
         evidence_rows = []
 
-    # Bring persisted source-lineage review into the analyzer. A lineage
-    # relationship is person-scoped and never inferred from cross-person IDs.
-    from app.models.care_continuity import EvidenceSourceRelationship
-
+    # Bring persisted source lineage and every reachable ancestor into the
+    # analysis. All lookups remain scoped to this person. A bounded walk prevents
+    # corrupt cycles or unexpectedly deep chains from turning into unbounded work.
     from app.models.care_continuity import EvidenceSourceRelationship
     from app.services.evidence_lineage import build_evidence_lineage
 
+    lineage_rows_by_id = {str(row.id): row for row in evidence_rows}
+    frontier = {
+        str(row.parent_evidence_id)
+        for row in evidence_rows
+        if getattr(row, "parent_evidence_id", None)
+        and str(row.parent_evidence_id) not in lineage_rows_by_id
+    }
+    for _depth in range(20):
+        if not frontier:
+            break
+        ancestor_rows = engine.db.query(Evidence).filter(
+            Evidence.person_id == request.person_id,
+            Evidence.id.in_(frontier),
+        ).all()
+        next_frontier: set[str] = set()
+        for ancestor in ancestor_rows:
+            ancestor_id = str(ancestor.id)
+            if ancestor_id in lineage_rows_by_id:
+                continue
+            lineage_rows_by_id[ancestor_id] = ancestor
+            parent_id = str(getattr(ancestor, "parent_evidence_id", None) or "").strip()
+            if parent_id and parent_id not in lineage_rows_by_id:
+                next_frontier.add(parent_id)
+        frontier = next_frontier
+
+    lineage_ids = sorted(lineage_rows_by_id)
     relationships = []
-    if requested_evidence_ids:
+    if lineage_ids:
         relationships = engine.db.query(EvidenceSourceRelationship).filter(
             EvidenceSourceRelationship.person_id == request.person_id,
-            (EvidenceSourceRelationship.source_evidence_id.in_(requested_evidence_ids))
-            | (EvidenceSourceRelationship.related_evidence_id.in_(requested_evidence_ids)),
+            (EvidenceSourceRelationship.source_evidence_id.in_(lineage_ids))
+            | (EvidenceSourceRelationship.related_evidence_id.in_(lineage_ids)),
         ).all()
     lineage_by_id, independence_by_id = build_evidence_lineage(
-        evidence_rows, relationships, requested_evidence_ids
+        lineage_rows_by_id.values(), relationships, requested_evidence_ids
     )
 
     try:
