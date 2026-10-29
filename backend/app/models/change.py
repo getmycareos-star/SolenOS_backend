@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Enum as SQLEnum, Integer
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Enum as SQLEnum, Integer, Index, text
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -74,6 +74,18 @@ class Change(Base):
 
 class Pattern(Base):
     __tablename__ = "patterns"
+    __table_args__ = (
+        Index(
+            "uq_patterns_one_active_per_subject",
+            "person_id",
+            "subject_type",
+            "subject_id",
+            "pattern_type",
+            unique=True,
+            postgresql_where=text("is_active IS TRUE"),
+            sqlite_where=text("is_active IS TRUE"),
+        ),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     subject_type = Column(String, nullable=False)
