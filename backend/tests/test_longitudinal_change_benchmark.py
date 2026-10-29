@@ -297,9 +297,74 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
             "expected": True, "observed": observed, "pass": observed is True,
         })
 
+        # Case 10: overlapping contradictory coverage declarations must not
+        # be upgraded to complete coverage by unioning their intervals.
+        person, caregiver = _case_identity(db, "conflicting-coverage")
+        conflict_start = REFERENCE_TIME - timedelta(days=30)
+        db.add_all([
+            ObservationCoverage(
+                id=f"conflict-covered-{person.id}", person_id=person.id, subject_type="fall",
+                window_start=conflict_start, window_end=REFERENCE_TIME,
+                coverage_status="covered", source_evidence_ids=[],
+                rationale="One source declares full observation.", recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id=f"conflict-unknown-{person.id}", person_id=person.id, subject_type="fall",
+                window_start=REFERENCE_TIME - timedelta(days=3), window_end=REFERENCE_TIME,
+                coverage_status="unknown", source_evidence_ids=[],
+                rationale="Another source cannot establish observation status.", recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.flush()
+        coverage = __import__("app.services.observation_coverage", fromlist=["assess_observation_coverage"]).assess_observation_coverage(
+            db, person.id, "fall", conflict_start, REFERENCE_TIME
+        )
+        observed = coverage["coverage_status"] != "covered" and coverage["coverage_fraction"] != 1.0
+        outcomes.append({
+            "case": "conflicting_coverage_cannot_be_promoted_to_complete",
+            "expected": True, "observed": observed, "pass": observed is True,
+        })
+
+        # Case 11: future-dated records are excluded from a past reference-time
+        # analysis, even if they are already present in storage.
+        person, caregiver = _case_identity(db, "future-event")
+        _record_event(db, person, caregiver, "past-event-1", 5)
+        db.add(CareEvent(
+            id="future-event-1", person_id=person.id, event_type="fall", status="recorded",
+            occurred_at=REFERENCE_TIME + timedelta(days=1), title="Future fixture event",
+            evidence_ids=[], created_by_caregiver_id=caregiver.id,
+        ))
+        db.flush()
+        counts = get_longitudinal_event_counts(db, person.id, "fall", None, REFERENCE_TIME)
+        observed = counts["current_window_count"] == 1 and all(
+            event.occurred_at <= REFERENCE_TIME for event in counts["recent_events"]
+        )
+        outcomes.append({
+            "case": "future_dated_event_excluded_from_reference_time",
+            "expected": 1, "observed": counts["current_window_count"], "pass": observed,
+        })
+
+        # Case 12: a covered baseline with no events may support a zero count;
+        # without that coverage, the same count remains unknown (case 7).
+        person, caregiver = _case_identity(db, "covered-emergence-zero-count")
+        _record_event(db, person, caregiver, "covered-zero-count-current", 5)
+        _add_full_coverage(db, person, caregiver, REFERENCE_TIME - timedelta(days=180))
+        db.flush()
+        changes = detect_event_changes(db, person.id, "fall", None, REFERENCE_TIME)
+        emergence = next((change for change in changes if change.change_type.value == "emergence"), None)
+        observed = bool(
+            emergence
+            and emergence.baseline_coverage_status == "covered"
+            and emergence.previous_count == 0
+        )
+        outcomes.append({
+            "case": "covered_baseline_can_support_explicit_zero_prior_count",
+            "expected": True, "observed": observed, "pass": observed is True,
+        })
+
         score = sum(1 for outcome in outcomes if outcome["pass"]) / len(outcomes)
         report = {
-            "benchmark": "longitudinal-change-safeguards-v2",
+            "benchmark": "longitudinal-change-safeguards-v3",
             "reference_time": REFERENCE_TIME.isoformat(),
             "cases_passed": sum(1 for outcome in outcomes if outcome["pass"]),
             "cases_total": len(outcomes),
