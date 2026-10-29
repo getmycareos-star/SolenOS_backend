@@ -527,3 +527,81 @@ def test_frequency_pattern_is_withheld_when_coverage_is_unknown():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_change_assessment_is_rebuilt_when_coverage_provenance_changes(monkeypatch):
+    from app.core.change_enums import ChangeDirection, ChangeType
+    from app.models.care import CareEvent
+    from app.models.change import Change
+    from app.services import significance
+    from app.services.change_detection import _create_change
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        event = CareEvent(
+            id="coverage-refresh-event",
+            person_id=person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=now - timedelta(days=2),
+            title="Observed mobility event",
+            created_by_caregiver_id=caregiver.id,
+            evidence_ids=["coverage-refresh-source"],
+        )
+        db.add(event)
+        db.commit()
+        monkeypatch.setattr(significance, "assess_change", lambda *args, **kwargs: None)
+
+        base_comparison = {
+            "relative_change_percent": None,
+            "current_window_start": now - timedelta(days=42),
+            "current_window_end": now,
+            "baseline_coverage_status": "unknown",
+            "current_coverage_status": "unknown",
+            "baseline_coverage_fraction": None,
+            "current_coverage_fraction": None,
+        }
+        first = _create_change(
+            db=db, person_id=person.id, subject_type="mobility", subject_id="",
+            change_type=ChangeType.EMERGENCE, change_direction=ChangeDirection.INCREASING,
+            previous_state="No comparable prior events were recorded in the baseline window",
+            current_state="1 event recorded in the current observation window",
+            previous_count=0, current_count=1, baseline_id=None, baseline=None,
+            comparison=base_comparison, events=[event], now=now,
+        )
+        db.commit()
+        assert first.is_active is True
+        assert first.current_coverage_status == "unknown"
+
+        updated_comparison = {
+            **base_comparison,
+            "baseline_coverage_status": "covered",
+            "current_coverage_status": "covered",
+            "baseline_coverage_fraction": 1.0,
+            "current_coverage_fraction": 1.0,
+        }
+        second = _create_change(
+            db=db, person_id=person.id, subject_type="mobility", subject_id="",
+            change_type=ChangeType.EMERGENCE, change_direction=ChangeDirection.INCREASING,
+            previous_state="No comparable prior events were recorded in the baseline window",
+            current_state="1 event recorded in the current observation window",
+            previous_count=0, current_count=1, baseline_id=None, baseline=None,
+            comparison=updated_comparison, events=[event], now=now + timedelta(minutes=1),
+        )
+        db.commit()
+        rows = db.query(Change).filter(
+            Change.person_id == person.id,
+            Change.subject_type == "mobility",
+            Change.change_type == ChangeType.EMERGENCE,
+        ).order_by(Change.created_at.asc()).all()
+        assert len(rows) == 2
+        assert rows[0].is_active is False
+        assert rows[0].superseded_by_change_id == second.id
+        assert rows[1].is_active is True
+        assert rows[1].baseline_coverage_status == "covered"
+        assert rows[1].current_coverage_status == "covered"
+        assert rows[1].baseline_coverage_fraction == pytest.approx(1.0)
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
