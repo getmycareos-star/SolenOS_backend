@@ -212,53 +212,81 @@ def detect_event_changes(
                 )
                 changes.append(change)
 
-    # Coverage and source records are append-only, so a previously valid rate
-    # assessment can become unsupported after new conflicting/unknown coverage
-    # is recorded. Do not leave that stale increase/decrease visible as current.
-    # Preserve the row and its explanation for audit; only retire machine-detected
-    # assessments, never caregiver-confirmed or caregiver-rejected decisions.
-    current_rate_types = {change.change_type for change in changes}
-    stale_rate_candidates = (
+    # Source evidence and coverage are append-only, but derived assessments can
+    # become stale when an event is corrected/invalidated or coverage conflicts
+    # arrive. Retain the historical row, but do not keep unsupported machine
+    # findings active. Caregiver decisions are never silently rewritten.
+    current_change_types = {change.change_type for change in changes}
+    stale_candidates = (
         db.query(Change)
         .filter(
             Change.person_id == person_id,
             Change.subject_type == event_type,
             Change.subject_id == (subject_id or ""),
             Change.is_active.is_(True),
-            Change.change_type.in_((ChangeType.INCREASE, ChangeType.DECREASE)),
+            Change.change_type.in_((
+                ChangeType.INCREASE, ChangeType.DECREASE,
+                ChangeType.EMERGENCE, ChangeType.RECURRENCE,
+            )),
             Change.confirmation_status.in_(("detected", "awaiting_confirmation")),
         )
         .order_by(Change.created_at.asc(), Change.id.asc())
         .all()
     )
-    for stale in stale_rate_candidates:
-        if stale.change_type in current_rate_types:
+    current_event_ids = {event.id for event in counts["recent_events"]}
+    current_event_times = {
+        _ensure_utc(event.occurred_at)
+        for event in counts["recent_events"]
+        if _ensure_utc(event.occurred_at) is not None
+    }
+    recurrence_span_days = (
+        (max(current_event_times) - min(current_event_times)).total_seconds() / 86400.0
+        if len(current_event_times) >= 2 else None
+    )
+    for stale in stale_candidates:
+        if stale.change_type in current_change_types:
             continue
-        # Do not retire a still-supported same-direction assessment merely because
-        # this invocation emitted a different candidate (e.g. recurrence).
-        coverage_is_complete = (
-            comparison.get("baseline_coverage_status") == "covered"
-            and comparison.get("current_coverage_status") == "covered"
-            and not comparison.get("baseline_history_truncated", False)
-            and baseline.event_count > 0
-        )
-        rate_delta = comparison.get("frequency_delta")
-        direction_still_supported = (
-            coverage_is_complete
-            and rate_delta is not None
-            and (
-                (stale.change_type == ChangeType.INCREASE and rate_delta > 0)
-                or (stale.change_type == ChangeType.DECREASE and rate_delta < 0)
+        still_supported = False
+        if stale.change_type in (ChangeType.INCREASE, ChangeType.DECREASE):
+            coverage_is_complete = (
+                comparison.get("baseline_coverage_status") == "covered"
+                and comparison.get("current_coverage_status") == "covered"
+                and not comparison.get("baseline_history_truncated", False)
+                and baseline.event_count > 0
             )
-        )
-        if direction_still_supported:
+            rate_delta = comparison.get("frequency_delta")
+            still_supported = bool(
+                coverage_is_complete
+                and rate_delta is not None
+                and (
+                    (stale.change_type == ChangeType.INCREASE and rate_delta > 0)
+                    or (stale.change_type == ChangeType.DECREASE and rate_delta < 0)
+                )
+            )
+        elif stale.change_type == ChangeType.EMERGENCE:
+            still_supported = bool(
+                stale.evidence_ids
+                and set(stale.evidence_ids).issubset(current_event_ids)
+                and current_count > 0
+                and baseline.event_count == 0
+                and not comparison.get("baseline_history_truncated", False)
+            )
+        elif stale.change_type == ChangeType.RECURRENCE:
+            still_supported = bool(
+                stale.evidence_ids
+                and set(stale.evidence_ids).issubset(current_event_ids)
+                and current_count >= 2
+                and recurrence_span_days is not None
+                and recurrence_span_days <= 42
+            )
+        if still_supported:
             continue
         stale.is_active = False
         stale.explanation = (
-            (stale.explanation or "Longitudinal rate assessment.")
-            + " This assessment is no longer active: reassessment could not reproduce its rate-change claim from the current source evidence and explicit observation coverage. The historical assessment is retained; retirement does not prove that the real-world event stopped."
+            (stale.explanation or "Longitudinal change assessment.")
+            + " This assessment is no longer active: reassessment could not reproduce its claim from the currently eligible source events and observation coverage. The historical assessment is retained; retirement does not prove that the real-world event stopped."
         )
-    if stale_rate_candidates:
+    if stale_candidates:
         db.flush()
     return changes
 
