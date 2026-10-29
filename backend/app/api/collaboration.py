@@ -1334,6 +1334,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        retrieval_terms = _expanded_context_terms(retrieval_query)
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1341,6 +1350,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
+        matching_events = []
+        if retrieval_terms:
+            matching_events = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(*[
+                        column.ilike(f"%{term}%")
+                        for column in (CareEvent.title, CareEvent.description, CareEvent.event_type, CareEvent.status)
+                        for term in retrieval_terms
+                    ]),
+                )
+                .order_by(CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        # Search-matched older records are added independently of the recent
+        # window. Deduplicate before context ranking so a source appears once.
+        event_by_id = {str(event.id): event for event in [*recent_events, *matching_events]}
+        recent_events = list(event_by_id.values())
         for event in recent_events:
             source_event_ids.append(str(event.id))
             event_context.append(
@@ -1483,15 +1512,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Prior conversation can resolve a follow-up reference, but it remains
         # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
-
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
         shared_lcr_lines: list[str] = []
