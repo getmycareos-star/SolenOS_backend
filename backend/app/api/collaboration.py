@@ -1826,11 +1826,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "when useful. Match the user's language, answer first, be concise, and avoid generic disclaimers."
         )
         model_messages = [{"role": "system", "content": system_prompt}]
-        model_messages.extend(
-            {"role": row.role, "content": (row.content or "")[:300]}
-            for row in reversed(prior_messages[:2])
-            if row.role in {"user", "assistant"}
-        )
+        # Conversation history is included only when the current message has an
+        # explicit reference that the retrieval resolver could not answer alone.
+        # A standalone new topic must not inherit the previous answer as context.
+        if retrieval_query.strip() != user_text.strip():
+            model_messages.extend(
+                {"role": row.role, "content": (row.content or "")[:300]}
+                for row in reversed(prior_messages[:2])
+                if row.role in {"user", "assistant"}
+            )
         # The caregiver's question is plain text, not a JSON task wrapper. This
         # prevents small local models from describing the JSON instead of
         # answering the question. Bound context to fit the configured 1K window.
