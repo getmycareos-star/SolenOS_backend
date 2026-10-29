@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import or_
+from sqlalchemy import case, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -527,6 +527,17 @@ def _expanded_context_terms(text: str) -> set[str]:
         if direct.intersection(group):
             expanded.update(group)
     return expanded
+
+
+def _source_sql_relevance(columns: tuple, direct_terms: list[str], synonym_terms: list[str]):
+    """Order SQL candidates by term relevance before a bounded candidate limit."""
+    scores = []
+    for column in columns:
+        for term in direct_terms:
+            scores.append(case((column.ilike(f"%{term}%"), 3), else_=0))
+        for term in synonym_terms:
+            scores.append(case((column.ilike(f"%{term}%"), 1), else_=0))
+    return sum(scores, 0)
 
 
 def _rank_source_rows(query: str, rows: list, fields: tuple[str, ...], limit: int) -> list:
@@ -1637,6 +1648,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
             if token not in _CONTEXT_STOPWORDS
         ))[:12]
+        ranking_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", retrieval_query.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:12]
+        synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(ranking_terms))[:12]
         expanded_terms = sorted(_expanded_context_terms(retrieval_query) - set(direct_terms))
         retrieval_terms = list(dict.fromkeys([*direct_terms, *expanded_terms]))[:24]
         if retrieval_terms and not _is_casual_greeting(user_text):
@@ -1651,7 +1667,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc()).limit(250).all()
+            ).order_by(
+                _source_sql_relevance(
+                    (CareEvent.title, CareEvent.description, CareEvent.event_type, CareEvent.status),
+                    ranking_terms, synonym_terms,
+                ).desc(),
+                CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc(),
+            ).limit(250).all()
             for event in _rank_source_rows(retrieval_query, historical_events, ("title", "description", "event_type", "status"), 12):
                 event_id = str(event.id)
                 if event_id in existing_event_ids:
@@ -1678,7 +1700,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
+            ).order_by(
+                _source_sql_relevance(
+                    (CareAssertion.field, CareAssertion.asserted_value, CareAssertion.source_label, CareAssertion.source_text),
+                    ranking_terms, synonym_terms,
+                ).desc(),
+                CareAssertion.recorded_at.desc(),
+            ).limit(250).all()
             for assertion in _rank_source_rows(retrieval_query, historical_assertions, ("field", "asserted_value", "source_label", "source_text"), 12):
                 assertion_id = str(assertion.id)
                 if assertion_id in existing_assertion_ids:
@@ -1706,7 +1734,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     )
                     for term in retrieval_terms
                 ]),
-            ).order_by(Appointment.scheduled_at.desc()).limit(250).all()
+            ).order_by(
+                _source_sql_relevance(
+                    (Appointment.title, Appointment.location, Appointment.provider, Appointment.healthcare_org, Appointment.status),
+                    ranking_terms, synonym_terms,
+                ).desc(),
+                Appointment.scheduled_at.desc(),
+            ).limit(250).all()
             for appointment in _rank_source_rows(retrieval_query, historical_appointments, ("title", "location", "provider", "healthcare_org", "status"), 12):
                 appointment_id = str(appointment.id)
                 if appointment_id in existing_appointment_ids:
@@ -1729,7 +1763,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     for column in (EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type)
                     for term in retrieval_terms
                 ]),
-            ).order_by(EvidenceModel.uploaded_at.desc()).limit(250).all()
+            ).order_by(
+                _source_sql_relevance(
+                    (EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type),
+                    ranking_terms, synonym_terms,
+                ).desc(),
+                EvidenceModel.uploaded_at.desc(),
+            ).limit(250).all()
             for evidence in _rank_source_rows(retrieval_query, historical_evidence, ("source_text", "extra_metadata", "type"), 12):
                 evidence_id = str(evidence.id)
                 if evidence_id in existing_evidence_ids:
