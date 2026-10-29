@@ -10,6 +10,7 @@ import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
@@ -65,6 +66,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
