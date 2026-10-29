@@ -371,6 +371,16 @@ def analyze_uncertainty(
             "reason": "At least one evidence item is not explicitly verified.",
             "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
         })
+    if normalized_access not in {"available", ""}:
+        questions.append({
+            "target_field": None,
+            "question": "Can source access be restored or the missing source material be retrieved before drawing a conclusion?",
+            "reason": unavailable_reasons.get(
+                normalized_access,
+                "The source has a nonstandard access status, so completeness cannot be assumed.",
+            ),
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
     if stale:
         questions.append({
             "target_field": None,
