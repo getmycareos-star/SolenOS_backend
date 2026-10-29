@@ -14,6 +14,7 @@ from app.models.care import Person, Caregiver, CareEvent
 from app.models.anonymous_session import AnonymousSession
 from app.models.care_continuity import CareAssertion
 from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
+from app.models.observation_coverage import ObservationCoverage
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -713,6 +714,34 @@ def test_higher_normalized_rate_is_detected_even_when_raw_counts_are_lower():
         db.commit()
 
         from app.services.change_detection import detect_event_changes
+
+        changes_without_coverage = detect_event_changes(db, person.id, "mobility_observation", None, now)
+        assert not any(change.change_type.value == "increase" for change in changes_without_coverage), (
+            "A higher recorded rate is not an occurrence-rate increase without complete coverage."
+        )
+
+        from app.services.baseline import build_baseline
+        baseline = build_baseline(db, person.id, "mobility_observation", None, now)
+        assert baseline is not None
+        db.add_all([
+            ObservationCoverage(
+                id="mobility-baseline-coverage", person_id=person.id,
+                subject_type="mobility_observation",
+                window_start=baseline.window_start, window_end=baseline.window_end,
+                coverage_status="covered", source_evidence_ids=[],
+                rationale="The domain was explicitly observed throughout the baseline window.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="mobility-current-coverage", person_id=person.id,
+                subject_type="mobility_observation",
+                window_start=now - timedelta(days=42), window_end=now,
+                coverage_status="covered", source_evidence_ids=[],
+                rationale="The domain was explicitly observed throughout the current window.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
 
         changes = detect_event_changes(db, person.id, "mobility_observation", None, now)
         assert any(change.change_type.value == "increase" for change in changes)
