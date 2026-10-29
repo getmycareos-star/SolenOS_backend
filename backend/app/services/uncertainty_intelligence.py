@@ -256,8 +256,6 @@ def analyze_uncertainty(
         # A present observation does not establish the separate claim that it
         # represents a change when the comparison prerequisite is missing.
         epistemic_state = "unknown"
-    elif ambiguity_signals:
-        epistemic_state = "ambiguous"
     elif unverified or stale or explicit_uncertainty or quality_limited or missing_time:
         epistemic_state = "partially_known"
     else:
@@ -265,8 +263,8 @@ def analyze_uncertainty(
     task_thresholds = {
         "summarize": "qualified_summary_permitted" if items else "insufficient",
         "identify_change": "possible_change_only" if items and not conflicts and not missing and has_baseline and has_comparison_observation else "insufficient",
-        "change_detection": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
-        "compare_state": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
+        "change_detection": "possible_change_only" if items and not conflicts and not missing and has_baseline and has_comparison_observation else "insufficient",
+        "compare_state": "possible_change_only" if items and not conflicts and not missing and has_baseline and has_comparison_observation else "insufficient",
         "low_risk_next_step": "qualified_low_risk_step_permitted" if items else "insufficient",
         "high_consequence_assessment": "insufficient_without_independent_validation",
         "recommendation": "qualified_only" if items and not conflicts else "insufficient",
