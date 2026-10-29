@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models.uncertainty import (
     InformationGap as InformationGapModel,
     OpenQuestion as OpenQuestionModel,
+    OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel,
     Contradiction as ContradictionModel,
     UncertaintyAssessment as UncertaintyAssessmentModel,
     ContradictionResolutionEvent as ContradictionResolutionEventModel,
@@ -216,14 +217,35 @@ class UncertaintyEngine:
             raise ValueError("A question can only be closed with an answer or an explicit close reason.")
 
         now = datetime.now(timezone.utc)
+        answer_text = answer.strip() if isinstance(answer, str) else answer
+        answer_source = answer_provenance.strip() if isinstance(answer_provenance, str) else answer_provenance
+        answer_was_recorded = new_status == "answered" and (
+            db_question.status != "answered"
+            or answer_text != db_question.answer
+            or answer_source != db_question.answer_provenance
+        )
+        if answer_was_recorded:
+            if not self.caregiver_id:
+                raise ValueError("Recording a clarification answer requires an authenticated caregiver identity.")
+            update_data["answer"] = answer_text
+            update_data["answer_provenance"] = answer_source
+            db_question.answered_by_caregiver_id = self.caregiver_id
+            self.db.add(OpenQuestionAnswerEventModel(
+                question_id=db_question.id,
+                person_id=db_question.person_id,
+                answer=answer_text,
+                answer_provenance=answer_source,
+                answered_by_caregiver_id=self.caregiver_id,
+            ))
+
         if new_status == "open" and db_question.status != "open":
-            # Reopening does not erase the previous answer; it remains part of the
-            # question's record until a separately recorded new answer supersedes it.
+            # Reopening does not erase the previous answer; the immutable answer
+            # event remains available even if the question is reopened or corrected.
             db_question.closed_at = None
             db_question.closed_reason = None
         elif new_status in {"answered", "declined", "closed"}:
             db_question.closed_at = now
-            if new_status == "answered":
+            if new_status == "answered" and answer_was_recorded:
                 db_question.answered_at = now
             elif new_status == "declined":
                 db_question.answered_at = None
