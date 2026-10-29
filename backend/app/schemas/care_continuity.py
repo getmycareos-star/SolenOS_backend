@@ -125,3 +125,45 @@ class ContradictionResolutionRequest(BaseModel):
     resolution_status: Literal["resolved", "qualified", "superseded"]
     resolution_notes: str = Field(min_length=3, max_length=4000)
     resolved_by_caregiver_id: Optional[str] = None
+
+
+class EvidenceClaimLinkInput(BaseModel):
+    evidence_id: str = Field(min_length=1, max_length=160)
+    relationship: Literal["supports", "partial_support", "scope_limited", "contradicts", "neutral"] 
+    source_passage: Optional[str] = Field(default=None, max_length=12000)
+    scope_note: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def passage_required_for_substantive_link(self):
+        if self.relationship in {"supports", "partial_support", "scope_limited", "contradicts"}:
+            if not (self.source_passage or "").strip():
+                raise ValueError("source_passage is required for support, contradiction, and scope-limited links")
+        return self
+
+
+class EvidenceClaimAssessmentCreate(BaseModel):
+    status: Literal[
+        "supported", "partially_supported", "contradicted", "unverified",
+        "uncertain", "conflicting", "missing_evidence", "stale",
+        "superseded", "withdrawn",
+    ]
+    rationale: str = Field(min_length=3, max_length=4000)
+    policy_version: Literal["claim-assessment-v1"]
+    evidence_links: List[EvidenceClaimLinkInput] = Field(default_factory=list, max_length=100)
+
+
+class EvidenceClaimAssessmentResponse(BaseModel):
+    id: str
+    person_id: str
+    claim_id: str
+    claim_version: int
+    status: str
+    rationale: str
+    policy_version: str
+    evidence_links: List[Dict[str, Any]]
+    reviewed_by_caregiver_id: str
+    supersedes_assessment_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
