@@ -150,6 +150,15 @@ class EvidenceClaimAssessmentCreate(BaseModel):
     rationale: str = Field(min_length=3, max_length=4000)
     policy_version: Literal["claim-assessment-v1"]
     evidence_links: List[EvidenceClaimLinkInput] = Field(default_factory=list, max_length=100)
+    superseded_by_claim_id: Optional[str] = Field(default=None, min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def supersession_target_required(self):
+        if self.status == "superseded" and not self.superseded_by_claim_id:
+            raise ValueError("superseded_by_claim_id is required when status is superseded")
+        if self.status != "superseded" and self.superseded_by_claim_id is not None:
+            raise ValueError("superseded_by_claim_id is only valid when status is superseded")
+        return self
 
 
 class EvidenceClaimAssessmentResponse(BaseModel):
@@ -163,6 +172,7 @@ class EvidenceClaimAssessmentResponse(BaseModel):
     evidence_links: List[Dict[str, Any]]
     reviewed_by_caregiver_id: str
     supersedes_assessment_id: Optional[str] = None
+    superseded_by_claim_id: Optional[str] = None
     created_at: datetime
 
     class Config:
