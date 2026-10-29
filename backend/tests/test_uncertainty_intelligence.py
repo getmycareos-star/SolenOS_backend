@@ -646,11 +646,26 @@ def test_change_assessment_without_explicit_baseline_is_insufficient():
 
 def test_explicit_baseline_allows_only_a_possible_change_assessment():
     result = analyze_uncertainty(
-        claim="Appetite may have changed.",
+        claim="Appetite changed.",
         task="identify_change",
         evidence=[
-            {"id": "baseline", "text": "Ate usual breakfast yesterday.", "source_type": "caregiver_report", "role": "baseline"},
-            {"id": "current", "text": "Ate less at breakfast today.", "source_type": "caregiver_report"},
+            {
+                "id": "baseline",
+                "text": "Ate usual breakfast yesterday.",
+                "source_type": "caregiver_report",
+                "verified": True,
+                "role": "baseline",
+                "observed_at": "2026-10-28T08:00:00Z",
+                "temporal_scope": "historical",
+            },
+            {
+                "id": "current",
+                "text": "Ate less at breakfast today.",
+                "source_type": "caregiver_report",
+                "verified": True,
+                "observed_at": "2026-10-29T08:00:00Z",
+                "temporal_scope": "current",
+            },
         ],
     )
     assert "missing_baseline" not in result["classifications"]
