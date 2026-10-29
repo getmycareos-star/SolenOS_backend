@@ -2,7 +2,7 @@ name: Backend tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, benchmark/longitudinal-messy-care-v1]
     paths:
       - "backend/**"
       - "Dockerfile"
