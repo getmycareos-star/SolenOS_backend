@@ -133,8 +133,10 @@ def test_single_tired_today_is_not_meaningful_no_alert():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
         db, person, caregiver = _seed_person()
-        now = datetime.now(timezone.utc)
         _add_event(db, person, caregiver, "fatigue", "Mom seemed tired today", days_ago=0)
+        # Reference time must be captured after event creation; the detector
+        # intentionally excludes records later than its as-of timestamp.
+        now = datetime.now(timezone.utc)
 
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "fatigue", None, now)
@@ -161,9 +163,9 @@ def test_ambiguous_input_does_not_invent_specificity():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
         db, person, caregiver = _seed_person()
-        now = datetime.now(timezone.utc)
         _add_event(db, person, caregiver, "altered_mental_status",
                    "Dad wasn't himself today", days_ago=0)
+        now = datetime.now(timezone.utc)
 
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "altered_mental_status", None, now)
@@ -270,12 +272,12 @@ def test_documentation_density_spike_not_treated_as_real_event():
         from app.core.database import get_db
         app.dependency_overrides[get_db] = override_get_db
         db, person, caregiver = _seed_person()
-        now = datetime.now(timezone.utc)
         # Two documentation events by the SAME reporter within minutes (a
         # documentation cadence spike, not two distinct real events), on a
         # non-functional, low-signal subject, with a sparse baseline.
         _add_event(db, person, caregiver, "appetite", "Appetite lower today", days_ago=0)
         _add_event(db, person, caregiver, "appetite", "Appetite lower today", days_ago=0)
+        now = datetime.now(timezone.utc)
 
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "appetite", None, now)
