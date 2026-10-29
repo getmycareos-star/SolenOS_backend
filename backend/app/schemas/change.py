@@ -220,6 +220,27 @@ class ChangeAssertionEvidenceResponse(BaseModel):
         from_attributes = True
 
 
+class ChangeObservationEvidenceResponse(BaseModel):
+    id: str
+    evidence_id: str
+    observation_kind: str
+    epistemic_status: str
+    subject_label: str
+    attribute: str
+    value_text: Optional[str] = None
+    normalized_value: Optional[str] = None
+    units: Optional[str] = None
+    observed_at: Optional[datetime] = None
+    occurred_at: Optional[datetime] = None
+    source_passage: str
+    negated: Optional[bool] = None
+    hedge_marker: Optional[str] = None
+    ambiguity_note: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class ChangeConfirmationHistoryItem(BaseModel):
     id: str
     previous_status: str
@@ -237,6 +258,7 @@ class ChangeDetailResponse(BaseModel):
     change: Change
     evidence: List[ChangeEvidenceResponse]
     assertions: List[ChangeAssertionEvidenceResponse] = Field(default_factory=list)
+    observations: List[ChangeObservationEvidenceResponse] = Field(default_factory=list)
     confirmation_history: List[ChangeConfirmationHistoryItem] = Field(default_factory=list)
 
 class ChangeConfirmationRequest(BaseModel):
