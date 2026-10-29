@@ -122,6 +122,73 @@ def main():
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
 
+        # Professional-input evidence must resolve to a real source row in the
+        # same PostgreSQL-backed care record; caregiver prose alone is not proof.
+        status, source_record = request(
+            "POST", "/api/v1/evidence", token=token_a, body={
+                "person_id": person_a,
+                "uploaded_by_caregiver_id": caregiver_a,
+                "type": "document",
+                "evidence_kind": "documented_record",
+                "epistemic_status": "unverified",
+                "source_text": "Synthetic CI-only source record for professional input verification.",
+                "source_type": "ci_open_loop_fixture",
+                "ingestion_key": "postgres-open-loop-professional-source-001",
+            },
+        )
+        require(status in {200, 201} and source_record.get("id"),
+                f"PostgreSQL source evidence creation failed: {status}: {source_record}")
+        professional_source_id = source_record["id"]
+        status, professional_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body={
+                "loop_type": "professional_input",
+                "title": "CI-only source-backed professional response",
+                "description": "Synthetic CI fixture requiring a verified source record.",
+                "idempotency_key": "postgres-open-loop-professional-input-001",
+                "evidence": [],
+            },
+        )
+        require(status == 201, f"Professional-input loop creation failed: {status}: {professional_loop}")
+        professional_loop_id = professional_loop["id"]
+        status, unsupported_professional_note = request(
+            "POST", f"/api/v1/open-loops/{professional_loop_id}/responses", token=token_a,
+            body={"text": "Caregiver says the professional called",
+                  "evidence": [{"kind": "caregiver_recorded", "text": "A professional called"}]},
+        )
+        require(status == 422,
+                f"Caregiver prose alone must not substantiate professional input: {status}: {unsupported_professional_note}")
+        status, foreign_source_loop = request(
+            "POST", "/api/v1/open-loops", token=token_b, body={
+                "loop_type": "professional_input",
+                "title": "CI-only foreign-source isolation",
+                "description": "Synthetic test: source evidence from another person must be denied.",
+                "idempotency_key": "postgres-open-loop-foreign-source-001",
+                "evidence": [],
+            },
+        )
+        require(status == 201, f"Foreign-source isolation loop creation failed: {status}: {foreign_source_loop}")
+        status, foreign_source_attempt = request(
+            "POST", f"/api/v1/open-loops/{foreign_source_loop['id']}/responses", token=token_b,
+            body={"text": "Attempt to reference another person's source",
+                  "evidence": [{"kind": "care_record_source", "evidence_id": professional_source_id}]},
+        )
+        require(status == 404,
+                f"Cross-person source evidence reference must return 404: {status}: {foreign_source_attempt}")
+        status, accepted_professional_response = request(
+            "POST", f"/api/v1/open-loops/{professional_loop_id}/responses", token=token_a,
+            body={"text": "Source-backed professional response recorded",
+                  "evidence": [{"kind": "care_record_source", "evidence_id": professional_source_id}]},
+        )
+        require(status == 200,
+                f"Source-backed professional response failed: {status}: {accepted_professional_response}")
+        status, closed_professional_loop = request(
+            "POST", f"/api/v1/open-loops/{professional_loop_id}/close", token=token_a,
+            body={"text": "Reviewed against source record",
+                  "evidence": [{"kind": "closure_review", "text": "Synthetic CI closure review"}]},
+        )
+        require(status == 200 and closed_professional_loop.get("loop", {}).get("status") == "closed",
+                f"Source-backed professional loop did not close correctly: {status}: {closed_professional_loop}")
+
         # Real PostgreSQL observation-coverage persistence, authorization, and
         # explicit coverage assessment. This never uses the deployed Railway API.
         coverage_start = datetime.now(timezone.utc) - timedelta(days=14)
@@ -625,6 +692,20 @@ def main():
 
         stop_server(server)
         server = start_server()
+        status, professional_after_restart = request(
+            "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
+        )
+        persisted_professional = professional_after_restart.get("loop", {}) if status == 200 else {}
+        require(status == 200 and persisted_professional.get("status") == "closed"
+                and any(
+                    isinstance(entry, dict) and any(
+                        isinstance(source, dict) and source.get("evidence_id") == professional_source_id
+                        for source in (entry.get("evidence") or [])
+                    )
+                    for entry in persisted_professional.get("response_evidence", [])
+                ),
+                f"Source-backed professional response/closure did not persist across restart: {status}: {professional_after_restart}")
+
         status, open_loop_after_restart = request(
             "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
         )
