@@ -261,3 +261,29 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_coverage_schema_normalizes_naive_timestamps_to_utc():
+    payload = ObservationCoverageCreate(
+        person_id="coverage-person",
+        subject_type="  mobility  ",
+        window_start=datetime(2026, 10, 1),
+        window_end=datetime(2026, 10, 2),
+        coverage_status="covered",
+        rationale="Explicitly observed during this interval.",
+    )
+    assert payload.subject_type == "mobility"
+    assert payload.window_start.tzinfo == timezone.utc
+    assert payload.window_end.tzinfo == timezone.utc
+
+
+def test_coverage_schema_rejects_blank_domain_and_nonpositive_window():
+    with pytest.raises(ValidationError):
+        ObservationCoverageCreate(
+            person_id="coverage-person",
+            subject_type="   ",
+            window_start=datetime(2026, 10, 2, tzinfo=timezone.utc),
+            window_end=datetime(2026, 10, 1, tzinfo=timezone.utc),
+            coverage_status="covered",
+            rationale="Invalid interval.",
+        )
