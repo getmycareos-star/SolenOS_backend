@@ -52,6 +52,65 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The record contains one reported sleep observation."
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation", description="Caregiver reported restless sleep last night.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id, time_provenance="caregiver_reported",
+        )
+        db.add(event); db.commit(); event_id = event.id; db.close()
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = str(__import__("uuid").uuid4())
+        body = {"person_id": person_id, "text": "What was recorded about sleep?", "client_turn_id": turn_id}
+        first = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert first_data["written_to_lcr"] is False
+        assert first_data["persistence"] == "conversation_only"
+        assert event_id in first_data["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in first_data["source_record_refs"]
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert retry.status_code == 200, retry.text
+        replay = retry.json()
+        assert replay["idempotent_replay"] is True
+        assert replay["session_id"] == first_data["session_id"]
+        assert replay["reply"] == first_data["reply"]
+        assert event_id in replay["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in replay["source_record_refs"]
+        assert len(calls) == 1
+        restored = client.get(f"/api/v1/conversation/{first_data['session_id']}", headers=headers)
+        assert restored.status_code == 200, restored.text
+        assistant = next(row for row in restored.json()["messages"] if row["role"] == "assistant")
+        assert assistant["written_to_lcr"] is False
+        assert assistant["persistence"] == "conversation_only"
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={"person_id": other_person_id, "text": body["text"], "client_turn_id": turn_id},
+        )
+        assert cross_person.status_code == 409, cross_person.text
+
+        changed = {**body, "text": "Tell me about the medication record."}
+        mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert mismatch.status_code == 409, mismatch.text
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
