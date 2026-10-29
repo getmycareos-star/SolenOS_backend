@@ -635,7 +635,7 @@ def test_public_safety_input_cannot_self_certify_reviewed_evidence():
         evidence_references=[
             EvidenceReference(
                 evidence_id="evidence-1",
-                source_text="The note confirms the claim.",
+                source_text="Caller-invented source text must not be trusted.",
                 authority=SourceAuthority.DOCUMENT,
                 quality=SourceQuality.HIGH,
                 currentness=CurrentnessStatus.CURRENT,
@@ -655,7 +655,7 @@ def test_public_safety_input_cannot_self_certify_reviewed_evidence():
     db.query.return_value.filter.return_value.all.return_value = [
         SimpleNamespace(
             id="evidence-1",
-            source_text="The note confirms the claim.",
+            source_text="Persisted original note confirms the claim.",
             occurred_at=None,
             uploaded_at=None,
         )
@@ -668,3 +668,4 @@ def test_public_safety_input_cannot_self_certify_reviewed_evidence():
     assert sanitized.evidence_references[0].quality == SourceQuality.UNVERIFIED
     assert sanitized.evidence_references[0].currentness == CurrentnessStatus.UNKNOWN_CURRENCY
     assert sanitized.evidence_references[0].confidence is None
+    assert sanitized.evidence_references[0].source_text == "Persisted original note confirms the claim."
