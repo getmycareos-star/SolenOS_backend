@@ -31,10 +31,6 @@ def upgrade() -> None:
                 "open_questions",
                 sa.Column(name, type_, nullable=nullable, server_default=default),
             )
-    if "necessity" in {column["name"] for column in inspect(bind).get_columns("open_questions")}:
-        op.alter_column("open_questions", "necessity", server_default=None)
-
-
 def downgrade() -> None:
     raise RuntimeError(
         "Refusing to discard clarification answerer intent and necessity assessments."
