@@ -191,12 +191,29 @@ def test_contradictory_observations_preserved_not_collapsed():
         db.add(cg_b)
         db.commit()
         now = datetime.now(timezone.utc)
-        _add_event(db, person, caregiver, "confusion", "Dad was unusually confused",
-                   days_ago=1, evidence_text="Dad was unusually confused today.",
-                   caregiver_obj=caregiver)
-        _add_event(db, person, cg_b, "confusion", "Dad seemed completely normal",
-                   days_ago=1, evidence_text="He seemed completely normal today.",
-                   caregiver_obj=cg_b)
+        event_a = _add_event(
+            db, person, caregiver, "confusion", "Dad was unusually confused",
+            days_ago=1, evidence_text="Dad was unusually confused today.",
+            caregiver_obj=caregiver,
+        )
+        event_b = _add_event(
+            db, person, cg_b, "confusion", "Dad seemed completely normal",
+            days_ago=1, evidence_text="He seemed completely normal today.",
+            caregiver_obj=cg_b,
+        )
+        from app.models.uncertainty import Contradiction
+        db.add(Contradiction(
+            person_id=person.id,
+            subject_type="confusion",
+            subject_id="",
+            field="reported_state",
+            description="Persisted conflict between two attributed reports.",
+            evidence_ids=list(dict.fromkeys((event_a.evidence_ids or []) + (event_b.evidence_ids or []))),
+            matching_candidate_ids=[event_a.id, event_b.id],
+            source_assertion_ids=[],
+            resolution_status="unresolved",
+        ))
+        db.commit()
 
         from app.services.change_detection import detect_event_changes
         changes = detect_event_changes(db, person.id, "confusion", None, now)
