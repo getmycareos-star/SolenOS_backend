@@ -627,7 +627,7 @@ def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
     )
 
 
-def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
+def _unsupported_care_claim_failure_code(reply: str, source_text: str) -> str | None:
     """Reject high-impact care-status claims when the supplied source does not support them.
 
     This is a conservative guardrail, not a general semantic-entailment proof. If
@@ -657,7 +657,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:was\s+)?(?:reported|provided|recorded|observed)\b",
         r"\b(?:professional|clinician|doctor|nurse)-reported information\b",
     )
-    for pattern in patterns:
+    for pattern_index, pattern in enumerate(patterns):
         for match in re.finditer(pattern, text):
             claim = match.group(0)
             # A source-absence statement is not an assertion that professional
@@ -677,7 +677,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             # in source text; exact wording is intentionally required here.
             terms = re.findall(r"[a-z]+", claim)
             if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
-                return True
+                return f"pattern_{pattern_index}"
     # A question can mention the same words as an unsupported delivery claim.
     # Do not treat word overlap as proof when the source explicitly lacks a receipt.
     missing_delivery_state = re.search(
@@ -691,7 +691,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         text,
     )
     if missing_delivery_state and delivery_status_claim:
-        return True
+        return "missing_delivery_receipt_claim"
 
     # Never ask caregivers to disclose credentials or one-time verification secrets.
     if re.search(
@@ -699,7 +699,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:password|verification code|authentication code|one[- ]time code|otp|recovery code|security code)\b",
         text,
     ):
-        return True
+        return "credential_request"
 
     # When authoritative state is explicitly missing, reject confident status claims.
     missing_state = re.search(
@@ -717,9 +717,13 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:retained|available|saved|synced|verified|accepted|completed|deleted|archived)\b",
     )
     if missing_state and any(re.search(pattern, text) for pattern in unsupported_state_claims):
-        return True
-    return False
+        return "unsupported_state_claim"
+    return None
 
+
+
+def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
+    return _unsupported_care_claim_failure_code(reply, source_text) is not None
 
 def _companion_message_needs_revision(text: str) -> bool:
     """Allow detail when warranted while rejecting empty, runaway, or internal output."""
@@ -1165,8 +1169,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             failures.append("style_or_length")
         if _contains_unrequested_saba(candidate, source_context):
             failures.append("unrequested_token")
-        if _contains_unsupported_care_claim(candidate, source_context):
-            failures.append("unsupported_care_claim")
+        care_claim_failure = _unsupported_care_claim_failure_code(candidate, source_context)
+        if care_claim_failure:
+            failures.append("unsupported_care_claim_" + care_claim_failure)
         if _contains_unsupported_operational_claim(candidate, source_context, context_lines):
             failures.append("unsupported_operational_claim")
         return failures
