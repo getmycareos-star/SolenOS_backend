@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence
+from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -354,6 +355,90 @@ def test_open_question_lifecycle():
         data = response.json()
         assert data["status"] == "closed"
         assert data["answer"] == "The caregiver reports attendance and says follow-up was discussed."
+    finally:
+        teardown_db()
+
+
+
+def test_clarification_question_requires_same_record_claim_and_matching_subject_scope():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="question-claim-person", name="Question Claim Person")
+        caregiver = Caregiver(
+            id="question-claim-caregiver",
+            name="Question Claim Caregiver",
+            email="question-claim@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="question-claim-other-person", name="Other Question Claim Person")
+        other_caregiver = Caregiver(
+            id="question-claim-other-caregiver",
+            name="Other Question Claim Caregiver",
+            email="question-claim-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        db.add_all([
+            CareAssertion(
+                id="question-claim-own",
+                person_id=person.id,
+                subject_type="daily_care",
+                subject_id="breakfast",
+                field="intake",
+                assertion_kind="reported_state",
+                asserted_value="Breakfast intake was lower than usual.",
+                source_label="caregiver report",
+                source_text="Breakfast intake was lower than usual.",
+                evidence_ids=[],
+                assertion_status="reported",
+            ),
+            CareAssertion(
+                id="question-claim-foreign",
+                person_id=other_person.id,
+                subject_type="daily_care",
+                subject_id="breakfast",
+                field="intake",
+                assertion_kind="reported_state",
+                asserted_value="Other person's breakfast intake.",
+                source_label="caregiver report",
+                source_text="Other person's breakfast intake.",
+                evidence_ids=[],
+                assertion_status="reported",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client("question-claim-person")
+        base = {
+            "person_id": "question-claim-person",
+            "question": "Was the lower intake also observed at lunch?",
+            "subject_type": "daily_care",
+            "subject_id": "breakfast",
+            "claim_id": "question-claim-own",
+            "priority": "informational",
+        }
+        created = client.post("/api/v1/uncertainty/questions", json=base)
+        assert created.status_code == 200, created.text
+        assert created.json()["claim_id"] == "question-claim-own"
+
+        mismatched_subject = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**base, "subject_id": "sleep", "question": "Was sleep affected?"},
+        )
+        assert mismatched_subject.status_code == 422, mismatched_subject.text
+
+        foreign_claim = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**base, "claim_id": "question-claim-foreign"},
+        )
+        assert foreign_claim.status_code == 422, foreign_claim.text
     finally:
         teardown_db()
 
