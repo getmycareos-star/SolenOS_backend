@@ -309,6 +309,7 @@ class EvidenceObservation(Base):
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     evidence_id = Column(String, ForeignKey("evidence.id", ondelete="RESTRICT"), nullable=False, index=True)
     supersedes_observation_id = Column(String, ForeignKey("evidence_observations.id"), nullable=True)
+    correction_rationale = Column(Text, nullable=True)
     observation_kind = Column(String(40), nullable=False)
     epistemic_status = Column(String(24), nullable=False)
     subject_label = Column(String(160), nullable=False)
