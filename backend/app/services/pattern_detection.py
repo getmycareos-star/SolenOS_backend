@@ -296,18 +296,38 @@ def _build_instability_pattern(
     changes: List[Change],
     now: datetime,
 ) -> Optional[Pattern]:
-    if len(changes) < 2:
+    comparable = [
+        change for change in changes
+        if change.comparison_window_start is not None
+        and change.comparison_window_end is not None
+        and change.change_direction in (ChangeDirection.INCREASING, ChangeDirection.DECREASING)
+    ]
+    if len(comparable) < 2:
         return None
-    has_increase = any(c.change_direction == ChangeDirection.INCREASING for c in changes)
-    has_decrease = any(c.change_direction == ChangeDirection.DECREASING for c in changes)
+    has_increase = any(c.change_direction == ChangeDirection.INCREASING for c in comparable)
+    has_decrease = any(c.change_direction == ChangeDirection.DECREASING for c in comparable)
     if not (has_increase and has_decrease):
         return None
-    event_ids = []
-    for c in changes:
-        event_ids.extend(c.evidence_ids or [])
-    event_ids = sorted(set(event_ids))
-    temporal_start = min(c.created_at for c in changes)
-    temporal_end = max(c.created_at for c in changes)
+
+    ordered = sorted(
+        comparable,
+        key=lambda change: (_ensure_utc(change.comparison_window_end), change.id),
+    )
+    if len({_ensure_utc(change.comparison_window_end) for change in ordered}) < 2:
+        return None
+    event_ids = sorted({
+        evidence_id
+        for change in ordered
+        for evidence_id in (change.evidence_ids or [])
+    })
+    if len(event_ids) < 2:
+        return None
+    change_ids = [change.id for change in ordered]
+    temporal_start = min(_ensure_utc(change.comparison_window_start) for change in ordered)
+    temporal_end = max(_ensure_utc(change.comparison_window_end) for change in ordered)
+    alternatives = [
+        "Direction changes across source-linked assessments; this does not establish cause or clinical fluctuation."
+    ]
     pattern = Pattern(
         person_id=person_id,
         subject_type=subject_type,
@@ -315,12 +335,12 @@ def _build_instability_pattern(
         pattern_type=PatternType.INSTABILITY,
         pattern_strength=PatternStrength.EMERGING,
         event_ids=event_ids,
-        change_ids=[c.id for c in changes],
+        change_ids=change_ids,
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         direction=ChangeDirection.FLUCTUATING,
         confidence=None,
         evidence_count=len(event_ids),
-        alternative_interpretations=[],
+        alternative_interpretations=alternatives,
     )
     return _persist_pattern(db, pattern)
