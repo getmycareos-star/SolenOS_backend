@@ -352,7 +352,7 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert body["assessment"]["person_id"] == owner["person"]["id"]
     assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
     assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
-    assert len(body["assessment"]["capabilities"]) == 21
+    assert len(body["assessment"]["capabilities"]) == 22
     loops = body["assessment"]["open_loops"]
     assert loops["source_of_truth"] == "persisted_lcr_records"
     assert any(
