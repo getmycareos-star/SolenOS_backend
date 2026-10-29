@@ -1293,9 +1293,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     if candidate_evidence_ids:
         authorized_evidence_ids = {
             str(value)
-            for value in db.query(Evidence.id).filter(
-                Evidence.person_id == person_id,
-                Evidence.id.in_(candidate_evidence_ids),
+            for value in db.execute(
+                select(Evidence.id).where(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(candidate_evidence_ids),
+                )
             ).scalars().all()
         }
     source_domains = {
