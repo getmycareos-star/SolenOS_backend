@@ -2,7 +2,7 @@
 
 **Scope:** canonical `main` only. Pull requests are not modified.  
 **Purpose:** a verification ledger, not a declaration that the entire capability map is complete.  
-**Last audited:** 2026-10-29. Latest direct-main changes also bind safety evaluation references to persisted same-person evidence, replace caller-supplied source text with the stored original, clear caller-supplied review/confidence flags, validate source spans against persisted text, and scope safety response validation/audit history to the bearer session. Structured-observation tests now supply explicit source offsets. The latest backend tests and PostgreSQL migration validation are still running; do not mark these newest changes verified until the exact current-main workflow completes.  
+**Last audited:** 2026-10-29. Latest direct-main changes bind safety evaluation references to persisted same-person evidence, replace caller-supplied source text with the stored original, clear caller-supplied review/confidence flags, validate source spans against persisted text, and scope safety response validation/audit history to the bearer session. Structured-observation tests now supply explicit source offsets. Backend tests passed on implementation commit [`45179ef`](https://github.com/getmycareos-star/SolenOS_backend/commit/45179ef1cbcc7ce996f474d3b55f91e63b415bda) in [run 40875008698](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40875008698); PostgreSQL migration validation also passed in that run. The separate backend Docker-build smoke workflow is still running. This ledger deliberately does not mark the entire capability map complete.  
 **Rule:** a capability is not marked complete merely because a model, helper, endpoint, UI panel, or unit test exists. Completion requires persistence, authorization, migrations, real workflow integration, and relevant automated verification.
 
 ## Status definitions
@@ -12,7 +12,7 @@
 - **MISSING** — no adequate implementation was found during this audit.
 - **BLOCKED** — requires a real dependency, policy, source, or authorization decision that is not available.
 
-No group is marked fully complete in this ledger. Source-lineage implementation is newly added on main, but remains unverified until CI and PostgreSQL migration execution pass.
+No group is marked fully complete in this ledger. Source-lineage persistence and PostgreSQL migration checks have passed on the cited implementation commit, but automated source-family discovery and corroboration assessment remain partial.
 
 ## Capability groups A–R
 
