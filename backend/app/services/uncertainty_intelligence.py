@@ -230,6 +230,7 @@ def analyze_uncertainty(
         classifications.append("source_verification_uncertainty")
         limitations.append("At least one supplied evidence item is not explicitly verified.")
     stale = []
+    invalid_temporal_items = []
     for item in items:
         observed_at = item.get("observed_at")
         if isinstance(observed_at, str) and observed_at.strip():
@@ -240,6 +241,7 @@ def analyze_uncertainty(
                 parsed = parsed.astimezone(timezone.utc)
                 age_days = (now - parsed).total_seconds() / 86400
                 if age_days < 0:
+                    invalid_temporal_items.append(item)
                     classifications.append("temporal_uncertainty")
                     limitations.append("An evidence timestamp is in the future relative to the assessment clock; temporal ordering needs verification.")
                 max_age = item.get("max_age_days")
@@ -251,6 +253,7 @@ def analyze_uncertainty(
                 ):
                     stale.append(item)
             except (ValueError, OverflowError):
+                invalid_temporal_items.append(item)
                 classifications.append("temporal_uncertainty")
                 limitations.append("An evidence timestamp could not be parsed; its temporal validity is unknown.")
     if stale:
@@ -265,7 +268,8 @@ def analyze_uncertainty(
     # a change claim even if other records exist.
     completeness = "insufficient" if not independent_items or missing else (
         "partial" if conflicts or unverified or stale or quality_limited or missing_time
-        or duplicate_groups or normalized_access not in {"available", ""} else "provided"
+        or invalid_temporal_items or missing_source_metadata or explicit_uncertainty
+        or evidence_uncertainty or duplicate_groups or normalized_access not in {"available", ""} else "provided"
     )
     if conflicts:
         epistemic_state = "conflicting"
@@ -301,11 +305,28 @@ def analyze_uncertainty(
         # heuristics. Evidence may exist, but this task has no authorized rule to
         # interpret it, so its task-specific conclusion remains unknown.
         epistemic_state = "unknown"
-    if (
-        conflicts or missing or normalized_access not in {"available", ""}
-        or ambiguity_signals or quality_limited
+    # Do not let a task-level "qualified" label survive a known blocker. These
+    # checks are deliberately conservative: the engine can still return a
+    # bounded summary, but must not label the evidence sufficient for downstream
+    # decision-making when source integrity or temporal validity is unresolved.
+    sufficiency_blockers = (
+        conflicts
+        or missing
+        or normalized_access not in {"available", ""}
+        or ambiguity_signals
+        or quality_limited
+        or unverified
+        or stale
+        or missing_time
+        or invalid_temporal_items
+        or missing_source_metadata
+        or explicit_uncertainty
+        or evidence_uncertainty
+        or "source_verification_uncertainty" in classifications
+        or "causal_inference_review" in classifications
         or (task in {"identify_change", "change_detection", "compare_state"} and "missing_baseline" in classifications)
-    ):
+    )
+    if sufficiency_blockers:
         sufficiency = "insufficient_pending_resolution"
     questions = []
     for field in missing:
@@ -321,6 +342,41 @@ def analyze_uncertainty(
             "question": "Can the conflicting records be reconciled against the original source or an appropriate professional?",
             "reason": "The supplied records disagree and the assessment cannot safely select one.",
             "priority": "high",
+        })
+    if unverified:
+        questions.append({
+            "target_field": None,
+            "question": "Can the relevant source be checked or verified before relying on this information?",
+            "reason": "At least one evidence item is not explicitly verified.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if stale:
+        questions.append({
+            "target_field": None,
+            "question": "Can the current status be confirmed against a source with an appropriate freshness window?",
+            "reason": "At least one evidence item exceeded its supplied freshness limit.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if missing_time or invalid_temporal_items:
+        questions.append({
+            "target_field": None,
+            "question": "When was this information observed or when did it take effect?",
+            "reason": "Temporal validity is missing, malformed, or inconsistent with the assessment clock.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if quality_limited:
+        questions.append({
+            "target_field": None,
+            "question": "Can the original source be reviewed or re-extracted so the relevant content is readable and complete?",
+            "reason": "At least one source has poor quality or incomplete extraction.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if any(pattern.search(claim) for pattern in _CAUSAL_PATTERNS):
+        questions.append({
+            "target_field": None,
+            "question": "What evidence supports a causal relationship rather than a temporal association?",
+            "reason": "Causal wording requires evidence beyond sequence or correlation.",
+            "priority": "high" if task == "high_consequence_assessment" else "medium",
         })
 
     evidence_refs = [
