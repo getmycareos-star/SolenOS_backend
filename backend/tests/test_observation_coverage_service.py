@@ -194,3 +194,33 @@ def test_coverage_rows_are_append_only():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_conflicting_coverage_records_do_not_inflate_covered_fraction():
+    db, person, caregiver = _db()
+    try:
+        end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        start = end - timedelta(days=14)
+        db.add_all([
+            ObservationCoverage(
+                id="coverage-claim-covered", person_id=person.id, subject_type="mobility",
+                window_start=start, window_end=end, coverage_status="covered",
+                source_evidence_ids=[], rationale="One record asserts full observation.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="coverage-claim-unknown", person_id=person.id, subject_type="mobility",
+                window_start=start, window_end=end, coverage_status="unknown",
+                source_evidence_ids=[], rationale="A second record cannot establish observation.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        result = assess_observation_coverage(db, person.id, "mobility", start, end)
+        assert result["coverage_status"] == "unknown"
+        assert result["covered_seconds"] == 0
+        assert result["coverage_fraction"] == 0
+        assert len(result["records"]) == 2
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
