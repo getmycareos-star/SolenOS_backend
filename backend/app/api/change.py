@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
 from app.schemas.change import (
@@ -232,7 +232,14 @@ def transition_change_confirmation(
                 CareAssertion.id.in_(supplied_evidence_ids),
             ).all()
         }
-        valid_ids = valid_event_ids | valid_assertion_ids
+        valid_observation_ids = {
+            row[0]
+            for row in db.query(EvidenceObservation.id).filter(
+                EvidenceObservation.person_id == person_id,
+                EvidenceObservation.id.in_(supplied_evidence_ids),
+            ).all()
+        }
+        valid_ids = valid_event_ids | valid_assertion_ids | valid_observation_ids
         if valid_ids != set(supplied_evidence_ids):
             raise HTTPException(
                 status_code=422,
@@ -307,6 +314,15 @@ def get_change_detail(
             .order_by(CareAssertion.observed_at.asc(), CareAssertion.recorded_at.asc(), CareAssertion.id.asc())
             .all()
         )
+    observation_evidence = (
+        db.query(EvidenceObservation)
+        .filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.id.in_(evidence_ids),
+        )
+        .order_by(EvidenceObservation.observed_at.asc(), EvidenceObservation.id.asc())
+        .all()
+    ) if evidence_ids else []
     # Do not return arbitrary source records referenced by stale or corrupt IDs.
     history = (
         db.query(ChangeConfirmationEvent)
@@ -321,6 +337,7 @@ def get_change_detail(
         change=change,
         evidence=evidence,
         assertions=assertion_evidence,
+        observations=observation_evidence,
         confirmation_history=history,
     )
 
