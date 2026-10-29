@@ -421,8 +421,13 @@ def list_evidence_observations(
         EvidenceObservation.evidence_id == evidence_id,
     ).order_by(EvidenceObservation.recorded_at.asc(), EvidenceObservation.id.asc()).limit(limit).all()
     superseded_ids = {
-        str(row.supersedes_observation_id)
-        for row in rows if row.supersedes_observation_id
+        str(value)
+        for (value,) in db.query(EvidenceObservation.supersedes_observation_id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.supersedes_observation_id.isnot(None),
+        ).all()
+        if value
     }
     return {
         "evidence_id": evidence_id,
