@@ -31,6 +31,8 @@ class Evidence(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     type = Column(String, nullable=False)
+    evidence_kind = Column(String(40), nullable=True)
+    epistemic_status = Column(String(32), nullable=True)
     source_text = Column(Text, nullable=False)
     original_file_path = Column(String, nullable=True)
     uploaded_at = Column(DateTime(timezone=True), server_default=func.now())
