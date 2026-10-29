@@ -659,15 +659,15 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     # Supported provenance permits a qualified state, not certainty.
                     epistemic_state = EpistemicState.PARTIALLY_KNOWN
                     gap_reason = None
-                active_assessment = db.query(UncertaintyAssessment).filter(
+                active_assessments = db.query(UncertaintyAssessment).filter(
                     UncertaintyAssessment.person_id == person_id,
                     UncertaintyAssessment.subject_type == finding_subject_type,
                     UncertaintyAssessment.subject_id == finding_name,
                     UncertaintyAssessment.field == finding_field,
                     UncertaintyAssessment.is_active.is_(True),
-                ).first()
+                ).all()
                 assessment_id = str(uuid.uuid4())
-                if active_assessment is not None:
+                for active_assessment in active_assessments:
                     active_assessment.is_active = False
                     active_assessment.superseded_by_assessment_id = assessment_id
                 db.add(UncertaintyAssessment(
