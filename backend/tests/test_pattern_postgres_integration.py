@@ -184,3 +184,103 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         db.commit()
         db.close()
         engine.dispose()
+
+
+def test_postgres_concurrent_conflict_transitions_form_a_serial_audit_chain():
+    """A disposable CI PostgreSQL database verifies row-locking under competing writers.
+
+    The fixture rows are intentionally retained: conflict history has a database-enforced
+    append-only policy, and this workflow's PostgreSQL service is discarded after the run.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from app.models.uncertainty import Contradiction, ContradictionResolutionEvent
+    from app.schemas.uncertainty import ContradictionUpdate
+    from app.services.uncertainty import UncertaintyEngine
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"conflict-concurrency-person-{suffix}"
+    caregiver_id = f"conflict-concurrency-caregiver-{suffix}"
+    conflict_id = f"conflict-concurrency-{suffix}"
+
+    with Session() as db:
+        db.add(Person(id=person_id, name="PostgreSQL concurrent conflict fixture"))
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id,
+            name="PostgreSQL concurrent conflict caregiver",
+            relationship="family",
+            person_id=person_id,
+        ))
+        db.flush()
+        db.add(Contradiction(
+            id=conflict_id,
+            person_id=person_id,
+            subject_type="medication",
+            subject_id=f"medication-{suffix}",
+            field="status",
+            description="Concurrent transition fixture; no clinical interpretation.",
+            matching_candidate_ids=[],
+            evidence_ids=[],
+            resolution_status="unresolved",
+        ))
+        db.commit()
+
+    start = Barrier(2)
+
+    def transition(status, rationale):
+        start.wait(timeout=10)
+        with Session() as db:
+            updated = UncertaintyEngine(
+                db, person_id=person_id, caregiver_id=caregiver_id
+            ).update_contradiction(
+                conflict_id,
+                ContradictionUpdate(
+                    resolution_status=status,
+                    resolution_notes=rationale,
+                ),
+            )
+            assert updated is not None
+            return updated.resolution_status
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(
+                transition, "qualified",
+                "Concurrent writer A preserved the conflict pending evidence review.",
+            )
+            second = pool.submit(
+                transition, "reopened",
+                "Concurrent writer B reopened the conflict for a new report.",
+            )
+            first.result(timeout=20)
+            second.result(timeout=20)
+
+        with Session() as db:
+            conflict = db.query(Contradiction).filter(
+                Contradiction.id == conflict_id,
+                Contradiction.person_id == person_id,
+            ).one()
+            events = db.query(ContradictionResolutionEvent).filter(
+                ContradictionResolutionEvent.contradiction_id == conflict_id,
+                ContradictionResolutionEvent.person_id == person_id,
+            ).all()
+
+        assert len(events) == 2, "both concurrent state transitions must be audited"
+        assert sum(event.previous_status == "unresolved" for event in events) == 1, (
+            "exactly one transition may claim the original unresolved state"
+        )
+        first_event = next(event for event in events if event.previous_status == "unresolved")
+        second_event = next(event for event in events if event.previous_status != "unresolved")
+        assert second_event.previous_status == first_event.new_status, (
+            "concurrent conflict audit events must form one serial state-transition chain"
+        )
+        assert second_event.new_status == conflict.resolution_status, (
+            "persisted conflict state must match the final audited transition"
+        )
+    finally:
+        engine.dispose()
+
