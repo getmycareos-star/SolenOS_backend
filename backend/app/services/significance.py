@@ -76,41 +76,11 @@ def _evidence_status_from_events(db: Session, events: List[CareEvent], person_id
     if contradictions:
         return EvidenceStatus.CONTRADICTORY
 
-    if _reports_conflict(events):
-        return EvidenceStatus.CONTRADICTORY
-
     # Source prose cannot establish professional identity or authority. This
     # schema has no verified professional credential binding for the evidence
     # author, so no evidence is promoted to CONFIRMED by text matching.
     return EvidenceStatus.REPORTED
 
-
-_CONFLICT_POSITIVE_WORDS = ("normal", "fine", "healthy", "well", "okay", "ok",
-                            "clear", "unremarkable", "without symptom", "no ")
-
-
-def _reports_conflict(events: List[CareEvent]) -> bool:
-    """Preserve opposing caregiver reports instead of choosing one.
-
-    A conflict is present when, for the same subject and a short window, at least
-    two distinct reporters produce observations and at least one uses a
-    positive/normal indicator alongside a report that asserts the finding.
-    This is not a clinical adjudication; it is a signal that the record holds
-    mutually inconsistent observations and must not silently collapse them.
-    """
-    if len(events) < 2:
-        return False
-    reporters = [e.created_by_caregiver_id for e in events if e.created_by_caregiver_id]
-    if len(set(reporters)) < 2:
-        return False
-
-    texts = [
-        " ".join(filter(None, [(e.title or ""), (e.description or "")])).lower()
-        for e in events
-    ]
-    has_positive = any(any(w in t for w in _CONFLICT_POSITIVE_WORDS) for t in texts)
-    has_symptom = any(not any(w in t for w in _CONFLICT_POSITIVE_WORDS) for t in texts)
-    return has_positive and has_symptom
 
 
 def _contextual_associations(db: Session, person_id: str, events: List[CareEvent],
