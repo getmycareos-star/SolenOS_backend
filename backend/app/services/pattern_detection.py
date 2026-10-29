@@ -86,9 +86,22 @@ def detect_patterns(
     seen_identities = set()
     for event in source_events:
         evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
-        # Only a non-empty, shared evidence set can establish duplicate identity.
-        # Empty evidence arrays do not mean every such event is the same event.
-        identity = ("evidence", evidence_signature) if evidence_signature else ("event", event.id)
+        if evidence_signature:
+            # Shared provenance alone is not duplicate identity: one document can
+            # describe multiple distinct occurrences. Require matching occurrence
+            # time and normalized event descriptors as well before collapsing copies.
+            identity = (
+                "evidence-backed-event",
+                evidence_signature,
+                _ensure_utc(event.occurred_at),
+                " ".join((event.title or "").casefold().split()),
+                " ".join((event.description or "").casefold().split()),
+                " ".join((event.location or "").casefold().split()),
+            )
+        else:
+            # Without a shared source anchor, retain each event as a distinct
+            # occurrence rather than guessing that similar records are duplicates.
+            identity = ("event", event.id)
         if identity in seen_identities:
             continue
         seen_identities.add(identity)
