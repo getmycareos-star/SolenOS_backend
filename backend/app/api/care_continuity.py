@@ -1093,6 +1093,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     uncertainty_items = []
     missing_items = []
     open_loops = []
+    baseline_items = []
     open_loop_sources = {
         "conflicts": "conflict_review",
         "reconciliations": "reconciliation_review",
@@ -1135,6 +1136,18 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         }
         if uncertainty_analysis is not None:
             summary_item["uncertainty_analysis"] = uncertainty_analysis
+        baseline_marker = (
+            item.get("is_baseline") is True
+            or item.get("baseline_confirmed") is True
+            or str(item.get("record_role") or "").lower() in {"baseline", "usual_state", "usual_pattern"}
+            or str(item.get("baseline_type") or "").lower() in {"baseline", "usual_state", "usual_pattern"}
+        )
+        if baseline_marker:
+            baseline_items.append({
+                **summary_item,
+                "baseline_basis": "explicit_persisted_baseline_marker",
+                "interpretation_limit": "A baseline is included only when the source record explicitly marks it as baseline/usual state; no population norm is assumed.",
+            })
         if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments", "information_gaps", "missing_information", "open_questions"} and status not in closed_statuses:
             (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments"} else missing_items).append(summary_item)
 
@@ -1235,6 +1248,16 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "evidence_state": "supported_by_persisted_records" if records else "insufficient_evidence",
             "unavailable_sources": unavailable,
         }
+    capabilities["baseline_establishment"] = {
+        "source_names": capability_specs["baseline_establishment"],
+        "record_count": len(baseline_items),
+        "evidence_state": "supported_by_persisted_records" if baseline_items else "insufficient_evidence",
+        "unavailable_sources": [
+            source_name for source_name in capability_specs["baseline_establishment"]
+            if (sources.get(source_name) or {}).get("status") == "unavailable_schema"
+        ],
+        "interpretation_limit": "Ordinary historical records do not automatically establish an individual baseline.",
+    }
     capabilities["observation_coverage_awareness"] = {
         "source_names": ["observation_coverage"],
         "record_count": coverage_count,
@@ -1320,6 +1343,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "longitudinal_context": {
             "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions"}][:100],
             "bounded": True,
+        },
+        "baseline_assessment": {
+            "status": "explicit_baseline_records_available" if baseline_items else "not_established",
+            "items": baseline_items[:100],
+            "count": len(baseline_items),
+            "has_more": len(baseline_items) > 100,
+            "source_of_truth": "explicitly_marked_persisted_lcr_records",
+            "limitation": "The earliest available record is not automatically the person's baseline; absence of an explicit baseline leaves baseline unknown.",
         },
         "observation_coverage": observation_coverage,
         "situation_trajectory": {
