@@ -198,20 +198,21 @@ def assess_change(
     novelty = 1.0 if baseline_event_count == 0 else 0.0
     recurrence = 1.0 if current_count >= 2 else 0.0
 
-    persistence_days = 0
+    event_span_days = 0
     if len(events) >= 2:
         starts = [_ensure_utc(e.occurred_at) for e in events if e.occurred_at]
         if starts:
-            persistence_days = max(0, int((max(starts) - min(starts)).total_seconds() // 86400))
-    persistence_score = min(persistence_days / 14.0, 1.0)
-
-    clustering = 1.0 if (len(events) >= 2 and persistence_days <= 14) else 0.0
+            event_span_days = max(0, int((max(starts) - min(starts)).total_seconds() // 86400))
+    # Occurrence timestamps establish a span or clustering, not continuous
+    # persistence between observations. Persistence remains unmeasured here.
+    persistence_score = 0.0
+    clustering = 1.0 if (len(events) >= 2 and event_span_days <= 14) else 0.0
 
     functional = _functional_impact(events)
     functional_score = 1.0 if functional else 0.0
 
+    # Repeated records from one reporter are not independent corroboration.
     corroboration_score = min((len(set(reporters)) - 1) / 2.0, 1.0) if reporters else 0.0
-    corroboration_score = min(corroboration_score + min(current_count / 4.0, 0.25), 1.0)
 
     associations = _contextual_associations(db, person_id, events, now)
     contextual_score = 1.0 if associations else 0.0
@@ -228,7 +229,8 @@ def assess_change(
         {"name": "magnitude", "score": round(magnitude_score, 3), "label": _magnitude_label(change, relative_change),
          "evidence_ids": [e for e in evidence_ids if e != (baseline.id if baseline else None)]},
         {"name": "persistence", "score": round(persistence_score, 3),
-         "label": f"{persistence_days} days observed", "evidence_ids": [e.id for e in events]},
+         "label": "continuous persistence not established by occurrence timestamps",
+         "measurement_status": "unknown", "evidence_ids": [e.id for e in events]},
         {"name": "novelty", "score": round(novelty, 3),
          "label": "no prior event recorded in baseline window" if novelty else "events recorded in baseline window",
          "evidence_ids": [] if novelty else list(evidence_ids)},
@@ -254,6 +256,7 @@ def assess_change(
     ]
 
     possible_context: List[str] = []
+    possible_context.append("continuous persistence is not established by occurrence timestamps alone")
     if evidence_status == EvidenceStatus.REPORTED:
         possible_context.append("observations are caregiver-reported; no clinician verification recorded")
     if functional_score == 0.0:
