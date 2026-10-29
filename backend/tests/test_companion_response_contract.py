@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import uuid
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -113,6 +114,67 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
             assert [message.role for message in messages] == ["user", "assistant"]
         finally:
             db.close()
+    finally:
+        teardown()
+
+
+def test_companion_retry_replays_same_turn_and_rejects_changed_text(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The record contains one sleep observation. It does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        turn_id = str(uuid.uuid4())
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {
+            "person_id": person_id,
+            "text": "What did we record about sleep?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert first.status_code == 200, first.text
+        original = first.json()
+        assert original["written_to_lcr"] is False
+        assert original["idempotent_replay"] is False
+
+        # A successful first turn may commit before its response reaches the client.
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert retry.status_code == 200, retry.text
+        replay = retry.json()
+        assert replay["idempotent_replay"] is True
+        assert replay["session_id"] == original["session_id"]
+        assert replay["reply"] == original["reply"]
+        assert replay["source_event_ids"] == original["source_event_ids"]
+        assert len(calls) == 1
+
+        changed = {**body, "text": "What did we record about medication?"}
+        mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert mismatch.status_code == 409, mismatch.text
+        assert len(calls) == 1
+
+        other_token, other_person_id, _ = create_session(client)
+        reused = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={**body, "person_id": other_person_id},
+        )
+        assert reused.status_code == 409
+        assert original["reply"] not in reused.text
+        assert original["session_id"] not in reused.text
+        assert len(calls) == 1
+
+        history = client.get(
+            f"/api/v1/conversation/{original['session_id']}",
+            headers=headers,
+        )
+        assert history.status_code == 200, history.text
+        assert [row["role"] for row in history.json()["messages"]] == ["user", "assistant"]
     finally:
         teardown()
 
