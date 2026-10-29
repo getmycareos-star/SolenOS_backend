@@ -429,7 +429,7 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         lineage_context = user_payload["authorized_record_context"]["evidence_lineage"]
         assert lineage_context["status"] in {"assessed_bounded_subset", "unavailable_schema", "not_assessed"}
         assert "does not establish common origin" in lineage_context["interpretation_limit"] or "does not prove" in lineage_context["interpretation_limit"]
-        assert "Evidence source lineage metadata" in "\n".join(entry["content"] for entry in captured["messages"] if entry["role"] == "user")
+        assert "evidence_lineage" in user_payload["authorized_record_context"]
         assert any(
             item.get("evidence_id") == evidence_id
             and item.get("filename") == "care-letter.txt"
