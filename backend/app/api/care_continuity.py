@@ -1370,6 +1370,82 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     )
     required_missing = context.get("missing_required_sources") or []
     optional_missing = context.get("missing_optional_sources") or []
+    bounded_sources = sorted(
+        source_name for source_name, source in sources.items() if source.get("has_more")
+    )
+    unlinked_record_count = sum(1 for item in all_items if not item.get("evidence_ids"))
+    temporally_unanchored_count = sum(
+        1 for entry in trajectory_entries
+        if not entry.get("event_time") and not entry.get("recorded_at")
+    )
+    record_time_only_count = sum(
+        1 for entry in trajectory_entries
+        if not entry.get("event_time") and entry.get("recorded_at")
+    )
+    quality_dimensions = [
+        {
+            "dimension": "source_coverage",
+            "status": "insufficient" if required_missing else "partial" if optional_missing or bounded_sources else "available",
+            "basis": {
+                "required_sources_unavailable": required_missing,
+                "optional_sources_unavailable": optional_missing,
+                "bounded_sources": bounded_sources,
+            },
+        },
+        {
+            "dimension": "evidence_linkage",
+            "status": "unknown" if not all_items else "partial" if unlinked_record_count else "linked",
+            "basis": {
+                "records_examined": len(all_items),
+                "records_without_explicit_evidence_link": unlinked_record_count,
+                "distinct_linked_evidence_ids": len(evidence_ids),
+            },
+        },
+        {
+            "dimension": "temporal_anchoring",
+            "status": "unknown" if not trajectory_entries else "partial" if temporally_unanchored_count or record_time_only_count else "event_time_anchored",
+            "basis": {
+                "trajectory_entries": len(trajectory_entries),
+                "entries_without_any_timestamp": temporally_unanchored_count,
+                "entries_with_record_time_only": record_time_only_count,
+            },
+        },
+        {
+            "dimension": "individual_baseline",
+            "status": "explicitly_recorded" if baseline_items else "not_established",
+            "basis": {"explicit_baseline_records": len(baseline_items)},
+        },
+        {
+            "dimension": "unresolved_items",
+            "status": "requires_review" if open_loops or uncertainty_items or missing_items else "no_open_items_returned",
+            "basis": {
+                "open_loops": len(open_loops),
+                "uncertainties_and_conflicts": len(uncertainty_items),
+                "missing_information_items": len(missing_items),
+            },
+        },
+    ]
+    quality_blockers = []
+    if required_missing:
+        quality_blockers.append("required_source_unavailable")
+    if optional_missing:
+        quality_blockers.append("optional_source_unavailable")
+    if bounded_sources:
+        quality_blockers.append("source_history_bounded")
+    if unlinked_record_count:
+        quality_blockers.append("some_records_lack_explicit_evidence_links")
+    if not baseline_items:
+        quality_blockers.append("individual_baseline_not_established")
+    if open_loops or uncertainty_items or missing_items:
+        quality_blockers.append("unresolved_information_requires_review")
+    assessment_quality = {
+        "status": "limitations_present" if quality_blockers else "source_checks_passed",
+        "dimensions": quality_dimensions,
+        "blocking_limitations": quality_blockers,
+        "high_impact_conclusion_gate": "restricted" if quality_blockers else "source_quality_only; human review and clinical judgement remain outside this scorecard",
+        "numeric_confidence": "not_provided; this deterministic scorecard is not a calibrated probability",
+        "interpretation_policy": "No-records is not evidence of absence; source availability and record counts do not establish clinical truth.",
+    }
     return {
         "schema_version": "situation-understanding.v1",
         "person_id": str(person_id),
@@ -1389,6 +1465,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         },
         "domains": domain_sources,
         "capabilities": capabilities,
+        "assessment_quality": assessment_quality,
         "current_care_reality": {
             "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "caregiver_observations", "caregiver_contexts"}][:100],
             "notice": "Records are reported with their source status. A record or missing record is not, by itself, proof of clinical truth or absence.",
