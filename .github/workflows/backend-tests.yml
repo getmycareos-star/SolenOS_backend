@@ -68,6 +68,35 @@ jobs:
               raise SystemExit("Benchmark gate failed: zero executed, failing/error cases, or skipped cases.")
           PY
 
+
+      - name: Run longitudinal change benchmark and publish measured score
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest backend/tests/test_longitudinal_change_benchmark.py -q -s | tee /tmp/longitudinal-change-benchmark.log
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          output = Path("/tmp/longitudinal-change-benchmark.log").read_text()
+          marker = "LONGITUDINAL_CHANGE_BENCHMARK="
+          reports = [line.split(marker, 1)[1] for line in output.splitlines() if marker in line]
+          if not reports:
+              raise SystemExit("Longitudinal benchmark did not publish its measured case report.")
+          report = json.loads(reports[-1])
+          passed = int(report.get("cases_passed", 0))
+          total = int(report.get("cases_total", 0))
+          score = float(report.get("score", 0.0))
+          print(f"LONGITUDINAL_CHANGE_BENCHMARK_SCORE={score:.4f}")
+          print(f"LONGITUDINAL_CHANGE_BENCHMARK_PASSED={passed}")
+          print(f"LONGITUDINAL_CHANGE_BENCHMARK_TOTAL={total}")
+          failed = [case for case in report.get("outcomes", []) if not case.get("pass")]
+          print("LONGITUDINAL_CHANGE_BENCHMARK_FAILED_CASES=" + json.dumps(failed, sort_keys=True))
+          if total == 0 or passed != total or score != 1.0 or failed:
+              raise SystemExit("Longitudinal change benchmark gate failed.")
+          PY
+
   postgres-migration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
