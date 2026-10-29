@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Literal, List, Optional
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 CoverageStatus = Literal["covered", "partial", "uncovered", "unknown"]
@@ -32,6 +32,8 @@ class ObservationCoverageRecord(ObservationCoverageCreate):
 
 
 class CoverageAssessment(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     person_id: str
     subject_type: str
     window_start: datetime
