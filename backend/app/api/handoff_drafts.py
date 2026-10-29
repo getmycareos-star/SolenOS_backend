@@ -431,7 +431,6 @@ def prepare_handoff_draft(
 
     lineage_relationships = []
     if inspector.has_table("evidence_source_relationships") and referenced_evidence_ids:
-        from app.models.care_continuity import EvidenceSourceRelationship
         lineage_relationships = db.query(EvidenceSourceRelationship).filter(
             EvidenceSourceRelationship.person_id == person_id,
             (EvidenceSourceRelationship.source_evidence_id.in_(referenced_evidence_ids))
