@@ -1609,7 +1609,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
-            or _contains_unsupported_record_reference(reply, validation_source)
+                    or _contains_unsupported_record_reference(reply, validation_source)
                     or _greeting_reply_needs_revision(reply)
                 )
                 if not invalid_reply:
