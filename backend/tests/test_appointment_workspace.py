@@ -334,15 +334,15 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
         """))
         connection.execute(text("""
             INSERT INTO open_questions
-                (id, person_id, subject_type, subject_id, question, status, priority, asked_at, created_by_caregiver_id)
+                (id, person_id, subject_type, subject_id, question, necessity, status, priority, asked_at, created_by_caregiver_id)
             VALUES
                 ('open-question-1', :person_id, 'appointment', 'appointment-date',
                  'Confirm whether the appointment date is Monday or Tuesday',
-                 'open', 1, CURRENT_TIMESTAMP, :caregiver_id),
+                 'not_assessed', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id),
                 ('open-question-closed', :person_id, 'appointment', 'appointment-date-closed',
-                 'Question already answered', 'answered', 2, CURRENT_TIMESTAMP, :caregiver_id),
+                 'Question already answered', 'not_assessed', 'answered', 2, CURRENT_TIMESTAMP, :caregiver_id),
                 ('open-question-other-person', :other_person_id, 'appointment', 'private-appointment',
-                 'Private question for another person', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
+                 'Private question for another person', 'not_assessed', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
         """), {
             "person_id": owner["person"]["id"],
             "other_person_id": other["person"]["id"],
