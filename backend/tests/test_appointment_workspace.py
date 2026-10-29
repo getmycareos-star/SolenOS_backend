@@ -58,6 +58,7 @@ def client():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
     with engine.begin() as connection:
+        connection.execute(text("DROP TABLE IF EXISTS open_questions"))
         connection.execute(text("DROP TABLE IF EXISTS care_facts"))
     Base.metadata.drop_all(bind=engine)
 
@@ -305,6 +306,28 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
             )
         """))
         connection.execute(text("""
+            CREATE TABLE IF NOT EXISTS open_questions (
+                id VARCHAR(36) PRIMARY KEY,
+                question TEXT NOT NULL,
+                status VARCHAR(40) NOT NULL,
+                priority INTEGER,
+                evidence_ids TEXT,
+                asked_at DATETIME,
+                answered_at DATETIME,
+                answer TEXT,
+                closed_at DATETIME,
+                closed_reason TEXT,
+                created_by_caregiver_id VARCHAR(255)
+            )
+        """))
+        connection.execute(text("""
+            INSERT INTO open_questions
+                (id, question, status, priority, asked_at, created_by_caregiver_id)
+            VALUES
+                ('open-question-1', 'Confirm whether the appointment date is Monday or Tuesday',
+                 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
+        """), {"caregiver_id": owner["caregiver"]["id"]})
+        connection.execute(text("""
             INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
             VALUES ('understanding-fact', :person_id, 'mobility', 'Caregiver-reported mobility change',
                     'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -318,6 +341,16 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
     assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
     assert len(body["assessment"]["capabilities"]) == 20
+    loops = body["assessment"]["open_loops"]
+    assert loops["source_of_truth"] == "persisted_lcr_records"
+    assert any(
+        item["id"] == "open-question-1"
+        and item["loop_type"] == "unanswered_question"
+        and item["recorded_status"] == "open"
+        and item["owner"] is None
+        and item["due_at"] is None
+        for item in loops["items"]
+    ), loops
     assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] in {
         "supported_by_persisted_records", "insufficient_evidence"
     }
