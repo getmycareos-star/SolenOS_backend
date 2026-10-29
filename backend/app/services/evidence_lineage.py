@@ -144,6 +144,27 @@ def summarize_evidence_lineage(
             "basis": "explicit_persisted_provenance",
             "interpretation_limit": "A source-lineage relationship does not establish that a claim is true.",
         })
+    # Report explicit independent-source reviews separately. They are not
+    # merged into shared-origin groups and do not establish factual truth.
+    independent_pairs = set()
+    for relationship in relationships:
+        status = str(getattr(relationship, "source_independence_status", "") or "").strip().lower()
+        if status not in INDEPENDENT_STATUSES:
+            continue
+        left = str(getattr(relationship, "source_evidence_id", "") or "").strip()
+        right = str(getattr(relationship, "related_evidence_id", "") or "").strip()
+        if left in selected and right in selected and left != right:
+            independent_pairs.add(tuple(sorted((left, right))))
+    for left, right in sorted(independent_pairs):
+        groups.append({
+            "lineage_id": "reviewed-independent-pair:" + left + ":" + right,
+            "evidence_ids": [left, right],
+            "origin_group_keys": [],
+            "source_independence_status": "independent",
+            "basis": "explicit_independence_review",
+            "interpretation_limit": "The recorded independence review does not prove either claim is factually true.",
+        })
+    groups.sort(key=lambda group: (group["source_independence_status"], group["lineage_id"]))
     return {
         "status": "assessed" if selected else "not_assessed",
         "evidence_ids_considered": selected,
