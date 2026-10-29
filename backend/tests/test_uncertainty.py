@@ -1651,6 +1651,6 @@ def test_safety_audit_history_rejects_cross_record_person_id():
 
         client = authorized_client(person.id)
         response = client.get("/api/v1/safety/audit/safety-person-other")
-        assert response.status_code == 403
+        assert response.status_code == 404
     finally:
         teardown_db()
