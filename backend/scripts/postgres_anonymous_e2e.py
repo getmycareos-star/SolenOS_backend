@@ -452,6 +452,33 @@ def main():
         require(status == 200 and len(retry_actions) == 1,
                 f"Same-key action retry duplicated evidence: {retry_actions}")
 
+        # Two simultaneous retries with the same mutation idempotency key
+        # must converge to one event/evidence append (not one success plus a 500).
+        concurrent_retry_payload = {
+            "text": "CI-only concurrent retry action",
+            "evidence": [{"kind": "ci_fixture", "text": "concurrent same-key retry"}],
+            "idempotency_key": "postgres-open-loop-concurrent-action-retry-001",
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_action_retries = list(pool.map(
+                lambda _: request(
+                    "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+                    token=token_a, body=concurrent_retry_payload,
+                ),
+                range(2),
+            ))
+        require(all(status == 200 for status, _ in concurrent_action_retries),
+                f"Concurrent same-key action retries must both return successfully: {concurrent_action_retries}")
+        status, after_concurrent_retry = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        same_key_actions = [
+            item for item in after_concurrent_retry.get("loop", {}).get("action_evidence", [])
+            if item.get("text") == concurrent_retry_payload["text"]
+        ]
+        require(status == 200 and len(same_key_actions) == 1,
+                f"Concurrent same-key retries duplicated action evidence: {same_key_actions}")
+
         # Concurrent append attempts must not silently overwrite one another.
         # This is intentionally a strict invariant; if it fails, the database-backed
         # test should remain red rather than claiming concurrency safety.
