@@ -319,9 +319,20 @@ jobs:
         run: python backend/scripts/postgres_anonymous_e2e.py
 
       - name: Run longitudinal messy-care benchmark against PostgreSQL
-        env:
-          SOLENOS_BENCHMARK_DATABASE_URL: ${{ env.DATABASE_URL }}
-        run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s
+        run: |
+          # Keep the benchmark's create/drop test schema isolated from the already-migrated legacy-schema database.
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          connection = psycopg2.connect(os.environ["DATABASE_URL"])
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("CREATE DATABASE solenos_benchmark")
+          connection.close()
+          PY
+          export SOLENOS_BENCHMARK_DATABASE_URL="${DATABASE_URL%/*}/solenos_benchmark"
+          python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s
 
 
   qwen-image-build:
