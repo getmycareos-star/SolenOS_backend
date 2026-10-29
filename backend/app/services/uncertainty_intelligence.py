@@ -164,6 +164,9 @@ def analyze_uncertainty(
                 "evidence_references_valid": not invalid_refs,
                 "verified_supporting_evidence_ids": verified_supporting_ids,
                 "has_verified_supporting_evidence": bool(verified_supporting_ids),
+                "support_validation_scope": "reference_and_source_status_only_not_semantic_entailment",
+                "engine_semantic_support_verified": False,
+                "decision_attribution": "caregiver_review" if status in {"accepted", "rejected", "superseded"} else "unresolved_or_proposed",
                 "invalid_evidence_ids": list(dict.fromkeys(invalid_refs)),
                 "reviewed_by_caregiver_id": reviewer_id or None,
                 "resolution_rationale": rationale or None,
@@ -331,6 +334,9 @@ def analyze_uncertainty(
     if invalid_candidate_refs:
         classifications.append("invalid_candidate_evidence_reference")
         limitations.append("At least one assumption or alternative references evidence outside the records supplied to this assessment.")
+    if normalized_assumptions or normalized_alternatives:
+        classifications.append("candidate_support_not_semantically_verified")
+        limitations.append("Candidate evidence links are checked for record presence and source status only; the engine does not semantically prove that a cited record entails an assumption or alternative.")
     if _PRONOUN_PATTERN.search(claim):
         classifications.append("possible_reference_ambiguity")
         limitations.append("Pronouns or demonstratives occur in the claim; referent ambiguity requires contextual review.")
