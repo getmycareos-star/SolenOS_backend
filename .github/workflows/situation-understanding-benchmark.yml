@@ -143,4 +143,51 @@ jobs:
               raise SystemExit("PostgreSQL longitudinal integration gate failed.")
           PY
 
-# PR branch push trigger ensures a new run is created for every benchmark fix commit.
+  # Validate the complete Alembic history against a clean PostgreSQL database.
+  migration-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_migration
+          POSTGRES_PASSWORD: solenos_migration_ci
+          POSTGRES_DB: solenos_migration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_migration -d solenos_migration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg2://solenos_migration:solenos_migration_ci@localhost:5432/solenos_migration
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and PostgreSQL driver
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend psycopg2-binary
+      - name: Upgrade empty PostgreSQL database through every migration
+        working-directory: backend
+        run: alembic upgrade head
+      - name: Confirm exactly one migration head
+        working-directory: backend
+        run: |
+          alembic current
+          alembic heads
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          script = ScriptDirectory.from_config(Config("alembic.ini"))
+          heads = script.get_heads()
+          print("ALEMBIC_HEADS=" + ",".join(heads))
+          if len(heads) != 1:
+              raise SystemExit(f"Expected one migration head, found {len(heads)}: {heads}")
+          PY
