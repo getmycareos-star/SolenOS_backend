@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from math import isfinite
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.care import CareEvent
@@ -206,9 +207,13 @@ def _create_change(
             f"current observation coverage: {comparison.get('current_coverage_status', 'unknown')}. "
             "Unknown or incomplete coverage limits interpretation of the true occurrence rate."
         )
-    if comparison.get("relative_change_percent") is not None:
+    relative_change = comparison.get("relative_change_percent")
+    if isinstance(relative_change, (int, float)) and isfinite(relative_change):
+        explanation += f" Relative change: {relative_change:.1f}%."
+    elif relative_change is not None:
         explanation += (
-            f" Relative change: {comparison['relative_change_percent']:.1f}%."
+            " Relative change is undefined because the baseline rate was zero; "
+            "absolute recorded event counts are shown instead."
         )
     # Source observations and the baseline are separate provenance objects.
     # Keep only actual care-event IDs in evidence_ids; baseline_id already has its
