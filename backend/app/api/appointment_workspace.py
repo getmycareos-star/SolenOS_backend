@@ -11,12 +11,12 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.schemas.appointment_workspace import AppointmentWorkspaceCreate, AppointmentWorkspaceUpdate
 
@@ -43,6 +43,20 @@ def _iso(value):
     if value is None:
         return None
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+def _evidence_ids_from_row(row) -> list[str]:
+    """Read only explicit evidence references; malformed values remain unlinked."""
+    values = row.get("evidence_ids") if hasattr(row, "get") else None
+    if values is None and hasattr(row, "get"):
+        values = row.get("source_evidence_id")
+    if isinstance(values, str):
+        try:
+            values = json.loads(values)
+        except (TypeError, ValueError):
+            values = [values] if values.strip() else []
+    if isinstance(values, (list, tuple, set)):
+        return list(dict.fromkeys(str(value) for value in values if isinstance(value, str) and value.strip()))
+    return [str(values)] if isinstance(values, str) and values.strip() else []
 
 
 def _record_out(record: AppointmentWorkspaceRecord) -> dict:
@@ -116,13 +130,20 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     cutoff = now - timedelta(days=window_days)
 
     try:
-        fact_rows = db.execute(text("""
-            SELECT id, fact_type, fact_value, epistemic_status, effective_at, created_at, updated_at
-            FROM care_facts
-            WHERE person_id = :person_id
-            ORDER BY COALESCE(updated_at, created_at) DESC
-            LIMIT 40
-        """), {"person_id": person_id}).mappings().all()
+        fact_columns = {column["name"] for column in inspect(db.get_bind()).get_columns("care_facts")}
+        fact_select = [
+            name for name in (
+                "id", "fact_type", "fact_value", "epistemic_status", "effective_at",
+                "created_at", "updated_at", "evidence_ids", "source_evidence_id",
+            ) if name in fact_columns
+        ]
+        if not {"id", "fact_type", "fact_value"}.issubset(fact_columns):
+            raise RuntimeError("care_facts is missing required preparation fields")
+        fact_rows = db.execute(text(
+            "SELECT " + ", ".join(fact_select) + " FROM care_facts "
+            "WHERE person_id = :person_id "
+            "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 40"
+        ), {"person_id": person_id}).mappings().all()
     except Exception:
         db.rollback()
         fact_rows = None
@@ -146,7 +167,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "epistemic_status": row["epistemic_status"] or "unknown",
                 "effective_at": _iso(row["effective_at"]),
                 "recorded_at": _iso(row["created_at"]),
-                "updated_at": _iso(row["updated_at"]),
+                "updated_at": _iso(row["updated_at"]) if "updated_at" in row else None,
+                "evidence_ids": _evidence_ids_from_row(row),
             })
 
     event_items = [{
@@ -172,6 +194,56 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "preparation_notes": item.preparation_notes,
         "evidence_ids": item.evidence_ids or [],
     } for item in appointments]
+
+    # Attach provenance only for evidence IDs explicitly linked to this person's
+    # preparation records. Author/uploader/reporter and event time stay separate.
+    referenced_evidence_ids = set()
+    for row in facts:
+        referenced_evidence_ids.update(row.get("evidence_ids", []))
+    for row in event_items + appointment_items:
+        referenced_evidence_ids.update(
+            str(value) for value in row.get("evidence_ids", []) if isinstance(value, str)
+        )
+    evidence_sources = {}
+    if referenced_evidence_ids:
+        evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(sorted(referenced_evidence_ids)),
+        ).all()
+        evidence_sources = {
+            row.id: {
+                "evidence_id": row.id,
+                "type": row.type,
+                "evidence_kind": row.evidence_kind,
+                "epistemic_status": row.epistemic_status or "unknown",
+                "source_type": row.source_type,
+                "source_text": (row.source_text or "")[:1200],
+                "original_author": row.original_author,
+                "reported_by_label": row.reported_by_label,
+                "uploaded_by_caregiver_id": row.uploaded_by_caregiver_id,
+                "reported_by_caregiver_id": row.reported_by_caregiver_id,
+                "collected_by_caregiver_id": row.collected_by_caregiver_id,
+                "occurred_at": _iso(row.occurred_at),
+                "occurred_at_timezone": row.occurred_at_timezone,
+                "collected_at": _iso(row.collected_at),
+                "ingested_at": _iso(row.ingested_at),
+                "original_source_reference": row.original_source_reference,
+                "parent_evidence_id": row.parent_evidence_id,
+                "source_text_sha256": row.source_text_sha256,
+            }
+            for row in evidence_rows
+        }
+    for row in facts + event_items + appointment_items:
+        row["evidence_sources"] = [
+            evidence_sources[evidence_id]
+            for evidence_id in row.get("evidence_ids", [])
+            if evidence_id in evidence_sources
+        ]
+        row["evidence_reference_status"] = (
+            "linked_sources_available" if row["evidence_sources"]
+            else "referenced_sources_unavailable" if row.get("evidence_ids")
+            else "no_evidence_linked"
+        )
 
     return {
         "person_scope_verified": True,
