@@ -114,6 +114,7 @@ def test_unsupported_assessment_task_fails_closed():
         evidence=[{"id": "evidence-a", "text": "A caregiver report exists.", "source_type": "caregiver_report"}],
     )
     assert "unsupported_assessment_task" in result["classifications"]
+    assert result["epistemic_state"] == "unknown"
     assert result["sufficiency"] == "insufficient_pending_resolution"
     assert result["conclusion_confidence"] is None
 
