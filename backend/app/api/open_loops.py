@@ -470,6 +470,8 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     requested_status = changes.pop("status", None)
     if requested_status:
         if requested_status not in ALL_STATES: raise HTTPException(status_code=422, detail="Invalid lifecycle status")
+        if loop.status in TERMINAL_STATES:
+            raise HTTPException(status_code=409, detail="Terminal loops must use the explicit reopening endpoint")
         if requested_status in {"closed", "cancelled"}:
             raise HTTPException(status_code=409, detail="Use the closure-verification or cancellation endpoint")
         if requested_status == "deferred" and not (changes.get("deferred_reason") or loop.deferred_reason):
