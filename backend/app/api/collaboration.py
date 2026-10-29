@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -1358,7 +1359,34 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        # Search query-matched historical events independently of the recent-event
+        # window, so a relevant older event does not disappear as the record grows.
+        event_query_terms = sorted(_expanded_context_terms(user_text))[:12]
+        historical_events = []
+        if event_query_terms:
+            historical_events = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(*[
+                        field.ilike(f"%{term}%")
+                        for term in event_query_terms
+                        for field in (CareEvent.title, CareEvent.description, CareEvent.event_type)
+                    ]),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(60)
+                .all()
+            )
+        merged_events = []
+        seen_event_ids = set()
+        for event_row in [*historical_events, *recent_events]:
+            event_key = str(event_row.id)
+            if event_key in seen_event_ids:
+                continue
+            seen_event_ids.add(event_key)
+            merged_events.append(event_row)
+        for event in merged_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
