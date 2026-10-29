@@ -382,9 +382,38 @@ def test_claim_assessments_require_exact_source_passages_and_preserve_version_hi
     assert second["claim_version"] == 2
     assert second["supersedes_assessment_id"] == first["id"]
 
+    replacement_claim_response = client_a.post("/api/v1/care-continuity/assertions", json={
+        "subject_type": "appointment",
+        "subject_id": "appointment-evidence-test",
+        "field": "attendance",
+        "assertion_kind": "current_state",
+        "asserted_value": "Attendance has not been independently confirmed.",
+        "source_label": "Review note",
+        "source_text": "Assessment remains uncertain.",
+        "evidence_ids": [],
+    })
+    assert replacement_claim_response.status_code == 201, replacement_claim_response.text
+    replacement_claim_id = replacement_claim_response.json()["id"]
+    superseded_payload = {
+        "status": "superseded",
+        "rationale": "A newer claim now represents the current scope of this assertion.",
+        "policy_version": "claim-assessment-v1",
+        "superseded_by_claim_id": replacement_claim_id,
+        "evidence_links": [],
+    }
+    superseded_response = client_a.post(
+        f"/api/v1/care-continuity/claims/{claim_id}/assessments",
+        json=superseded_payload,
+    )
+    assert superseded_response.status_code == 201, superseded_response.text
+    third = superseded_response.json()
+    assert third["claim_version"] == 3
+    assert third["status"] == "superseded"
+    assert third["superseded_by_claim_id"] == replacement_claim_id
+
     history = client_a.get(f"/api/v1/care-continuity/claims/{claim_id}/assessments")
     assert history.status_code == 200, history.text
-    assert [item["id"] for item in history.json()] == [first["id"], second["id"]]
+    assert [item["id"] for item in history.json()] == [first["id"], second["id"], third["id"]]
     assert client_b.get(f"/api/v1/care-continuity/claims/{claim_id}/assessments").status_code == 404
 
     db = SessionLocal()
