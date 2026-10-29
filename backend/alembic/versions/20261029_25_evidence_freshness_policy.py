@@ -1,6 +1,6 @@
 """Persist explicit domain-specific freshness policies and assessments.
 
-Revision ID: 20261029_25_evidence_freshness_policy
+Revision ID: 20261029_25_freshness
 Revises: 20261029_24_baseline_history
 """
 from alembic import op
