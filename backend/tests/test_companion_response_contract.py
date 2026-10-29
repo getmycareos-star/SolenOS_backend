@@ -284,6 +284,7 @@ def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(
         assert retry_data["session_id"] == first_data["session_id"]
         assert retry_data["reply"] == first_data["reply"]
         assert retry_data["source_record_refs"] == first_data["source_record_refs"]
+        assert retry_data["source_freshness_assessment_ids"] == first_data["source_freshness_assessment_ids"]
         assert retry_data["written_to_lcr"] is False
         assert len(calls) == 1
 
