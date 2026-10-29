@@ -845,6 +845,8 @@ def test_companion_session_and_idempotency_key_cannot_cross_person(monkeypatch):
 
 
 def test_standalone_new_topic_does_not_send_previous_chat_to_qwen(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     client = setup_client(monkeypatch)
     captured = []
 
