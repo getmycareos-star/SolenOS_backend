@@ -1,13 +1,13 @@
 """Scope source relationship reviews to a claim, observation, or event.
 
-Revision ID: 20261029_29_evidence_relationship_scope
+Revision ID: 20261029_29_ev_rel_scope
 Revises: 20261029_28_conflict_remainder
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_29_evidence_relationship_scope"
+revision = "20261029_29_ev_rel_scope"
 down_revision = "20261029_28_conflict_remainder"
 branch_labels = None
 depends_on = None
