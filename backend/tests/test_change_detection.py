@@ -1318,3 +1318,62 @@ def test_baseline_confidence_and_stability_require_complete_observation_coverage
         db.close()
     finally:
         teardown_db()
+
+
+def test_baseline_is_revised_when_observation_coverage_becomes_known():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-baseline-revision", name="Baseline revision test")
+        caregiver = Caregiver(
+            id="caregiver-baseline-revision",
+            name="Baseline Revision Caregiver",
+            email="baseline-revision@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for i in range(5):
+            db.add(CareEvent(
+                id=f"baseline-revision-event-{i}",
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=200 + i * 30),
+                title=f"Baseline revision fall {i + 1}",
+                created_by_caregiver_id=caregiver.id,
+            ))
+        db.commit()
+        from app.services.baseline import build_baseline
+        original = build_baseline(db, person.id, "fall", None, now)
+        assert original is not None
+        assert original.is_stable is False
+        assert original.confidence.value == "low"
+
+        db.add(ObservationCoverage(
+            id="baseline-revision-coverage",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=original.window_start,
+            window_end=original.window_end,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The caregiver explicitly confirms observation throughout the historical interval.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        revised = build_baseline(db, person.id, "fall", None, now)
+        assert revised is not None
+        assert revised.id != original.id
+        assert revised.is_stable is True
+        assert revised.confidence.value == "high"
+        assert original.is_active is False
+        assert original.superseded_by_baseline_id == revised.id
+        assert db.query(Baseline).filter(
+            Baseline.person_id == person.id, Baseline.is_active.is_(True)
+        ).count() == 1
+        db.close()
+    finally:
+        teardown_db()
