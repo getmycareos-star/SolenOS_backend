@@ -59,25 +59,17 @@ def main():
     collaboration._ollama_url = lambda: ("http://ollama.test.invalid", "qwen-test")
     collaboration._ollama_chat = fake_qwen
     try:
-        status, first_session = client.post(
+        created_a = client.post(
             "/api/v1/sessions/anonymous",
             json={"name": "CI Companion person A", "caregiver_name": "CI Companion caregiver A"},
-        ).status_code, None
-        # Keep the response payload explicit so assertion messages include the API body.
-        created = client.post(
+        )
+        created_b = client.post(
             "/api/v1/sessions/anonymous",
             json={"name": "CI Companion person B", "caregiver_name": "CI Companion caregiver B"},
         )
-        require(status == 201, f"anonymous session A failed: {status}")
-        require(created.status_code == 201, f"anonymous session B failed: {created.status_code}: {created.text}")
-        # Fetch a distinct first session; the initial status-only request above is
-        # deliberately not used as an identity source.
-        created_a = client.post(
-            "/api/v1/sessions/anonymous",
-            json={"name": "CI Companion person C", "caregiver_name": "CI Companion caregiver C"},
-        )
-        require(created_a.status_code == 201, f"anonymous session C failed: {created_a.status_code}: {created_a.text}")
-        data_a, data_b = created_a.json(), created.json()
+        require(created_a.status_code == 201, f"anonymous session A failed: {created_a.status_code}: {created_a.text}")
+        require(created_b.status_code == 201, f"anonymous session B failed: {created_b.status_code}: {created_b.text}")
+        data_a, data_b = created_a.json(), created_b.json()
         token_a, person_a = data_a["access_token"], data_a["person"]["id"]
         token_b, person_b = data_b["access_token"], data_b["person"]["id"]
         turn_id = "a1d6a0b7-9e62-4f44-8b4b-6f2d9a9b4c31"
