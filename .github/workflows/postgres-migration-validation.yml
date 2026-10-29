@@ -121,6 +121,13 @@ jobs:
               and item.get("referred_table") == "care_assertions"
               for item in question_claim_fks
           ), "open_questions.claim_id must reference care_assertions"
+          evidence_uniques = inspector.get_unique_constraints("evidence")
+          assert any(
+              item.get("name") == "uq_evidence_person_ingestion_key"
+              and item.get("column_names") == ["person_id", "ingestion_key"]
+              for item in evidence_uniques
+          ), "evidence ingestion idempotency key must be unique within a care record"
+          print("PASS evidence ingestion idempotency uniqueness")
           print("PASS normalized clarification-to-claim foreign key")
 
           fks = {
