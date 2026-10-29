@@ -255,6 +255,88 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_context_ranking_expands_caregiving_paraphrases_without_overriding_direct_matches():
+    sleep_record = 'LCR event evidence: {"title":"Waking several times overnight","description":"Restless sleep reported."}'
+    unrelated_record = 'LCR event evidence: {"title":"Lunch planning","description":"Meal preference."}'
+    ranked = collaboration._rank_context_lines("What happened with her rest?", [unrelated_record, sleep_record], limit=1)
+    assert ranked == [sleep_record]
+
+    medication_record = 'LCR event evidence: {"title":"Medication list reviewed","description":"Pill list was recorded."}'
+    ranked_medication = collaboration._rank_context_lines(
+        "Was the medicine recorded?", [unrelated_record, medication_record], limit=1
+    )
+    assert ranked_medication == [medication_record]
+
+
+def test_short_standalone_question_does_not_inherit_prior_care_topic():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="There is a sleep note."),
+    ]
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+    resolved = collaboration._context_query_with_history("What about that?", prior)
+    assert "sleep" in resolved.casefold()
+    assert "there is a sleep note" not in resolved.casefold()
+
+
+def test_companion_retrieves_matching_historical_event_outside_recent_event_window(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older note records waking several times overnight. It does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        db = TestingSessionLocal()
+        now = datetime(2026, 10, 27, 12, 0)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Overnight waking observation",
+            description="Caregiver noted waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            time_provenance="caregiver_reported",
+            confidence=None,
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="routine",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated routine event {index}",
+                description="A routine event unrelated to sleep.",
+                evidence_ids=[],
+                time_provenance="caregiver_reported",
+                confidence=None,
+            ))
+        db.commit()
+        older_id = str(older.id)
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
