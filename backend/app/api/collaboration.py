@@ -1355,8 +1355,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
-        # Retrieve a bounded but broader care history. All queries are server-scoped
-        # to the bearer session's person; the request body never selects another record.
+        # Resolve explicit follow-up references before retrieval. Dialogue helps
+        # formulate a search but is never itself evidence for a care fact.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        # Keep current-message terms first in their original order. History terms
+        # supplement only when a follow-up explicitly references prior dialogue.
+        direct_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:8]
+        synonym_terms = sorted(
+            _expanded_context_terms(retrieval_query) - set(direct_terms)
+        )[:16]
+        retrieval_terms = list(dict.fromkeys([*direct_terms, *synonym_terms]))
+
+        # Retrieve recent events plus independently query-matched historical
+        # events; relevance is not constrained by the newest-40-event window.
         recent_events = (
             db.query(CareEvent)
             .filter(CareEvent.person_id == person_id)
@@ -1364,7 +1385,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        matching_event_rows = []
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        all_events = []
+        seen_event_ids = set()
+        for event in [*matching_event_rows[:12], *recent_events]:
+            if str(event.id) not in seen_event_ids:
+                seen_event_ids.add(str(event.id))
+                all_events.append(event)
+        for event in all_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
