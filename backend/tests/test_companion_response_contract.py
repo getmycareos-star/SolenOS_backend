@@ -133,6 +133,23 @@ def test_companion_idempotent_retry_replays_original_response_and_blocks_key_reu
     text = "What was recorded about sleep?"
     try:
         token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported that the person slept poorly last night.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
         headers = {"Authorization": f"Bearer {token}"}
         payload = {
             "person_id": person_id,
@@ -145,6 +162,8 @@ def test_companion_idempotent_retry_replays_original_response_and_blocks_key_reu
         first_data = first.json()
         assert first_data["written_to_lcr"] is False
         assert first_data["persistence"] == "conversation_only"
+        assert event_id in first_data["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in first_data["source_record_refs"]
 
         # Simulate an ambiguous network failure: the client did not retain the
         # response/session ID, so it retries with the same turn key and no session ID.
