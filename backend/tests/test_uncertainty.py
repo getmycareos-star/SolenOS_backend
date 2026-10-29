@@ -258,11 +258,20 @@ def test_open_question_lifecycle():
             relationship="Family",
             person_id=person.id,
         )
-        db.add_all([person, caregiver])
+        other_person = Person(id="person-5-other", name="Other Test Person")
+        other_caregiver = Caregiver(
+            id="caregiver-5-other",
+            name="Other Test Caregiver",
+            email="test5-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
         db.commit()
         db.close()
 
         client = authorized_client("person-5")
+        other_client = authorized_client("person-5-other")
         
         response = client.post(
             "/api/v1/uncertainty/questions",
@@ -320,6 +329,22 @@ def test_open_question_lifecycle():
         assert len(second_history.json()) == 2
         assert second_history.json()[0]["answer"] != second_history.json()[1]["answer"]
         assert all(row["person_id"] == "person-5" for row in second_history.json())
+        assert other_client.get(
+            f"/api/v1/uncertainty/questions/{question_id}/answer-history"
+        ).status_code == 404
+
+        from app.models.uncertainty import OpenQuestionAnswerEvent
+        audit_db = TestingSessionLocal()
+        try:
+            answer_event = audit_db.query(OpenQuestionAnswerEvent).order_by(
+                OpenQuestionAnswerEvent.created_at.asc()
+            ).first()
+            answer_event.answer = "Attempted history rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                audit_db.commit()
+            audit_db.rollback()
+        finally:
+            audit_db.close()
 
         response = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
