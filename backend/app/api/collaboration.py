@@ -982,7 +982,7 @@ def _missing_requested_measurement_response(user_text: str, authorized_lines: li
     context = "\n".join(authorized_lines or [])
     for request_pattern, value_pattern, label in _MEASUREMENT_REQUESTS:
         if request_pattern.search(question) and not value_pattern.search(context):
-            return f"I couldn't find a {label} in the available care record for the time you asked about."
+            return f"No {label} is recorded in the available care record for the time you asked about."
     return None
 
 def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
