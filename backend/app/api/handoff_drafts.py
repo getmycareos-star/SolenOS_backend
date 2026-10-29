@@ -62,6 +62,17 @@ SOURCES = {
         "recorded_time_fields": ("created_at", "updated_at"),
         "detail_fields": ("priority", "status"),
     },
+    "uncertainty_assessments": {
+        "label": "Uncertainty assessments",
+        "kind": "uncertainty_assessment",
+        "fields": ("id", "subject_type", "subject_id", "field", "epistemic_state", "confidence", "known_value", "gap_reason", "evidence_ids", "assessed_at", "is_active", "superseded_by_assessment_id"),
+        "text_fields": ("field", "known_value", "gap_reason", "epistemic_state"),
+        "time_fields": ("assessed_at",),
+        "event_time_fields": ("assessed_at",),
+        "recorded_time_fields": ("assessed_at",),
+        "detail_fields": ("subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "confidence", "evidence_ids"),
+        "active_assessments_only": True,
+    },
     "care_timeline_entries": {
         "label": "Care timeline",
         "kind": "timeline_entry",
@@ -130,7 +141,7 @@ class DraftRequest(BaseModel):
 TEMPLATES = {
     "family": [
         ("start_here", "What matters most right now", ("care_facts", "care_timeline_entries", "care_events", "care_transitions"), ("Current situation", "Immediate care needs", "What the next caregiver must know")),
-        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events"), ("Today", "Change from baseline", "Uncertainty")),
+        ("current_status", "How the person is doing", ("care_facts", "care_timeline_entries", "care_events", "uncertainty_assessments"), ("Today", "Change from baseline", "Uncertainty")),
         ("daily_routine", "How to care for them", (), ("Daily routine", "Communication preferences", "Comfort and preferences", "Known distress triggers and helpful responses")),
         ("health_medication", "Health and medication information", ("appointments",), ("Documented health concerns", "Verified medication list", "Allergies and reactions", "Appointments and clinician instructions")),
         ("next_actions", "What needs to happen next", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Named owner", "Due time/date", "Status", "Outcome")),
@@ -144,7 +155,7 @@ TEMPLATES = {
         ("provenance", "Evidence and provenance register", ("care_facts", "care_timeline_entries", "care_events", "care_transitions", "appointments", "actions", "care_decisions", "open_questions", "information_gaps"), ("Source ID", "Author/reporter", "Timestamp", "Evidence status", "Conflicts", "Corrections")),
         ("medication_reconciliation", "Medication reconciliation", (), ("Verified medication and regimen", "Nonprescription products", "Allergies/reactions", "Recent authorised changes", "Discrepancies", "Resolution owner", "Reconciliation status")),
         ("clinical_functional", "Current clinical and functional assessment", (), ("Observations and measurements", "Symptoms and events", "Cognition/communication", "Mobility/ADLs", "Nutrition/hydration", "Sleep/mood/behaviour", "Equipment/environment")),
-        ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "care_facts", "care_events", "actions"), ("Issue", "Evidence/status", "Required response", "Owner", "Deadline")),
+        ("problems_uncertainty", "Active problems, risks, and uncertainty", ("open_questions", "information_gaps", "uncertainty_assessments", "care_facts", "care_events", "actions"), ("Issue", "Evidence/status", "Required response", "Owner", "Deadline")),
         ("care_plan", "Treatment and care plan", ("care_decisions", "actions"), ("Authorised plan", "Care delivered", "Response", "Pending investigations/consultations", "Unresolved decisions", "Escalation instructions")),
         ("action_register", "Action register and accountability", ("actions", "care_decisions", "open_questions", "information_gaps"), ("Action", "Owner", "Deadline", "Status", "Outcome")),
         ("person_family_context", "Person-centred and family context", (), ("Communication preferences", "Relevant routines", "Authorised contacts", "Caregiver support needs", "Documented information-sharing basis")),
@@ -282,6 +293,11 @@ def prepare_handoff_draft(
             continue
 
         query = select(*selected).where(table.c.person_id == person_id)
+        if spec.get("active_assessments_only"):
+            if "is_active" in table.c:
+                query = query.where(table.c.is_active.is_(True))
+            if "superseded_by_assessment_id" in table.c:
+                query = query.where(table.c.superseded_by_assessment_id.is_(None))
         if spec.get("require_caregiver_owned_evidence"):
             query = query.join(evidence_table, table.c.source_evidence_id == evidence_table.c.id).where(
                 evidence_table.c.person_id == person_id,
@@ -324,7 +340,7 @@ def prepare_handoff_draft(
                 details["fact_lifecycle"] = "current_in_lcr"
             if not text:
                 continue
-            epistemic_value = next((row.get(k) for k in ("epistemic_status", "assertion_status") if row.get(k) is not None), None)
+            epistemic_value = next((row.get(k) for k in ("epistemic_status", "epistemic_state", "assertion_status") if row.get(k) is not None), None)
             record_status = next((row.get(k) for k in ("decision_status", "status") if row.get(k) is not None), None)
             records.append({
                 "source_type": spec["kind"],
