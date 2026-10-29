@@ -26,6 +26,7 @@ import app.models.time_location  # noqa: E402, F401
 import app.models.temporal  # noqa: E402, F401
 import app.models.uncertainty  # noqa: E402, F401
 import app.models.change  # noqa: E402, F401
+import app.models.observation_coverage  # noqa: E402, F401
 import app.models.significance  # noqa: E402, F401
 import app.models.action  # noqa: E402, F401
 import app.models.caregiver_intelligence  # noqa: E402, F401
