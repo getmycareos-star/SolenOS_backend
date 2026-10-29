@@ -308,6 +308,7 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
         connection.execute(text("""
             CREATE TABLE IF NOT EXISTS open_questions (
                 id VARCHAR(36) PRIMARY KEY,
+                person_id VARCHAR(255) NOT NULL,
                 question TEXT NOT NULL,
                 status VARCHAR(40) NOT NULL,
                 priority INTEGER,
@@ -322,11 +323,11 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
         """))
         connection.execute(text("""
             INSERT INTO open_questions
-                (id, question, status, priority, asked_at, created_by_caregiver_id)
+                (id, person_id, question, status, priority, asked_at, created_by_caregiver_id)
             VALUES
-                ('open-question-1', 'Confirm whether the appointment date is Monday or Tuesday',
+                ('open-question-1', :person_id, 'Confirm whether the appointment date is Monday or Tuesday',
                  'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
-        """), {"caregiver_id": owner["caregiver"]["id"]})
+        """), {"person_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"]})
         connection.execute(text("""
             INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
             VALUES ('understanding-fact', :person_id, 'mobility', 'Caregiver-reported mobility change',
