@@ -93,7 +93,10 @@ def test_baseline_selection_uses_longest_stable_window():
         baseline = build_baseline(db, person.id, "fall", None, now)
         assert baseline is not None
         assert baseline.event_count == 5
-        assert baseline.confidence.value == "high"
+        assert baseline.confidence.value == "low"
+        assert baseline.is_stable is False
+        assert baseline.observation_density is None
+        assert baseline.documentation_bias_flag is True
         db.close()
     finally:
         teardown_db()
@@ -1263,5 +1266,55 @@ def test_coverage_assessment_api_rejects_naive_query_timestamps():
         )
         assert response.status_code == 422
         assert "explicit timezone offsets" in response.text
+    finally:
+        teardown_db()
+
+
+def test_baseline_confidence_and_stability_require_complete_observation_coverage():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-covered-baseline", name="Covered baseline test")
+        caregiver = Caregiver(
+            id="caregiver-covered-baseline",
+            name="Covered Baseline Caregiver",
+            email="covered-baseline@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        window_start = now - timedelta(days=320)
+        window_end = now - timedelta(days=42)
+        for i in range(5):
+            db.add(CareEvent(
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=200 + i * 30),
+                title=f"Covered baseline fall {i + 1}",
+                created_by_caregiver_id=caregiver.id,
+            ))
+        db.add(ObservationCoverage(
+            id="complete-baseline-coverage",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=window_start,
+            window_end=window_end,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The domain was actively observed throughout the baseline interval.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        from app.services.baseline import build_baseline
+        baseline = build_baseline(db, person.id, "fall", None, now)
+        assert baseline is not None
+        assert baseline.confidence.value == "high"
+        assert baseline.is_stable is True
+        assert baseline.observation_density == pytest.approx(1.0)
+        assert baseline.documentation_bias_flag is False
+        db.close()
     finally:
         teardown_db()
