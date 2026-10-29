@@ -65,7 +65,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
-    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -2016,7 +2016,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
         source_record_refs_json="[]",
-        client_turn_id=client_turn_id,
         created_at=turn_timestamp,
     ))
     response_metadata = {
