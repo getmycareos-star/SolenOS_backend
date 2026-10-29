@@ -49,24 +49,57 @@ import uuid
 router = APIRouter()
 
 
-def _sanitize_client_review_flags(input_data: SafetyContractInput) -> SafetyContractInput:
-    # A request payload cannot certify its own evidence. Only server-persisted,
-    # authorized review state may establish support; this endpoint currently
-    # treats submitted support flags as unverified candidates.
-    evidence = [
-        item.model_copy(update={
+def _sanitize_client_review_flags(
+    input_data: SafetyContractInput, db: Session, person_id: str
+) -> SafetyContractInput:
+    """Bind caller references to stored same-person source text and discard caller-assigned trust."""
+    supplied = input_data.evidence_references
+    evidence_ids = [item.evidence_id for item in supplied]
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
+    if len(evidence_ids) > 100:
+        raise HTTPException(status_code=422, detail="At most 100 evidence references may be evaluated")
+    persisted = {}
+    if evidence_ids:
+        rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+        ).all()
+        persisted = {row.id: row for row in rows}
+        if len(persisted) != len(evidence_ids):
+            raise HTTPException(status_code=404, detail="One or more evidence records were not found in this care record")
+
+    evidence = []
+    for item in supplied:
+        row = persisted[item.evidence_id]
+        source_text = row.source_text or ""
+        start, end, span = item.source_span_start, item.source_span_end, item.source_span
+        if start is not None or end is not None:
+            if start is None or end is None or start < 0 or end < start or end > len(source_text):
+                start, end, span = None, None, None
+            else:
+                actual_span = source_text[start:end]
+                if not actual_span or (span is not None and span != actual_span):
+                    start, end, span = None, None, None
+                else:
+                    span = actual_span
+        elif span is not None and span not in source_text:
+            span = None
+        evidence.append(item.model_copy(update={
+            "source_text": source_text,
+            "source_span": span,
+            "source_span_start": start,
+            "source_span_end": end,
             "authority": SourceAuthority.UNKNOWN,
             "quality": SourceQuality.UNVERIFIED,
             "currentness": CurrentnessStatus.UNKNOWN_CURRENCY,
             "confidence": None,
-            "document_time": None,
-            "uploaded_at": None,
+            "document_time": row.occurred_at,
+            "uploaded_at": row.uploaded_at,
             "supports_claim": False,
             "contradicts_claim": False,
             "reviewed_support": None,
-        })
-        for item in input_data.evidence_references
-    ]
+        }))
     return input_data.model_copy(update={"evidence_references": evidence})
 
 
@@ -76,7 +109,7 @@ def evaluate_safety(input_data: SafetyContractInput, request: Request, db: Sessi
     if input_data.person_id != person_id:
         raise HTTPException(status_code=403, detail="Safety evaluation is scoped to the authenticated care record")
     engine = SafetyEngine()
-    sanitized_input = _sanitize_client_review_flags(input_data).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
+    sanitized_input = _sanitize_client_review_flags(input_data, db, person_id).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
     return engine.evaluate(sanitized_input)
 
 
@@ -116,7 +149,7 @@ def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractO
     engine = SafetyEngine()
     # Recompute the audit decision server-side. The caller-supplied output is
     # accepted only for API compatibility and is never treated as proof.
-    sanitized_input = _sanitize_client_review_flags(input_data).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
+    sanitized_input = _sanitize_client_review_flags(input_data, db, person_id).model_copy(update={"person_id": person_id, "user_role": "caregiver"})
     verified_output = engine.evaluate(sanitized_input)
     audit_data = engine.create_safety_audit(sanitized_input, verified_output, final_output)
     db_audit = SafetyAuditRecordModel(**audit_data)
