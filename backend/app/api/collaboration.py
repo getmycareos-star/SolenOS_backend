@@ -571,10 +571,16 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     # questions are new topics unless they contain a referential expression.
     if not referential:
         return current
+    # Only caregiver-authored turns can resolve references for record search.
+    # Assistant statements are generated text, not evidence and not a reliable
+    # source of topic truth; including them can contaminate retrieval.
+    prior_user_messages = [
+        message for message in prior_messages
+        if getattr(message, "role", None) == "user"
+    ][:4]
     recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
+        f"user: {(message.content or '')[:500]}"
+        for message in reversed(prior_user_messages)
     ]
     return "\n".join([current, *recent]) if recent else current
 
