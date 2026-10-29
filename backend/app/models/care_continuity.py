@@ -416,6 +416,7 @@ class EvidenceFreshnessAssessment(Base):
     policy_version = Column(String(64), nullable=False)
     freshness_status = Column(String(32), nullable=False)
     source_time = Column(DateTime(timezone=True), nullable=True)
+    source_time_kind = Column(String(32), nullable=True)
     assessed_at = Column(DateTime(timezone=True), nullable=False)
     age_days = Column(Integer, nullable=True)
     rationale = Column(Text, nullable=False)
