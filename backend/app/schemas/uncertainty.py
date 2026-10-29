@@ -60,6 +60,10 @@ class OpenQuestionBase(BaseModel):
     subject_type: str
     subject_id: str
     claim_id: Optional[str] = None
+    intended_answerer_role: Optional[str] = None
+    intended_answerer_label: Optional[str] = None
+    necessity: str = "not_assessed"
+    necessity_rationale: Optional[str] = None
     status: str = "open"
     priority: Priority = Priority.INFORMATIONAL
     evidence_ids: Optional[List[str]] = None
