@@ -57,8 +57,19 @@ def get_longitudinal_event_counts(
     )
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
-    events = query.order_by(CareEvent.occurred_at.asc()).all()
-    now - timedelta(days=240)
+    queried_events = query.order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc()).all()
+    # Exact source-evidence reuse is a duplicate-record signal. Do not deduplicate
+    # by title or nearby timestamps alone; those can represent distinct events.
+    events = []
+    seen_source_signatures = set()
+    for event in queried_events:
+        evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
+        identity = ("evidence", evidence_signature) if evidence_signature else ("event", event.id)
+        if identity in seen_source_signatures:
+            continue
+        seen_source_signatures.add(identity)
+        events.append(event)
+
     six_weeks_ago = now - timedelta(days=42)
     current_window_count = sum(1 for e in events if _ensure_utc(e.occurred_at) >= six_weeks_ago)
     historical_count = sum(1 for e in events if _ensure_utc(e.occurred_at) < six_weeks_ago)
