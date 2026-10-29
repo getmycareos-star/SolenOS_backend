@@ -138,20 +138,45 @@ def build_baseline(
             Baseline.subject_id == (subject_id or ""),
             Baseline.baseline_type == BaselineType.PERSONAL_HISTORICAL,
             Baseline.is_active.is_(True),
-            Baseline.event_count == event_count,
         )
         .order_by(Baseline.created_at.desc())
         .all()
     )
     for existing in existing_baselines:
-        if evidence_ids and set(existing.evidence_ids or []) == set(evidence_ids):
-            return existing
+        same_source_events = (
+            set(existing.evidence_ids or []) == set(evidence_ids)
+            if evidence_ids
+            else (
+                not (existing.evidence_ids or [])
+                and _ensure_utc(existing.window_start).date() == _ensure_utc(window_start).date()
+                and _ensure_utc(existing.window_end).date() == _ensure_utc(window_end).date()
+            )
+        )
+        same_density = (
+            existing.observation_density is None and observation_density is None
+        ) or (
+            existing.observation_density is not None
+            and observation_density is not None
+            and abs(existing.observation_density - observation_density) < 1e-9
+        )
         if (
-            not evidence_ids
-            and _ensure_utc(existing.window_start).date() == _ensure_utc(window_start).date()
-            and _ensure_utc(existing.window_end).date() == _ensure_utc(window_end).date()
+            same_source_events
+            and existing.event_count == event_count
+            and _ensure_utc(existing.window_start) == _ensure_utc(window_start)
+            and _ensure_utc(existing.window_end) == _ensure_utc(window_end)
+            and existing.confidence == confidence
+            and bool(existing.is_stable) == coverage_complete
+            and same_density
+            and bool(existing.documentation_bias_flag) == (not coverage_complete)
         ):
             return existing
+
+    # A coverage update or changed source history changes baseline provenance.
+    # Preserve the prior baseline as history and keep one active baseline only.
+    for existing in existing_baselines:
+        existing.is_active = False
+    if existing_baselines:
+        db.flush()
 
     baseline = Baseline(
         person_id=person_id,
@@ -171,6 +196,10 @@ def build_baseline(
     )
     db.add(baseline)
     db.flush()
+    for existing in existing_baselines:
+        existing.superseded_by_baseline_id = baseline.id
+    if existing_baselines:
+        db.flush()
     return baseline
 
 
