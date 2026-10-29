@@ -2626,6 +2626,8 @@ def create_evidence_observation(
     if "negated" in payload and payload["negated"] is not None and not isinstance(payload["negated"], bool):
         raise HTTPException(status_code=422, detail="negated must be a boolean or null")
     value = payload.get("value_text")
+    if status in {"unknown", "missing"}:
+        value = None
     if value is not None and (not isinstance(value, str) or len(value) > 8000):
         raise HTTPException(status_code=422, detail="value_text must be a string up to 8000 characters")
     if status in {"unknown", "missing"} and value not in (None, ""):
@@ -2644,6 +2646,20 @@ def create_evidence_observation(
             raise HTTPException(status_code=422, detail="Observer caregiver must belong to the authorized care record")
     # Prevent accidental duplicate extraction while preserving distinct source spans and epistemic states.
     from app.models.care_continuity import EvidenceObservation
+    supersedes_id = payload.get("supersedes_observation_id")
+    superseded_observation = None
+    if supersedes_id is not None:
+        if not isinstance(supersedes_id, str) or not supersedes_id.strip():
+            raise HTTPException(status_code=422, detail="supersedes_observation_id must be a valid observation ID")
+        superseded_observation = db.query(EvidenceObservation).filter(
+            EvidenceObservation.id == supersedes_id,
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+        ).first()
+        if superseded_observation is None:
+            raise HTTPException(status_code=422, detail="The superseded observation must belong to this evidence and care record")
+        if superseded_observation.attribute != attribute.strip():
+            raise HTTPException(status_code=422, detail="A correction must retain the same observation attribute")
     duplicate = db.query(EvidenceObservation.id).filter(
         EvidenceObservation.person_id == person_id,
         EvidenceObservation.evidence_id == evidence_id,
@@ -2652,11 +2668,13 @@ def create_evidence_observation(
         EvidenceObservation.attribute == attribute.strip(),
         EvidenceObservation.observation_kind == kind,
         EvidenceObservation.epistemic_status == status,
+        EvidenceObservation.value_text == value,
     ).first()
-    if duplicate:
-        raise HTTPException(status_code=409, detail="An observation with this source span and classification already exists")
+    if duplicate and superseded_observation is None:
+        raise HTTPException(status_code=409, detail="An identical observation already exists; use supersedes_observation_id for a correction")
     row = EvidenceObservation(
-        person_id=person_id, evidence_id=evidence_id, observation_kind=kind, epistemic_status=status,
+        person_id=person_id, evidence_id=evidence_id, supersedes_observation_id=superseded_observation.id if superseded_observation else None,
+        observation_kind=kind, epistemic_status=status,
         subject_label=subject.strip(), attribute=attribute.strip(), value_text=value,
         normalized_value=payload.get("normalized_value"), units=payload.get("units"), context=payload.get("context"),
         occurred_at=_observation_datetime(payload.get("occurred_at"), "occurred_at"),
@@ -2690,6 +2708,7 @@ def create_evidence_observation(
 def _evidence_observation_response(row):
     return {
         "id": row.id, "person_id": row.person_id, "evidence_id": row.evidence_id,
+        "supersedes_observation_id": row.supersedes_observation_id,
         "observation_kind": row.observation_kind, "epistemic_status": row.epistemic_status,
         "subject_label": row.subject_label, "attribute": row.attribute, "value_text": row.value_text,
         "normalized_value": row.normalized_value, "units": row.units, "context": row.context,
