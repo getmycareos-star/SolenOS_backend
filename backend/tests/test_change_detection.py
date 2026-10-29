@@ -2206,3 +2206,63 @@ def test_cross_domain_pattern_retires_only_after_complete_scan_no_longer_support
         db.close()
     finally:
         teardown_db()
+
+def test_authenticated_reassessment_persists_cross_domain_convergence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="cross-domain-api-person", name="Cross-domain API person")
+        caregiver = Caregiver(
+            id="cross-domain-api-caregiver", name="Cross-domain API caregiver",
+            email="cross-domain-api@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        now = datetime.now(timezone.utc)
+        for event_id, event_type, days_ago in (
+            ("cross-domain-api-fall", "fall", 5),
+            ("cross-domain-api-sleep", "sleep_disruption", 4),
+            ("cross-domain-api-mobility", "mobility", 2),
+        ):
+            db.add(CareEvent(
+                id=event_id, person_id=person.id, event_type=event_type,
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded {event_type} event", created_by_caregiver_id=caregiver.id,
+                evidence_ids=[],
+            ))
+        db.commit()
+        db.close()
+
+        response = TestClient(app).post(
+            f"/api/v1/change/changes/reassess?person_id={person.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+
+        db = TestingSessionLocal()
+        convergence = (
+            db.query(Pattern)
+            .filter(
+                Pattern.person_id == person.id,
+                Pattern.subject_type == "cross_domain",
+                Pattern.pattern_type == "convergence",
+                Pattern.is_active.is_(True),
+            )
+            .one()
+        )
+        assert set(convergence.event_ids) == {
+            "cross-domain-api-fall", "cross-domain-api-sleep", "cross-domain-api-mobility"
+        }
+        assert convergence.confidence is None
+        assert any(
+            "does not establish" in note.lower()
+            for note in (convergence.alternative_interpretations or [])
+        )
+        db.close()
+    finally:
+        teardown_db()
+
