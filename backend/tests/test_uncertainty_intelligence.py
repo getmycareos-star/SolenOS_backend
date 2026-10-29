@@ -91,6 +91,7 @@ def test_evidence_backed_assumption_keeps_explicit_status_and_provenance():
             "statement": "The report is being treated as a report of the caregiver's observation.",
             "status": "accepted",
             "supporting_evidence_ids": ["evidence-breakfast"],
+            "reviewed_by_caregiver_id": "test-caregiver-reviewer",
             "resolution_rationale": "The cited record contains the stated caregiver report.",
         }],
     )
