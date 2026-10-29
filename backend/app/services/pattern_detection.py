@@ -297,8 +297,13 @@ def _build_recurrence_pattern(
         if event_id_set.intersection(change.evidence_ids or [])
     ]
     change_ids = sorted({change.id for change in linked_changes})
+    # Rates require coverage over the entire analysis window, including time
+    # before the first event and after the last event. Coverage only between
+    # event timestamps cannot establish a valid denominator.
+    coverage_window_start = now - timedelta(days=90)
+    coverage_window_days = (now - coverage_window_start).total_seconds() / 86400.0
     coverage = assess_observation_coverage(
-        db, person_id, subject_type, distinct_times[0], distinct_times[-1]
+        db, person_id, subject_type, coverage_window_start, now
     )
     fully_observed = coverage["coverage_status"] == "covered"
     # Event recurrence is supported by multiple distinct source events, but a
@@ -307,8 +312,14 @@ def _build_recurrence_pattern(
         (right - left).total_seconds() / 86400.0
         for left, right in zip(distinct_times, distinct_times[1:])
     ]
-    frequency_per_day = len(ordered_events) / span_days if fully_observed else None
-    rate_per_30_days = len(ordered_events) / (span_days / 30.0) if fully_observed else None
+    frequency_per_day = (
+        len(ordered_events) / coverage_window_days
+        if fully_observed and coverage_window_days > 0 else None
+    )
+    rate_per_30_days = (
+        len(ordered_events) / (coverage_window_days / 30.0)
+        if fully_observed and coverage_window_days > 0 else None
+    )
     interval_mean = mean(interval_days) if interval_days else None
     interval_std_dev = pstdev(interval_days) if len(interval_days) >= 2 else None
     interval_cv = (
@@ -321,6 +332,9 @@ def _build_recurrence_pattern(
         "distinct_observation_times": len(distinct_times),
         "distinct_event_records": len(ordered_events),
         "span_days": round(span_days, 6),
+        "analysis_window_start": coverage_window_start.isoformat(),
+        "analysis_window_end": now.isoformat(),
+        "analysis_window_days": round(coverage_window_days, 6),
         "inter_event_interval_count": len(interval_days),
         "inter_event_intervals_days": [round(value, 6) for value in interval_days],
         "minimum_interval_days": round(min(interval_days), 6) if interval_days else None,
