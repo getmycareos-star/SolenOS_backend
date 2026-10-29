@@ -423,6 +423,127 @@ def test_conversation_history_isolated_between_care_records(monkeypatch):
         teardown()
 
 
+def test_companion_preserves_conflicting_historical_events_in_context(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The records disagree: one says October 31 and another says November 2. The date is unresolved."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        first = CareEvent(
+            person_id=person_id, event_type="appointment", status="recorded",
+            occurred_at=now - timedelta(days=3), title="Neurology appointment schedule",
+            description="Caregiver note: neurology appointment is scheduled for October 31.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id, time_provenance="caregiver_reported",
+        )
+        second = CareEvent(
+            person_id=person_id, event_type="appointment", status="recorded",
+            occurred_at=now - timedelta(days=1), title="Neurology appointment update",
+            description="A later caregiver note says the neurology appointment moved to November 2.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id, time_provenance="caregiver_reported",
+        )
+        db.add_all([first, second])
+        db.commit()
+        first_id, second_id = first.id, second.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What date is the neurology appointment?"},
+        )
+        assert response.status_code == 200, response.text
+        assert {first_id, second_id}.issubset(set(response.json()["source_event_ids"]))
+        prompt = "\n".join(message.get("content", "") for message in captured["messages"])
+        assert "October 31" in prompt
+        assert "November 2" in prompt
+        assert "The records disagree" in response.json()["reply"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_reports_documented_medication_without_inventing_a_change(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The recorded dose is 5 mg once daily; the record does not establish a dose change."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        event = CareEvent(
+            person_id=person_id, event_type="medication", status="recorded",
+            occurred_at=datetime(2026, 10, 28, 12, 0),
+            title="Medication list",
+            description="Caregiver-reported medication list records 5 mg once daily; no dose-change instruction is recorded.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id, time_provenance="caregiver_reported",
+        )
+        db = TestingSessionLocal()
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What medication dose is recorded?"},
+        )
+        assert response.status_code == 200, response.text
+        assert event_id in response.json()["source_event_ids"]
+        assert "5 mg once daily" in "\n".join(message.get("content", "") for message in captured["messages"])
+        assert "does not establish a dose change" in response.json()["reply"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_new_conversation_does_not_inherit_unrelated_prior_dialogue(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = []
+
+    def fake_qwen(base, model, messages, options=None):
+        captured.append(messages)
+        return "I do not have enough recorded information to establish that."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "Mum's sleep became worse after the hospital visit."},
+        )
+        assert first.status_code == 200, first.text
+        second = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "What about that?"},
+        )
+        assert second.status_code == 200, second.text
+        second_prompt = "\n".join(message.get("content", "") for message in captured[-1])
+        assert "Mum's sleep became worse after the hospital visit" not in second_prompt
+        assert second.json()["session_id"] != first.json()["session_id"]
+        assert second.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_replays_same_turn_without_second_inference(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
