@@ -187,6 +187,17 @@ def _normalise(value: Any) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: str) -> list[dict[str, Any]]:
+    """Return only person-scoped evidence whose stored text contains this finding's excerpt."""
+    normalized_excerpt = _normalise(excerpt)
+    if not normalized_excerpt:
+        return []
+    return [
+        row for row in persisted_evidence
+        if normalized_excerpt in _normalise(str(row.get("text") or ""))
+    ]
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -623,12 +634,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 # Link only persisted evidence whose stored text contains the finding's
                 # explicit excerpt; otherwise preserve the finding as unsupported/unknown.
                 excerpt = str(source_item.get("evidence_excerpt") or "").strip()
-                normalized_excerpt = _normalise(excerpt)
-                finding_evidence = [
-                    row for row in persisted_evidence
-                    if normalized_excerpt
-                    and normalized_excerpt in _normalise(str(row.get("text") or ""))
-                ]
+                finding_evidence = _match_finding_evidence(persisted_evidence, excerpt)
                 finding_evidence_ids = [str(row["id"]) for row in finding_evidence if row.get("id")]
                 analysis = analyze_uncertainty(
                     claim=(str(finding.get("current") or "") or str(finding.get("change_type") or "Change not established")),
