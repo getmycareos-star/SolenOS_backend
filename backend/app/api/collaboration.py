@@ -576,12 +576,15 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     # Shortness alone does not imply a follow-up; require an explicit reference.
     if not referential:
         return current
-    recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
-    ]
-    return "\n".join([current, *recent]) if recent else current
+    # Retrieval query expansion must not treat an earlier assistant-generated
+    # claim as evidence. Use caregiver-authored turns only to resolve references;
+    # the full transcript can still be supplied separately as conversation context.
+    recent_user_turns = [
+        f"user: {(message.content or '')[:500]}"
+        for message in reversed(prior_messages[:8])
+        if getattr(message, "role", None) == "user"
+    ][:4]
+    return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
