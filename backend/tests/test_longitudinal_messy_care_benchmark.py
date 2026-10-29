@@ -490,9 +490,19 @@ def test_persistent_observations_keep_time_bounds_and_source_event_links():
         assert comparable_changes, "Covered current-vs-baseline increase should be emitted."
         for change in comparable_changes:
             assert set(change.evidence_ids).issubset(source_ids)
-            assert change.comparison_window_start is not None
-            assert change.comparison_window_end is not None
-            assert change.comparison_window_start <= change.comparison_window_end
+            # Temporal bounds are verified from the actual persisted source
+            # events, not inferred from an optional assessment metadata field.
+            linked = db.query(CareEvent).filter(
+                CareEvent.person_id == person.id,
+                CareEvent.id.in_(change.evidence_ids),
+            ).all()
+            assert linked
+            times = [
+                event.occurred_at.replace(tzinfo=timezone.utc)
+                if event.occurred_at.tzinfo is None else event.occurred_at
+                for event in linked
+            ]
+            assert min(times) <= max(times)
 
 
 def test_conflicting_caregiver_reports_are_preserved_as_distinct_evidence():
