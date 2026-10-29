@@ -828,7 +828,7 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
     if not assessment or assessment.get("sufficient"):
         return False
-    for sentence in re.split(r"[.!?;\\n]+", (reply or "").casefold()):
+    for sentence in re.split(r"[.!?;\n]+", (reply or "").casefold()):
         if _TREND_DIRECTION_RE.search(sentence) and not _TREND_UNCERTAINTY_RE.search(sentence):
             return True
     return False
@@ -1855,9 +1855,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # lacks two distinct dated observations. Return an evidence-derived
             # uncertainty statement rather than expose the unsupported claim.
             reply = _trend_uncertainty_response(trend_assessment)
-            verdict = "blocked"
-            safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
-            ai_generated = False
         invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
@@ -1919,9 +1916,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion could not produce a clear, sufficiently grounded response. No reply was saved; please clarify or retry.",
             )
         reply = reply.strip()
-        verdict = "passed"
-        safety_note = None
-        ai_generated = True
+        if unsupported_trend:
+            verdict = "blocked"
+            safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
+            ai_generated = False
+        else:
+            verdict = "passed"
+            safety_note = None
+            ai_generated = True
         evidence_ids = source_evidence_ids
 
     # Persist only after a valid model response or the safety guard response exists.
