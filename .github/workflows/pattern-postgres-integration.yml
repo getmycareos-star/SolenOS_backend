@@ -1,0 +1,60 @@
+name: PostgreSQL change-pattern integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/pattern_detection.py"
+      - "backend/app/models/change.py"
+      - "backend/app/models/care.py"
+      - "backend/tests/test_pattern_postgres_integration.py"
+      - "backend/alembic/**"
+      - "backend/alembic.ini"
+      - ".github/workflows/pattern-postgres-integration.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-pattern-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_test
+          POSTGRES_PASSWORD: solenos_ci_only
+          POSTGRES_DB: solenos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_test -d solenos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://solenos_test:solenos_ci_only@localhost:5432/solenos_test
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest
+
+      - name: Upgrade empty PostgreSQL database through full Alembic chain
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Verify migration head
+        working-directory: backend
+        run: alembic current
+
+      - name: Run persisted pattern lifecycle against PostgreSQL
+        run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
