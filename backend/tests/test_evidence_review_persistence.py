@@ -496,3 +496,34 @@ def test_source_relationships_persist_lineage_and_reject_cross_record_or_cycle(r
         "rationale": "Duplicate relationship.",
     })
     assert duplicate.status_code == 409
+
+
+def test_source_relationship_append_only_guard(review_records):
+    client_a, _ = review_records
+    db = SessionLocal()
+    try:
+        caregiver = db.query(Caregiver).filter(Caregiver.person_id == "review-person-a").one()
+        db.add(Evidence(
+            id="review-evidence-lineage-guard", person_id="review-person-a", type="derived",
+            source_text="Derived evidence item for append-only guard test.",
+            uploaded_by_caregiver_id=caregiver.id, source_type="derived",
+        ))
+        db.flush()
+        from app.models.care_continuity import EvidenceSourceRelationship
+        relationship = EvidenceSourceRelationship(
+            person_id="review-person-a",
+            source_evidence_id="review-evidence-lineage-guard",
+            related_evidence_id="review-evidence-a",
+            relationship_type="derived_from",
+            source_independence_status="shared_origin",
+            rationale="Derived from the original source.",
+            reviewed_by_caregiver_id=caregiver.id,
+        )
+        db.add(relationship)
+        db.commit()
+        relationship.rationale = "Attempted history rewrite"
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+    finally:
+        db.close()
