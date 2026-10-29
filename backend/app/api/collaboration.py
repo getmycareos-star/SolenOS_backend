@@ -10,6 +10,7 @@ import uuid
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 from typing import Literal, Optional
 from urllib.parse import urlparse
 
@@ -65,6 +66,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -1271,6 +1273,64 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+
+    def replay_saved_turn(saved_assistant, saved_session):
+        if (
+            saved_session.person_id != person_id
+            or saved_session.caregiver_id != caregiver_id
+            or saved_session.status != "active"
+        ):
+            raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+        if payload.session_id and payload.session_id != saved_session.id:
+            raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+        try:
+            metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        if metadata.get("request_sha256") != request_sha256:
+            raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+        try:
+            saved_refs = json.loads(saved_assistant.source_record_refs_json or "[]")
+        except (TypeError, ValueError):
+            saved_refs = metadata.get("source_record_refs", [])
+        saved_history = (
+            db.query(ConversationMessage).filter_by(session_id=saved_session.id)
+            .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
+        )
+        return {
+            "session_id": saved_session.id, "person_id": person_id,
+            "reply": saved_assistant.content, "guard_verdict": saved_assistant.guard_verdict,
+            "safety_note": saved_assistant.safety_note, "confidence": None,
+            "evidence_ids": json.loads(saved_assistant.evidence_ids_json or "[]"),
+            "source_event_ids": metadata.get("source_event_ids", []),
+            "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+            "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+            "source_record_refs": saved_refs,
+            "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+            "ai_generated": metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
+            "written_to_lcr": False, "persistence": "conversation_only", "idempotent_replay": True,
+            "messages": [{
+                "role": row.role, "text": row.content,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "guard_verdict": row.guard_verdict, "safety_note": row.safety_note,
+            } for row in saved_history],
+        }
+
+    if client_turn_id:
+        existing_pair = (
+            db.query(ConversationMessage, ConversationSession)
+            .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+            .filter(ConversationMessage.client_turn_id == client_turn_id, ConversationMessage.role == "assistant")
+            .first()
+        )
+        if existing_pair:
+            return replay_saved_turn(*existing_pair)
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
@@ -1740,19 +1800,56 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    turn_recorded_at = datetime.now(timezone.utc)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-        source_record_refs_json="[]",
+        source_record_refs_json="[]", created_at=turn_recorded_at,
     ))
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        created_at=turn_recorded_at + timedelta(microseconds=1),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps({
+            "request_sha256": request_sha256,
+            "source_event_ids": source_event_ids,
+            "source_evidence_ids": source_evidence_ids,
+            "source_appointment_ids": source_appointment_ids,
+            "source_assertion_ids": source_assertion_ids,
+            "source_lcr_context_ids": source_lcr_context_ids,
+            "source_freshness_assessment_ids": source_freshness_assessment_ids,
+            "source_record_refs": source_record_refs,
+            "lcr_context_coverage": lcr_context_coverage,
+            "ai_generated": ai_generated,
+            "written_to_lcr": False,
+        }),
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if client_turn_id:
+            winner = (
+                db.query(ConversationMessage, ConversationSession)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(ConversationMessage.client_turn_id == client_turn_id, ConversationMessage.role == "assistant")
+                .first()
+            )
+            if winner:
+                saved_assistant, saved_session = winner
+                if not payload.session_id and session.id != saved_session.id:
+                    orphan = db.query(ConversationSession).filter_by(
+                        id=session.id, person_id=person_id, caregiver_id=caregiver_id, status="active"
+                    ).first()
+                    if orphan and db.query(ConversationMessage).filter_by(session_id=orphan.id).count() == 0:
+                        db.delete(orphan)
+                        db.commit()
+                return replay_saved_turn(saved_assistant, saved_session)
+        raise
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
@@ -1796,13 +1893,32 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-    } for row in rows]}
+    messages = []
+    for row in rows:
+        try:
+            metadata = json.loads(row.response_metadata_json or "{}") if row.role == "assistant" else {}
+        except (TypeError, ValueError):
+            metadata = {}
+        messages.append({
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+            "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+            "source_event_ids": metadata.get("source_event_ids", []),
+            "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+            "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+            "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+            "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+            "ai_generated": metadata.get("ai_generated"),
+            "written_to_lcr": False,
+            "persistence": "conversation_only",
+        })
+    return {"session_id": session.id, "person_id": person_id, "messages": messages}
 
 
 class NotificationPreferenceUpdate(BaseModel):
