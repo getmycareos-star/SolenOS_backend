@@ -229,7 +229,8 @@ def test_reused_idempotency_key_cannot_commit_a_second_mutation():
     assert first.status_code == 201, first.text
 
     retry = client.post("/api/v1/open-loops", headers=headers, json=payload)
-    assert retry.status_code == 409, retry.text
+    assert retry.status_code == 201, retry.text
+    assert retry.json()["id"] == first.json()["id"]
 
     listed = client.get("/api/v1/open-loops", headers=headers)
     assert listed.status_code == 200, listed.text
