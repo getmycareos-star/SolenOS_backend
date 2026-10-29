@@ -1621,7 +1621,7 @@ def test_safety_response_validation_rejects_unpersisted_evidence_ids():
                 "risk_class": "informational",
             },
         )
-        assert response.status_code == 404
+        assert response.status_code == 404, response.text
         assert "not found in this care record" in response.json()["detail"]
     finally:
         teardown_db()
