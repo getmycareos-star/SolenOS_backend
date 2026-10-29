@@ -130,6 +130,7 @@ def test_explicit_domain_policy_persists_assessment_history_and_never_guesses_mi
         assert assessed.status_code == 201, assessed.text
         result = assessed.json()
         assert result["freshness_status"] == "needs_review"
+        assert result["source_time_kind"] == "event_occurrence"
         assert result["policy_version"] == "v1"
         assert result["historical_record"] is True
 
@@ -139,6 +140,7 @@ def test_explicit_domain_policy_persists_assessment_history_and_never_guesses_mi
         })
         assert missing_time.status_code == 201, missing_time.text
         assert missing_time.json()["freshness_status"] == "unknown_source_time"
+        assert missing_time.json()["source_time_kind"] is None
         assert missing_time.json()["age_days"] is None
 
         history = client.get("/api/v1/care-continuity/evidence-freshness/assessments/freshness-evidence-a")
