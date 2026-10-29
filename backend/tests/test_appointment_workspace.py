@@ -487,3 +487,55 @@ def test_observation_coverage_api_persists_and_isolates_person_records(client):
     )
     assert forged.status_code == 422
 
+def test_structured_source_observation_appears_in_current_care_projection(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO evidence (
+                id, person_id, type, source_text, uploaded_by_caregiver_id
+            ) VALUES (
+                'sleep-source-evidence', :person_id, 'caregiver_note',
+                'Caregiver recorded: woke twice overnight.', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+        connection.execute(text("""
+            INSERT INTO evidence_observations (
+                id, person_id, evidence_id, observation_kind, epistemic_status,
+                subject_label, attribute, value_text, source_passage,
+                source_span_start, source_span_end, extraction_method,
+                extraction_version, created_by_caregiver_id
+            ) VALUES (
+                'sleep-structured-observation', :person_id, 'sleep-source-evidence',
+                'reported_observation', 'caregiver_reported', 'care recipient',
+                'sleep', 'woke twice overnight', 'woke twice overnight',
+                26, 46, 'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
+            )
+        """), {
+            "person_id": owner["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get("/api/v1/care-continuity/current-care", headers=headers)
+    assert response.status_code == 200, response.text
+    item = next(
+        row for row in response.json()["items"]
+        if row["id"] == "sleep-structured-observation"
+    )
+    assert item["source_collection"] == "evidence_observations"
+    assert item["title"] == "sleep"
+    assert item["evidence_ids"] == ["sleep-source-evidence"]
+    assert item["source_span_start"] == 26
+    assert item["source_span_end"] == 46
+    assert item["source_passage"] == "woke twice overnight"
+    assert item["epistemic_status"] == "caregiver_reported"
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    other_response = test_client.get("/api/v1/care-continuity/current-care", headers=other_headers)
+    assert other_response.status_code == 200, other_response.text
+    assert "sleep-structured-observation" not in other_response.text
+    assert "woke twice overnight" not in other_response.text
+
