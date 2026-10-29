@@ -118,13 +118,16 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 
 ### N. Evidence-grounded questions and next steps — PARTIAL
 - [x] Open questions and information gaps have persisted records and lifecycle fields.
-- [ ] Generate questions only from a traceable evidence gap, track intended answerer/priority/necessity/history, preserve answer provenance, and avoid repeating questions already answered by sufficient current evidence.
+- [x] Add a caregiver-facing LCR workflow that creates a clarification question tied to a selected source-attributed claim and its subject context, with optional same-record evidence links and explicit priority.
+- [x] Attribute each recorded answer to the session caregiver and preserve every answer version, provenance text, and timestamp in append-only history; expose a person-scoped answer-history API and reject cross-record history reads.
+- [x] Add SQLite ORM guards and a PostgreSQL append-only trigger for answer-history rows; migration workflow verifies the table and trigger.
+- [ ] Generate questions automatically only from traceable evidence gaps, track intended answerer/necessity, and avoid repeating questions already answered by sufficient current evidence.
 - [ ] An answer must not automatically resolve the underlying claim without assessment.
 
 ### O. Integrity, security, and governance — PARTIAL
 - [x] Evidence creation now requires a server-issued bearer session matching person and uploader caregiver.
 - [x] Reporter/collector caregiver references and parent evidence are validated against the same care record.
-- [x] Evidence reviews, claim assessments, source relationships, and structured observations are append-only in ORM; PostgreSQL/SQLite migrations add database-level mutation guards for each new audit record.
+- [x] Evidence reviews, claim assessments, source relationships, structured observations, claim dependencies, conflict-resolution events, and clarification-answer events are append-only in ORM; PostgreSQL/SQLite migrations add database-level mutation guards for these audit records.
 - [x] Claim-assessment writes derive person and reviewer identity from the server-validated bearer session, validate every linked evidence ID against that same person, and preserve assessment history with ORM/database append-only guards.
 - [ ] Audit every remaining evidence/claim/conflict/gap/question endpoint for scope authorization, every foreign ID, transactional rollback, idempotency, secure media handling, retention/deletion, backup/restore, and production failure behavior.
 - [ ] Verify immutable source handling against all writers, direct SQL, and deployed PostgreSQL behavior.
