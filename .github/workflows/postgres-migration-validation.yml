@@ -358,7 +358,7 @@ jobs:
                   person_id=person.id,
                   timezone="UTC",
               )
-              db.add_all([person, caregiver])
+              db.add(caregiver)
               db.flush()
               question = OpenQuestion(
                   id="question-answer-trigger-question",
