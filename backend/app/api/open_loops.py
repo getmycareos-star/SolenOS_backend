@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text,
-    UniqueConstraint, and_, or_
+    UniqueConstraint, and_, or_, text
 )
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -238,6 +238,17 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
     """Resolve committed mutation retries without appending duplicate evidence."""
     if not idempotency_key:
         return None
+    # Serialize the same person-scoped key across *different* Open Loop rows.
+    # A row lock alone cannot prevent two concurrent requests against different
+    # loops from both observing no event before the unique constraint is hit.
+    # Transaction-scoped advisory locks release automatically on commit/rollback.
+    if db.bind is not None and db.bind.dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"{person_id}:{idempotency_key}".encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     event = db.query(OpenLoopEvent).filter(
         OpenLoopEvent.person_id == person_id,
         OpenLoopEvent.idempotency_key == idempotency_key,
