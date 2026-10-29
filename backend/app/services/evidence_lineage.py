@@ -115,6 +115,49 @@ def build_evidence_lineage(
 
 
 
+def find_exact_content_duplicate_candidates(
+    evidence_rows: Iterable[Any],
+    selected_evidence_ids: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Find identical stored source-text candidates without claiming common origin.
+
+    A stored SHA-256 fingerprint is only a duplicate-content signal. It cannot
+    establish who copied whom, whether two reports are independent witnesses,
+    or whether the content is true. Independence remains unassessed until a
+    source relationship has been reviewed.
+    """
+    selected = {str(value).strip() for value in selected_evidence_ids if str(value).strip()}
+    by_digest: dict[str, list[str]] = {}
+    for row in evidence_rows:
+        evidence_id = str(getattr(row, "id", "") or "").strip()
+        if evidence_id not in selected:
+            continue
+        digest = str(getattr(row, "source_text_sha256", "") or "").strip().lower()
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            continue
+        by_digest.setdefault(digest, []).append(evidence_id)
+
+    candidates = []
+    for digest, evidence_ids in sorted(by_digest.items()):
+        unique_ids = sorted(set(evidence_ids))
+        if len(unique_ids) < 2:
+            continue
+        candidates.append({
+            "status": "exact_content_duplicate_candidate",
+            "evidence_ids": unique_ids,
+            "source_text_sha256": digest,
+            "basis": "matching_stored_source_text_sha256",
+            "common_origin_established": False,
+            "independent_corroboration_established": False,
+            "review_required": True,
+            "interpretation_limit": (
+                "Identical source text does not prove common origin or independence. "
+                "Do not count these records as independent corroboration until source relationships are reviewed."
+            ),
+        })
+    return candidates
+
+
 def load_evidence_lineage_scope(
     db: Any,
     person_id: str,
@@ -153,7 +196,7 @@ def load_evidence_lineage_scope(
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
 
     evidence_fields = [
-        name for name in ("id", "person_id", "parent_evidence_id", "original_source_reference")
+        name for name in ("id", "person_id", "parent_evidence_id", "original_source_reference", "source_text_sha256")
         if name in evidence.c
     ]
     evidence_by_id: dict[str, Any] = {}
