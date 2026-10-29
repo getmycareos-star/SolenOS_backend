@@ -1163,6 +1163,44 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             })
         elif source == "follow_up_links" and status in open_statuses:
             attention_items.append(summary_item)
+    # Observation coverage is distinct from event evidence: an unobserved interval
+    # must never be represented as evidence that an event did not occur.
+    coverage_table_available = inspect(db.get_bind()).has_table("observation_coverage")
+    coverage_rows = []
+    coverage_count = 0
+    if coverage_table_available:
+        coverage_count = db.query(func.count(ObservationCoverage.id)).filter(
+            ObservationCoverage.person_id == person_id
+        ).scalar() or 0
+        coverage_rows = (
+            db.query(ObservationCoverage)
+            .filter(ObservationCoverage.person_id == person_id)
+            .order_by(desc(ObservationCoverage.window_start), ObservationCoverage.id.asc())
+            .limit(100)
+            .all()
+        )
+    observation_coverage = {
+        "items": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "window_start": row.window_start,
+                "window_end": row.window_end,
+                "coverage_status": row.coverage_status,
+                "source_evidence_ids": list(row.source_evidence_ids or []),
+                "rationale": row.rationale,
+                "recorded_at": row.created_at,
+                "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
+                "interpretation_limit": "Observation coverage describes whether a domain was recorded as observed; it does not prove that an event did or did not occur.",
+            }
+            for row in coverage_rows
+        ],
+        "count": coverage_count,
+        "has_more": coverage_count > len(coverage_rows),
+        "status": "available" if coverage_table_available else "unavailable_schema",
+        "source_of_truth": "persisted_person_scoped_observation_coverage",
+        "absence_rule": "No coverage record means unknown, not no events.",
+    }
     capability_specs = {
         "situation_understanding": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts", "caregiver_perspectives", "decisions", "decision_outcomes", "timeline", "uncertainties", "uncertainty_assessments", "information_gaps", "conflicts"],
         "current_care_reality": ["events", "facts", "assertions", "caregiver_observations", "caregiver_contexts"],
@@ -1202,44 +1240,6 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "record_count": coverage_count,
         "evidence_state": "supported_by_persisted_records" if coverage_count else "insufficient_evidence",
         "unavailable_sources": [] if coverage_table_available else ["observation_coverage"],
-    }
-    # Observation coverage is distinct from event evidence: an unobserved interval
-    # must never be represented as evidence that an event did not occur.
-    coverage_table_available = inspect(db.get_bind()).has_table("observation_coverage")
-    coverage_rows = []
-    coverage_count = 0
-    if coverage_table_available:
-        coverage_count = db.query(func.count(ObservationCoverage.id)).filter(
-            ObservationCoverage.person_id == person_id
-        ).scalar() or 0
-        coverage_rows = (
-            db.query(ObservationCoverage)
-            .filter(ObservationCoverage.person_id == person_id)
-            .order_by(desc(ObservationCoverage.window_start), ObservationCoverage.id.asc())
-            .limit(100)
-            .all()
-        )
-    observation_coverage = {
-        "items": [
-            {
-                "id": row.id,
-                "subject_type": row.subject_type,
-                "window_start": row.window_start,
-                "window_end": row.window_end,
-                "coverage_status": row.coverage_status,
-                "source_evidence_ids": list(row.source_evidence_ids or []),
-                "rationale": row.rationale,
-                "recorded_at": row.created_at,
-                "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
-                "interpretation_limit": "Observation coverage describes whether a domain was recorded as observed; it does not prove that an event did or did not occur.",
-            }
-            for row in coverage_rows
-        ],
-        "count": coverage_count,
-        "has_more": coverage_count > len(coverage_rows),
-        "status": "available" if coverage_table_available else "unavailable_schema",
-        "source_of_truth": "persisted_person_scoped_observation_coverage",
-        "absence_rule": "No coverage record means unknown, not no events.",
     }
     # A source-linked chronology is not a causal explanation. Preserve event time and
     # record time separately, and leave temporal anchors unknown when not recorded.
