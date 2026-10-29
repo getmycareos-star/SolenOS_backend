@@ -112,6 +112,8 @@ jobs:
               "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
               "evidence_freshness_policies": {"id", "person_id", "domain_key", "policy_version", "max_age_days", "historical_after_days", "rationale", "created_by_caregiver_id", "created_at"},
               "evidence_freshness_assessments": {"id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status", "source_time", "source_time_kind", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id"},
+              "evidence_completeness_policies": {"id", "person_id", "domain_key", "purpose_key", "policy_version", "required_fields", "rationale", "created_by_caregiver_id", "created_at"},
+              "evidence_completeness_assessments": {"id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "field_evidence_json", "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at"},
               "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "created_at"},
           }
           for table, required in expected.items():
@@ -243,12 +245,19 @@ jobs:
                           (f"trg_{table}_immutable",),
                       ).first()
                       assert freshness_trigger is not None, f"append-only trigger missing for {table}"
+                  for table in ("evidence_completeness_policies", "evidence_completeness_assessments"):
+                      completeness_trigger = connection.exec_driver_sql(
+                          "SELECT 1 FROM pg_trigger WHERE tgname = %s AND NOT tgisinternal",
+                          (f"trg_{table}_immutable",),
+                      ).first()
+                      assert completeness_trigger is not None, f"append-only trigger missing for {table}"
               print("PASS evidence review append-only trigger")
               print("PASS claim assessment append-only trigger")
               print("PASS claim dependency append-only trigger")
               print("PASS persisted conflict resolution scope column")
               print("PASS clarification answer history append-only trigger")
               print("PASS append-only freshness policy and assessment triggers")
+              print("PASS append-only completeness policy and assessment triggers")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
               (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
