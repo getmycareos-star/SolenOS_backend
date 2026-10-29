@@ -1,13 +1,13 @@
 """Persist append-only source lineage and corroboration assessments.
 
-Revision ID: 20261029_08_evidence_source_relationships
+Revision ID: 20261029_08_source_links
 Revises: 20261029_07_claim_assessments
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_08_evidence_source_relationships"
+revision = "20261029_08_source_links"
 down_revision = "20261029_07_claim_assessments"
 branch_labels = None
 depends_on = None
