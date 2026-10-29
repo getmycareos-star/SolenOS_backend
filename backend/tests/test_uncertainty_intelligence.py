@@ -434,6 +434,23 @@ def test_failed_or_truncated_source_is_not_a_negative_finding():
     assert any("truncated" in limitation for limitation in result["limitations"])
 
 
+def test_source_access_failure_creates_actionable_clarification():
+    result = analyze_uncertainty(
+        claim="No appointment is listed.",
+        task="recommendation",
+        evidence=[],
+        source_access="permission_denied",
+    )
+    assert result["epistemic_state"] == "unknown"
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert any(
+        "source access" in question["question"].lower()
+        and "permission" in question["reason"].lower()
+        for question in result["clarification_questions"]
+    )
+    assert result["conclusion_confidence"] is None
+
+
 def test_unreadable_evidence_reduces_sufficiency_without_confidence_inflation():
     result = analyze_uncertainty(
         claim="The document establishes the current instruction.",
