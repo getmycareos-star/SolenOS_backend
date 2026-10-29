@@ -68,18 +68,22 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 
 ### G. Structured observation extraction — PARTIAL
 - [x] Existing ingestion/extraction and care-assertion paths preserve source text, evidence IDs, source spans, and separate event/recording times in supported workflows.
-- [ ] Implement a universal typed extraction contract for negation, hedging, ambiguity, temporal expressions, pronoun/entity safeguards, extraction model/version, and structured validation.
+- [x] Add append-only typed observations linked to an exact passage and offsets in original evidence, with source kind, epistemic status, subject, attribute/value/units/context, negation, hedging, ambiguity, observer/method, extraction method/version, and separate occurrence/observation/report/recording times.
+- [x] Validate exact source passages, ambiguous repeated passage offsets, observed-status requirements, unknown/missing value semantics, time-zone-bearing timestamps, and same-record observer identity.
+- [ ] Universal automated extraction across document/audio/transcript/image/text adapters and pronoun/entity resolution remain incomplete.
 - [ ] Verify document, audio, transcript, image, and text paths preserve originals and report unsupported formats/failures.
 
 ### H. Fact, inference, interpretation, and reported-versus-observed separation — PARTIAL
 - [x] Uncertainty analysis distinguishes unknown, conflicting, ambiguous, partially known, insufficient, and uncalibrated states in supported tasks.
 - [x] Unsupported assessment tasks now fail closed to unknown.
-- [ ] Verify end-to-end separation of report vs direct observation, behavior vs interpretation, hypothesis vs finding, prediction vs outcome, correlation vs causation, and question vs assertion.
+- [x] Structured observation API refuses to label an observation as observed without a direct-observation kind, named observer, and method; reported/inferred/hypothesis/unknown/missing remain explicit statuses.
+- [ ] Verify end-to-end separation of behavior vs interpretation, prediction vs outcome, correlation vs causation, and question vs assertion across Companion, summaries, appointments, and handoffs.
 - [ ] Add dependency-aware inference invalidation and grounded alternative explanations; no diagnosis or causal claim from narratives or temporal sequence alone.
 
 ### I. Temporal evidence and historical continuity — PARTIAL
 - [x] Care events preserve occurrence time, recorded time, timezone, and time provenance; evidence now has separate occurred, collected, uploaded, and ingested time fields.
 - [x] Conflict matching checks explicit intervals and rejects reversed intervals.
+- [x] Structured observations retain distinct occurred, observed, reported, and recorded times; submitted timestamps must be timezone-aware.
 - [ ] Complete review/correction/effective interval dimensions, approximate time precision, late/backdated evidence policy, domain-specific freshness, temporal claim validity, and historical snapshot reconstruction.
 
 ### J. Duplicate detection, entity resolution, and identity integrity — PARTIAL
@@ -111,7 +115,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 ### O. Integrity, security, and governance — PARTIAL
 - [x] Evidence creation now requires a server-issued bearer session matching person and uploader caregiver.
 - [x] Reporter/collector caregiver references and parent evidence are validated against the same care record.
-- [x] Evidence reviews and conflict-resolution history are append-only in ORM; evidence review has PostgreSQL immutability enforcement.
+- [x] Evidence reviews, claim assessments, source relationships, and structured observations are append-only in ORM; PostgreSQL/SQLite migrations add database-level mutation guards for each new audit record.
 - [x] Claim-assessment writes derive person and reviewer identity from the server-validated bearer session, validate every linked evidence ID against that same person, and preserve assessment history with ORM/database append-only guards.
 - [ ] Audit every remaining evidence/claim/conflict/gap/question endpoint for scope authorization, every foreign ID, transactional rollback, idempotency, secure media handling, retention/deletion, backup/restore, and production failure behavior.
 - [ ] Verify immutable source handling against all writers, direct SQL, and deployed PostgreSQL behavior.
@@ -134,7 +138,8 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Added tests for evidence provenance fields, source-text hashing, and evidence-create authorization.
 - [x] Add source-lineage API tests for create/list persistence, cross-record denial, duplicate prevention, and cycle prevention.
 - [ ] Current-main test and PostgreSQL migration runs must pass before these additions are considered verified.
-- [ ] Add broader E2E/property/concurrency/failure tests for every state transition, ingestion retry, cross-person access, extraction path, claim dependency, source lineage, historical reconstruction, and production telemetry.
+- [x] Add tests for source relationship persistence/isolation/cycle rejection/duplicate rejection and exact-source-span observation persistence, classification boundaries, invalid source passages, and cross-record denial.
+- [ ] Current-main backend tests and PostgreSQL migration validation must pass before these additions are considered verified; broader E2E/property/concurrency/failure tests remain incomplete.
 
 ## Current implementation commits
 
