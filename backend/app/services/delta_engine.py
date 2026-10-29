@@ -626,7 +626,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     "source_type": row.source_type or row.type,
                     "text": row.source_text,
                     "verified": str(row.evidence_status or "").lower() == "verified",
-                    "observed_at": row.time_provenance,
+                    # This is provenance about the time, not an occurrence timestamp.
+                    "temporal_provenance": row.time_provenance,
                 } for row in evidence_rows]
 
             for finding in computed:
