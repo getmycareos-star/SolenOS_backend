@@ -237,6 +237,8 @@ def detect_event_changes(
         coverage_is_complete = (
             comparison.get("baseline_coverage_status") == "covered"
             and comparison.get("current_coverage_status") == "covered"
+            and not comparison.get("baseline_history_truncated", False)
+            and baseline.event_count > 0
         )
         rate_delta = comparison.get("frequency_delta")
         direction_still_supported = (
