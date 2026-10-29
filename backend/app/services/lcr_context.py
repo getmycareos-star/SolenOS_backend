@@ -36,9 +36,16 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "evidence": {
         "table": "evidence",
         "required": True,
-        "fields": ["id", "type", "source_text", "uploaded_at", "uploaded_by_caregiver_id",
-                   "time_provenance", "location", "evidence_status", "source_type",
-                   "source_span_start", "source_span_end"],
+        "fields": [
+            "id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_at",
+            "uploaded_by_caregiver_id", "time_provenance", "location", "evidence_status",
+            "source_type", "source_span_start", "source_span_end", "original_author",
+            "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id",
+            "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel",
+            "original_source_reference", "parent_evidence_id", "source_text_sha256",
+            "ingested_at", "reported_at", "collection_method", "origin_device_ref",
+            "transfer_source", "transfer_reference",
+        ],
         "order": ["uploaded_at", "created_at"],
     },
     "evidence_observations": {
@@ -275,6 +282,11 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
         for spec in SOURCE_SPECS.values()
         if spec["table"] in available_tables
     ]
+    # Source lineage is auxiliary metadata for all LCR-facing workflows. Keep it
+    # outside SOURCE_SPECS so its absence does not falsely mark core schema coverage
+    # as incomplete on legacy databases.
+    if "evidence_source_relationships" in available_tables:
+        present.append("evidence_source_relationships")
     if present:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)))
     return available_tables, metadata
@@ -359,6 +371,63 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
             "limit": limit,
         }
 
+    evidence_lineage: dict[str, Any] = {
+        "status": "not_assessed",
+        "groups": [],
+        "relationship_records_examined": 0,
+        "relationship_history_bounded": True,
+        "interpretation_limit": (
+            "Source lineage is based only on explicit parent/source references and persisted "
+            "reviewed relationships. Text similarity, shared vocabulary, or model repetition "
+            "does not establish common origin or independent corroboration."
+        ),
+    }
+    evidence_source = sources.get("evidence", {})
+    evidence_items = evidence_source.get("items", [])
+    relationship_table = metadata.tables.get("evidence_source_relationships")
+    if relationship_table is not None and "person_id" in relationship_table.c:
+        relationship_rows = db.execute(
+            select(*relationship_table.c).where(
+                relationship_table.c.person_id == str(person_id)
+            ).order_by(
+                desc(relationship_table.c.created_at)
+                if "created_at" in relationship_table.c else relationship_table.c.id
+            ).limit(min(limit * 3, 150) + 1)
+        ).mappings().all()
+        relationship_has_more = len(relationship_rows) > min(limit * 3, 150)
+        relationship_rows = relationship_rows[:min(limit * 3, 150)]
+        from types import SimpleNamespace
+        from app.services.evidence_lineage import build_evidence_lineage
+        selected_ids = [str(item.get("id")) for item in evidence_items if item.get("id")]
+        lineage_by_id, independence_by_id = build_evidence_lineage(
+            [SimpleNamespace(**item) for item in evidence_items],
+            [SimpleNamespace(**dict(row)) for row in relationship_rows],
+            selected_ids,
+        )
+        group_members: dict[str, list[str]] = {}
+        for evidence_id, lineage_id in lineage_by_id.items():
+            group_members.setdefault(lineage_id, []).append(evidence_id)
+        evidence_lineage.update({
+            "status": "assessed_bounded_subset",
+            "groups": [
+                {
+                    "lineage_id": lineage_id,
+                    "evidence_ids": sorted(ids),
+                    "source_independence_status": (
+                        "shared_origin" if any(independence_by_id.get(eid) == "shared_origin" for eid in ids)
+                        else "unassessed"
+                    ),
+                    "basis": "explicit_persisted_provenance",
+                    "interpretation_limit": "A lineage link is not proof that the linked claim is true.",
+                }
+                for lineage_id, ids in sorted(group_members.items())
+            ],
+            "relationship_records_examined": len(relationship_rows),
+            "relationship_history_bounded": relationship_has_more,
+        })
+    else:
+        evidence_lineage["status"] = "unavailable_schema" if evidence_items else "not_assessed"
+
     schema_status = "complete" if not missing_required and not missing_optional else "partial"
     return {
         "person_id": str(person_id),
@@ -370,6 +439,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
         "missing_required_sources": missing_required,
         "missing_optional_sources": missing_optional,
         "sources": sources,
+        "evidence_lineage": evidence_lineage,
     }
 
 
@@ -382,6 +452,10 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             "history_coverage": context.get("history_coverage"),
             "missing_required_sources": context.get("missing_required_sources", []),
             "missing_optional_sources": context.get("missing_optional_sources", []),
+            "evidence_lineage": context.get("evidence_lineage", {
+                "status": "not_assessed",
+                "interpretation_limit": "No source-lineage assessment was supplied.",
+            }),
         }, ensure_ascii=False, separators=(",", ":"))
     )
     chunks = [header]
