@@ -658,3 +658,45 @@ def test_reassessment_retires_patterns_when_all_source_events_are_invalidated():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_partial_uncovered_interval_does_not_label_whole_window_uncovered():
+    db, person, caregiver = _db()
+    try:
+        end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        start = end - timedelta(days=14)
+        db.add(ObservationCoverage(
+            id="only-first-week-uncovered", person_id=person.id, subject_type="mobility",
+            window_start=start, window_end=start + timedelta(days=7), coverage_status="uncovered",
+            source_evidence_ids=[], rationale="Caregiver confirms the first week was not observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        result = assess_observation_coverage(db, person.id, "mobility", start, end)
+        assert result["coverage_status"] == "unknown"
+        assert result["coverage_fraction"] == 0
+        assert "do not establish observation status" in result["limitations"][0]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
+
+def test_entire_window_must_be_explicitly_uncovered_for_uncovered_status():
+    db, person, caregiver = _db()
+    try:
+        end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        start = end - timedelta(days=14)
+        db.add(ObservationCoverage(
+            id="whole-window-uncovered", person_id=person.id, subject_type="mobility",
+            window_start=start, window_end=end, coverage_status="uncovered",
+            source_evidence_ids=[], rationale="Caregiver confirms the whole interval was not observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        result = assess_observation_coverage(db, person.id, "mobility", start, end)
+        assert result["coverage_status"] == "uncovered"
+        assert result["coverage_fraction"] == 0
+        assert "entire requested interval" in result["limitations"][0]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
