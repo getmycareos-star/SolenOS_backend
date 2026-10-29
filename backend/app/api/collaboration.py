@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect
+from sqlalchemy import inspect, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -559,32 +559,59 @@ _CONTEXT_STOPWORDS = {
 }
 
 
-def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
-    """Put query-relevant authorized records first without changing their meaning.
+_COMPANION_SYNONYM_GROUPS = (
+    {"sleep", "rest", "waking", "wake", "insomnia", "restless", "night"},
+    {"fall", "fell", "slip", "slipped", "trip", "tripped", "stumble"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "provider"},
+    {"medication", "medicine", "pill", "tablet", "dose", "prescription"},
+    {"pain", "ache", "sore", "discomfort", "hurting"},
+    {"appetite", "eating", "meal", "food", "hungry"},
+    {"confusion", "confused", "disoriented", "memory", "forgetful"},
+    {"breathing", "breathless", "breathlessness", "wheeze", "shortness"},
+    {"agitation", "agitated", "restlessness", "distressed", "upset"},
+    {"fatigue", "tired", "exhausted", "weakness", "weak"},
+    {"hydration", "drinking", "fluids", "dehydration", "thirsty"},
+)
 
-    Recency is already represented by the input order and is only a tie-breaker;
-    keyword overlap selects context, never establishes truth or source authority.
-    """
-    if limit <= 0 or not lines:
-        return []
-    query_terms = {
+
+def _companion_query_terms(query: str, *, max_direct: int = 12) -> tuple[set[str], set[str]]:
+    """Return bounded direct and paraphrase terms; synonyms aid retrieval, not truth."""
+    tokens = [
         token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
         if token not in _CONTEXT_STOPWORDS
-    }
-    if not query_terms:
+    ]
+    direct_ordered = list(dict.fromkeys(tokens))[:max_direct]
+    direct = set(direct_ordered)
+    expanded = set()
+    for group in _COMPANION_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    expanded.difference_update(direct)
+    return direct, expanded
+
+
+def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
+    """Rank authorized records by direct relevance, then paraphrase relevance, then recency."""
+    if limit <= 0 or not lines:
+        return []
+    direct_terms, synonym_terms = _companion_query_terms(query)
+    if not direct_terms and not synonym_terms:
         return lines[:limit]
 
     scored = []
+    normalized_query = " ".join((query or "").casefold().split())
+    phrases = [
+        phrase for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query)
+        if len(phrase) >= 8
+    ]
     for index, line in enumerate(lines):
         text = (line or "").casefold()
         record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = (2 * len(direct_overlap)) + len(synonym_overlap)
         # A matched multiword phrase is stronger than incidental single words.
-        normalized_query = " ".join((query or "").casefold().split())
-        for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
-            if len(phrase) >= 8 and phrase in text:
-                score += 2
+        score += sum(2 for phrase in phrases if phrase in text)
         scored.append((score, index, line))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [line for _, _, line in scored[:limit]]
