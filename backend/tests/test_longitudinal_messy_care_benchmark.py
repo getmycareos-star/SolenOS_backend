@@ -410,6 +410,40 @@ def test_attention_candidate_confusion_matrix_uses_actual_service_outputs():
 
 
 
+def test_handoff_draft_api_is_persisted_read_only_and_source_grounded():
+    """Exercise real authenticated handoff-draft API and verify source IDs and limitations."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "handoff-draft")
+        event = add_event(db, person, caregiver, "mobility", 1, "Needed help standing yesterday")
+        token = issue_session(db, person, caregiver)
+        db.commit()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/handoff-drafts/prepare",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"purpose": "family_transition", "audience": "family", "window_days": 30},
+        )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["read_only"] is True
+    assert payload["requires_caregiver_review"] is True
+    assert payload["creates_handoff"] is False
+    assert payload["updates_lcr"] is False
+    refs = payload["source_references"]
+    assert any(item["source_table"] == "care_events" and item["source_id"] == event.id for item in refs)
+    assert all(item["source_id"] != "" for item in refs)
+    assert "Unavailable sources were not read" in payload["warning"]
+    assert payload["source_statuses"]["community"]["status"] == "not_authorized"
+    with TestingSessionLocal() as db:
+        from app.models.privacy_delivery import AuditLogEvent
+        assert db.query(AuditLogEvent).filter(
+            AuditLogEvent.person_id == person.id,
+            AuditLogEvent.action == "handoff_draft.prepare",
+            AuditLogEvent.outcome == "success",
+        ).count() == 1
+
+
 def test_gradual_change_is_compared_only_when_each_window_is_covered():
     """Synthetic independently labelled gradual rise across three covered windows."""
     with TestingSessionLocal() as db:
