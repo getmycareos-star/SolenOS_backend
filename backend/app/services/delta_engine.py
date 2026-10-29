@@ -188,9 +188,16 @@ def _normalise(value: Any) -> str:
 
 
 def _match_finding_evidence(persisted_evidence: list[dict[str, Any]], excerpt: str) -> list[dict[str, Any]]:
-    """Return only person-scoped evidence whose stored text contains this finding's excerpt."""
+    """Match a finding to sufficiently specific text in persisted, person-scoped evidence.
+
+    Very short excerpts (for example, a medication name or "yes") are not
+    discriminative enough to establish provenance and must not be treated as
+    evidence linkage. This intentionally prefers a missed link over attributing
+    an unrelated record to a finding.
+    """
     normalized_excerpt = _normalise(excerpt)
-    if not normalized_excerpt:
+    excerpt_tokens = [token for token in normalized_excerpt.split() if any(char.isalnum() for char in token)]
+    if len(normalized_excerpt) < 16 or len(excerpt_tokens) < 3:
         return []
     return [
         row for row in persisted_evidence
