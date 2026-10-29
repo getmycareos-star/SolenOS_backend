@@ -117,6 +117,56 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         teardown()
 
 
+def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The available record does not establish a change over time."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": person_id,
+            "text": "Has the care situation changed?",
+            "client_turn_id": "retry-turn-0001",
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+
+        # Simulate a lost first response: retry without session_id, as the client
+        # cannot know the session ID until it receives the first response.
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["idempotent_replay"] is True
+        assert retry_data["session_id"] == first_data["session_id"]
+        assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert retry_data["written_to_lcr"] is False
+        assert len(calls) == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).all()
+            assert [row.role for row in rows] == ["user", "assistant"]
+            assert {row.client_turn_id for row in rows} == {"retry-turn-0001"}
+        finally:
+            db.close()
+
+        changed = {**payload, "text": "A different message using the same turn ID"}
+        conflict = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert conflict.status_code == 409, conflict.text
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
