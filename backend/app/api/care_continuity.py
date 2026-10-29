@@ -734,7 +734,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         value["source_statuses"] = sorted(set(value["source_statuses"]))
         value["evidence_state"] = "supported_by_persisted_records" if value["record_count"] else "no_records_returned"
     open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending"}
-    closed_statuses = {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "known"}
+    closed_statuses = {"resolved", "closed", "completed", "answered", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "dismissed", "not_applicable", "known"}
     attention_items = []
     uncertainty_items = []
     missing_items = []
