@@ -261,3 +261,37 @@ def _enforce_claim_assessment_append_only(session, flush_context, instances):
         raise ValueError("Evidence claim assessments are append-only and cannot be updated")
     if any(isinstance(obj, EvidenceClaimAssessment) for obj in session.deleted):
         raise ValueError("Evidence claim assessments are append-only and cannot be deleted")
+
+
+class EvidenceSourceRelationship(Base):
+    """Append-only, person-scoped source lineage and corroboration review."""
+    __tablename__ = "evidence_source_relationships"
+    __table_args__ = (
+        UniqueConstraint(
+            "person_id", "source_evidence_id", "related_evidence_id", "relationship_type",
+            name="uq_evidence_source_relationship",
+        ),
+        Index("ix_evidence_source_relationships_person_source", "person_id", "source_evidence_id"),
+        Index("ix_evidence_source_relationships_person_related", "person_id", "related_evidence_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
+    related_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
+    relationship_type = Column(String(32), nullable=False)
+    source_independence_status = Column(String(24), nullable=False)
+    origin_group_key = Column(String(128), nullable=True)
+    rationale = Column(Text, nullable=False)
+    reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_evidence_source_relationship_append_only(session, flush_context, instances):
+    """Source lineage and independence assessments are immutable audit facts."""
+    cls = EvidenceSourceRelationship
+    if any(isinstance(obj, cls) for obj in session.dirty):
+        raise ValueError("Evidence source relationships are append-only; create a new assessment instead")
+    if any(isinstance(obj, cls) for obj in session.deleted):
+        raise ValueError("Evidence source relationships are append-only and cannot be deleted")
