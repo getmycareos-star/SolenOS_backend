@@ -1335,6 +1335,28 @@ def test_source_lineage_rejects_false_independence_and_cross_record_links():
         assert listed.status_code == 200, listed.text
         assert len(listed.json()) == 1
         assert listed.json()[0]["source_evidence_id"] == "lineage-forward"
+
+        # Exercise the real authenticated uncertainty API, not just the lineage
+        # helper: two selected records with a persisted shared-origin edge must
+        # not be counted as independent corroboration.
+        analysis_response = client.post("/api/v1/uncertainty/analyze", json={
+            "person_id": person_id,
+            "subject_type": "care_event",
+            "subject_id": "event-lineage-1",
+            "field": "reported_event",
+            "claim": "Two independent sources confirm the event.",
+            "task": "summarize",
+            "evidence_ids": ["lineage-origin", "lineage-forward"],
+        })
+        assert analysis_response.status_code == 200, analysis_response.text
+        analysis = analysis_response.json()["analysis"]
+        assert analysis["independent_evidence_record_count"] == 1
+        assert any(
+            group["reason"] == "shared_source_lineage"
+            and group["independent_corroboration"] is False
+            for group in analysis["duplicate_evidence_groups"]
+        )
+        assert analysis["source_lineage_scope"]["status"] == "bounded_closure_loaded"
     finally:
         teardown_db()
 
