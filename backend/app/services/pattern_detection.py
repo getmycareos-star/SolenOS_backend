@@ -69,9 +69,9 @@ def detect_patterns(
             for change in changes
             for evidence_id in (change.evidence_ids or [])
         })
-        if not linked_ids:
-            return []
-        event_query = event_query.filter(CareEvent.id.in_(linked_ids))
+        # An empty linkage set means no eligible events for this subject, not
+        # "skip reconciliation". Let the empty query flow through so stale active
+        # patterns can be retired when their source evidence was invalidated.
     queried_events = (
         event_query
         .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
@@ -220,6 +220,35 @@ def detect_patterns(
                         f"{MAX_PATTERN_CHANGE_ASSESSMENTS} records; earlier assessments were not included.",
                     )
                 patterns.append(pattern)
+
+    # Reconcile lifecycle only when both source-event and change histories were
+    # fully read. A bounded/truncated scan cannot prove that an older pattern is
+    # unsupported, so it must not retire existing assessments.
+    if not events_truncated and not changes_truncated:
+        current_pattern_ids = {pattern.id for pattern in patterns}
+        stale_query = db.query(Pattern).filter(
+            Pattern.person_id == person_id,
+            Pattern.subject_type == subject_type,
+            Pattern.is_active.is_(True),
+        )
+        if subject_id is not None:
+            stale_query = stale_query.filter(Pattern.subject_id == (subject_id or ""))
+        stale_patterns = stale_query.order_by(Pattern.created_at.asc(), Pattern.id.asc()).all()
+        for stale in stale_patterns:
+            if stale.id in current_pattern_ids:
+                continue
+            stale.is_active = False
+            alternatives = list(stale.alternative_interpretations or [])
+            note = (
+                "This assessment is no longer supported by the latest eligible source "
+                "evidence during reconciliation. It is retained as historical context; "
+                "the absence of a current pattern is not proof that the real-world event stopped."
+            )
+            if note not in alternatives:
+                alternatives.append(note)
+            stale.alternative_interpretations = alternatives
+        if stale_patterns:
+            db.flush()
     return patterns
 
 
