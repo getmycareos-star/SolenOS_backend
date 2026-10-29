@@ -1215,6 +1215,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     user_text = payload.text.strip()
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
+    turn_started_at = datetime.now(timezone.utc)
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
@@ -1874,6 +1875,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
         client_turn_id=client_turn_id,
+        created_at=turn_started_at,
     ))
     response_metadata = {
         "request_sha256": request_sha256,
@@ -1892,6 +1894,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         evidence_ids_json=json.dumps(evidence_ids),
         client_turn_id=client_turn_id,
         response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=max(datetime.now(timezone.utc), turn_started_at + timedelta(microseconds=1)),
     )
     db.add(assistant_row)
     try:
