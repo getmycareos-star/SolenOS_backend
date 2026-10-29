@@ -191,6 +191,34 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     assert closure.json()["loop"]["status"] == "closed"
 
 
+def test_open_loop_create_and_update_reject_cross_person_source_ids():
+    client = TestClient(app)
+    _, headers_a = session(client, "Evidence scope A")
+    _, headers_b = session(client, "Evidence scope B")
+    other_loop = create_loop(client, headers_b, "pending_action")
+    foreign_source_id = create_source_evidence(other_loop, "Source belongs to another care record")
+
+    created = client.post(
+        "/api/v1/open-loops",
+        headers=headers_a,
+        json={
+            "loop_type": "pending_decision",
+            "title": "Decision with a foreign source",
+            "description": "The source must belong to this care record.",
+            "evidence": [{"evidence_id": foreign_source_id, "kind": "source_record"}],
+        },
+    )
+    assert created.status_code == 404, created.text
+
+    own_loop = create_loop(client, headers_a, "pending_decision")
+    updated = client.patch(
+        f"/api/v1/open-loops/{own_loop['id']}",
+        headers=headers_a,
+        json={"evidence": [{"evidence_id": foreign_source_id, "kind": "source_record"}]},
+    )
+    assert updated.status_code == 404, updated.text
+
+
 def test_professional_input_requires_source_evidence():
     client = TestClient(app)
     _, headers = session(client, "Care recipient")
