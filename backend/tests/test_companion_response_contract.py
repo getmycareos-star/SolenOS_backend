@@ -136,6 +136,36 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
     finally:
         teardown()
 
+def test_evidence_provenance_uses_deterministic_labeling_without_qwen(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def forbidden_qwen(*args, **kwargs):
+        raise AssertionError("evidence provenance must not invoke Qwen when the source is explicit")
+
+    monkeypatch.setattr(collaboration, "qwen_chat", forbidden_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "evidence_provenance",
+                "text": "Label the source of this claim: caregiver observed she seemed tired this morning. No professional assessment is supplied.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["provider_status"] == "not_required_deterministic"
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "read_only_assistance"
+        assert "caregiver-reported observation" in data["reply"]
+        assert "No professional assessment is supplied" in data["reply"]
+        assert "does not verify the underlying observation" in data["reply"]
+    finally:
+        teardown()
+
+
 def test_provenance_guard_allows_explicit_absence_but_rejects_unsupported_affirmation():
     source = "Caregiver report: sleep was poor last night."
     assert collaboration._contains_unsupported_care_claim(
