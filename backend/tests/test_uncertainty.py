@@ -280,19 +280,55 @@ def test_open_question_lifecycle():
         assert data["answer"] is None
         
         question_id = data["id"]
-        
-        response = client.patch(
+
+        first_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
-                "status": "closed",
-                "answer": "Yes, patient attended and follow-up was discussed",
-                "answer_provenance": "Note from cardiology visit",
+                "status": "answered",
+                "answer": "The caregiver reports that the appointment was attended.",
+                "answer_provenance": "Caregiver report recorded during the current session.",
             },
+        )
+        assert first_answer.status_code == 200, first_answer.text
+        assert first_answer.json()["answered_by_caregiver_id"] == "caregiver-5"
+
+        first_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert first_history.status_code == 200, first_history.text
+        assert len(first_history.json()) == 1
+        assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
+        assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
+
+        reopened = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={"status": "open"},
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["answer"] == "The caregiver reports that the appointment was attended."
+
+        corrected_answer = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "status": "answered",
+                "answer": "The caregiver reports attendance and says follow-up was discussed.",
+                "answer_provenance": "Caregiver clarification updated after checking the visit note.",
+            },
+        )
+        assert corrected_answer.status_code == 200, corrected_answer.text
+
+        second_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert second_history.status_code == 200, second_history.text
+        assert len(second_history.json()) == 2
+        assert second_history.json()[0]["answer"] != second_history.json()[1]["answer"]
+        assert all(row["person_id"] == "person-5" for row in second_history.json())
+
+        response = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={"status": "closed"},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "closed"
-        assert data["answer"] == "Yes, patient attended and follow-up was discussed"
+        assert data["answer"] == "The caregiver reports attendance and says follow-up was discussed."
     finally:
         teardown_db()
 
