@@ -498,32 +498,58 @@ _CONTEXT_STOPWORDS = {
 }
 
 
-def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
-    """Put query-relevant authorized records first without changing their meaning.
+_CONTEXT_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food", "intake"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
 
-    Recency is already represented by the input order and is only a tie-breaker;
-    keyword overlap selects context, never establishes truth or source authority.
-    """
-    if limit <= 0 or not lines:
-        return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
+
+def _base_context_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
         if token not in _CONTEXT_STOPWORDS
     }
-    if not query_terms:
+
+
+def _expanded_context_terms(text: str) -> set[str]:
+    direct = _base_context_terms(text)
+    expanded = set(direct)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    return expanded
+
+
+def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
+    """Rank direct matches above transparent synonym matches; never establish truth."""
+    if limit <= 0 or not lines:
+        return []
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    if not direct_terms and not synonym_terms:
         return lines[:limit]
 
     scored = []
+    normalized_query = " ".join((query or "").casefold().split())
     for index, line in enumerate(lines):
         text = (line or "").casefold()
-        record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
-        # A matched multiword phrase is stronger than incidental single words.
-        normalized_query = " ".join((query or "").casefold().split())
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", text))
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = 3 * len(direct_overlap) + len(synonym_overlap)
+        # Exact phrases strengthen a match, but cannot override source authority.
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
             if len(phrase) >= 8 and phrase in text:
-                score += 2
+                score += 3
         scored.append((score, index, line))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [line for _, _, line in scored[:limit]]
@@ -536,12 +562,13 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # Shortness alone does not imply a follow-up; require an explicit reference.
+    if not referential:
         return current
     recent = [
         f"{message.role}: {(message.content or '')[:500]}"
