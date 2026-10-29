@@ -282,3 +282,39 @@ def test_evidence_kind_rejects_unregistered_classifications(review_records):
         "uploaded_by_caregiver_id": "review-caregiver-a",
     })
     assert response.status_code == 422, response.text
+
+
+def test_source_text_integrity_endpoint_is_person_scoped_and_reports_exact_text_hash(review_records):
+    client_a, client_b = review_records
+    response = client_a.get("/api/v1/care-continuity/evidence/review-evidence-a/integrity")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["evidence_id"] == "review-evidence-a"
+    assert payload["person_id"] == "review-person-a"
+    assert payload["source_text_integrity_status"] == "match"
+    assert payload["stored_source_text_sha256"] == hashlib.sha256(
+        b"Caregiver reports that the appointment occurred."
+    ).hexdigest()
+    assert payload["hash_scope"] == "exact UTF-8 encoding of the currently stored source_text field"
+    assert payload["original_file_authenticity_verified"] is False
+
+    foreign = client_b.get("/api/v1/care-continuity/evidence/review-evidence-a/integrity")
+    assert foreign.status_code == 404
+
+
+def test_original_evidence_source_text_and_hash_cannot_be_changed_through_orm(review_records):
+    db = SessionLocal()
+    try:
+        evidence = db.query(Evidence).filter(Evidence.id == "review-evidence-a").one()
+        original_text = evidence.source_text
+        original_hash = evidence.source_text_sha256
+        evidence.source_text = "Changed text must not overwrite the original."
+        with pytest.raises(ValueError, match="immutable"):
+            db.commit()
+        db.rollback()
+
+        restored = db.query(Evidence).filter(Evidence.id == "review-evidence-a").one()
+        assert restored.source_text == original_text
+        assert restored.source_text_sha256 == original_hash
+    finally:
+        db.close()
