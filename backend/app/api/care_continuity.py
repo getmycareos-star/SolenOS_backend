@@ -1320,6 +1320,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "provenance": "care_context_reconstruction",
         "timeline": "historical_state_reconstruction",
         "follow_up_links": "situation_reassessment",
+        "open_loop_records": "open_loop_management",
     }
     evidence_ids: set[str] = set()
     domain_sources: dict[str, dict[str, Any]] = {}
@@ -1409,7 +1410,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "relationship_policy": "No relationship is inferred when records do not explicitly share a persisted evidence reference.",
     }
 
-    open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending"}
+    open_statuses = {
+        "open", "active", "pending", "unresolved", "needs_review", "not_started",
+        "follow_up_pending", "waiting", "deferred", "blocked", "review_abandoned",
+        "pending_closure_verification",
+    }
     closed_statuses = {"resolved", "closed", "completed", "answered", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "dismissed", "not_applicable", "known"}
     attention_items = []
     uncertainty_items = []
@@ -1425,6 +1430,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "missing_information": "missing_information",
         "open_questions": "unanswered_question",
         "follow_up_links": "follow_up",
+        "open_loop_records": "persistent_open_loop",
     }
     for item in all_items:
         status = str(item.get("status") or item.get("lifecycle_status") or item.get("assertion_status") or "").lower()
@@ -1499,12 +1505,16 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         if source in open_loop_sources and status not in closed_statuses:
             open_loops.append({
                 **summary_item,
-                "loop_type": open_loop_sources[source],
+                "loop_type": str(item.get("loop_type") or open_loop_sources[source]),
                 "description": str(item.get("description") or item.get("notes") or item.get("question") or item.get("topic") or "")[:1600],
-                "owner": item.get("owner") or item.get("assigned_to") or item.get("owner_id"),
-                "due_at": item.get("due_at"),
+                "owner": item.get("owner") or item.get("assigned_to") or item.get("owner_id") or item.get("owner_label") or item.get("owner_role"),
+                "due_at": item.get("due_at") or item.get("deadline_at"),
                 "recorded_status": status or "not_recorded",
                 "status_confidence": "explicitly_recorded" if status in open_statuses else "unresolved_source_record_status_not_explicit",
+                "priority": item.get("priority") if source == "open_loop_records" else None,
+                "priority_reasons": item.get("priority_reasons") if source == "open_loop_records" else None,
+                "outcome_status": item.get("outcome_status") if source == "open_loop_records" else None,
+                "closure_result": item.get("closure_result") if source == "open_loop_records" else None,
             })
         elif source == "events" and (item.get("attention_candidate") is True or item.get("follow_up_candidate") is True):
             attention_items.append(summary_item)
