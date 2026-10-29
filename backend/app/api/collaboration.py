@@ -1999,6 +1999,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "freshness_source_status": freshness_source_status,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
     }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
