@@ -560,6 +560,19 @@ def test_structured_observation_requires_exact_source_span_and_preserves_epistem
     assert source_text[row["source_span_start"]:row["source_span_end"]] == row["source_passage"]
     assert row["created_by_caregiver_id"] == "review-caregiver-a"
 
+    correction = dict(
+        payload,
+        value_text="three awakenings",
+        supersedes_observation_id=row["id"],
+        correction_rationale="The source span was reviewed and this observation was re-entered as a new version.",
+    )
+    corrected = client_a.post(
+        "/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=correction
+    )
+    assert corrected.status_code == 201, corrected.text
+    assert corrected.json()["supersedes_observation_id"] == row["id"]
+    assert corrected.json()["correction_rationale"] == correction["correction_rationale"]
+
     invalid_passage = dict(payload, source_passage="The person slept well.")
     assert client_a.post("/api/v1/care-continuity/evidence/review-observation-evidence/observations", json=invalid_passage).status_code == 422
 
