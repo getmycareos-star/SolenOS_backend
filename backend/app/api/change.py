@@ -513,6 +513,29 @@ def update_situations_endpoint(
 
 # Coverage is recorded independently of event occurrence. It describes observation,
 # not whether an event did or did not happen.
+
+def _coverage_record_out(row: ObservationCoverage) -> dict:
+    """Serialize UTC-normalized coverage timestamps safely across DB dialects."""
+    def utc(value):
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "subject_type": row.subject_type,
+        "window_start": utc(row.window_start),
+        "window_end": utc(row.window_end),
+        "coverage_status": row.coverage_status,
+        "source_evidence_ids": row.source_evidence_ids or [],
+        "rationale": row.rationale,
+        "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
+        "created_at": utc(row.created_at),
+    }
+
 from app.models.care import Evidence
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import (
@@ -540,8 +563,11 @@ def record_observation_coverage(
     row = ObservationCoverage(
         person_id=payload.person_id,
         subject_type=payload.subject_type.strip(),
-        window_start=payload.window_start,
-        window_end=payload.window_end,
+        # Normalize offset-bearing API timestamps before persistence. SQLite
+        # drops timezone metadata for DateTime columns, so stored naive values
+        # must already represent UTC to make round-trip serialization defensible.
+        window_start=payload.window_start.astimezone(timezone.utc),
+        window_end=payload.window_end.astimezone(timezone.utc),
         coverage_status=payload.coverage_status,
         source_evidence_ids=source_ids,
         rationale=payload.rationale.strip(),
@@ -554,7 +580,7 @@ def record_observation_coverage(
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="Observation coverage could not be persisted") from exc
-    return row
+    return _coverage_record_out(row)
 
 
 @router.get("/coverage/{person_id}", response_model=CoverageAssessment)
