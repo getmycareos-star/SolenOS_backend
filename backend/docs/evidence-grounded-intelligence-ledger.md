@@ -114,7 +114,13 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 ### K. Evidence completeness, freshness, and gaps — PARTIAL
 - [x] Persisted review criteria include completeness and freshness; information gaps and open questions are modeled and exposed through APIs.
 - [x] Unknown, missing, and unassessed are represented in existing epistemic workflows.
-- [ ] Add versioned domain-specific policies, rationale-backed review intervals, evidence dependency sufficiency per decision, stale/unknown/unassessed separation across every consumer, and change-triggered reassessment.
+- [x] Add person-scoped, immutable domain-specific freshness policy versions with explicit max-age and/or historical boundaries; no universal default threshold is supplied.
+- [x] Add authenticated policy creation/list APIs and append-only freshness assessments with policy version, event/collection/upload source time, assessment time, age, rationale, and explicit unknown/future timestamp outcomes.
+- [x] Add assessment-history retrieval and UI controls in the LCR evidence review panel; failed history reads are not presented as an empty history.
+- [x] Add a PostgreSQL migration with append-only database triggers and schema/trigger assertions; migration is idempotent when ORM metadata has pre-created the new tables.
+- [x] Add backend API tests for explicit-policy requirement, duplicate version rejection, stale/unknown time outcomes, persisted history, cross-person isolation, and ORM append-only behavior.
+- [ ] Current-main backend, PostgreSQL migration, and frontend checks must pass on the exact latest SHAs before this slice is verified.
+- [ ] Evidence dependency sufficiency per decision, stale/unknown/unassessed separation across every consumer, and automatic change-triggered reassessment remain incomplete.
 
 ### L. Evidence-grounded change detection — PARTIAL
 - [x] Persisted change assessments and patterns exist; evidence references, comparison windows, confirmation history, and reversal/supersession concepts exist.
@@ -362,3 +368,17 @@ Automatic source-family discovery, full dependency invalidation/re-review, unive
 - [x] PostgreSQL migration workflow passed at commit [`2b3f254`](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40894632632), including the `trg_conflict_resolution_events_immutable` direct-SQL mutation rejection step.
 - [ ] The historical reconstruction route and Companion lineage-propagation regression are still waiting for backend tests/validation on the exact latest `main` SHA. This migration workflow result is not being represented as a pass for those later code changes.
 - [ ] The new endpoint reconstructs one target from recorded revisions; it does not yet rebuild every domain's complete cross-record state at arbitrary historical instants. Full multi-domain historical reconstruction remains partial.
+
+
+## Direct-main implementation slice — domain-specific evidence freshness (2026-10-29)
+
+**Scope:** backend and frontend `main` only. No PR branch was modified.
+
+- Backend model: [persist versioned freshness policies and assessment history](https://github.com/getmycareos-star/SolenOS_backend/commit/9fc323d70dad342313e4932289a5943b5c7241c3).
+- Backend API: [add scoped policy and assessment workflows](https://github.com/getmycareos-star/SolenOS_backend/commit/9ab844f5517871083ccf3843b3805abaf261631e).
+- Migration: [add freshness policy schema and immutability](https://github.com/getmycareos-star/SolenOS_backend/commit/95e409cc9cf12d1741e6aa390638bd639a22f1c0); [make upgrade idempotent for pre-created schema](https://github.com/getmycareos-star/SolenOS_backend/commit/788d6f43b5f35a2bc698289d5a69289b7ad276a2).
+- Backend tests: [policy lifecycle, unknown timestamps, isolation, and append-only behavior](https://github.com/getmycareos-star/SolenOS_backend/commit/506e6b7fccdb81ec636b233a2dd0466c3d4f3ee9).
+- Frontend: [connect domain policies and assessment history to LCR evidence review](https://github.com/getmycareos-star/SolenOS-landing/commit/bd0fd93d78580daa3b98e4c90a7ec1860719603d); [verify the workflow contract](https://github.com/getmycareos-star/SolenOS-landing/commit/2b18a300a3d13c1c7b1e3e6d04cea3e04af23903); [fix type declarations after CI exposed escaped newline characters](https://github.com/getmycareos-star/SolenOS-landing/commit/f6ae714623e1489147877328e13bad4ea9389f3b).
+- Verification rule: the failed first PostgreSQL run identified duplicate-table creation when legacy schema paths pre-create current ORM metadata. The migration was changed to validate/reconcile existing tables and create missing indexes/triggers only. The corrected run and all exact-current-main workflows must pass before this work is marked verified.
+
+This slice does **not** close the full evidence capability map. Groups A–J and L–R retain their existing partial/missing/verification states unless separately proven by current-main integration evidence.
