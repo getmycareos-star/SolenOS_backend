@@ -339,3 +339,63 @@ def test_lower_record_count_without_coverage_does_not_claim_decrease():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_pattern_reassessment_supersedes_metrics_when_coverage_changes():
+    from app.models.care import CareEvent
+    from app.models.change import Pattern
+    from app.services.pattern_detection import detect_patterns
+
+    db, person, caregiver = _db()
+    try:
+        event_start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        reference_time = event_start + timedelta(days=10)
+        for i, days in enumerate((0, 2, 7, 8)):
+            db.add(CareEvent(
+                id=f"coverage-recalc-event-{i}",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=event_start + timedelta(days=days),
+                occurred_at_timezone="America/New_York",
+                title=f"Recorded mobility event {i}",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"coverage-recalc-source-{i}"],
+            ))
+        db.commit()
+
+        first = next(
+            item for item in detect_patterns(db, person.id, "mobility", None, reference_time)
+            if item.pattern_type.value == "recurrence"
+        )
+        assert first.frequency is None
+        first_id = first.id
+
+        db.add(ObservationCoverage(
+            id="full-90-day-coverage",
+            person_id=person.id,
+            subject_type="mobility",
+            window_start=reference_time - timedelta(days=90),
+            window_end=reference_time,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The mobility domain was explicitly observed for the full analysis window.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+
+        second = next(
+            item for item in detect_patterns(db, person.id, "mobility", None, reference_time)
+            if item.pattern_type.value == "recurrence"
+        )
+        db.refresh(second)
+        old = db.query(Pattern).filter(Pattern.id == first_id).one()
+        assert second.id != first_id
+        assert second.frequency == pytest.approx(4 / 90)
+        assert second.rate_per_period == pytest.approx(4 / 3)
+        assert second.pattern_metrics["observation_coverage_status"] == "covered"
+        assert old.is_active is False
+        assert old.superseded_by_pattern_id == second.id
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
