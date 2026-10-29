@@ -275,6 +275,10 @@ def analyze_uncertainty(
         classifications.append("unsupported_assessment_task")
         limitations.append("No sufficiency rule is defined for this assessment task; no downstream conclusion should be treated as established.")
         sufficiency = "insufficient_pending_resolution"
+        # Unsupported tasks cannot inherit a knowledge state from generic evidence
+        # heuristics. Evidence may exist, but this task has no authorized rule to
+        # interpret it, so its task-specific conclusion remains unknown.
+        epistemic_state = "unknown"
     if (
         conflicts or missing or normalized_access not in {"available", ""}
         or ambiguity_signals or quality_limited
