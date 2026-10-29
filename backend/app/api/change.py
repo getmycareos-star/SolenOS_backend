@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 import hashlib
 from sqlalchemy.orm import Session
