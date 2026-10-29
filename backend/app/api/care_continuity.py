@@ -2078,7 +2078,7 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         previous_comparison.pop("evolution_since_previous_assessment", None)
         current_comparison.pop("evolution_since_previous_assessment", None)
         if previous_comparison == current_comparison and not changes:
-            return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": previous_assessment}
+            return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": previous_assessment, "source_freshness": {"status": "current_for_bounded_source_view", "reassessment_recommended": False, "source_of_truth": "current_person_scoped_lcr_context", "scope": "bounded_per_source_limit_50", "read_only": True, "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete."}}
     else:
         assessment["evolution_since_previous_assessment"] = {
             "comparison_available": False,
@@ -2117,7 +2117,7 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         db.rollback()
         logger.exception("Situation assessment persistence failed for session-scoped person %s", person_id)
         raise HTTPException(status_code=503, detail="Situation assessment could not be persisted") from exc
-    return {"person_id": person_id, "status": "created", "assessment_id": row["id"], "assessment": assessment}
+    return {"person_id": person_id, "status": "created", "assessment_id": row["id"], "assessment": assessment, "source_freshness": {"status": "current_for_bounded_source_view", "reassessment_recommended": False, "source_of_truth": "current_person_scoped_lcr_context", "scope": "bounded_per_source_limit_50", "read_only": True, "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete."}}
 
 
 @router.get("/summary")
