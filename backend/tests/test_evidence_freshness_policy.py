@@ -11,6 +11,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Person, Caregiver, Evidence
+from app.models.care_continuity import EvidenceCompletenessPolicy, EvidenceCompletenessAssessment
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -214,6 +215,106 @@ def test_freshness_policy_and_assessment_history_are_immutable_in_the_orm():
 
             record = db.query(EvidenceFreshnessAssessment).filter_by(id=assessment.json()["id"]).one()
             record.rationale = "Attempted assessment rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                db.commit()
+            db.rollback()
+        finally:
+            db.close()
+    finally:
+        teardown_records()
+
+
+def test_purpose_specific_completeness_policy_assessment_history_and_scope():
+    setup_records()
+    try:
+        app.dependency_overrides[get_db] = override_get_db
+        client = client_for("freshness-person-a")
+        policy_response = client.post("/api/v1/care-continuity/evidence-completeness/policies", json={
+            "domain_key": "medication_history",
+            "purpose_key": "appointment_handoff",
+            "policy_version": "v1",
+            "required_fields": ["current_list", "source_date", "reporter"],
+            "rationale": "Checklist selected for preparing this appointment handoff; not a universal completeness rule.",
+        })
+        assert policy_response.status_code == 201, policy_response.text
+        policy = policy_response.json()
+        assert policy["required_fields"] == ["current_list", "source_date", "reporter"]
+        assert policy["immutable"] is True
+
+        duplicate = client.post("/api/v1/care-continuity/evidence-completeness/policies", json={
+            "domain_key": "medication_history",
+            "purpose_key": "appointment_handoff",
+            "policy_version": "v1",
+            "required_fields": ["current_list"],
+            "rationale": "Must not rewrite an existing policy version.",
+        })
+        assert duplicate.status_code == 409
+
+        partial = client.post("/api/v1/care-continuity/evidence-completeness/assessments", json={
+            "policy_id": policy["id"],
+            "subject_type": "appointment",
+            "subject_id": "appointment-test-1",
+            "assessment_mode": "assessed",
+            "field_evidence": {
+                "current_list": ["freshness-evidence-a"],
+                "reporter": ["freshness-evidence-a"],
+            },
+            "rationale": "The linked source is available for two checklist fields; source content still requires review.",
+        })
+        assert partial.status_code == 201, partial.text
+        assert partial.json()["status"] == "partial"
+        assert partial.json()["satisfied_fields"] == ["current_list", "reporter"]
+        assert partial.json()["missing_fields"] == ["source_date"]
+        assert partial.json()["assessment_basis"] == "linked_source_coverage_only"
+        assert partial.json()["semantic_sufficiency"] == "not_automatically_verified"
+
+        unknown = client.post("/api/v1/care-continuity/evidence-completeness/assessments", json={
+            "policy_id": policy["id"],
+            "subject_type": "appointment",
+            "subject_id": "appointment-test-2",
+            "field_evidence": {"current_list": ["freshness-evidence-b"]},
+            "rationale": "This evidence belongs to another care record.",
+        })
+        assert unknown.status_code == 422
+
+        not_assessed = client.post("/api/v1/care-continuity/evidence-completeness/assessments", json={
+            "policy_id": policy["id"],
+            "subject_type": "appointment",
+            "subject_id": "appointment-test-3",
+            "assessment_mode": "not_assessed",
+            "field_evidence": {},
+            "rationale": "The evidence could not be reviewed at this time.",
+        })
+        assert not_assessed.status_code == 201, not_assessed.text
+        assert not_assessed.json()["status"] == "undetermined"
+        assert not_assessed.json()["missing_fields"] == []
+
+        history = client.get(
+            "/api/v1/care-continuity/evidence-completeness/assessments/appointment/appointment-test-1"
+        )
+        assert history.status_code == 200
+        assert len(history.json()["items"]) == 1
+        assert history.json()["items"][0]["policy_version"] == "v1"
+
+        other_client = client_for("freshness-person-b")
+        cross_scope_policy = other_client.post("/api/v1/care-continuity/evidence-completeness/assessments", json={
+            "policy_id": policy["id"],
+            "subject_type": "appointment",
+            "subject_id": "appointment-test-4",
+            "field_evidence": {},
+            "rationale": "Cross-record policy access must be denied.",
+        })
+        assert cross_scope_policy.status_code == 404
+
+        db = TestingSessionLocal()
+        try:
+            row = db.query(EvidenceCompletenessPolicy).filter_by(id=policy["id"]).one()
+            row.rationale = "Attempted in-place rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                db.commit()
+            db.rollback()
+            assessment_row = db.query(EvidenceCompletenessAssessment).filter_by(id=partial.json()["id"]).one()
+            assessment_row.rationale = "Attempted assessment rewrite"
             with pytest.raises(ValueError, match="append-only"):
                 db.commit()
             db.rollback()
