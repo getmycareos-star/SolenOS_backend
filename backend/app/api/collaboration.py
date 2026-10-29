@@ -1307,6 +1307,43 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _conversation_history_payload(db: Session, session_id: str) -> list[dict]:
+    """Rebuild ordered transcript rows with persisted response provenance when available."""
+    rows = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session_id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    messages = []
+    for row in rows:
+        item = {
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+            "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+            "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+        }
+        if row.role == "assistant" and row.response_metadata_json:
+            try:
+                metadata = json.loads(row.response_metadata_json)
+            except (TypeError, ValueError):
+                metadata = {}
+            for key in (
+                "confidence", "source_event_ids", "source_evidence_ids",
+                "source_appointment_ids", "source_assertion_ids",
+                "source_lcr_context_ids", "source_freshness_assessment_ids",
+                "freshness_source_status", "lcr_context_coverage", "ai_generated",
+                "written_to_lcr", "persistence",
+            ):
+                if key in metadata:
+                    item[key] = metadata[key]
+        messages.append(item)
+    return messages
+
+
 def _replay_companion_turn(db: Session, session_id: str, user_row: ConversationMessage) -> Optional[dict]:
     """Reconstruct the original committed response for a safe idempotent retry."""
     assistant_row = (
@@ -1326,19 +1363,7 @@ def _replay_companion_turn(db: Session, session_id: str, user_row: ConversationM
         replay = json.loads(assistant_row.response_metadata_json)
     except (TypeError, ValueError):
         return None
-    history = (
-        db.query(ConversationMessage)
-        .filter_by(session_id=session_id)
-        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
-        .all()
-    )
-    replay["messages"] = [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "guard_verdict": row.guard_verdict,
-        "safety_note": row.safety_note,
-    } for row in history]
+    replay["messages"] = _conversation_history_payload(db, session_id)
     return replay
 
 
@@ -2046,14 +2071,11 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-    } for row in rows]}
+    return {
+        "session_id": session.id,
+        "person_id": person_id,
+        "messages": _conversation_history_payload(db, session.id),
+    }
 
 
 class NotificationPreferenceUpdate(BaseModel):
