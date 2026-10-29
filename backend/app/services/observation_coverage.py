@@ -29,19 +29,28 @@ def assess_observation_coverage(
         .order_by(ObservationCoverage.window_start.asc(), ObservationCoverage.id.asc())
         .all()
     )
-    intervals = sorted(
-        (max(start, _utc(r.window_start)), min(end, _utc(r.window_end)))
-        for r in rows if r.coverage_status == "covered"
-    )
+    # Count an interval as confidently covered only when at least one covered
+    # record spans it and no partial/uncovered/unknown record conflicts with it.
+    # Conflicting coverage declarations must reduce, never inflate, the fraction.
+    intervals = [
+        (max(start, _utc(r.window_start)), min(end, _utc(r.window_end)), r.coverage_status)
+        for r in rows
+    ]
+    boundaries = {start, end}
+    for left, right, _status in intervals:
+        boundaries.add(left)
+        boundaries.add(right)
+    ordered_boundaries = sorted(boundaries)
     covered_seconds = 0
-    cursor = start
-    for left, right in intervals:
-        if right <= cursor:
+    for left, right in zip(ordered_boundaries, ordered_boundaries[1:]):
+        if right <= left:
             continue
-        left = max(left, cursor)
-        if right > left:
+        active_statuses = {
+            status for interval_start, interval_end, status in intervals
+            if interval_start <= left and interval_end >= right
+        }
+        if "covered" in active_statuses and active_statuses == {"covered"}:
             covered_seconds += int((right - left).total_seconds())
-            cursor = right
     window_seconds = int((end - start).total_seconds())
     has_explicit_interval_status = any(r.coverage_status in {"covered", "uncovered"} for r in rows)
     # No coverage rows means unknown, not a measured 0% observation rate.
