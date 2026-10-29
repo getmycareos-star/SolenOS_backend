@@ -189,14 +189,14 @@ def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
     from sqlalchemy.exc import IntegrityError
     from app.core.database import Base
     from app.core.uncertainty_enums import EpistemicState, GapReason
-    from app.models.care import Person
+    from app.models.care import Caregiver, Person
     from app.models.uncertainty import UncertaintyAssessment
     from app.models.care_continuity import CareStateRevision
 
     engine = create_engine("sqlite://")
     Base.metadata.create_all(
         engine,
-        tables=[Person.__table__, UncertaintyAssessment.__table__, CareStateRevision.__table__],
+        tables=[Person.__table__, Caregiver.__table__, UncertaintyAssessment.__table__, CareStateRevision.__table__],
     )
 
     analysis_old = {"epistemic_state": "unknown", "limitations": ["No current evidence."], "calibration_status": "not_calibrated"}
