@@ -120,6 +120,37 @@ def main():
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
 
+        # Real PostgreSQL uncertainty API persistence and record-isolation checks.
+        status, created_uncertainty = request("POST", "/api/v1/uncertainty/assessments", token=token_a, body={
+            "person_id": person_a, "subject_type": "medication",
+            "subject_id": "postgres-e2e-unknown-medication", "field": "current_status",
+            "epistemic_state": "unknown", "gap_reason": "not_documented", "known_value": None,
+        })
+        require(status == 200, f"uncertainty create expected 200, got {status}: {created_uncertainty}")
+        require(created_uncertainty.get("epistemic_state") == "unknown"
+                and created_uncertainty.get("confidence") is None,
+                f"unknown state/confidence contract failed: {created_uncertainty}")
+        status, persisted_uncertainty = request(
+            "GET", f"/api/v1/uncertainty/assessments/{person_a}?subject_type=medication&subject_id=postgres-e2e-unknown-medication",
+            token=token_a,
+        )
+        require(status == 200 and any(
+            item.get("field") == "current_status" and item.get("epistemic_state") == "unknown"
+            and item.get("confidence") is None for item in persisted_uncertainty
+        ), f"uncertainty assessment did not persist: {status}: {persisted_uncertainty}")
+        status, uncertainty_view = request(
+            "GET", f"/api/v1/uncertainty/view/{person_a}/medication/postgres-e2e-unknown-medication",
+            token=token_a,
+        )
+        require(status == 200 and uncertainty_view.get("epistemic_state") == "unknown"
+                and uncertainty_view.get("known_value") is None,
+                f"unknown epistemic view contract failed: {status}: {uncertainty_view}")
+        status, cross_uncertainty = request(
+            "GET", f"/api/v1/uncertainty/assessments/{person_a}", token=token_b,
+        )
+        require(status == 403,
+                f"cross-person uncertainty access must return 403, got {status}: {cross_uncertainty}")
+
         observation = "PostgreSQL end-to-end durable observation unique to person A"
         status, captured = request(
             "POST",
