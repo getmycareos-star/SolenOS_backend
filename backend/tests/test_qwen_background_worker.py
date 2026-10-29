@@ -192,6 +192,7 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
             "source_appointment_ids": ["appointment-record-123456"],
             "source_handoff_ids": ["handoff-record-123456"],
             "source_notification_ids": ["notification-record-123456"],
+            "source_freshness_assessment_ids": ["freshness-assessment-123456"],
         }
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -213,6 +214,7 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     assert output.output_metadata["source_appointment_ids"] == ["appointment-record-123456"]
     assert output.output_metadata["source_handoff_ids"] == ["handoff-record-123456"]
     assert output.output_metadata["source_notification_ids"] == ["notification-record-123456"]
+    assert output.output_metadata["source_freshness_assessment_ids"] == ["freshness-assessment-123456"]
     safety = db.query(QwenSafetyEvaluation).filter_by(output_id=output.id).one()
     assert safety.decision == "review_required"
     assert safety.human_review_required is True
