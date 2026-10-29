@@ -421,6 +421,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert retrieved.status_code == 200, retrieved.text
     assert retrieved.json()["assessment_id"] == body["assessment_id"]
     assert retrieved.json()["assessment"]["person_id"] == owner["person"]["id"]
+    assert retrieved.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+    assert retrieved.json()["source_freshness"]["reassessment_recommended"] is False
 
     # A genuinely new persisted source record must change the next assessment
     # and be represented as a projection delta, not a clinical interpretation.
@@ -430,6 +432,10 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
             VALUES ('understanding-fact-2', :person_id, 'daily_function', 'Newly reported support requirement',
                     'reported', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         """), {"person_id": owner["person"]["id"]})
+    check = test_client.get("/api/v1/care-continuity/situation-understanding", headers=headers)
+    assert check.status_code == 200, check.text
+    assert check.json()["source_freshness"]["status"] == "source_changed_since_assessment"
+    assert check.json()["source_freshness"]["reassessment_recommended"] is True
     changed = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
     assert changed.status_code == 200, changed.text
     changed_body = changed.json()
