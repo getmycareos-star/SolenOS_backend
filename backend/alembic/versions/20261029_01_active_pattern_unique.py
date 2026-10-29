@@ -1,6 +1,6 @@
 """Prevent concurrent creation of duplicate active longitudinal patterns.
 
-Revision ID: 20261029_01_active_pattern_unique
+Revision ID: 20261029_01_pattern_unique
 Revises: 20261028_06_review_immutable
 
 The migration refuses to guess which active duplicate is authoritative. If existing
@@ -10,7 +10,7 @@ must be reconciled with provenance preserved before retrying.
 from alembic import op
 from sqlalchemy import inspect, text
 
-revision = "20261029_01_active_pattern_unique"
+revision = "20261029_01_pattern_unique"
 down_revision = "20261028_06_review_immutable"
 branch_labels = None
 depends_on = None
