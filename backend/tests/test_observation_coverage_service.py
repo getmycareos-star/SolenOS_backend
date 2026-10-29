@@ -98,3 +98,47 @@ def test_coverage_records_are_isolated_by_person():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+def test_decrease_requires_complete_coverage_for_both_comparison_windows():
+    from app.models.care import CareEvent
+    from app.services.baseline import build_baseline
+    from app.services.change_detection import detect_event_changes
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime.now(timezone.utc)
+        for i, days_ago in enumerate((120, 100, 80, 60, 7)):
+            db.add(CareEvent(
+                id=f"fall-event-{i}", person_id=person.id, event_type="fall",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded fall {i}", created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"source-{i}"],
+            ))
+        db.commit()
+        baseline = build_baseline(db, person.id, "fall", None, now)
+        assert baseline is not None
+        db.add_all([
+            ObservationCoverage(
+                id="baseline-covered", person_id=person.id, subject_type="fall",
+                window_start=baseline.window_start, window_end=baseline.window_end,
+                coverage_status="covered", source_evidence_ids=[],
+                rationale="The domain was explicitly observed throughout the baseline interval.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="current-covered", person_id=person.id, subject_type="fall",
+                window_start=now - timedelta(days=42), window_end=now,
+                coverage_status="covered", source_evidence_ids=[],
+                rationale="The domain was explicitly observed throughout the current interval.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        decreases = [row for row in changes if row.change_type.value == "decrease"]
+        assert decreases, "A lower rate with complete coverage in both windows should be assessed"
+        assert "Baseline observation coverage: covered" in decreases[0].explanation
+        assert "current observation coverage: covered" in decreases[0].explanation
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
