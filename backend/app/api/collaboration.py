@@ -1446,6 +1446,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
         db.commit()
+    attempt_session_id = str(session.id)
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
@@ -2048,6 +2049,42 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(assistant_row)
         db.commit()
         db.refresh(assistant_row)
+    except IntegrityError as exc:
+        db.rollback()
+        # A concurrent request may have committed the same idempotency key after
+        # this request's initial lookup. Replay that winner instead of returning a
+        # false failure or creating a second turn pair.
+        if client_turn_id:
+            replay = _replay_companion_turn(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                client_turn_id=client_turn_id,
+                request_sha256=request_sha256,
+                expected_session_id=payload.session_id,
+            )
+            if replay is not None:
+                if not payload.session_id and attempt_session_id != replay["session_id"]:
+                    losing_session = db.query(ConversationSession).filter_by(
+                        id=attempt_session_id,
+                        person_id=person_id,
+                        caregiver_id=caregiver_id,
+                        status="active",
+                    ).first()
+                    if losing_session:
+                        has_messages = db.query(ConversationMessage.id).filter_by(
+                            session_id=attempt_session_id
+                        ).first()
+                        if not has_messages:
+                            db.delete(losing_session)
+                            db.commit()
+                logger.info("Companion duplicate turn commit resolved by replay")
+                return replay
+        logger.warning("Companion turn persistence hit an integrity conflict; retry may replay if a winner committed")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. Please retry; duplicate turns are prevented.",
+        ) from exc
     except Exception as exc:
         db.rollback()
         logger.exception("Companion conversation pair failed to persist")
