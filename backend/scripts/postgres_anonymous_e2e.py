@@ -579,7 +579,9 @@ def main():
         retry_payload = {
             "text": "CI-only action with retry key",
             "evidence": [{"kind": "ci_fixture", "text": "retry evidence"}],
-            "idempotency_key": "postgres-open-loop-action-retry-001",
+            # Use a distinct key from the earlier action test: key reuse with
+            # changed content is a conflict, not an idempotent retry.
+            "idempotency_key": "postgres-open-loop-action-retry-concurrent-002",
         }
         def retry_action(_):
             return request(
