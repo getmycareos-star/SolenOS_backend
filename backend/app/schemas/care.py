@@ -54,6 +54,17 @@ class EvidenceBase(BaseModel):
     source_type: Optional[str] = None
     source_span_start: Optional[int] = None
     source_span_end: Optional[int] = None
+    # These fields identify the author/reporter/collector independently from uploader.
+    original_author: Optional[str] = None
+    reported_by_label: Optional[str] = None
+    reported_by_caregiver_id: Optional[str] = None
+    collected_by_caregiver_id: Optional[str] = None
+    collected_at: Optional[datetime] = None
+    occurred_at: Optional[datetime] = None
+    occurred_at_timezone: Optional[str] = None
+    origin_channel: Optional[str] = None
+    original_source_reference: Optional[str] = None
+    parent_evidence_id: Optional[str] = None
 
 
 class EvidenceCreate(EvidenceBase):
@@ -64,6 +75,8 @@ class Evidence(EvidenceBase):
     id: str
     uploaded_at: datetime
     uploaded_by_caregiver_id: str
+    source_text_sha256: Optional[str] = None
+    ingested_at: datetime
 
     class Config:
         from_attributes = True
