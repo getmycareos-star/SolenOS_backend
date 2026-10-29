@@ -217,7 +217,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 
 This pass made targeted fixes after inspecting the actual repository tree and workflow definitions. These are implemented on `main`; no pull request was changed.
 
-- Corrected `backend/tests/test_migration_graph.py` to require the latest connected Alembic head, `20261029_11_change_coverage_provenance`, instead of the stale `20261029_09_obs` head. The test also asserts the coverage immutability and change-coverage provenance revisions are reachable from the graph.
+- Corrected `backend/tests/test_migration_graph.py` to require the latest connected Alembic head, `20261029_11_cov_prov`, instead of the stale `20261029_09_obs` head. The test also asserts the coverage immutability and change-coverage provenance revisions are reachable from the graph.
 - Updated `.github/workflows/postgres-migration-validation.yml` to assert the same current head in both fresh-schema and legacy-backfill upgrade paths.
 - Corrected the frontend type-check blocker in `src/components/mvp-workspace/ChangeIntelligencePanel.tsx`: a duplicate block-scoped `detail` declaration prevented TypeScript validation before any evidence-specific checks could run.
 - Hardened `src/components/EvidenceReviewPanel.tsx` to reject an LCR-provided person scope that differs from the authenticated anonymous session scope. Added a regression assertion to `scripts/verify-evidence-grounding-contract.mts`.
@@ -234,3 +234,19 @@ This pass made targeted fixes after inspecting the actual repository tree and wo
 - The source-integrity hash covers the stored UTF-8 source text only. It does not authenticate the original document, photo, audio, or binary file.
 - The 18 capability groups remain **PARTIAL or UNVERIFIED** until their individual gaps and end-to-end proof listed above are closed. This ledger intentionally does not claim complete implementation.
 
+
+
+### Additional CI-driven migration corrections
+
+The PostgreSQL workflow exposed two concrete migration defects, which were corrected on `main`:
+
+- The change-coverage migration attempted to add columns that already existed in some schema paths. It now checks for the `changes` table and adds only missing columns, preserving existing data.
+- The first revision identifier exceeded Alembic's default PostgreSQL `alembic_version.version_num VARCHAR(32)` limit. The canonical revision ID is now `20261029_11_cov_prov` (20 characters), and the migration graph test and PostgreSQL workflow use that exact ID.
+
+Commits:
+- [Idempotent coverage-provenance migration](https://github.com/getmycareos-star/SolenOS_backend/commit/c42b1b308d958a5aaf8d30fa81454f9c15a4dfff)
+- [Compact Alembic revision ID](https://github.com/getmycareos-star/SolenOS_backend/commit/dbded0b7e9c32162c59f03861c20dbba2a20bbd5)
+- [Migration graph assertion update](https://github.com/getmycareos-star/SolenOS_backend/commit/cc87967032709362456e05defdcad41cb7f68c0a)
+- [PostgreSQL workflow revision update](https://github.com/getmycareos-star/SolenOS_backend/commit/dd66a1a5fb906e1010f123f545bc794125f3450a)
+
+The failing run that revealed these defects is [PostgreSQL migration validation run 40859766335](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40859766335). A later run on the corrected commit is required before the migration can be marked verified.
