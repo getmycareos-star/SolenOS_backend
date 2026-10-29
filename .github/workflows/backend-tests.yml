@@ -44,6 +44,7 @@ jobs:
         run: python -m pytest backend/tests -q
 
       - name: Run uncertainty benchmark and publish measured score
+        if: always()
         run: |
           python -m pytest backend/tests/test_uncertainty_benchmark.py -q --junitxml=/tmp/uncertainty-benchmark.xml
           python - <<'PY'
