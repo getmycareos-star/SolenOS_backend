@@ -119,6 +119,87 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         teardown()
 
 
+def test_companion_idempotent_retry_replays_original_response_and_blocks_key_reuse(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "One caregiver-reported sleep note is recorded; a trend is not established."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    turn_id = "9c9d7f14-a44b-4eab-a2df-000000000001"
+    text = "What was recorded about sleep?"
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": person_id,
+            "text": text,
+            "client_turn_id": turn_id,
+        }
+
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert first_data["written_to_lcr"] is False
+        assert first_data["persistence"] == "conversation_only"
+
+        # Simulate an ambiguous network failure: the client did not retain the
+        # response/session ID, so it retries with the same turn key and no session ID.
+        replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_data = replay.json()
+        assert replay_data["session_id"] == first_data["session_id"]
+        assert replay_data["reply"] == first_data["reply"]
+        assert replay_data["source_record_refs"] == first_data["source_record_refs"]
+        assert replay_data["messages"] == first_data["messages"]
+        assert len(calls) == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).order_by(
+                ConversationMessage.created_at.asc()
+            ).all()
+            assert [row.role for row in rows] == ["user", "assistant"]
+            assert rows[0].content == text
+            assert rows[1].client_turn_id == turn_id
+            metadata = __import__("json").loads(rows[1].response_metadata_json)
+            assert metadata["response"]["reply"] == first_data["reply"]
+            assert metadata["response"]["source_record_refs"] == first_data["source_record_refs"]
+            assert len(rows) == 2
+        finally:
+            db.close()
+
+        changed = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={**payload, "text": "Tell me the medication dose instead."},
+        )
+        assert changed.status_code == 409, changed.text
+        assert len(calls) == 1
+
+        # A different caregiver/person cannot use an existing key to read a
+        # previous conversation, even if they supply the same opaque key.
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={"person_id": other_person_id, "text": text, "client_turn_id": turn_id},
+        )
+        assert cross_person.status_code == 409
+        assert first_data["reply"] not in cross_person.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).count() == 2
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
