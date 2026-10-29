@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
@@ -427,5 +427,37 @@ def test_companion_surfaces_freshness_policy_context_and_persists_reference(monk
             "record_type": "freshness_assessment",
             "record_id": "companion-freshness-assessment",
         } in assistant_message["source_record_refs"]
+    finally:
+        teardown()
+
+
+
+def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The available record does not establish a cause."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+
+        def fail_commit(_session):
+            raise RuntimeError("simulated database commit failure")
+
+        monkeypatch.setattr(Session, "commit", fail_commit)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What does the saved record establish?"},
+        )
+        assert response.status_code == 503, response.text
+        assert "No saved response is confirmed" in response.text
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).count() == 0
+        finally:
+            db.close()
     finally:
         teardown()
