@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import hashlib
 import math
 import os
@@ -32,6 +33,8 @@ from app.models.notifications import CareNotification, CareNotificationPreferenc
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.improvement_training_example import ImprovementTrainingExample
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["community and companion"])
 
