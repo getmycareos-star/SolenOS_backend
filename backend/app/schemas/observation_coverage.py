@@ -17,6 +17,10 @@ class ObservationCoverageCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_window(self):
+        if not self.subject_type.strip():
+            raise ValueError("subject_type must not be blank")
+        if not self.rationale.strip():
+            raise ValueError("rationale must not be blank")
         for name, value in (("window_start", self.window_start), ("window_end", self.window_end)):
             if value.tzinfo is None or value.utcoffset() is None:
                 raise ValueError(f"{name} must include an explicit timezone offset")
