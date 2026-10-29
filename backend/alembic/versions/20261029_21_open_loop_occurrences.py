@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("person_id", "idempotency_key", name="uq_open_loop_occurrence_idempotency"),
-        sa.UniqueConstraint("person_id", "source_id", name="uq_open_loop_occurrence_source"),
+        sa.UniqueConstraint("person_id", "source_type", "source_id", "loop_id", name="uq_open_loop_occurrence_source"),
     )
     op.create_index("ix_open_loop_occurrences_loop_id", "open_loop_occurrences", ["loop_id"])
     op.create_index("ix_open_loop_occurrences_person_id", "open_loop_occurrences", ["person_id"])
