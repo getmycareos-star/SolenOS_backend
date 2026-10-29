@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from test_open_loops import (
     create_loop,
+    create_source_evidence,
     session,
     setup_function as setup_open_loop_db,
     teardown_function as teardown_open_loop_db,
