@@ -317,6 +317,19 @@ def test_companion_retrieves_matching_historical_event_beyond_recent_window(monk
         assert older_id in captured["messages"][-1]["content"]
         assert "waking several times overnight" in captured["messages"][-1]["content"]
         assert response.json()["written_to_lcr"] is False
+
+        follow_up = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "session_id": response.json()["session_id"],
+                "text": "What about that?",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        assert older_id in follow_up.json()["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
     finally:
         teardown()
 
