@@ -671,6 +671,23 @@ def add_dependency(loop_id: str, payload: DependencyInput, request: Request, db:
     return {"accepted": True, "prerequisite_id": prerequisite.id, "dependent_id": dependent.id, "blocked": dependent.status == "blocked"}
 
 
+@router.get("/{loop_id}/occurrences")
+def list_occurrences(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    loop = _get_scoped(db, person_id, caregiver_id, loop_id)
+    rows = db.query(OpenLoopOccurrence).filter(
+        OpenLoopOccurrence.loop_id == loop.id,
+        OpenLoopOccurrence.person_id == person_id,
+        OpenLoopOccurrence.caregiver_id == caregiver_id,
+    ).order_by(OpenLoopOccurrence.occurred_at.asc()).limit(limit).all()
+    return [{
+        "id": row.id, "loop_id": row.loop_id, "source_type": row.source_type,
+        "source_id": row.source_id, "source_fingerprint": row.source_fingerprint,
+        "evidence": row.evidence, "occurred_at": row.occurred_at.isoformat(),
+        "created_at": row.created_at.isoformat(),
+    } for row in rows]
+
+
 @router.get("/{loop_id}/history")
 def loop_history(loop_id: str, request: Request, limit: int = Query(100, ge=1, le=500), db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
