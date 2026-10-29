@@ -2,7 +2,7 @@
 
 **Scope:** canonical `main` only. Pull requests are not modified.  
 **Purpose:** a verification ledger, not a declaration that the entire capability map is complete.  
-**Last audited:** 2026-10-29. Latest direct-main changes bind safety evaluation references to persisted same-person evidence, replace caller-supplied source text with the stored original, clear caller-supplied review/confidence flags, validate source spans against persisted text, and scope safety response validation/audit history to the bearer session. Structured-observation tests now supply explicit source offsets. Backend tests passed on implementation commit [`45179ef`](https://github.com/getmycareos-star/SolenOS_backend/commit/45179ef1cbcc7ce996f474d3b55f91e63b415bda) in [run 40875008698](https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40875008698); PostgreSQL migration validation also passed in that run. The separate backend Docker-build smoke workflow is still running. This ledger deliberately does not mark the entire capability map complete.  
+**Last audited:** 2026-10-29. Latest evidence-grounding slice is verified on backend code commit [`51fc366`](https://github.com/getmycareos-star/SolenOS_backend/commit/51fc366fd578bfa9b82d233cffd84de83e3c01f5): 842 backend tests passed, the 15-case uncertainty benchmark passed, PostgreSQL migration validation passed, and backend validation/container smoke passed. Frontend historical-reconstruction UI and contract checks passed on [`a9fa62e`](https://github.com/getmycareos-star/SolenOS-landing/commit/a9fa62e8001a82ff5b0b7880a64b94f0b5709261). This ledger remains deliberately conservative: the complete 18-group capability map is not complete. This ledger deliberately does not mark the entire capability map complete.  
 **Rule:** a capability is not marked complete merely because a model, helper, endpoint, UI panel, or unit test exists. Completion requires persistence, authorization, migrations, real workflow integration, and relevant automated verification.
 
 ## Status definitions
@@ -66,7 +66,10 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [ ] Add automated source-family clustering for copied/forwarded content and claim/event/observation-level corroboration assessments; human-declared lineage is not automatic source discovery.
 - [x] Add a shared bounded provenance-closure loader that follows parent links, normalized original-source references, and persisted relationship edges across selected records and unselected ancestors; traversal is person-scoped and exposes depth/node/relationship truncation.
 - [x] Wire the shared loader into uncertainty analysis, shared LCR context, appointment preparation briefs, and handoff drafts; add API/route regression assertions for shared-origin evidence and person isolation.
-- [ ] Exact latest-main CI must pass for the new closure and workflow integration before this increment is marked verified.
+- [x] Add exact-content duplicate candidate detection from persisted SHA-256 fingerprints and require source-independence review before emitting a numeric independent-evidence count.
+- [x] Exact latest code-main tests and PostgreSQL migration workflow passed at backend commit `51fc366fd578bfa9b82d233cffd84de83e3c01f5`.
+- [ ] Automated source-family discovery from source metadata and full claim/event/observation-level corroboration remain incomplete.
+- [x] Surface exact source-text hash matches as duplicate-content candidates without asserting common origin; withhold independent-evidence count pending review.
 - [ ] Distinguish no corroboration from attempted-but-failed corroboration in a canonical state model.
 
 ### F. Conflict detection, comparison, and resolution — PARTIAL
