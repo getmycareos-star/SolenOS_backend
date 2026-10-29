@@ -6,7 +6,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20261029_06_observation_coverage"
-down_revision = "20261029_05_evidence_source_immutable"
+down_revision = "20261029_05_evidence_immut"
 branch_labels = None
 depends_on = None
 
