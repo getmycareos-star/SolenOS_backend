@@ -10,9 +10,9 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
-from app.models.care import Person, Caregiver, CareEvent
+from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
 from app.models.observation_coverage import ObservationCoverage
 
@@ -2306,3 +2306,115 @@ def test_invalidating_last_source_event_retires_active_emergence_assessment():
     finally:
         teardown_db()
 
+
+
+def test_numeric_observation_change_requires_comparable_source_bound_measurements():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="numeric-change-person", name="Numeric change person")
+        caregiver = Caregiver(
+            id="numeric-change-caregiver", name="Numeric change caregiver",
+            email="numeric-change@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        source_rows = [
+            Evidence(
+                id="numeric-evidence-prior", person_id=person.id, type="measurement",
+                source_text="Instrument recorded 10 kg.", uploaded_by_caregiver_id=caregiver.id,
+            ),
+            Evidence(
+                id="numeric-evidence-current", person_id=person.id, type="measurement",
+                source_text="Instrument recorded 12 kg.", uploaded_by_caregiver_id=caregiver.id,
+            ),
+        ]
+        db.add_all(source_rows)
+        db.flush()
+        prior = EvidenceObservation(
+            id="numeric-observation-prior", person_id=person.id, evidence_id=source_rows[0].id,
+            observation_kind="instrument_measurement", epistemic_status="observed",
+            subject_label="Person", attribute="weight", value_text="10 kg",
+            normalized_value="10", units="kg", observed_at=now - timedelta(days=7),
+            source_passage="10 kg", source_span_start=20, source_span_end=25,
+            extraction_method="manual", extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+        )
+        current = EvidenceObservation(
+            id="numeric-observation-current", person_id=person.id, evidence_id=source_rows[1].id,
+            observation_kind="instrument_measurement", epistemic_status="observed",
+            subject_label="Person", attribute="weight", value_text="12 kg",
+            normalized_value="12", units="kg", observed_at=now,
+            source_passage="12 kg", source_span_start=20, source_span_end=25,
+            extraction_method="manual", extraction_version="test-v1",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([prior, current])
+        db.commit()
+
+        from app.services.change_detection import detect_numeric_observation_changes
+        changes = detect_numeric_observation_changes(db, person.id, now)
+        db.commit()
+        assert len(changes) == 1
+        change = changes[0]
+        assert change.change_type.value == "transition"
+        assert change.change_direction.value == "unknown"
+        assert change.previous_state == "10 kg"
+        assert change.current_state == "12 kg"
+        assert change.magnitude == pytest.approx(20.0)
+        assert change.confidence is None
+        assert set(change.evidence_ids) == {prior.id, current.id}
+        assert "does not establish" in change.explanation
+
+        repeated = detect_numeric_observation_changes(db, person.id, now)
+        db.commit()
+        assert [row.id for row in repeated] == [change.id]
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_numeric_observation_change_with_zero_prior_value_has_no_relative_ratio():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="numeric-zero-person", name="Numeric zero person")
+        caregiver = Caregiver(
+            id="numeric-zero-caregiver", name="Numeric zero caregiver",
+            email="numeric-zero@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        rows = []
+        for idx, (value, days_ago) in enumerate((("0", 2), ("5", 0))):
+            evidence = Evidence(
+                id=f"numeric-zero-evidence-{idx}", person_id=person.id, type="measurement",
+                source_text=f"Instrument recorded {value} units.", uploaded_by_caregiver_id=caregiver.id,
+            )
+            db.add(evidence)
+            db.flush()
+            observation = EvidenceObservation(
+                id=f"numeric-zero-observation-{idx}", person_id=person.id, evidence_id=evidence.id,
+                observation_kind="instrument_measurement", epistemic_status="observed",
+                subject_label="Person", attribute="score", value_text=f"{value} units",
+                normalized_value=value, units="units", observed_at=now - timedelta(days=days_ago),
+                source_passage=f"{value} units", source_span_start=20, source_span_end=30,
+                extraction_method="manual", extraction_version="test-v1",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(observation)
+            rows.append(observation)
+        db.commit()
+
+        from app.services.change_detection import detect_numeric_observation_changes
+        changes = detect_numeric_observation_changes(db, person.id, now)
+        db.commit()
+        assert len(changes) == 1
+        assert changes[0].magnitude is None
+        assert "Relative change is undefined" in changes[0].explanation
+        assert set(changes[0].evidence_ids) == {row.id for row in rows}
+        db.close()
+    finally:
+        teardown_db()
