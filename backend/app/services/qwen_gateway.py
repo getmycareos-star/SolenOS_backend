@@ -6,12 +6,15 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 
 def get_ollama_config() -> tuple[str, str, float]:
@@ -118,6 +121,7 @@ def qwen_chat(
         with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        logger.warning("Qwen gateway HTTP error: status=%s", exc.code)
         # Ollama uses HTTP 404 for an absent model. Preserve this actionable
         # operational distinction without exposing upstream response contents.
         if exc.code == 404:
@@ -138,16 +142,19 @@ def qwen_chat(
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
         ) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        logger.warning("Qwen gateway returned malformed JSON: error_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=502,
             detail="SolenOS local Qwen returned an invalid response; no model response was generated.",
         ) from exc
     except TimeoutError as exc:
+        logger.warning("Qwen gateway timed out")
         raise HTTPException(
             status_code=504,
             detail="SolenOS local Qwen timed out; no model response was generated.",
         ) from exc
     except urllib.error.URLError as exc:
+        logger.warning("Qwen gateway connection error: reason_type=%s", type(getattr(exc, "reason", None)).__name__)
         if isinstance(getattr(exc, "reason", None), TimeoutError):
             raise HTTPException(
                 status_code=504,
@@ -158,12 +165,14 @@ def qwen_chat(
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
         ) from exc
     except (ValueError, OSError) as exc:
+        logger.warning("Qwen gateway transport/response error: error_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
         ) from exc
     content = result.get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
+        logger.warning("Qwen gateway returned empty or non-text content")
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen returned no usable response.",
