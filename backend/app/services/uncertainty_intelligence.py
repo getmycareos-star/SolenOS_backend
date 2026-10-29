@@ -75,6 +75,8 @@ def analyze_uncertainty(
     evidence: Sequence[Dict[str, Any]],
     required_fields: Optional[Sequence[str]] = None,
     unresolved_conflicts: Optional[Sequence[Dict[str, Any]]] = None,
+    assumptions: Optional[Sequence[Dict[str, Any]]] = None,
+    alternatives: Optional[Sequence[Dict[str, Any]]] = None,
     source_access: str = "available",
     now: Optional[datetime] = None,
 ) -> Dict[str, Any]:
@@ -104,6 +106,52 @@ def analyze_uncertainty(
     raw_items = [dict(item) for item in evidence if isinstance(item, dict)]
     conflicts = [dict(item) for item in (unresolved_conflicts or []) if isinstance(item, dict)]
     required = [field.strip() for field in (required_fields or []) if isinstance(field, str) and field.strip()]
+    supplied_evidence_ids = {_text(item.get("id")) for item in raw_items if _text(item.get("id"))}
+
+    def normalize_review_candidates(candidates, *, kind):
+        normalized = []
+        allowed_statuses = {"proposed", "unresolved", "accepted", "rejected", "superseded"}
+        if candidates is None:
+            return normalized
+        if not isinstance(candidates, (list, tuple)):
+            raise ValueError(f"{kind} must be a list of structured review candidates")
+        for index, candidate in enumerate(candidates):
+            if not isinstance(candidate, dict):
+                raise ValueError(f"{kind}[{index}] must be an object")
+            description = _text(candidate.get("statement") or candidate.get("hypothesis") or candidate.get("description"))
+            if not description:
+                raise ValueError(f"{kind}[{index}] requires a non-empty statement or hypothesis")
+            status = _text(candidate.get("status")).lower() or "unresolved"
+            if status not in allowed_statuses:
+                raise ValueError(f"{kind}[{index}] has unsupported status {status!r}")
+            evidence_fields = {}
+            invalid_refs = []
+            for key in ("supporting_evidence_ids", "contradicting_evidence_ids", "evidence_ids"):
+                refs = candidate.get(key, [])
+                if not isinstance(refs, (list, tuple)) or any(not isinstance(ref, str) or not ref.strip() for ref in refs):
+                    raise ValueError(f"{kind}[{index}].{key} must be a list of non-empty evidence IDs")
+                cleaned = list(dict.fromkeys(ref.strip() for ref in refs))
+                evidence_fields[key] = cleaned
+                invalid_refs.extend(ref for ref in cleaned if ref not in supplied_evidence_ids)
+            has_supporting_evidence = bool(
+                evidence_fields["supporting_evidence_ids"] or evidence_fields["evidence_ids"]
+            )
+            if invalid_refs:
+                status = "unresolved"
+            if status == "accepted" and (not has_supporting_evidence or invalid_refs):
+                status = "unresolved"
+            normalized.append({
+                "statement" if kind == "assumptions" else "hypothesis": description,
+                "status": status,
+                **evidence_fields,
+                "evidence_references_valid": not invalid_refs,
+                "invalid_evidence_ids": list(dict.fromkeys(invalid_refs)),
+                "resolution_rationale": _text(candidate.get("resolution_rationale")) or None,
+            })
+        return normalized
+
+    normalized_assumptions = normalize_review_candidates(assumptions, kind="assumptions")
+    normalized_alternatives = normalize_review_candidates(alternatives, kind="alternatives")
     items = raw_items
     duplicate_groups: list[dict[str, Any]] = []
     seen_evidence_ids: dict[str, int] = {}
@@ -248,6 +296,21 @@ def analyze_uncertainty(
     if conflicts:
         classifications.append("conflicting_evidence")
         limitations.append("Unresolved conflicting records were supplied; this assessment does not choose a winner.")
+    unresolved_assumptions = [item for item in normalized_assumptions if item["status"] in {"proposed", "unresolved"}]
+    unresolved_alternatives = [item for item in normalized_alternatives if item["status"] in {"proposed", "unresolved"}]
+    invalid_candidate_refs = [
+        item for item in (*normalized_assumptions, *normalized_alternatives)
+        if not item["evidence_references_valid"]
+    ]
+    if unresolved_assumptions:
+        classifications.append("unresolved_assumptions")
+        limitations.append("One or more explicit assumptions remain unresolved and must not be treated as established facts.")
+    if unresolved_alternatives:
+        classifications.append("unresolved_alternative_hypotheses")
+        limitations.append("One or more alternative hypotheses remain unresolved and must not be treated as established explanations.")
+    if invalid_candidate_refs:
+        classifications.append("invalid_candidate_evidence_reference")
+        limitations.append("At least one assumption or alternative references evidence outside the records supplied to this assessment.")
     if _PRONOUN_PATTERN.search(claim):
         classifications.append("possible_reference_ambiguity")
         limitations.append("Pronouns or demonstratives occur in the claim; referent ambiguity requires contextual review.")
@@ -354,6 +417,9 @@ def analyze_uncertainty(
         or evidence_uncertainty
         or "source_verification_uncertainty" in classifications
         or "causal_inference_review" in classifications
+        or unresolved_assumptions
+        or unresolved_alternatives
+        or invalid_candidate_refs
         or (task in {"identify_change", "change_detection", "compare_state"} and "missing_baseline" in classifications)
     )
     if sufficiency_blockers:
@@ -464,7 +530,7 @@ def analyze_uncertainty(
         "unresolved_conflicts": conflicts,
         # The caller supplies a bounded set of retrieved records. The assessment
         # cannot independently prove that every relevant source was searched.
-        "assumptions": [],
+        "assumptions": normalized_assumptions,
         "retrieval_scope": {
             "basis": "only_records_supplied_to_this_assessment",
             "completeness_verified": False,
@@ -476,7 +542,7 @@ def analyze_uncertainty(
             "separate_comparison_observation_present": has_comparison_observation,
             "change_established_by_this_assessment": False,
         },
-        "alternatives": [],
+        "alternatives": normalized_alternatives,
         "clarification_questions": questions,
         "evidence_refs": evidence_refs,
         "evidence_record_count": len(raw_items),
