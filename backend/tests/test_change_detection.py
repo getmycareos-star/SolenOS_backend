@@ -988,6 +988,20 @@ def test_change_confirmation_lifecycle_persists_actor_reason_and_transition_hist
 
         client = TestClient(app)
         url = f"/api/v1/change/changes/{person_id}/{change_id}/confirmation"
+        missing_evidence = client.post(
+            url,
+            json={"status": "confirmed", "reason": "Caregiver reviewed the linked observations.", "evidence_ids": []},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert missing_evidence.status_code == 422
+
+        missing_rationale = client.post(
+            url,
+            json={"status": "confirmed", "evidence_ids": [evidence_id]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert missing_rationale.status_code == 422
+
         response = client.post(
             url,
             json={"status": "confirmed", "reason": "Caregiver reviewed the linked observations.", "evidence_ids": [evidence_id]},
