@@ -1980,6 +1980,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    # Use explicit monotonic timestamps for the two rows in this turn. Database
+    # server defaults can be equal at transaction precision and make transcript
+    # ordering nondeterministic after reload.
+    user_turn_created_at = datetime.now(timezone.utc)
+    assistant_turn_created_at = user_turn_created_at + timedelta(microseconds=1)
     response_metadata = {
         "request_sha256": request_sha256,
         "source_event_ids": source_event_ids,
@@ -2001,12 +2006,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
         client_turn_id=client_turn_id,
         response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=assistant_turn_created_at,
     )
     try:
         db.add(ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
             source_record_refs_json="[]",
+            created_at=user_turn_created_at,
         ))
         db.add(assistant_row)
         db.commit()
@@ -2021,7 +2028,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
     return {
