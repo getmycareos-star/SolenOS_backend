@@ -154,6 +154,20 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     )
     assert ungrounded.status_code == 422, ungrounded.text
 
+    _, other_headers = session(client, "Different care recipient")
+    other_loop = create_loop(client, other_headers, "pending_action")
+    other_source_id = create_source_evidence(other_loop, "Evidence from another care record")
+    cross_person = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers,
+        json={
+            "text": "Attempt to verify using another person's source",
+            "evidence": [{"evidence_id": other_source_id, "kind": "supporting_record"}],
+            "verification_rule": "The outcome must be supported by this care record.",
+        },
+    )
+    assert cross_person.status_code == 404, cross_person.text
+
     source_id = create_source_evidence(loop)
     verified = client.post(
         f"/api/v1/open-loops/{loop['id']}/verify-outcome",
