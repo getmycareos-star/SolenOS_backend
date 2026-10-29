@@ -68,6 +68,66 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
+
+
+def _companion_request_sha256(person_id: str, caregiver_id: str, text: str) -> str:
+    canonical = json.dumps(
+        {"person_id": person_id, "caregiver_id": caregiver_id, "text": text},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _companion_replay_response(
+    db: Session,
+    assistant_row: ConversationMessage,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    request_sha256: str,
+    supplied_session_id: Optional[str],
+) -> dict:
+    """Replay only a committed, same-identity turn with the same request content."""
+    conversation = db.query(ConversationSession).filter_by(
+        id=assistant_row.session_id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+    ).first()
+    if not conversation or (supplied_session_id and supplied_session_id != conversation.id):
+        raise HTTPException(status_code=409, detail="This turn key is already associated with another conversation")
+    try:
+        metadata = json.loads(assistant_row.response_metadata_json or "{}")
+    except (TypeError, json.JSONDecodeError):
+        metadata = {}
+    if metadata.get("request_sha256") != request_sha256:
+        raise HTTPException(status_code=409, detail="This turn key was already used for different message content")
+    response = metadata.get("response")
+    if not isinstance(response, dict) or response.get("reply") != assistant_row.content:
+        raise HTTPException(
+            status_code=503,
+            detail="The original Companion response is recorded but its replay metadata is unavailable. No new turn was generated.",
+        )
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=conversation.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    replay_messages = []
+    for row in history:
+        replay_messages.append({
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        })
+        if row.id == assistant_row.id:
+            break
+    return {**response, "session_id": conversation.id, "person_id": person_id, "messages": replay_messages}
 
 
 class QwenBackgroundJobCreate(BaseModel):
