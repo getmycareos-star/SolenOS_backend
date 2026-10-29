@@ -373,6 +373,27 @@ def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeyp
         teardown()
 
 
+def test_caregiver_paraphrase_ranks_clinic_visit_as_appointment_evidence():
+    from datetime import datetime, timedelta
+    now = datetime(2026, 10, 29, 12, 0)
+    unrelated = SimpleNamespace(
+        title="Lunch planning", location="Home", provider=None,
+        healthcare_org=None, status="recorded", scheduled_at=now,
+    )
+    appointment = SimpleNamespace(
+        title="Neurology consultation", location="Clinic", provider="Neurology team",
+        healthcare_org="Community clinic", status="completed",
+        scheduled_at=now - timedelta(days=120),
+    )
+    ranked = collaboration._rank_source_rows(
+        "Tell me about the clinic visit",
+        [unrelated, appointment],
+        ("title", "location", "provider", "healthcare_org", "status"),
+        1,
+    )
+    assert ranked == [appointment]
+
+
 def test_historical_document_beyond_recent_upload_window_is_retrieved(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
