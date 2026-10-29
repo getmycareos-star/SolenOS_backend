@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.database import get_db
+from app.models.care import Evidence
 from app.api.care_delta import _scoped_identity
 from app.schemas.safety import (
     SafetyContractInput,
@@ -85,8 +86,23 @@ def validate_response(
     claims: List[str],
     evidence_ids: List[str],
     risk_class: RiskClass,
+    request: Request,
     db: Session = Depends(get_db),
 ):
+    """Validate only against evidence IDs that exist in the authenticated care record."""
+    person_id, _ = _scoped_identity(request, db)
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed")
+    if len(evidence_ids) > 100:
+        raise HTTPException(status_code=422, detail="At most 100 evidence IDs may be validated at once")
+    if evidence_ids:
+        found = db.query(Evidence.id).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+        ).count()
+        if found != len(evidence_ids):
+            # Do not reveal whether an ID exists in another person's care record.
+            raise HTTPException(status_code=404, detail="One or more evidence records were not found in this care record")
     engine = SafetyEngine()
     decision = engine.validate_response(candidate_response, claims, evidence_ids, risk_class)
     return decision
@@ -111,12 +127,16 @@ def create_safety_audit(input_data: SafetyContractInput, output: SafetyContractO
 
 
 @router.get("/audit/{person_id}", response_model=List[SafetyAuditRecord])
-def list_safety_audits(person_id: str, limit: int = 50, db: Session = Depends(get_db)):
+def list_safety_audits(person_id: str, request: Request, limit: int = 50, db: Session = Depends(get_db)):
+    authorized_person_id, _ = _scoped_identity(request, db)
+    if person_id != authorized_person_id:
+        raise HTTPException(status_code=403, detail="Safety audit history is scoped to the authenticated care record")
+    bounded_limit = max(1, min(limit, 200))
     return (
         db.query(SafetyAuditRecordModel)
-        .filter(SafetyAuditRecordModel.person_id == person_id)
+        .filter(SafetyAuditRecordModel.person_id == authorized_person_id)
         .order_by(SafetyAuditRecordModel.timestamp.desc())
-        .limit(limit)
+        .limit(bounded_limit)
         .all()
     )
 
