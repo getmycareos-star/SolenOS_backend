@@ -1811,6 +1811,34 @@ def test_exact_duplicate_source_text_does_not_inflate_independent_corroboration(
         assert candidates[0]["evidence_ids"] == ["exact-duplicate-a", "exact-duplicate-b"]
         assert candidates[0]["common_origin_established"] is False
         assert "exact_content_duplicate_candidate_review" in analysis["classifications"]
+
+        relationship_response = client.post(
+            "/api/v1/care-continuity/evidence/exact-duplicate-a/relationships",
+            json={
+                "related_evidence_id": "exact-duplicate-b",
+                "relationship_type": "corroboration_attempt_failed",
+                "source_independence_status": "unknown",
+                "rationale": "The reports were compared but did not independently establish the claimed detail.",
+            },
+        )
+        assert relationship_response.status_code == 201, relationship_response.text
+        reassessed = client.post(
+            "/api/v1/uncertainty/analyze",
+            json={
+                "person_id": "exact-duplicate-person",
+                "subject_type": "sleep",
+                "subject_id": "overnight",
+                "field": "awakenings",
+                "claim": "Two independent sources confirm three awakenings.",
+                "task": "summarize",
+                "evidence_ids": ["exact-duplicate-a", "exact-duplicate-b"],
+            },
+        )
+        assert reassessed.status_code == 200, reassessed.text
+        corroboration = reassessed.json()["analysis"]["corroboration_assessment"]
+        assert corroboration["status"] == "attempted_but_not_corroborated"
+        assert corroboration["independent_corroboration_established"] is False
+        assert corroboration["failed_corroboration_pairs"] == [["exact-duplicate-a", "exact-duplicate-b"]]
     finally:
         teardown_db()
 
