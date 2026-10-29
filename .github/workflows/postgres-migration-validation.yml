@@ -820,8 +820,14 @@ jobs:
       - name: Rehearse Companion schema rollback and re-upgrade without data loss
         working-directory: backend
         run: |
+          before_turns="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")"
+          before_metadata="$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")"
+          test "$before_turns" -ge 2
+          test "$before_metadata" -ge 2
           python -m alembic downgrade 20261029_29_ev_rel_scope
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_29_ev_rel_scope"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")" = "$before_turns"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")" = "$before_metadata"
           psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
             DO \$\$
             BEGIN
@@ -845,3 +851,5 @@ jobs:
           "
           python -m alembic upgrade head
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_30_comp_turn_idem"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE client_turn_id IS NOT NULL")" = "$before_turns"
+          test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM conversation_messages WHERE response_metadata_json IS NOT NULL")" = "$before_metadata"
