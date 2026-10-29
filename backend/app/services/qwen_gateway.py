@@ -144,16 +144,19 @@ def qwen_chat(
             detail="SolenOS local Qwen rejected the request or is unavailable.",
         ) from exc
     except TimeoutError as exc:
+        logger.warning("Qwen inference timed out")
         raise HTTPException(
             status_code=504,
             detail="SolenOS local Qwen timed out; no model response was generated.",
         ) from exc
     except urllib.error.URLError as exc:
         if isinstance(getattr(exc, "reason", None), TimeoutError):
+            logger.warning("Qwen inference timed out at the transport layer")
             raise HTTPException(
                 status_code=504,
                 detail="SolenOS local Qwen timed out; no model response was generated.",
             ) from exc
+        logger.error("Qwen inference transport unavailable: error_type=%s", type(getattr(exc, "reason", exc)).__name__)
         raise HTTPException(
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
