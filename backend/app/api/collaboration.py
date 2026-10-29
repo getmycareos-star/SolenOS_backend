@@ -568,7 +568,12 @@ def _humanize_model_context_line(line: str) -> str:
     if not isinstance(payload, dict):
         return (line or "").strip()
     record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+    prefix = (line[:brace].split(":", 1)[0] or "").casefold()
     label = str(payload.get("source_type") or "").replace("_", " ").strip()
+    if not label and "lineage" in prefix:
+        label = "Evidence lineage"
+    if not label and "caregiver-provided evidence" in prefix:
+        label = "Caregiver-provided evidence"
     if not label:
         if "event_id" in record:
             label = "Care event"
