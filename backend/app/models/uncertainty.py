@@ -96,6 +96,8 @@ class Contradiction(Base):
     source_assertion_ids = Column(JSONList, nullable=True)
     resolution_status = Column(String, nullable=False, default="unresolved")
     resolution_notes = Column(Text, nullable=True)
+    resolution_scope = Column(Text, nullable=True)
+    unresolved_remainder = Column(Text, nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolved_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -135,6 +137,7 @@ class ContradictionResolutionEvent(Base):
     new_status = Column(String(32), nullable=False)
     rationale = Column(Text, nullable=False)
     resolution_scope = Column(Text, nullable=True)
+    unresolved_remainder = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
