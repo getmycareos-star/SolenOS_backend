@@ -478,6 +478,14 @@ def get_observation_coverage(
     db: Session = Depends(get_db),
 ):
     _require_person_scope(request, db, person_id)
+    if (
+        window_start.tzinfo is None or window_start.utcoffset() is None
+        or window_end.tzinfo is None or window_end.utcoffset() is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="window_start and window_end must include explicit timezone offsets",
+        )
     if window_end <= window_start:
         raise HTTPException(status_code=422, detail="window_end must be later than window_start")
-    return assess_observation_coverage(db, person_id, subject_type, window_start, window_end)
+    return assess_observation_coverage(db, person_id, subject_type.strip(), window_start, window_end)
