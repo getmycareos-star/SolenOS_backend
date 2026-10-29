@@ -2073,3 +2073,63 @@ def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_a
         teardown_db()
         Base.metadata.drop_all(bind=engine)
 
+
+def test_duplicate_open_clarification_question_is_suppressed_but_answered_question_can_be_reasked():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="question-dedupe-person", name="Question Dedupe Person")
+        caregiver = Caregiver(
+            id="question-dedupe-caregiver",
+            name="Question Dedupe Caregiver",
+            email="question-dedupe@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        payload = {
+            "person_id": person.id,
+            "question": "Was the appointment attended?",
+            "subject_type": "appointment",
+            "subject_id": "appointment-1",
+            "status": "open",
+            "priority": "informational",
+            "necessity": "not_assessed",
+            "evidence_ids": [],
+            "context": [{"purpose": "clarify an unestablished event"}],
+        }
+        created = client.post("/api/v1/uncertainty/questions", json=payload)
+        assert created.status_code == 200, created.text
+        question_id = created.json()["id"]
+
+        duplicate = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**payload, "question": " WAS THE appointment attended? "},
+        )
+        assert duplicate.status_code == 422, duplicate.text
+        assert "equivalent open clarification question already exists" in duplicate.text
+
+        answered = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "status": "answered",
+                "answer": "The caregiver reports that it was attended.",
+                "answer_provenance": "Answered by the reporting caregiver during follow-up.",
+            },
+        )
+        assert answered.status_code == 200, answered.text
+        assert answered.json()["status"] == "answered"
+
+        repeated_after_answer = client.post("/api/v1/uncertainty/questions", json=payload)
+        assert repeated_after_answer.status_code == 200, repeated_after_answer.text
+        assert repeated_after_answer.json()["id"] != question_id
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+
