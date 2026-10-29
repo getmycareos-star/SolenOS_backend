@@ -1813,3 +1813,92 @@ def test_exact_duplicate_source_text_does_not_inflate_independent_corroboration(
         assert "exact_content_duplicate_candidate_review" in analysis["classifications"]
     finally:
         teardown_db()
+
+
+def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="safety-scope-person", name="Safety Scope Person")
+        caregiver = Caregiver(
+            id="safety-scope-caregiver",
+            name="Safety Scope Caregiver",
+            email="safety-scope@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="safety-scope-other", name="Safety Scope Other")
+        other_caregiver = Caregiver(
+            id="safety-scope-other-caregiver",
+            name="Safety Scope Other Caregiver",
+            email="safety-scope-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.add(Evidence(
+            id="safety-scope-evidence",
+            person_id=person.id,
+            type="document",
+            source_text="A documented event requiring review.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="document",
+        ))
+        db.add(Evidence(
+            id="safety-scope-other-evidence",
+            person_id=other_person.id,
+            type="document",
+            source_text="Evidence from another care record.",
+            uploaded_by_caregiver_id=other_caregiver.id,
+            source_type="document",
+        ))
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
+        params = {
+            "person_id": person.id,
+            "affected_person_id": person.id,
+            "trigger": "Documented event requires review",
+            "risk_category": "moderate_risk",
+            "recommended_reviewer": "caregiver",
+            "evidence_ids": ["safety-scope-evidence"],
+        }
+        created = client.post("/api/v1/safety/escalations", params=params)
+        assert created.status_code == 200, created.text
+        escalation_id = created.json()["id"]
+        assert created.json()["person_id"] == person.id
+        assert created.json()["evidence_ids"] == ["safety-scope-evidence"]
+
+        forged_scope = client.post(
+            "/api/v1/safety/escalations",
+            params={**params, "person_id": other_person.id, "affected_person_id": other_person.id},
+        )
+        assert forged_scope.status_code == 403, forged_scope.text
+
+        cross_record_evidence = client.post(
+            "/api/v1/safety/escalations",
+            params={**params, "evidence_ids": ["safety-scope-other-evidence"]},
+        )
+        assert cross_record_evidence.status_code == 404, cross_record_evidence.text
+
+        listed = client.get(f"/api/v1/safety/escalations/{person.id}")
+        assert listed.status_code == 200, listed.text
+        assert all(row["person_id"] == person.id for row in listed.json())
+        assert other_client.get(f"/api/v1/safety/escalations/{person.id}").status_code == 403
+        assert other_client.patch(
+            f"/api/v1/safety/escalations/{escalation_id}",
+            params={"status": "resolved", "reviewer_identity": "forged-reviewer"},
+        ).status_code == 404
+        assert client.get(f"/api/v1/safety/escalations/{other_person.id}").status_code == 403
+
+        unauthenticated = TestClient(app)
+        denied = unauthenticated.get(f"/api/v1/safety/escalations/{person.id}")
+        assert denied.status_code in (401, 403), denied.text
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+
