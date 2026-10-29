@@ -1848,6 +1848,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Select context by the current question and, for referential follow-ups,
         # the recent dialogue. Keep source IDs aligned with records sent to Qwen.
+        document_question = bool(re.search(
+            r"\b(?:uploaded document|document|file|attachment|letter|pdf)\b",
+            user_text, re.IGNORECASE,
+        ))
         event_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, event_context, 5)
         )
@@ -1857,8 +1861,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         appointment_context = _filter_context_lines_to_query(
             retrieval_query, _rank_context_lines(retrieval_query, appointment_context, 3)
         )
-        evidence_context = _filter_context_lines_to_query(
-            retrieval_query, _rank_context_lines(retrieval_query, evidence_context, 4)
+        ranked_evidence_context = _rank_context_lines(retrieval_query, evidence_context, 4)
+        evidence_context = (
+            ranked_evidence_context
+            if document_question
+            else _filter_context_lines_to_query(retrieval_query, ranked_evidence_context)
         )
         shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
