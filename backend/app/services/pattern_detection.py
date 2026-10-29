@@ -101,6 +101,18 @@ def detect_patterns(
         )
         if pattern:
             patterns.append(pattern)
+        # A short-window cluster is distinct from recurrence across the full
+        # history. It is based on source-event timestamps, never repeated
+        # assessment rows or narrative keyword matches.
+        cluster = _build_clustering_pattern(
+            db=db,
+            person_id=person_id,
+            subject_type=subject_type,
+            subject_id=subject_id or "",
+            events=canonical_events,
+        )
+        if cluster:
+            patterns.append(cluster)
 
     # Never combine assessments for different subjects into one trend or
     # instability sequence. When the caller does not scope a subject, reconcile
@@ -443,6 +455,58 @@ def _build_instability_pattern(
         temporal_start=temporal_start,
         temporal_end=temporal_end,
         direction=ChangeDirection.FLUCTUATING,
+        confidence=None,
+        evidence_count=len(event_ids),
+        alternative_interpretations=alternatives,
+    )
+    return _persist_pattern(db, pattern)
+
+
+
+def _build_clustering_pattern(
+    db: Session,
+    person_id: str,
+    subject_type: str,
+    subject_id: str,
+    events: List[CareEvent],
+) -> Optional[Pattern]:
+    """Find a bounded burst of distinct events without inferring cause or rate."""
+    ordered = sorted(
+        events,
+        key=lambda event: (_ensure_utc(event.occurred_at), event.id),
+    )
+    best_cluster: List[CareEvent] = []
+    left = 0
+    for right, event in enumerate(ordered):
+        event_time = _ensure_utc(event.occurred_at)
+        while left <= right and (
+            event_time - _ensure_utc(ordered[left].occurred_at)
+        ) > timedelta(days=7):
+            left += 1
+        candidate = ordered[left:right + 1]
+        distinct_times = {_ensure_utc(item.occurred_at) for item in candidate}
+        if len(candidate) >= 3 and len(distinct_times) >= 3 and len(candidate) > len(best_cluster):
+            best_cluster = candidate
+    if len(best_cluster) < 3:
+        return None
+
+    start = _ensure_utc(best_cluster[0].occurred_at)
+    end = _ensure_utc(best_cluster[-1].occurred_at)
+    event_ids = [event.id for event in best_cluster]
+    alternatives = [
+        "A cluster means distinct recorded events occurred within a seven-day window; it does not establish a cause, severity trend, or clinical relationship."
+    ]
+    pattern = Pattern(
+        person_id=person_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        pattern_type=PatternType.CLUSTERING,
+        pattern_strength=PatternStrength.ESTABLISHED if len(best_cluster) >= 4 else PatternStrength.EMERGING,
+        event_ids=event_ids,
+        change_ids=[],
+        temporal_start=start,
+        temporal_end=end,
+        direction=ChangeDirection.UNKNOWN,
         confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=alternatives,
