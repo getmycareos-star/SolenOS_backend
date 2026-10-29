@@ -2,7 +2,7 @@
 
 **Scope:** canonical `main` only. Pull requests are not modified.  
 **Purpose:** a verification ledger, not a declaration that the entire capability map is complete.  
-**Last audited:** 2026-10-29.  
+**Last audited:** 2026-10-29. Latest targeted regression additions: `backend/tests/test_uncertainty.py` commit `c1dde21ec8628c6bf5cfa6f048c19f8ea14850f6`; not considered verified until the exact-main workflow completes.  
 **Rule:** a capability is not marked complete merely because a model, helper, endpoint, UI panel, or unit test exists. Completion requires persistence, authorization, migrations, real workflow integration, and relevant automated verification.
 
 ## Status definitions
@@ -55,6 +55,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Record explicit independence states (independent/shared-origin/unknown/not-assessed), rationale, reviewer identity from the authorized session, optional origin group, and append-only timestamps.
 - [x] Reject cross-record relationships, self-links, duplicate links, false independent labels on lineage edges, and source-lineage cycles; list relationships from either endpoint.
 - [x] Add migration, unique constraints, PostgreSQL/SQLite append-only guards, API persistence/isolation tests, and migration-workflow checks.
+- [x] Add API regression coverage for persisted source lineage, server-derived reviewer identity, false-independence rejection, cross-record relationship denial, and reverse endpoint listing. (Test added to `backend/tests/test_uncertainty.py`; current-main CI result pending.)
 - [ ] Current-main CI and deployed PostgreSQL execution must pass before this capability is considered verified.
 - [ ] Add automated source-family clustering for copied/forwarded content and claim/event/observation-level corroboration assessments; human-declared lineage is not automatic source discovery.
 - [ ] Distinguish no corroboration from attempted-but-failed corroboration in a canonical state model.
@@ -72,6 +73,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Validate exact source passages, ambiguous repeated passage offsets, observed-status requirements, unknown/missing value semantics, time-zone-bearing timestamps, and same-record observer identity.
 - [x] Preserve observation corrections as new append-only versions with a same-evidence supersession link and mandatory correction rationale.
 - [ ] Universal automated extraction across document/audio/transcript/image/text adapters and pronoun/entity resolution remain incomplete.
+- [x] Add API regression coverage for exact source-passage enforcement, source offsets, report-versus-observed status preservation, append-only correction linkage, and ORM mutation rejection. (Test added to `backend/tests/test_uncertainty.py`; current-main CI result pending.)
 - [ ] Verify document, audio, transcript, image, and text paths preserve originals and report unsupported formats/failures.
 
 ### H. Fact, inference, interpretation, and reported-versus-observed separation — PARTIAL
