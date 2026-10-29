@@ -300,6 +300,7 @@ class EvidenceSourceRelationship(Base):
     __table_args__ = (
         UniqueConstraint(
             "person_id", "source_evidence_id", "related_evidence_id", "relationship_type",
+            "scope_type", "scope_id",
             name="uq_evidence_source_relationship",
         ),
         Index("ix_evidence_source_relationships_person_source", "person_id", "source_evidence_id"),
@@ -311,6 +312,10 @@ class EvidenceSourceRelationship(Base):
     source_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
     related_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
     relationship_type = Column(String(32), nullable=False)
+    # A relationship may be source-pair level or explicitly scoped to one
+    # claim, observation, or event. Empty scope_id means source-pair level.
+    scope_type = Column(String(24), nullable=False, default="evidence_pair", server_default="evidence_pair")
+    scope_id = Column(String(128), nullable=False, default="", server_default="")
     source_independence_status = Column(String(24), nullable=False)
     origin_group_key = Column(String(128), nullable=True)
     rationale = Column(Text, nullable=False)
