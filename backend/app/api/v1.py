@@ -281,6 +281,27 @@ def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
     _require_person_and_linked_caregiver(
         db, evidence.person_id, evidence.uploaded_by_caregiver_id
     )
+    for field_name, caregiver_id in (
+        ("reported_by_caregiver_id", evidence.reported_by_caregiver_id),
+        ("collected_by_caregiver_id", evidence.collected_by_caregiver_id),
+    ):
+        if caregiver_id and not db.query(CaregiverModel.id).filter(
+            CaregiverModel.id == caregiver_id,
+            CaregiverModel.person_id == evidence.person_id,
+        ).first():
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field_name} must identify a caregiver linked to this care record",
+            )
+    if evidence.parent_evidence_id:
+        if evidence.parent_evidence_id == getattr(evidence, "id", None):
+            raise HTTPException(status_code=422, detail="Evidence cannot be its own parent")
+        parent = db.query(EvidenceModel.id).filter(
+            EvidenceModel.id == evidence.parent_evidence_id,
+            EvidenceModel.person_id == evidence.person_id,
+        ).first()
+        if parent is None:
+            raise HTTPException(status_code=422, detail="Parent evidence must exist in the same care record")
     db_evidence = EvidenceModel(**evidence.model_dump())
     db.add(db_evidence)
     db.commit()
