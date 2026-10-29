@@ -162,6 +162,53 @@ def main():
             f"cross-person observation-coverage read must return 403, got {status}: {cross_person_coverage}",
         )
 
+        # Real HTTP + PostgreSQL change/pattern reconciliation after late-arriving
+        # source events. These are synthetic CI records, never production care data.
+        pattern_event_ids = []
+        for suffix, days_ago in (("old", 20), ("middle", 10), ("recent", 2)):
+            event_time = datetime.now(timezone.utc) - timedelta(days=days_ago)
+            status, event_record = request(
+                "POST",
+                "/api/v1/events",
+                token=token_a,
+                body={
+                    "person_id": person_a,
+                    "event_type": "fall",
+                    "status": "recorded",
+                    "occurred_at": event_time.isoformat(),
+                    "title": f"CI-only fall event {suffix}",
+                    "description": "Synthetic integration fixture; not a real care report.",
+                    "created_by_caregiver_id": caregiver_a,
+                    "time_provenance": "ci_fixture",
+                    "tags": ["ci_fixture", "change_intelligence"],
+                },
+            )
+            require(status == 200, f"care event create expected 200, got {status}: {event_record}")
+            pattern_event_ids.append(event_record["id"])
+
+        status, persisted_patterns = request(
+            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_a,
+        )
+        require(status == 200, f"pattern list expected 200, got {status}: {persisted_patterns}")
+        recurrence_patterns = [
+            pattern for pattern in persisted_patterns
+            if pattern.get("pattern_type") == "recurrence"
+            and pattern.get("is_active") is True
+            and set(pattern.get("event_ids") or []).issuperset(pattern_event_ids)
+        ]
+        require(
+            recurrence_patterns,
+            "newly recorded source events did not produce a persisted source-linked recurrence pattern",
+        )
+        persisted_recurrence_id = recurrence_patterns[0]["id"]
+        status, cross_person_patterns = request(
+            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_b,
+        )
+        require(
+            status == 403,
+            f"cross-person pattern access must return 403, got {status}: {cross_person_patterns}",
+        )
+
         # Real PostgreSQL uncertainty API persistence and record-isolation checks.
         status, created_uncertainty = request("POST", "/api/v1/uncertainty/assessments", token=token_a, body={
             "person_id": person_a, "subject_type": "medication",
@@ -323,6 +370,19 @@ def main():
             "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_a,
         )
         require(status == 200, f"coverage read after application restart expected 200, got {status}: {coverage_after_restart}")
+        status, patterns_after_restart = request(
+            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_a,
+        )
+        require(status == 200, f"pattern read after application restart expected 200, got {status}: {patterns_after_restart}")
+        require(
+            any(
+                pattern.get("id") == persisted_recurrence_id
+                and pattern.get("is_active") is True
+                and set(pattern.get("event_ids") or []).issuperset(pattern_event_ids)
+                for pattern in patterns_after_restart
+            ),
+            "source-linked recurrence pattern did not persist across Uvicorn restart",
+        )
         require(
             any(row.get("id") == saved_coverage.get("id") for row in coverage_after_restart.get("records", [])),
             "observation coverage did not persist across application restart",
