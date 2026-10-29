@@ -339,7 +339,6 @@ def _reassess(db, loop):
     return reasons
 
 
-@router.post("", status_code=201)
 def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
                   event_type: str, idempotency_key: Optional[str]):
     """Resolve committed mutation retries without appending duplicate evidence."""
@@ -356,6 +355,7 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
     return _snapshot(_get_scoped(db, person_id, caregiver_id, loop_id))
 
 
+@router.post("", status_code=201)
 def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     deadline = _utc(payload.deadline_at)
