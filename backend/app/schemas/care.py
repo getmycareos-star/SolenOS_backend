@@ -82,6 +82,8 @@ class EvidenceBase(BaseModel):
     origin_device_ref: Optional[str] = Field(None, max_length=160)
     transfer_source: Optional[str] = Field(None, max_length=160)
     transfer_reference: Optional[str] = Field(None, max_length=2000)
+    # Client-generated key reused only for retries of the identical submission.
+    ingestion_key: Optional[str] = Field(None, min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class EvidenceCreate(EvidenceBase):
