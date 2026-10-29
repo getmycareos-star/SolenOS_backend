@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence as EvidenceModel
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -128,6 +128,93 @@ def test_companion_retrieval_expands_common_caregiving_paraphrases():
     ]
     assert collaboration._context_query_with_history("What about that?", prior).lower().find("sleep") >= 0
     assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+
+
+def test_companion_retrieves_relevant_old_event_and_document_beyond_recent_windows(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older record describes restless sleep. The record does not establish a longer-term trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        db = TestingSessionLocal()
+        older_event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older_event)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index + 1),
+                title=f"Unrelated routine note {index}",
+                description=f"Household activity note {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        older_evidence = EvidenceModel(
+            person_id=person_id,
+            type="document",
+            source_text="August care note: waking several times overnight and restless sleep.",
+            original_file_path=None,
+            uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"August care note.pdf"}',
+            time_provenance="caregiver_reported",
+            confidence=None,
+            evidence_status="recorded",
+            source_type="document",
+        )
+        db.add(older_evidence)
+        for index in range(20):
+            db.add(EvidenceModel(
+                person_id=person_id,
+                type="document",
+                source_text=f"Unrelated household document number {index}.",
+                original_file_path=None,
+                uploaded_at=now - timedelta(hours=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"household note"}',
+                time_provenance="caregiver_reported",
+                confidence=None,
+                evidence_status="recorded",
+                source_type="document",
+            ))
+        db.commit()
+        older_event_id, older_evidence_id = older_event.id, older_evidence.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about rest?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_event_id in data["source_event_ids"]
+        assert older_evidence_id in data["source_evidence_ids"]
+        assert older_event_id in captured["messages"][-1]["content"]
+        assert older_evidence_id in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
 
 
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
