@@ -605,3 +605,56 @@ def test_change_assessment_is_rebuilt_when_coverage_provenance_changes(monkeypat
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_reassessment_retires_patterns_when_all_source_events_are_invalidated():
+    from app.core.change_enums import PatternType
+    from app.models.care import CareEvent
+    from app.models.change import Pattern
+    from app.services.pattern_detection import detect_patterns
+
+    db, person, caregiver = _db()
+    try:
+        start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+        reference_time = start + timedelta(days=10)
+        events = []
+        for index, day in enumerate((0, 2, 7, 8)):
+            event = CareEvent(
+                id=f"retire-pattern-event-{index}",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=start + timedelta(days=day),
+                title=f"Mobility occurrence {index}",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"retire-pattern-source-{index}"],
+            )
+            events.append(event)
+            db.add(event)
+        db.commit()
+
+        first = detect_patterns(db, person.id, "mobility", None, reference_time)
+        db.commit()
+        recurrence = next(item for item in first if item.pattern_type == PatternType.RECURRENCE)
+        assert recurrence.is_active is True
+
+        for event in events:
+            event.status = "invalidated"
+        db.commit()
+
+        second = detect_patterns(db, person.id, "mobility", None, reference_time)
+        db.commit()
+        assert not second
+        persisted = db.query(Pattern).filter(
+            Pattern.person_id == person.id,
+            Pattern.subject_type == "mobility",
+        ).all()
+        assert persisted
+        assert all(item.is_active is False for item in persisted)
+        assert any(
+            "retained as historical context" in " ".join(item.alternative_interpretations or [])
+            for item in persisted
+        )
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
