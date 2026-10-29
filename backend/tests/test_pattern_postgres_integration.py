@@ -13,8 +13,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.models.care import Caregiver, CareEvent, Person
-from app.models.change import Change, Pattern
-from app.services.pattern_detection import detect_patterns
+from app.models.change import Baseline, Change, Pattern
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -66,9 +66,15 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         b2 = add_event(person_b_id, caregiver_b_id, f"pg-event-b2-{suffix}", 9, f"pg-source-b2-{suffix}")
         db.flush()
 
-        first_a = detect_patterns(db, person_a_id, "fall", None, REFERENCE_TIME)
-        first_b = detect_patterns(db, person_b_id, "fall", None, REFERENCE_TIME)
+        reconcile_person_change_intelligence(db, person_a_id, REFERENCE_TIME)
+        reconcile_person_change_intelligence(db, person_b_id, REFERENCE_TIME)
         db.commit()
+        first_a = db.query(Pattern).filter(
+            Pattern.person_id == person_a_id, Pattern.is_active.is_(True)
+        ).all()
+        first_b = db.query(Pattern).filter(
+            Pattern.person_id == person_b_id, Pattern.is_active.is_(True)
+        ).all()
         assert first_a and first_b
         first_a_ids = {pattern.id for pattern in first_a}
         assert first_a_ids
@@ -87,8 +93,11 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         # Late-arriving source event must be incorporated by explicit reconciliation.
         a3 = add_event(person_a_id, caregiver_a_id, f"pg-event-a3-{suffix}", 2, f"pg-source-a3-{suffix}")
         db.flush()
-        after_late_event = detect_patterns(db, person_a_id, "fall", None, REFERENCE_TIME)
+        reconcile_person_change_intelligence(db, person_a_id, REFERENCE_TIME)
         db.commit()
+        after_late_event = db.query(Pattern).filter(
+            Pattern.person_id == person_a_id, Pattern.is_active.is_(True)
+        ).all()
         assert after_late_event
         assert all(pattern.person_id == person_a_id for pattern in after_late_event)
         assert any(a3.id in (pattern.event_ids or []) for pattern in after_late_event)
@@ -97,7 +106,7 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         # in active pattern evidence. The historical Pattern row is retained.
         a3.status = "invalidated"
         db.flush()
-        after_correction = detect_patterns(db, person_a_id, "fall", None, REFERENCE_TIME)
+        reconcile_person_change_intelligence(db, person_a_id, REFERENCE_TIME)
         db.commit()
         active_after_correction = db.query(Pattern).filter(
             Pattern.person_id == person_a_id, Pattern.is_active.is_(True)
@@ -110,7 +119,7 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
     finally:
         db.rollback()
         # Remove only this test's rows. Delete dependent assessments before source records.
-        for model in (Pattern, Change, CareEvent, Caregiver):
+        for model in (Pattern, Change, Baseline, CareEvent, Caregiver):
             db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.commit()
