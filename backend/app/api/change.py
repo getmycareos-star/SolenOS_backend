@@ -133,13 +133,19 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
         if row[0]
     ]
     try:
-        from app.services.pattern_detection import detect_patterns as reconcile_patterns
+        from app.services.pattern_detection import (
+            detect_patterns as reconcile_patterns,
+            detect_cross_domain_patterns,
+        )
 
         for event_type in event_types:
             detect_event_changes(db, person_id, event_type, None)
             # Pattern reconciliation runs only after the evidence-backed change
             # assessments have been flushed into this transaction.
             reconcile_patterns(db, person_id, event_type, None)
+        # Cross-domain co-occurrence is a separate descriptive assessment across
+        # persisted source events. It does not assert causal relationships.
+        detect_cross_domain_patterns(db, person_id)
         detect_assertion_changes(db, person_id)
         db.commit()
     except Exception as exc:
