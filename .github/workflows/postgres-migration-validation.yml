@@ -663,6 +663,10 @@ jobs:
         working-directory: backend
         run: python scripts/postgres_anonymous_e2e.py
 
+      - name: Verify Companion idempotency, concurrent retry and identity isolation on PostgreSQL
+        working-directory: backend
+        run: python scripts/postgres_companion_idempotency_e2e.py
+
       - name: Create isolated PostgreSQL migration test databases
         env:
           PGPASSWORD: postgres
