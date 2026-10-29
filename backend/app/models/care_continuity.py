@@ -220,3 +220,12 @@ class EvidenceReviewRecord(Base):
     source_attribution_snapshot = Column(Text, nullable=False)
     reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_evidence_review_append_only(session, flush_context, instances):
+    """Review history is immutable: append a new review instead of editing an old one."""
+    if any(isinstance(obj, EvidenceReviewRecord) for obj in session.dirty):
+        raise ValueError("Evidence review records are append-only and cannot be updated")
+    if any(isinstance(obj, EvidenceReviewRecord) for obj in session.deleted):
+        raise ValueError("Evidence review records are append-only and cannot be deleted")
