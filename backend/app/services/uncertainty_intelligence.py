@@ -105,7 +105,7 @@ def analyze_uncertainty(
         classifications.append("duplicate_evidence")
         limitations.append("Repeated evidence records were detected and are not counted as independent corroboration.")
     unavailable_reasons = {
-        "unavailable": "A required source is unavailable; absence from this assessment is not a negative finding.",
+        "unavailable": "A required source is not available; absence from this assessment is not a negative finding.",
         "inaccessible": "A required source is inaccessible; absence from this assessment is not a negative finding.",
         "failed": "A required retrieval or processing operation failed; the result is incomplete, not a negative finding.",
         "partial": "Only part of the relevant source material was retrieved; conclusions are bounded to the retrieved subset.",
@@ -215,7 +215,9 @@ def analyze_uncertainty(
         epistemic_state = "partially_known"  # Evidence presence alone never proves a claim.
     task_thresholds = {
         "summarize": "qualified_summary_permitted" if items else "insufficient",
-        "identify_change": "possible_change_only" if items and not conflicts and not missing else "insufficient",
+        "identify_change": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
+        "change_detection": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
+        "compare_state": "possible_change_only" if items and not conflicts and not missing and any(item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline" for item in items) else "insufficient",
         "low_risk_next_step": "qualified_low_risk_step_permitted" if items else "insufficient",
         "high_consequence_assessment": "insufficient_without_independent_validation",
         "recommendation": "qualified_only" if items and not conflicts else "insufficient",
