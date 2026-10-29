@@ -1936,3 +1936,136 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         teardown_db()
         Base.metadata.drop_all(bind=engine)
 
+
+def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_and_preserve_history():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="claim-status-person", name="Claim Status Person")
+        caregiver = Caregiver(
+            id="claim-status-caregiver",
+            name="Claim Status Caregiver",
+            email="claim-status@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        claim = CareAssertion(
+            id="claim-status-main",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep-1",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="Three awakenings were reported overnight.",
+            source_label="caregiver report",
+            source_text="Three awakenings were reported overnight.",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        replacement_claim = CareAssertion(
+            id="claim-status-replacement",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep-1",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="A later report records a different count.",
+            source_label="caregiver report",
+            source_text="A later report records a different count.",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, claim, replacement_claim])
+        db.add_all([
+            Evidence(
+                id="claim-status-evidence-a",
+                person_id=person.id,
+                type="document",
+                source_text="Three awakenings were reported overnight.",
+                source_type="document",
+                uploaded_by_caregiver_id=caregiver.id,
+            ),
+            Evidence(
+                id="claim-status-evidence-b",
+                person_id=person.id,
+                type="document",
+                source_text="A later source records one awakening.",
+                source_type="document",
+                uploaded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        endpoint = f"/api/v1/care-continuity/claims/{claim.id}/assessments"
+        statuses = [
+            ("supported", [{"evidence_id": "claim-status-evidence-a", "relationship": "supports", "source_passage": "Three awakenings were reported overnight."}], None),
+            ("partially_supported", [{"evidence_id": "claim-status-evidence-a", "relationship": "partial_support", "source_passage": "Three awakenings were reported overnight."}], None),
+            ("contradicted", [{"evidence_id": "claim-status-evidence-b", "relationship": "contradicts", "source_passage": "A later source records one awakening."}], None),
+            ("unverified", [], None),
+            ("uncertain", [{"evidence_id": "claim-status-evidence-a", "relationship": "neutral", "source_passage": None}], None),
+            ("conflicting", [
+                {"evidence_id": "claim-status-evidence-a", "relationship": "supports", "source_passage": "Three awakenings were reported overnight."},
+                {"evidence_id": "claim-status-evidence-b", "relationship": "contradicts", "source_passage": "A later source records one awakening."},
+            ], None),
+            ("missing_evidence", [], None),
+            ("stale", [{"evidence_id": "claim-status-evidence-a", "relationship": "neutral", "source_passage": None}], None),
+            ("superseded", [], replacement_claim.id),
+            ("withdrawn", [], None),
+        ]
+        created_versions = []
+        for status, evidence_links, superseded_by in statuses:
+            payload = {
+                "status": status,
+                "rationale": f"Explicit review for status {status}; this is a recorded assessment, not proof of clinical truth.",
+                "policy_version": "claim-assessment-v1",
+                "evidence_links": evidence_links,
+            }
+            if superseded_by:
+                payload["superseded_by_claim_id"] = superseded_by
+            response = client.post(endpoint, json=payload)
+            assert response.status_code == 200, f"{status}: {response.status_code} {response.text}"
+            created_versions.append(response.json())
+        assert [row["status"] for row in created_versions] == [item[0] for item in statuses]
+        assert [row["claim_version"] for row in created_versions] == list(range(1, 11))
+        assert created_versions[-2]["superseded_by_claim_id"] == replacement_claim.id
+
+        history = client.get(endpoint)
+        assert history.status_code == 200, history.text
+        assert len(history.json()) == 10
+        assert all(row["person_id"] == person.id for row in history.json())
+
+        # The backend must reject a paraphrase as a source quote and must not
+        # allow a substantive relationship with no exact source passage.
+        wrong_quote = client.post(endpoint, json={
+            "status": "supported",
+            "rationale": "Attempted to attach a paraphrase as source evidence.",
+            "policy_version": "claim-assessment-v1",
+            "evidence_links": [{
+                "evidence_id": "claim-status-evidence-a",
+                "relationship": "supports",
+                "source_passage": "Three or more awakenings happened overnight.",
+            }],
+        })
+        assert wrong_quote.status_code == 422, wrong_quote.text
+
+        missing_quote = client.post(endpoint, json={
+            "status": "supported",
+            "rationale": "Attempted support without a source passage.",
+            "policy_version": "claim-assessment-v1",
+            "evidence_links": [{
+                "evidence_id": "claim-status-evidence-a",
+                "relationship": "supports",
+                "source_passage": None,
+            }],
+        })
+        assert missing_quote.status_code == 422, missing_quote.text
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+
