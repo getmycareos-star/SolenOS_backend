@@ -395,6 +395,67 @@ def create_evidence_observation(
     }
 
 
+@router.get("/evidence/{evidence_id}/observations")
+def list_evidence_observations(
+    evidence_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=250),
+    db: Session = Depends(get_db),
+):
+    """Return source-linked observation versions, including superseded history, for one authorized evidence item."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("evidence_observations"):
+        raise HTTPException(status_code=503, detail="Structured observation storage is unavailable until migration completes")
+    evidence = db.query(Evidence.id).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    total = db.query(func.count(EvidenceObservation.id)).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+    ).scalar() or 0
+    rows = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+    ).order_by(EvidenceObservation.recorded_at.asc(), EvidenceObservation.id.asc()).limit(limit).all()
+    superseded_ids = {
+        str(row.supersedes_observation_id)
+        for row in rows if row.supersedes_observation_id
+    }
+    return {
+        "evidence_id": evidence_id,
+        "items": [
+            {
+                "id": row.id,
+                "observation_kind": row.observation_kind,
+                "epistemic_status": row.epistemic_status,
+                "subject_label": row.subject_label,
+                "attribute": row.attribute,
+                "value_text": row.value_text,
+                "normalized_value": row.normalized_value,
+                "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+                "observed_at": row.observed_at.isoformat() if row.observed_at else None,
+                "reported_at": row.reported_at.isoformat() if row.reported_at else None,
+                "source_passage": row.source_passage,
+                "source_span_start": row.source_span_start,
+                "source_span_end": row.source_span_end,
+                "supersedes_observation_id": row.supersedes_observation_id,
+                "correction_rationale": row.correction_rationale,
+                "is_superseded": row.id in superseded_ids,
+                "created_by_caregiver_id": row.created_by_caregiver_id,
+                "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
+            }
+            for row in rows
+        ],
+        "count": total,
+        "has_more": total > len(rows),
+        "history_policy": "Append-only observation versions are returned; corrections add new versions rather than overwriting source history.",
+        "source_of_truth": "persisted_person_scoped_evidence_observations",
+    }
+
+
 @router.get("/evidence/{evidence_id}/integrity")
 def get_evidence_source_integrity(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Compare the stored source-text hash with the current persisted text, within session scope."""
