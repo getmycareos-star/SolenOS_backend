@@ -43,7 +43,7 @@ def upgrade() -> None:
                 BEFORE UPDATE OF source_text, source_text_sha256 ON evidence
                 FOR EACH ROW EXECUTE FUNCTION solenos_prevent_evidence_source_mutation();
               END IF;
-            END
+            END;
             $trigger$;
         """)
     elif bind.dialect.name == "sqlite":
