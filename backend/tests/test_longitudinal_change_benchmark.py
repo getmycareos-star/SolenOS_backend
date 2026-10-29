@@ -13,6 +13,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.care import Person, Caregiver, CareEvent
+from app.models.change import Change
+from app.core.change_enums import ChangeType, ChangeDirection
 from app.models.observation_coverage import ObservationCoverage
 from app.services.baseline import get_longitudinal_event_counts
 from app.services.change_detection import detect_event_changes
@@ -82,6 +84,76 @@ def _add_full_coverage(db, person, caregiver, baseline_start):
             recorded_by_caregiver_id=caregiver.id,
         ),
     ])
+
+
+def _add_trend_assessments(db, person, event_ids):
+    """Add three distinct, source-linked rising assessments for benchmark tests."""
+    windows = ((80, 70), (60, 50), (40, 30))
+    for index, (start_days, end_days) in enumerate(windows):
+        db.add(Change(
+            id=f"trend-change-{person.id}-{index}",
+            person_id=person.id,
+            subject_type="fall",
+            subject_id="",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state=f"{index + 1} recorded events in prior comparison",
+            current_state=f"{index + 2} recorded events in current comparison",
+            magnitude=float(index + 1),
+            previous_count=index + 1,
+            current_count=index + 2,
+            comparison_window_start=REFERENCE_TIME - timedelta(days=start_days),
+            comparison_window_end=REFERENCE_TIME - timedelta(days=end_days),
+            baseline_coverage_status="covered",
+            current_coverage_status="covered",
+            evidence_ids=[event_ids[index]],
+            confirmation_status="detected",
+            is_active=True,
+        ))
+
+
+def test_longitudinal_trend_requires_distinct_windows_source_events_and_full_coverage():
+    Base.metadata.create_all(bind=engine)
+    db = Session()
+    try:
+        person, caregiver = _case_identity(db, "trend-covered")
+        event_ids = []
+        for event_id, days in (("trend-event-1", 70), ("trend-event-2", 50), ("trend-event-3", 30)):
+            _record_event(db, person, caregiver, event_id, days)
+            event_ids.append(event_id)
+        db.add(ObservationCoverage(
+            id=f"trend-coverage-{person.id}",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=REFERENCE_TIME - timedelta(days=90),
+            window_end=REFERENCE_TIME,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="Benchmark fixture explicitly covers the complete trend interval.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        _add_trend_assessments(db, person, event_ids)
+        db.flush()
+        patterns = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        trend = next((pattern for pattern in patterns if pattern.pattern_type.value == "trend"), None)
+        assert trend is not None
+        assert set(trend.event_ids) == set(event_ids)
+        assert len(set(trend.change_ids or [])) == 3
+        assert trend.direction.value == "increasing"
+        assert trend.confidence is None
+
+        person, caregiver = _case_identity(db, "trend-unknown-coverage")
+        event_ids = []
+        for event_id, days in (("trend-unknown-event-1", 70), ("trend-unknown-event-2", 50), ("trend-unknown-event-3", 30)):
+            _record_event(db, person, caregiver, event_id, days)
+            event_ids.append(event_id)
+        _add_trend_assessments(db, person, event_ids)
+        db.flush()
+        patterns = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        assert all(pattern.pattern_type.value != "trend" for pattern in patterns)
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
 
 
 def test_longitudinal_change_benchmark_reports_measured_case_score():
