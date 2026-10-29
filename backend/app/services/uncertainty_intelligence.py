@@ -251,6 +251,7 @@ def analyze_uncertainty(
         epistemic_state = "ambiguous"
     elif (
         not independent_items or missing or normalized_access not in {"available", ""}
+        or "unsupported_assessment_task" in classifications
         or (task in {"identify_change", "change_detection", "compare_state"} and "missing_baseline" in classifications)
     ):
         # A present observation does not establish the separate claim that it
