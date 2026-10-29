@@ -654,6 +654,19 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     for pattern in patterns:
         for match in re.finditer(pattern, text):
             claim = match.group(0)
+            # A source-absence statement is not an assertion that professional
+            # information exists. Preserve this distinction for provenance tasks.
+            if re.search(r"(?i)professional-reported information", claim):
+                left = max(text.rfind(".", 0, match.start()), text.rfind(";", 0, match.start())) + 1
+                ends = [p for p in (text.find(".", match.end()), text.find(";", match.end())) if p >= 0]
+                right = min(ends) if ends else len(text)
+                clause = text[left:right]
+                if re.search(
+                    r"\b(?:no|none|not|unknown|missing|without|unavailable|"
+                    r"not recorded|not documented|not supplied|not provided)\b",
+                    clause,
+                ):
+                    continue
             # All meaningful terms in these high-impact phrases must be present
             # in source text; exact wording is intentionally required here.
             terms = re.findall(r"[a-z]+", claim)
