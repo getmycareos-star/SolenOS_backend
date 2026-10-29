@@ -420,6 +420,16 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     )
     assert premature.status_code == 409, premature.text
 
+    ungrounded_reconciliation = client.post(
+        f"/api/v1/open-loops/{loop['id']}/reconcile",
+        headers=headers,
+        json={
+            "text": "The two reports refer to different dates; neither is discarded.",
+            "evidence": [{"kind": "source_comparison"}],
+        },
+    )
+    assert ungrounded_reconciliation.status_code == 422, ungrounded_reconciliation.text
+
     reconciled = client.post(
         f"/api/v1/open-loops/{loop['id']}/reconcile",
         headers=headers,
