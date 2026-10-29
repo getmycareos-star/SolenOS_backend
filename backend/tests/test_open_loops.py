@@ -214,3 +214,22 @@ def test_recurring_identical_issue_preserves_separate_occurrences():
     assert occurrences.status_code == 200, occurrences.text
     assert len(occurrences.json()) == 2
 
+def test_reused_idempotency_key_cannot_commit_a_second_mutation():
+    client = TestClient(app)
+    _, headers = session(client, "Idempotency recipient")
+    payload = {
+        "loop_type": "pending_decision",
+        "title": "Confirm the appointment plan",
+        "description": "The appointment plan still needs confirmation.",
+        "idempotency_key": "same-request-key",
+    }
+    first = client.post("/api/v1/open-loops", headers=headers, json=payload)
+    assert first.status_code == 201, first.text
+
+    retry = client.post("/api/v1/open-loops", headers=headers, json=payload)
+    assert retry.status_code == 409, retry.text
+
+    listed = client.get("/api/v1/open-loops", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()["items"]) == 1
+
