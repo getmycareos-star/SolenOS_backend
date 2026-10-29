@@ -330,6 +330,79 @@ def test_malformed_optional_metadata_does_not_crash_or_create_certainty():
     assert "source_verification_uncertainty" in result["classifications"]
 
 
+@pytest.mark.parametrize(
+    "source_access",
+    [
+        "permission_denied",
+        "authentication_failed",
+        "not_configured",
+        "not_attempted",
+        "timeout",
+        "rate_limited",
+        "error",
+    ],
+)
+def test_unreviewed_or_failed_source_access_fails_closed(source_access):
+    result = analyze_uncertainty(
+        claim="The appointment date is known.",
+        task="summarize",
+        evidence=[{
+            "id": "source-1",
+            "text": "Appointment details were requested.",
+            "source_type": "appointment_record",
+            "verified": True,
+        }],
+        source_access=source_access,
+    )
+    assert result["epistemic_state"] == "unknown"
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["source_access_status"] == source_access
+    assert result["retrieval_scope"]["completeness_verified"] is False
+    assert result["conclusion_confidence"] is None
+    assert result["review_required"] is True
+    assert any("not a negative finding" in limitation or "unknown" in limitation or
+               "incomplete" in limitation or "cannot be treated as reviewed" in limitation
+               or "cannot draw" in limitation
+               for limitation in result["limitations"])
+
+
+def test_future_evidence_timestamp_is_flagged_instead_of_treated_as_fresh():
+    result = analyze_uncertainty(
+        claim="The care status is current.",
+        task="summarize",
+        evidence=[{
+            "id": "future-evidence",
+            "text": "Caregiver reported the status.",
+            "source_type": "caregiver_report",
+            "verified": True,
+            "observed_at": "2030-01-01T00:00:00Z",
+        }],
+        now=datetime(2026, 10, 29, tzinfo=timezone.utc),
+    )
+    assert "temporal_uncertainty" in result["classifications"]
+    assert any("in the future" in limitation for limitation in result["limitations"])
+    assert result["epistemic_state"] == "partially_known"
+    assert result["conclusion_confidence"] is None
+
+
+def test_naive_assessment_clock_is_normalized_to_utc():
+    result = analyze_uncertainty(
+        claim="The care status may be current.",
+        task="summarize",
+        evidence=[{
+            "id": "dated-evidence",
+            "text": "Caregiver reported the status.",
+            "source_type": "caregiver_report",
+            "verified": True,
+            "observed_at": "2026-10-28T00:00:00Z",
+            "max_age_days": 10,
+        }],
+        now=datetime(2026, 10, 29),
+    )
+    assert result["assessed_at"] == "2026-10-29T00:00:00+00:00"
+    assert "outdated_information" not in result["classifications"]
+
+
 def test_assessment_never_claims_the_retrieved_evidence_set_is_complete():
     result = analyze_uncertainty(
         claim="The available note describes an appointment.",
