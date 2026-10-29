@@ -5,6 +5,7 @@ It evaluates supplied claims and provenance metadata and returns explicit limita
 """
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
@@ -21,6 +22,41 @@ _PRONOUN_PATTERN = re.compile(r"\b(it|they|them|he|she|that|this)\b", re.I)
 
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def evidence_record_to_uncertainty_item(
+    row: Any, *, role: str = "current", is_baseline: bool = False
+) -> Dict[str, Any]:
+    """Convert a persisted evidence row without promoting optional metadata to verified truth."""
+    metadata: Dict[str, Any] = {}
+    raw_metadata = getattr(row, "extra_metadata", None)
+    if isinstance(raw_metadata, str) and raw_metadata:
+        try:
+            parsed = json.loads(raw_metadata)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except (TypeError, ValueError):
+            metadata = {}
+    text = getattr(row, "source_text", None) or ""
+    item: Dict[str, Any] = {
+        "id": getattr(row, "id", None),
+        "source_type": getattr(row, "source_type", None) or getattr(row, "type", None),
+        "text": text,
+        "verified": str(getattr(row, "evidence_status", None) or "").lower() == "verified",
+        # A provenance label is not an occurrence timestamp.
+        "temporal_provenance": getattr(row, "time_provenance", None),
+        "readable": metadata.get("readable") if isinstance(metadata.get("readable"), bool) else bool(text.strip()),
+        "role": role,
+        "is_baseline": is_baseline,
+    }
+    for key in (
+        "quality", "extraction_status", "temporal_scope", "observed_at", "effective_at",
+        "source_id", "origin_id", "source_lineage_id", "max_age_days", "ambiguous",
+        "interpretation_status",
+    ):
+        if key in metadata:
+            item[key] = metadata[key]
+    return item
 
 
 def analyze_uncertainty(
