@@ -1378,8 +1378,10 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             source_domains.get(str(item.get("source") or ""), "unmapped_source")
             for item in records
         })
-        if len(records) < 2 or len(domains) < 2:
+        mapped_domains = [domain for domain in domains if domain != "unmapped_source"]
+        if len(records) < 2 or len(mapped_domains) < 2:
             continue
+        domains = mapped_domains
         cross_domain_source_groups.append({
             "evidence_id": evidence_id,
             "domains": domains,
