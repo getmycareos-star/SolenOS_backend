@@ -147,14 +147,22 @@ def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leak
             },
         ])
     from sqlalchemy.orm import Session
+    from app.api.care_continuity import _build_situation_understanding_assessment
     with Session(engine) as db:
         context = build_lcr_context(db, "person-a", limit_per_source=10)
+        situation = _build_situation_understanding_assessment(db, "person-a")
     source = context["sources"]["uncertainty_assessments"]
     assert source["returned_count"] == 1
     item = source["items"][0]
     assert item["id"] == "assessment-active"
     assert item["context"][0]["limitations"] == analysis["limitations"]
     assert item["context"][0]["clarification_questions"] == analysis["clarification_questions"]
+    situation_assessment = next(
+        record for record in situation["uncertainties_and_conflicts"]
+        if record["id"] == "assessment-active"
+    )
+    assert situation_assessment["uncertainty_analysis"]["limitations"] == analysis["limitations"]
+    assert situation_assessment["uncertainty_analysis"]["clarification_questions"] == analysis["clarification_questions"]
     assert "assessment-other-person" not in json.dumps(context)
     assert "must not leak" not in json.dumps(context)
     assert "assessment-superseded" not in json.dumps(context)
