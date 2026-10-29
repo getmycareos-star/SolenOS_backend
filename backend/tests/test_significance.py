@@ -333,6 +333,8 @@ def test_gradual_decline_detected_via_trend_requires_persisted_evidence_and_comp
                     previous_count=int(magnitude - 1),
                     current_count=int(magnitude),
                     baseline_id=None,
+                    baseline_coverage_status="covered",
+                    current_coverage_status="covered",
                     comparison_window_start=event_time - timedelta(days=30),
                     comparison_window_end=event_time,
                     confidence=None,
