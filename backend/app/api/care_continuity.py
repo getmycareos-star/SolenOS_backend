@@ -29,7 +29,7 @@ from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -3581,3 +3581,196 @@ def list_evidence_observations(evidence_id: str, request: Request, db: Session =
         EvidenceObservation.evidence_id == evidence_id,
     ).order_by(EvidenceObservation.source_span_start.asc(), EvidenceObservation.recorded_at.asc()).all()
     return [_evidence_observation_response(row) for row in rows]
+
+
+FRESHNESS_DOMAIN_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,79}$")
+
+
+def _freshness_policy_response(row: EvidenceFreshnessPolicy) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "domain_key": row.domain_key,
+        "policy_version": row.policy_version,
+        "max_age_days": row.max_age_days,
+        "historical_after_days": row.historical_after_days,
+        "rationale": row.rationale,
+        "created_by_caregiver_id": row.created_by_caregiver_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "immutable": True,
+    }
+
+
+@router.post("/evidence-freshness/policies", status_code=201)
+def create_evidence_freshness_policy(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Create an immutable, explicit freshness policy; no domain thresholds are guessed."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to define a freshness policy")
+    domain_key = str(payload.get("domain_key") or "").strip().lower()
+    policy_version = str(payload.get("policy_version") or "").strip()
+    rationale = str(payload.get("rationale") or "").strip()
+    max_age_days = payload.get("max_age_days")
+    historical_after_days = payload.get("historical_after_days")
+    if not FRESHNESS_DOMAIN_PATTERN.fullmatch(domain_key):
+        raise HTTPException(status_code=422, detail="domain_key must be a lowercase domain identifier (for example medication_history)")
+    if not policy_version or len(policy_version) > 64:
+        raise HTTPException(status_code=422, detail="An explicit policy_version of at most 64 characters is required")
+    if not rationale:
+        raise HTTPException(status_code=422, detail="A rationale for this domain-specific policy is required")
+    for name, value in (("max_age_days", max_age_days), ("historical_after_days", historical_after_days)):
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+            raise HTTPException(status_code=422, detail=f"{name} must be a non-negative integer or null")
+    if max_age_days is None and historical_after_days is None:
+        raise HTTPException(status_code=422, detail="At least one explicit freshness boundary is required; no universal default is applied")
+    existing = db.query(EvidenceFreshnessPolicy.id).filter(
+        EvidenceFreshnessPolicy.person_id == person_id,
+        EvidenceFreshnessPolicy.domain_key == domain_key,
+        EvidenceFreshnessPolicy.policy_version == policy_version,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="That domain policy version already exists; create a new version instead of overwriting history")
+    row = EvidenceFreshnessPolicy(
+        person_id=person_id,
+        domain_key=domain_key,
+        policy_version=policy_version,
+        max_age_days=max_age_days,
+        historical_after_days=historical_after_days,
+        rationale=rationale,
+        created_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The domain policy version already exists; no policy was overwritten") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence freshness policy could not be persisted")
+        raise HTTPException(status_code=503, detail="Freshness policy could not be persisted") from exc
+    return _freshness_policy_response(row)
+
+
+@router.get("/evidence-freshness/policies")
+def list_evidence_freshness_policies(request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    rows = db.query(EvidenceFreshnessPolicy).filter(
+        EvidenceFreshnessPolicy.person_id == person_id,
+    ).order_by(EvidenceFreshnessPolicy.domain_key.asc(), EvidenceFreshnessPolicy.created_at.asc()).limit(500).all()
+    return {"items": [_freshness_policy_response(row) for row in rows], "bounded": True, "limit": 500}
+
+
+@router.post("/evidence-freshness/assessments", status_code=201)
+def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Persist a freshness assessment against an explicit same-person domain policy."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to assess evidence freshness")
+    evidence_id = str(payload.get("evidence_id") or "").strip()
+    policy_id = str(payload.get("policy_id") or "").strip()
+    if not evidence_id or not policy_id:
+        raise HTTPException(status_code=422, detail="evidence_id and policy_id are required")
+    evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    policy = db.query(EvidenceFreshnessPolicy).filter(
+        EvidenceFreshnessPolicy.id == policy_id,
+        EvidenceFreshnessPolicy.person_id == person_id,
+    ).first()
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Freshness policy not found")
+    now = datetime.now(timezone.utc)
+    source_time = evidence.occurred_at or evidence.collected_at or evidence.uploaded_at
+    age_days = None
+    if source_time is None:
+        status = "unknown_source_time"
+        rationale = "No event, collection, or upload timestamp is available. Freshness cannot be inferred."
+    else:
+        if source_time.tzinfo is None:
+            source_time = source_time.replace(tzinfo=timezone.utc)
+        age_seconds = (now - source_time.astimezone(timezone.utc)).total_seconds()
+        age_days = int(age_seconds // 86400)
+        if age_seconds < -300:
+            status = "future_timestamp_conflict"
+            rationale = "The source timestamp is materially in the future relative to assessment time; review the timestamp before relying on freshness."
+        elif policy.historical_after_days is not None and age_days >= policy.historical_after_days:
+            status = "historical"
+            rationale = "The explicit policy classifies evidence at or beyond its historical boundary as historical. This does not mean the evidence is false."
+        elif policy.max_age_days is not None and age_days > policy.max_age_days:
+            status = "needs_review"
+            rationale = "The explicit domain policy review boundary has elapsed; re-confirm before relying on this evidence as current."
+        elif policy.max_age_days is not None:
+            status = "within_policy_window"
+            rationale = "The evidence falls within the explicit domain policy window; this is not independent verification of its truth."
+        else:
+            status = "not_historical_by_policy"
+            rationale = "The evidence has not reached the configured historical boundary. No maximum-age/currentness rule exists in this policy, so currentness is not established."
+    row = EvidenceFreshnessAssessment(
+        person_id=person_id,
+        evidence_id=evidence.id,
+        policy_id=policy.id,
+        policy_version=policy.policy_version,
+        freshness_status=status,
+        source_time=source_time,
+        assessed_at=now,
+        age_days=age_days,
+        rationale=rationale,
+        assessed_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence freshness assessment could not be persisted")
+        raise HTTPException(status_code=503, detail="Freshness assessment could not be persisted") from exc
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "evidence_id": row.evidence_id,
+        "policy_id": row.policy_id,
+        "policy_version": row.policy_version,
+        "domain_key": policy.domain_key,
+        "freshness_status": row.freshness_status,
+        "source_time": row.source_time.isoformat() if row.source_time else None,
+        "assessed_at": row.assessed_at.isoformat(),
+        "age_days": row.age_days,
+        "rationale": row.rationale,
+        "assessed_by_caregiver_id": row.assessed_by_caregiver_id,
+        "historical_record": True,
+    }
+
+
+@router.get("/evidence-freshness/assessments/{evidence_id}")
+def list_evidence_freshness_assessments(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    evidence = db.query(Evidence.id).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    rows = db.query(EvidenceFreshnessAssessment).filter(
+        EvidenceFreshnessAssessment.person_id == person_id,
+        EvidenceFreshnessAssessment.evidence_id == evidence_id,
+    ).order_by(EvidenceFreshnessAssessment.assessed_at.asc(), EvidenceFreshnessAssessment.id.asc()).limit(500).all()
+    return {
+        "items": [{
+            "id": row.id,
+            "evidence_id": row.evidence_id,
+            "policy_id": row.policy_id,
+            "policy_version": row.policy_version,
+            "freshness_status": row.freshness_status,
+            "source_time": row.source_time.isoformat() if row.source_time else None,
+            "assessed_at": row.assessed_at.isoformat(),
+            "age_days": row.age_days,
+            "rationale": row.rationale,
+            "assessed_by_caregiver_id": row.assessed_by_caregiver_id,
+        } for row in rows],
+        "bounded": True,
+        "limit": 500,
+        "interpretation_limit": "This is an append-only history of policy applications, not a truth judgment. Different domains may apply different explicit policies to the same evidence.",
+    }
