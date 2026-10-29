@@ -181,3 +181,81 @@ def test_delta_finding_evidence_requires_matching_stored_excerpt():
     assert [item["id"] for item in matched] == ["evidence-medication"]
     assert _match_finding_evidence(evidence, "") == []
     assert _match_finding_evidence(evidence, "reported dose changed to 10mg") == []
+
+
+def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
+    """Exercise the real mapped tables and SQLAlchemy transaction semantics on SQLite."""
+    from sqlalchemy.orm import Session
+    from sqlalchemy.exc import IntegrityError
+    from app.core.database import Base
+    from app.core.uncertainty_enums import EpistemicState, GapReason
+    from app.models.care import Person
+    from app.models.uncertainty import UncertaintyAssessment
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[Person.__table__, UncertaintyAssessment.__table__])
+
+    analysis_old = {"epistemic_state": "unknown", "limitations": ["No current evidence."], "calibration_status": "not_calibrated"}
+    analysis_new = {"epistemic_state": "partially_known", "limitations": ["Evidence is reported, not independently verified."], "calibration_status": "not_calibrated"}
+    with Session(engine) as db:
+        db.add(Person(id="orm-person-a", name="Test person"))
+        db.flush()
+        old = UncertaintyAssessment(
+            id="orm-assessment-old", person_id="orm-person-a", subject_type="care_record",
+            subject_id="medication", field="status", epistemic_state=EpistemicState.UNKNOWN,
+            confidence=None, gap_reason=GapReason.INSUFFICIENT_EVIDENCE,
+            context=[{"origin": "delta_engine", "analysis": analysis_old}],
+            evidence_ids=None, is_active=True,
+        )
+        db.add(old)
+        db.commit()
+
+        # A later assessment supersedes, but does not delete, the earlier history.
+        old.is_active = False
+        old.superseded_by_assessment_id = "orm-assessment-new"
+        db.add(UncertaintyAssessment(
+            id="orm-assessment-new", person_id="orm-person-a", subject_type="care_record",
+            subject_id="medication", field="status", epistemic_state=EpistemicState.PARTIALLY_KNOWN,
+            confidence=None, gap_reason=None,
+            context=[{"origin": "delta_engine", "delta_run_pending": False, "analysis": analysis_new}],
+            evidence_ids=None, is_active=True,
+        ))
+        db.commit()
+
+        history = db.query(UncertaintyAssessment).filter(
+            UncertaintyAssessment.person_id == "orm-person-a",
+            UncertaintyAssessment.subject_type == "care_record",
+            UncertaintyAssessment.subject_id == "medication",
+            UncertaintyAssessment.field == "status",
+        ).all()
+        assert len(history) == 2
+        prior = next(item for item in history if item.id == "orm-assessment-old")
+        current = next(item for item in history if item.id == "orm-assessment-new")
+        assert prior.is_active is False
+        assert prior.superseded_by_assessment_id == current.id
+        assert current.is_active is True
+
+        projection = build_lcr_context(db, "orm-person-a", limit_per_source=10)
+        projected = projection["sources"]["uncertainty_assessments"]
+        assert projected["returned_count"] == 1
+        assert projected["items"][0]["id"] == "orm-assessment-new"
+        assert projected["items"][0]["context"][0]["analysis"]["limitations"] == analysis_new["limitations"]
+
+        # Force a real uniqueness failure after changing state; rollback must preserve
+        # the committed active assessment and its historical predecessor.
+        current.is_active = False
+        db.add(UncertaintyAssessment(
+            id="orm-assessment-new", person_id="orm-person-a", subject_type="care_record",
+            subject_id="medication", field="status", epistemic_state=EpistemicState.UNKNOWN,
+            confidence=None, context=[], evidence_ids=None, is_active=True,
+        ))
+        with pytest.raises(IntegrityError):
+            db.flush()
+        db.rollback()
+
+        restored = db.query(UncertaintyAssessment).filter(
+            UncertaintyAssessment.person_id == "orm-person-a"
+        ).all()
+        assert next(item for item in restored if item.id == "orm-assessment-new").is_active is True
+        assert next(item for item in restored if item.id == "orm-assessment-old").is_active is False
+    engine.dispose()
