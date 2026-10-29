@@ -17,8 +17,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import or_, inspect
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -68,6 +68,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[uuid.UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -496,7 +497,40 @@ _CONTEXT_STOPWORDS = {
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+    "record", "records", "recorded", "event", "events", "history", "care", "note", "notes",
 }
+
+
+_CONTEXT_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food", "intake"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
+
+
+def _base_context_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+
+
+def _expanded_context_terms(text: str) -> set[str]:
+    direct = _base_context_terms(text)
+    expanded = set(direct)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    return expanded
+
 
 
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
@@ -507,24 +541,23 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """
     if limit <= 0 or not lines:
         return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
-        if token not in _CONTEXT_STOPWORDS
-    }
-    if not query_terms:
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    if not direct_terms and not synonym_terms:
         return lines[:limit]
 
     scored = []
+    normalized_query = " ".join((query or "").casefold().split())
     for index, line in enumerate(lines):
         text = (line or "").casefold()
-        record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", text))
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = 3 * len(direct_overlap) + len(synonym_overlap)
         # A matched multiword phrase is stronger than incidental single words.
-        normalized_query = " ".join((query or "").casefold().split())
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
             if len(phrase) >= 8 and phrase in text:
-                score += 2
+                score += 3
         scored.append((score, index, line))
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [line for _, _, line in scored[:limit]]
@@ -537,19 +570,21 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         return current
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
-        r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"what about|how about|what happened|why did that|why|how so|"
+        r"the same|same thing|that appointment|this appointment|"
+        r"what was that|and then|and what|what next)\b",
         current.casefold(),
     )
-    word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))
-    if not referential and word_count > 8:
+    # A short new question is not automatically a follow-up. Require an explicit
+    # reference, and use only caregiver-authored turns to resolve retrieval terms.
+    if not referential:
         return current
-    recent = [
-        f"{message.role}: {(message.content or '')[:500]}"
-        for message in reversed(prior_messages[:4])
-        if getattr(message, "role", None) in {"user", "assistant"}
+    recent_user_turns = [
+        f"user: {(message.content or '')[:500]}"
+        for message in reversed(prior_messages[:8])
+        if getattr(message, "role", None) == "user"
     ]
-    return "\n".join([current, *recent]) if recent else current
+    return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
@@ -1272,6 +1307,66 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _conversation_history_payload(db: Session, session_id: str) -> list[dict]:
+    """Rebuild ordered transcript rows with persisted response provenance when available."""
+    rows = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session_id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    messages = []
+    for row in rows:
+        item = {
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+            "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+            "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+        }
+        if row.role == "assistant" and row.response_metadata_json:
+            try:
+                metadata = json.loads(row.response_metadata_json)
+            except (TypeError, ValueError):
+                metadata = {}
+            for key in (
+                "confidence", "source_event_ids", "source_evidence_ids",
+                "source_appointment_ids", "source_assertion_ids",
+                "source_lcr_context_ids", "source_freshness_assessment_ids",
+                "freshness_source_status", "lcr_context_coverage", "ai_generated",
+                "written_to_lcr", "persistence",
+            ):
+                if key in metadata:
+                    item[key] = metadata[key]
+        messages.append(item)
+    return messages
+
+
+def _replay_companion_turn(db: Session, session_id: str, user_row: ConversationMessage) -> Optional[dict]:
+    """Reconstruct the original committed response for a safe idempotent retry."""
+    assistant_row = (
+        db.query(ConversationMessage)
+        .filter(
+            ConversationMessage.session_id == session_id,
+            ConversationMessage.role == "assistant",
+            ConversationMessage.request_fingerprint == user_row.request_fingerprint,
+            ConversationMessage.created_at > user_row.created_at,
+        )
+        .order_by(ConversationMessage.created_at.asc())
+        .first()
+    )
+    if not assistant_row or not assistant_row.response_metadata_json:
+        return None
+    try:
+        replay = json.loads(assistant_row.response_metadata_json)
+    except (TypeError, ValueError):
+        return None
+    replay["messages"] = _conversation_history_payload(db, session_id)
+    return replay
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1282,11 +1377,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     user_text = payload.text.strip()
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_fingerprint = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+
+    existing_turn = None
+    if client_turn_id:
+        # Resolve retries even when the first response was lost before the client
+        # received the newly-created session_id. Scope lookup to this caregiver.
+        existing_turn = (
+            db.query(ConversationMessage)
+            .join(ConversationSession, ConversationSession.id == ConversationMessage.session_id)
+            .filter(
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
+                ConversationSession.status == "active",
+                ConversationMessage.role == "user",
+                ConversationMessage.client_turn_id == client_turn_id,
+            )
+            .first()
+        )
+        if existing_turn and existing_turn.request_fingerprint != request_fingerprint:
+            raise HTTPException(status_code=409, detail="This turn ID was already used with different message text")
 
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
@@ -1294,6 +1410,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ).first()
         if not session:
             raise HTTPException(status_code=404, detail="Active conversation not found for this care record")
+        if existing_turn and existing_turn.session_id != session.id:
+            raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+    elif existing_turn:
+        session = db.query(ConversationSession).filter_by(
+            id=existing_turn.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
+        ).first()
+        if not session:
+            raise HTTPException(status_code=409, detail="The original conversation is no longer active")
     else:
         session = ConversationSession(person_id=person_id, caregiver_id=caregiver_id, title=user_text[:80])
         db.add(session)
@@ -1302,6 +1426,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
         db.commit()
+
+    if existing_turn:
+        replay = _replay_companion_turn(db, session.id, existing_turn)
+        if replay is None:
+            raise HTTPException(status_code=503, detail="The original turn is not fully committed; retry later with the same turn ID")
+        return replay
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
@@ -1337,6 +1467,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        # Resolve an explicit follow-up before retrieval. Only caregiver-authored
+        # prior turns may add retrieval terms; previous assistant output is not evidence.
+        prior_messages = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.desc())
+            .limit(8)
+            .all()
+        )
+        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        direct_terms = [
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ]
+        expanded_terms = _expanded_context_terms(retrieval_query)
+        retrieval_terms = list(dict.fromkeys([
+            *direct_terms,
+            *sorted(expanded_terms - set(direct_terms)),
+        ]))[:24]
+
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -1346,7 +1496,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        matching_event_rows = []
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        selected_events = []
+        seen_event_ids = set()
+        # Matching older records are retrieved independently of the recent-event
+        # window. Recency is only a tie-breaker, never a reason to omit a match.
+        for event in [*matching_event_rows[:12], *recent_events]:
+            if str(event.id) not in seen_event_ids:
+                seen_event_ids.add(str(event.id))
+                selected_events.append(event)
+        for event in selected_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
@@ -1397,13 +1572,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
-            .order_by(Appointment.scheduled_at.asc())
-            .limit(30)
-            .all()
+        appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                appointments_query.filter(or_(
+                    *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(20)
+                .all()
+            )
+        recent_appointments = (
+            appointments_query.order_by(Appointment.scheduled_at.desc()).limit(20).all()
         )
+        appointments = []
+        seen_appointment_ids = set()
+        for appointment in [*matching_appointments[:12], *recent_appointments]:
+            if str(appointment.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(appointment.id))
+                appointments.append(appointment)
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
@@ -1423,7 +1614,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # retaining event-linked and other recent evidence within a strict bound.
         linked_ids = list(dict.fromkeys(
             str(evidence_id)
-            for event in recent_events
+            for event in selected_events
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
@@ -1438,6 +1629,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
             if linked_ids else []
         )
+        matching_evidence_rows = []
+        if retrieval_terms:
+            matching_evidence_rows = (
+                evidence_query.filter(or_(
+                    *[EvidenceModel.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.extra_metadata.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.type.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         document_rows = (
             evidence_query.filter(EvidenceModel.type == "document")
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -1451,7 +1654,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        for row in [*matching_evidence_rows[:12], *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
@@ -1485,17 +1688,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }, ensure_ascii=False)
             )
         source_context.extend(evidence_context)
-
-        # Prior conversation can resolve a follow-up reference, but it remains
-        # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
@@ -1771,27 +1963,71 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    turn_time = datetime.now(timezone.utc)
+    response_metadata = {
+        "session_id": session.id,
+        "person_id": person_id,
+        "reply": reply,
+        "guard_verdict": verdict,
+        "safety_note": safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        request_fingerprint=request_fingerprint if client_turn_id else None,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=turn_time + timedelta(microseconds=1),
     )
     try:
         db.add(ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
+            source_record_refs_json="[]", client_turn_id=client_turn_id,
+            request_fingerprint=request_fingerprint if client_turn_id else None,
+            created_at=turn_time,
         ))
         db.add(assistant_row)
         db.commit()
         db.refresh(assistant_row)
     except Exception as exc:
         db.rollback()
-        logger.exception("Companion conversation pair failed to persist")
+        # A concurrent retry can finish inference at the same time. The unique
+        # index allows only one user turn; if another request committed it first,
+        # return that exact response instead of reporting a false persistence failure.
+        if client_turn_id:
+            duplicate_turn = (
+                db.query(ConversationMessage)
+                .filter_by(
+                    session_id=session.id,
+                    role="user",
+                    client_turn_id=client_turn_id,
+                )
+                .first()
+            )
+            if duplicate_turn and duplicate_turn.request_fingerprint == request_fingerprint:
+                replay = _replay_companion_turn(db, session.id, duplicate_turn)
+                if replay is not None:
+                    return replay
+        logger.error("Companion conversation pair failed to persist: error_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
-            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry with the same turn ID.",
         ) from exc
     history = (
         db.query(ConversationMessage)
@@ -1835,14 +2071,11 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{
-        "role": row.role,
-        "text": row.content,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
-        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
-    } for row in rows]}
+    return {
+        "session_id": session.id,
+        "person_id": person_id,
+        "messages": _conversation_history_payload(db, session.id),
+    }
 
 
 class NotificationPreferenceUpdate(BaseModel):
