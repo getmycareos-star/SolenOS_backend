@@ -1741,7 +1741,32 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{"role": row.role, "text": row.content, "created_at": row.created_at.isoformat() if row.created_at else None} for row in rows]}
+    messages = []
+    for row in rows:
+        metadata = {}
+        if row.role == "assistant":
+            try:
+                metadata = json.loads(row.response_metadata_json or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+        messages.append({
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+            "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+            "source_event_ids": metadata.get("source_event_ids", []),
+            "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+            "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+            "ai_generated": metadata.get("ai_generated"),
+            "written_to_lcr": False,
+            "persistence": "conversation_only",
+        })
+    return {"session_id": session.id, "person_id": person_id, "messages": messages}
 
 
 class NotificationPreferenceUpdate(BaseModel):
