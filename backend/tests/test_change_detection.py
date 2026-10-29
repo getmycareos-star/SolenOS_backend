@@ -1498,6 +1498,8 @@ def test_pattern_detection_finds_short_window_cluster_from_distinct_events():
 def test_pattern_detail_returns_only_same_person_source_events():
     setup_db()
     try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
         db = TestingSessionLocal()
         person = Person(id="pattern-detail-person", name="Pattern detail person")
         caregiver = Caregiver(
