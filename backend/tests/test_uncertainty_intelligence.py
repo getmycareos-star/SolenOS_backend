@@ -77,6 +77,29 @@ def test_assumption_is_not_accepted_without_linked_supporting_evidence():
     assert result["conclusion_confidence"] is None
 
 
+def test_supported_assumption_without_authenticated_reviewer_stays_unresolved():
+    result = analyze_uncertainty(
+        claim="A caregiver report is being summarized.",
+        task="summarize",
+        evidence=[{
+            "id": "evidence-report",
+            "text": "Caregiver report exists.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        assumptions=[{
+            "statement": "The report was made by the caregiver.",
+            "status": "accepted",
+            "supporting_evidence_ids": ["evidence-report"],
+            "resolution_rationale": "The record labels this as a caregiver report.",
+        }],
+    )
+    assert result["assumptions"][0]["status"] == "unresolved"
+    assert result["assumptions"][0]["reviewed_by_caregiver_id"] is None
+    assert "unresolved_assumptions" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+
+
 def test_evidence_backed_assumption_keeps_explicit_status_and_provenance():
     result = analyze_uncertainty(
         claim="A caregiver reported the breakfast intake.",
