@@ -409,6 +409,7 @@ def test_companion_surfaces_freshness_policy_context_and_persists_reference(monk
         assert response.status_code == 200, response.text
         data = response.json()
         assert "companion-freshness-assessment" in data["source_freshness_assessment_ids"]
+        assert data["freshness_source_status"] == "available"
         assert {
             "record_type": "freshness_assessment",
             "record_id": "companion-freshness-assessment",
