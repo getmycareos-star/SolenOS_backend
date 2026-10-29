@@ -161,6 +161,31 @@ def _append_limit_note(db: Session, pattern: Pattern, note: str) -> None:
         db.flush()
 
 
+def _validated_source_event_ids(
+    db: Session,
+    person_id: str,
+    subject_type: str,
+    candidate_ids: List[str],
+    reference_time: datetime,
+) -> List[str]:
+    """Only treat real, same-person source events as pattern evidence."""
+    unique_ids = sorted(set(candidate_ids))
+    if not unique_ids:
+        return []
+    rows = (
+        db.query(CareEvent.id)
+        .filter(
+            CareEvent.id.in_(unique_ids),
+            CareEvent.person_id == person_id,
+            CareEvent.event_type == subject_type,
+            CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
+            CareEvent.occurred_at <= reference_time,
+        )
+        .all()
+    )
+    return sorted(row[0] for row in rows)
+
+
 def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
     """Return an identical active pattern or preserve history through supersession."""
     existing = (
@@ -296,11 +321,17 @@ def _build_trend_pattern(
         return None
 
     # A trend without source evidence is not an evidence-backed pattern.
-    event_ids = sorted({
-        evidence_id
-        for change in ordered
-        for evidence_id in (change.evidence_ids or [])
-    })
+    event_ids = _validated_source_event_ids(
+        db=db,
+        person_id=person_id,
+        subject_type=subject_type,
+        candidate_ids=[
+            evidence_id
+            for change in ordered
+            for evidence_id in (change.evidence_ids or [])
+        ],
+        reference_time=_ensure_utc(now),
+    )
     if len(event_ids) < 3:
         return None
 
@@ -363,11 +394,17 @@ def _build_instability_pattern(
     )
     if len({_ensure_utc(change.comparison_window_end) for change in ordered}) < 2:
         return None
-    event_ids = sorted({
-        evidence_id
-        for change in ordered
-        for evidence_id in (change.evidence_ids or [])
-    })
+    event_ids = _validated_source_event_ids(
+        db=db,
+        person_id=person_id,
+        subject_type=subject_type,
+        candidate_ids=[
+            evidence_id
+            for change in ordered
+            for evidence_id in (change.evidence_ids or [])
+        ],
+        reference_time=_ensure_utc(now),
+    )
     if len(event_ids) < 2:
         return None
     change_ids = [change.id for change in ordered]
