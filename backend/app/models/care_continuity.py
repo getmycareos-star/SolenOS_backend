@@ -11,7 +11,7 @@ from datetime import date, datetime
 from enum import Enum
 
 from sqlalchemy import (
-    Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
+    Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Index
 )
 from sqlalchemy.sql import func
 from sqlalchemy import event, inspect
