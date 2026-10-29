@@ -447,6 +447,50 @@ def main():
         require(len(saved_actions) == 2 and
                 {item.get("text") for item in saved_actions} >= {"CI-only action A", "CI-only action B"},
                 f"Concurrent Open Loop updates lost an append: {saved_actions}")
+
+        # Retrying a mutation with the same idempotency key must return the
+        # committed result and must not duplicate evidence or audit history.
+        retry_payload = {
+            "text": "CI-only action with retry key",
+            "evidence": [{"kind": "ci_fixture", "text": "retry evidence"}],
+            "idempotency_key": "postgres-open-loop-action-retry-001",
+        }
+        def retry_action(_):
+            return request(
+                "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+                token=token_a, body=retry_payload,
+            )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            retry_results = list(pool.map(retry_action, (1, 2)))
+        require(all(status == 200 for status, _ in retry_results),
+                f"Concurrent idempotent action retries failed: {retry_results}")
+        status, loop_after_retry = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        require(status == 200, f"Open Loop read after idempotent retry failed: {status}: {loop_after_retry}")
+        retry_evidence_count = sum(
+            1 for item in loop_after_retry["loop"].get("action_evidence", [])
+            if item.get("text") == retry_payload["text"]
+        )
+        require(retry_evidence_count == 1,
+                f"Idempotent action retry duplicated evidence: {loop_after_retry['loop'].get('action_evidence')}")
+        status, history_after_retry = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}/history", token=token_a,
+        )
+        retry_event_count = sum(
+            1 for event in history_after_retry
+            if event.get("event_type") == "action_recorded"
+            and any(item.get("text") == "retry evidence" for item in event.get("evidence", []))
+        )
+        require(status == 200 and retry_event_count == 1,
+                f"Idempotent action retry duplicated audit events: {status}: {history_after_retry}")
+        status, conflicting_key_reuse = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/responses", token=token_a,
+            body={"text": "Wrong event for same key", "evidence": [{"kind": "ci_fixture", "text": "wrong event"}],
+                  "idempotency_key": retry_payload["idempotency_key"]},
+        )
+        require(status == 409,
+                f"Reusing an idempotency key for a different event must return 409: {status}: {conflicting_key_reuse}")
         status, recorded_response = request(
             "POST", f"/api/v1/open-loops/{open_loop_id}/responses", token=token_a,
             body={"text": "CI-only response received", "evidence": [{"kind": "ci_fixture", "text": "response"}]},
@@ -468,7 +512,7 @@ def main():
         persisted_loop = open_loop_after_restart.get("loop", {})
         require(persisted_loop.get("id") == open_loop_id
                 and persisted_loop.get("status") == "open"
-                and len(persisted_loop.get("action_evidence", [])) == 2
+                and len(persisted_loop.get("action_evidence", [])) == 3
                 and len(persisted_loop.get("response_evidence", [])) == 1,
                 f"Open Loop lifecycle/evidence did not persist across Uvicorn restart: {persisted_loop}")
         status, open_loop_history_after_restart = request(
