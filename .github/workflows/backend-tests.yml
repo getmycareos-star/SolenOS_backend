@@ -126,7 +126,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install backend dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ./backend
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
 
       - name: Recreate legacy account-oriented caregivers table
         run: |
@@ -317,6 +317,23 @@ jobs:
           SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
           APP_ENV: test
         run: python backend/scripts/postgres_anonymous_e2e.py
+
+      - name: Run current-main longitudinal messy-care benchmark against PostgreSQL
+        run: |
+          # Use a separate database because the benchmark creates/drops ORM tables per test.
+          python - <<'PY'
+          import os
+          import psycopg2
+
+          connection = psycopg2.connect(os.environ["DATABASE_URL"])
+          connection.autocommit = True
+          with connection.cursor() as cursor:
+              cursor.execute("CREATE DATABASE solenos_benchmark")
+          connection.close()
+          PY
+          export SOLENOS_BENCHMARK_DATABASE_URL="postgresql+psycopg2://${DATABASE_URL#postgresql://}"
+          export SOLENOS_BENCHMARK_DATABASE_URL="${SOLENOS_BENCHMARK_DATABASE_URL%/*}/solenos_benchmark"
+          python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s
 
 
   qwen-image-build:
