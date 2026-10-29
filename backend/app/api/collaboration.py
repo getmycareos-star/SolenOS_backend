@@ -1416,7 +1416,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             db.commit()
         except Exception as exc:
             db.rollback()
-            logger.exception("Companion session creation failed before inference")
+            logger.warning("Companion session creation failed: exception_type=%s", type(exc).__name__)
             raise HTTPException(
                 status_code=503,
                 detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
@@ -2018,14 +2018,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="This turn may already have been committed. Retry the same message with the same turn ID.",
                 headers={"Retry-After": "1"},
             ) from exc
-        logger.exception("Companion conversation pair failed to persist")
+        logger.warning("Companion conversation persistence failed: exception_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
     except Exception as exc:
         db.rollback()
-        logger.exception("Companion conversation pair failed to persist")
+        logger.warning("Companion conversation persistence failed: exception_type=%s", type(exc).__name__)
         raise HTTPException(
             status_code=503,
             detail="Companion response could not be confirmed as persisted. Please retry.",
