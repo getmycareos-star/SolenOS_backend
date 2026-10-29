@@ -12,12 +12,29 @@ from typing import Any, Dict, List, Optional, Sequence
 
 
 _UNCERTAINTY_PATTERNS = (
-    re.compile(r"\b(i think|i believe|maybe|perhaps|possibly|not sure|unsure|might have|may have|seems like|apparently)\b", re.I),
+    re.compile(
+        r"\b(i think|i believe|maybe|perhaps|possibly|not sure|unsure|uncertain|unclear|unknown|"
+        r"not known|not documented|not recorded|not confirmed|unconfirmed|unverified|"
+        r"cannot determine|unable to determine|insufficient information|not enough information|"
+        r"incomplete information|might have|may have|could be|may be|might be|seems like|"
+        r"appears to|apparently)\b",
+        re.I,
+    ),
 )
 _CAUSAL_PATTERNS = (
-    re.compile(r"\b(caused by|because of|due to|resulted in|led to)\b", re.I),
+    re.compile(
+        r"\b(caused by|caused|because of|due to|resulted in|led to|triggered by|"
+        r"contributed to|precipitated by|brought on by|as a result of)\b",
+        re.I,
+    ),
 )
-_PRONOUN_PATTERN = re.compile(r"\b(it|they|them|he|she|that|this)\b", re.I)
+# Flag referential ambiguity cues, not every ordinary use of "this" or "it"
+# (for example, "this morning" is temporal context, not an ambiguous referent).
+_PRONOUN_PATTERN = re.compile(
+    r"^(it|they|them|he|she|that|this)\b|\b(it|they|them|he|she)\s+"
+    r"(changed|happened|said|did|was|were|is|are|has|have|had)\b|\b(that|this)\s+one\b",
+    re.I,
+)
 
 
 def _text(value: Any) -> str:
