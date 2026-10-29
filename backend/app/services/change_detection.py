@@ -249,8 +249,11 @@ def _create_change(
         )
         for field, expected in comparisons:
             actual = getattr(candidate, field, None)
-            if isinstance(actual, float) and isinstance(expected, (float, int)):
-                if abs(actual - float(expected)) > 1e-9:
+            if field in {"comparison_window_start", "comparison_window_end"}:
+                actual = _ensure_utc(actual)
+                expected = _ensure_utc(expected)
+            if isinstance(actual, (float, int)) and isinstance(expected, (float, int)):
+                if abs(float(actual) - float(expected)) > 1e-9:
                     return False
             elif actual != expected:
                 return False
