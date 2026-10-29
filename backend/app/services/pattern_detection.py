@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.change import Change, Pattern
 from app.models.care import CareEvent
 from app.core.change_enums import PatternType, PatternStrength, ChangeDirection, ChangeType
+from app.services.observation_coverage import assess_observation_coverage
 
 MAX_PATTERN_SOURCE_EVENTS = 1000
 MAX_PATTERN_CHANGE_ASSESSMENTS = 500
@@ -78,6 +79,8 @@ def detect_patterns(
     seen_identities = set()
     for event in source_events:
         evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
+        # Only a non-empty, shared evidence set can establish duplicate identity.
+        # Empty evidence arrays do not mean every such event is the same event.
         identity = ("evidence", evidence_signature) if evidence_signature else ("event", event.id)
         if identity in seen_identities:
             continue
@@ -257,11 +260,21 @@ def _build_recurrence_pattern(
         if event_id_set.intersection(change.evidence_ids or [])
     ]
     change_ids = sorted({change.id for change in linked_changes})
-    frequency_per_day = len(ordered_events) / span_days
-    rate_per_30_days = len(ordered_events) / (span_days / 30.0)
-    alternatives = [
-        "Rates describe distinct linked records; observation coverage is not measured."
-    ]
+    coverage = assess_observation_coverage(
+        db, person_id, subject_type, distinct_times[0], distinct_times[-1]
+    )
+    fully_observed = coverage["coverage_status"] == "covered"
+    # Event recurrence is supported by multiple distinct source events, but a
+    # rate requires an explicit observation denominator across the comparison span.
+    frequency_per_day = len(ordered_events) / span_days if fully_observed else None
+    rate_per_30_days = len(ordered_events) / (span_days / 30.0) if fully_observed else None
+    alternatives = []
+    if not fully_observed:
+        alternatives.append(
+            "Recurrence is based on distinct recorded events. A normalized frequency/rate is withheld because observation coverage across the event span is not explicitly complete."
+        )
+    if coverage["limitations"]:
+        alternatives.extend(coverage["limitations"])
     if history_truncated:
         alternatives.append(
             f"Source event history was bounded to the most recent {MAX_PATTERN_SOURCE_EVENTS} records; earlier events were not included."
