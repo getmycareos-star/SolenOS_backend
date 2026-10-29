@@ -952,7 +952,7 @@ def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fal
 
         replies = iter([
             "Saba, saba. I can help organize the recorded handoff information and identify what remains unknown.",
-            "I can organize the recorded handoff details and flag missing information without inventing a handoff.",
+            "I can organize the details you provide and flag what remains unknown.",
         ])
         calls = []
         def qwen_chat(messages, **kwargs):
