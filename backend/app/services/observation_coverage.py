@@ -29,9 +29,6 @@ def assess_observation_coverage(
         .order_by(ObservationCoverage.window_start.asc(), ObservationCoverage.id.asc())
         .all()
     )
-    # Count an interval as confidently covered only when at least one covered
-    # record spans it and no partial/uncovered/unknown record conflicts with it.
-    # Conflicting coverage declarations must reduce, never inflate, the fraction.
     intervals = [
         (max(start, _utc(r.window_start)), min(end, _utc(r.window_end)), r.coverage_status)
         for r in rows
@@ -40,8 +37,12 @@ def assess_observation_coverage(
     for left, right, _status in intervals:
         boundaries.add(left)
         boundaries.add(right)
+
     ordered_boundaries = sorted(boundaries)
     covered_seconds = 0
+    uncovered_seconds = 0
+    unknown_gap_seconds = 0
+    conflicting_seconds = 0
     for left, right in zip(ordered_boundaries, ordered_boundaries[1:]):
         if right <= left:
             continue
@@ -49,25 +50,48 @@ def assess_observation_coverage(
             status for interval_start, interval_end, status in intervals
             if interval_start <= left and interval_end >= right
         }
-        if "covered" in active_statuses and active_statuses == {"covered"}:
-            covered_seconds += int((right - left).total_seconds())
+        seconds = int((right - left).total_seconds())
+        if active_statuses == {"covered"}:
+            covered_seconds += seconds
+        elif active_statuses == {"uncovered"}:
+            uncovered_seconds += seconds
+        elif not active_statuses:
+            unknown_gap_seconds += seconds
+        else:
+            # Partial, unknown, or conflicting overlapping declarations cannot
+            # be upgraded to covered or uncovered without finer-grained data.
+            conflicting_seconds += seconds
+
     window_seconds = int((end - start).total_seconds())
     has_explicit_interval_status = any(r.coverage_status in {"covered", "uncovered"} for r in rows)
     # No coverage rows means unknown, not a measured 0% observation rate.
-    fraction = covered_seconds / window_seconds if window_seconds > 0 and has_explicit_interval_status else None
-    has_noncovered = any(r.coverage_status != "covered" for r in rows)
-    if fraction == 1.0 and not has_noncovered:
+    fraction = (
+        covered_seconds / window_seconds
+        if window_seconds > 0 and has_explicit_interval_status else None
+    )
+    if fraction == 1.0:
         status = "covered"
         limitations: List[str] = []
     elif covered_seconds > 0 or any(r.coverage_status == "partial" for r in rows):
         status = "partial"
-        limitations = ["Observation coverage is incomplete; event absence cannot be inferred for uncovered intervals."]
-    elif rows and all(r.coverage_status == "uncovered" for r in rows):
+        limitations = [
+            "Observation coverage is incomplete or conflicting; event absence cannot be inferred for uncovered or unknown intervals."
+        ]
+    elif (
+        rows
+        and uncovered_seconds == window_seconds
+        and unknown_gap_seconds == 0
+        and conflicting_seconds == 0
+    ):
         status = "uncovered"
-        limitations = ["The recorded interval was explicitly marked unobserved; no negative event claim is supported."]
+        limitations = [
+            "The entire requested interval was explicitly marked unobserved; no negative event claim is supported."
+        ]
     else:
         status = "unknown"
-        limitations = ["No complete observation-coverage record establishes whether this domain was observed."]
+        limitations = [
+            "The available coverage records do not establish observation status for the entire requested interval."
+        ]
     return {
         "person_id": person_id, "subject_type": subject_type,
         "window_start": start, "window_end": end, "coverage_status": status,
