@@ -1,3 +1,4 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -36,6 +37,36 @@ def get_engine(request: Request, db: Session = Depends(get_db)) -> UncertaintyEn
 def _require_person_scope(engine: UncertaintyEngine, person_id: str) -> None:
     if engine.person_id is not None and person_id != engine.person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+
+
+def _uncertainty_evidence_item(row: Evidence, baseline_ids: set[str]) -> dict:
+    """Project persisted evidence metadata without confusing provenance labels with timestamps."""
+    metadata = {}
+    if row.extra_metadata:
+        try:
+            parsed = json.loads(row.extra_metadata)
+            if isinstance(parsed, dict):
+                metadata = parsed
+        except (TypeError, ValueError):
+            # Unparseable optional metadata is not silently interpreted as a fact.
+            metadata = {}
+    text = row.source_text or ""
+    item = {
+        "id": row.id,
+        "source_type": row.source_type or row.type,
+        "text": text,
+        "verified": str(row.evidence_status or "").lower() == "verified",
+        "temporal_provenance": row.time_provenance,
+        "readable": metadata.get("readable") if isinstance(metadata.get("readable"), bool) else bool(text.strip()),
+        "role": "baseline" if row.id in baseline_ids else "current",
+        "is_baseline": row.id in baseline_ids,
+    }
+    for key in ("quality", "extraction_status", "temporal_scope", "observed_at", "effective_at",
+                "source_id", "origin_id", "source_lineage_id", "max_age_days", "ambiguous",
+                "interpretation_status"):
+        if key in metadata:
+            item[key] = metadata[key]
+    return item
 
 
 @router.post("/gaps", response_model=InformationGap)
@@ -279,17 +310,7 @@ def analyze_and_persist_uncertainty(
             claim=request.claim,
             task=request.task,
             evidence=[
-                {
-                    "id": row.id,
-                    "source_type": row.source_type or row.type,
-                    "text": row.source_text,
-                    "verified": str(row.evidence_status or "").lower() == "verified",
-                    # time_provenance describes how a time was established; it is
-                    # not itself an event timestamp and must not be parsed as one.
-                    "temporal_provenance": row.time_provenance,
-                    "role": "baseline" if row.id in requested_baseline_ids else "current",
-                    "is_baseline": row.id in requested_baseline_ids,
-                }
+                _uncertainty_evidence_item(row, set(requested_baseline_ids))
                 for row in evidence_rows
             ],
             required_fields=request.required_fields,
