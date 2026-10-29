@@ -32,7 +32,7 @@ def upgrade() -> None:
             sa.Column("status", sa.String(length=32), nullable=False),
             sa.Column("rationale", sa.Text(), nullable=False),
             sa.Column("policy_version", sa.String(length=64), nullable=False),
-            sa.Column("evidence_links", sa.JSON(), nullable=False),
+            sa.Column("evidence_links", sa.Text(), nullable=False),
             sa.Column("reviewed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("supersedes_assessment_id", sa.String(), sa.ForeignKey("evidence_claim_assessments.id"), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
