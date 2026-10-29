@@ -108,6 +108,7 @@ class PatternBase(BaseModel):
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_count: int = 0
     alternative_interpretations: Optional[List[Union[str, dict[str, Any]]]] = None
+    pattern_metrics: Optional[dict[str, Any]] = None
 
 
 class PatternCreate(PatternBase):
