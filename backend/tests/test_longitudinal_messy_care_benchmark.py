@@ -473,11 +473,11 @@ def test_persistent_observations_keep_time_bounds_and_source_event_links():
     """Persistent change candidates must retain real event IDs and their temporal bounds."""
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, "persistent")
-        for day in (160, 130, 100):
+        for day in (80, 70, 60):
             add_event(db, person, caregiver, "mobility", day, f"Earlier mobility {day}")
         for day in (35, 28, 21, 14, 7, 1):
             add_event(db, person, caregiver, "mobility", day, f"Recent mobility difficulty {day}")
-        add_complete_comparison_coverage(db, person, caregiver, "mobility", 160)
+        add_complete_comparison_coverage(db, person, caregiver, "mobility", 90)
         changes = detect_event_changes(db, person.id, "mobility", None, NOW)
         db.flush()
         assert changes
