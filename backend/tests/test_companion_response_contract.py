@@ -157,6 +157,15 @@ def test_companion_idempotent_retry_replays_original_response_and_blocks_key_reu
         assert replay_data["messages"] == first_data["messages"]
         assert len(calls) == 1
 
+        # The frontend restores history by session ID without a client-selected
+        # person_id query; authorization must derive scope from the bearer token.
+        history_response = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}",
+            headers=headers,
+        )
+        assert history_response.status_code == 200, history_response.text
+        assert [item["role"] for item in history_response.json()["messages"]] == ["user", "assistant"]
+
         db = TestingSessionLocal()
         try:
             rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).order_by(
