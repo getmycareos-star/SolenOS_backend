@@ -316,3 +316,28 @@ def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monke
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+
+def test_grounding_rejects_fabricated_record_identifiers_and_accepts_authorized_ids():
+    allowed = "Recorded appointment [12345678-1234-4234-8234-123456789abc] for this person."
+    fabricated = "The record [87654321-4321-4321-8321-cba987654321] confirms the appointment."
+    assert collaboration._contains_unsupported_record_reference(
+        "The appointment is recorded under 87654321-4321-4321-8321-cba987654321.",
+        allowed,
+    ) is True
+    assert collaboration._contains_unsupported_record_reference(
+        "The appointment is recorded under 12345678-1234-4234-8234-123456789abc.",
+        allowed,
+    ) is False
+    assert collaboration._contains_unsupported_record_reference(
+        "The appointment is recorded under 87654321-4321-4321-8321-cba987654321.",
+        fabricated,
+    ) is False
+
+
+def test_grounding_reference_validator_does_not_treat_unreferenced_plain_language_as_a_record_id():
+    assert collaboration._contains_unsupported_record_reference(
+        "The available information does not establish why this happened.",
+        "A caregiver reported the event, but the cause is not recorded.",
+    ) is False
