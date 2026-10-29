@@ -420,3 +420,64 @@ def update_situations_endpoint(
     updated = update_situations(db, person_id, event, ref_time)
     db.commit()
     return updated
+
+
+# Coverage is recorded independently of event occurrence. It describes observation,
+# not whether an event did or did not happen.
+from app.models.care import Evidence
+from app.models.observation_coverage import ObservationCoverage
+from app.schemas.observation_coverage import (
+    ObservationCoverageCreate, ObservationCoverageRecord, CoverageAssessment,
+)
+from app.services.observation_coverage import assess_observation_coverage
+
+
+@router.post("/coverage", response_model=ObservationCoverageRecord, status_code=201)
+def record_observation_coverage(
+    payload: ObservationCoverageCreate, request: Request, db: Session = Depends(get_db),
+):
+    session = _require_person_scope(request, db, payload.person_id)
+    if payload.window_end > datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="Coverage windows cannot end in the future")
+    source_ids = list(dict.fromkeys(payload.source_evidence_ids))
+    if source_ids:
+        valid_ids = {
+            row[0] for row in db.query(Evidence.id).filter(
+                Evidence.person_id == payload.person_id, Evidence.id.in_(source_ids)
+            ).all()
+        }
+        if valid_ids != set(source_ids):
+            raise HTTPException(status_code=422, detail="Coverage evidence must belong to this care record")
+    row = ObservationCoverage(
+        person_id=payload.person_id,
+        subject_type=payload.subject_type.strip(),
+        window_start=payload.window_start,
+        window_end=payload.window_end,
+        coverage_status=payload.coverage_status,
+        source_evidence_ids=source_ids,
+        rationale=payload.rationale.strip(),
+        recorded_by_caregiver_id=session.caregiver_id,
+    )
+    db.add(row)
+    try:
+        db.commit()
+        db.refresh(row)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=503, detail="Observation coverage could not be persisted") from exc
+    return row
+
+
+@router.get("/coverage/{person_id}", response_model=CoverageAssessment)
+def get_observation_coverage(
+    person_id: str,
+    request: Request,
+    subject_type: str = Query(..., min_length=1, max_length=120),
+    window_start: datetime = Query(...),
+    window_end: datetime = Query(...),
+    db: Session = Depends(get_db),
+):
+    _require_person_scope(request, db, person_id)
+    if window_end <= window_start:
+        raise HTTPException(status_code=422, detail="window_end must be later than window_start")
+    return assess_observation_coverage(db, person_id, subject_type, window_start, window_end)
