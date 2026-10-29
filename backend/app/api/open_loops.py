@@ -101,6 +101,26 @@ class OpenLoopEvent(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
+class OpenLoopOccurrence(Base):
+    __tablename__ = "open_loop_occurrences"
+    __table_args__ = (
+        UniqueConstraint("person_id", "idempotency_key", name="uq_open_loop_occurrence_idempotency"),
+        UniqueConstraint("person_id", "source_id", name="uq_open_loop_occurrence_source"),
+        Index("ix_open_loop_occurrence_record_created", "loop_id", "created_at"),
+    )
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    loop_id = Column(String, ForeignKey("open_loop_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    source_type = Column(String(80), nullable=True)
+    source_id = Column(String(160), nullable=True)
+    source_fingerprint = Column(String(64), nullable=False)
+    evidence = Column(JSON, nullable=False, default=list)
+    idempotency_key = Column(String(160), nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class OpenLoopDependency(Base):
     __tablename__ = "open_loop_dependencies"
     __table_args__ = (
@@ -313,19 +333,42 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         raise HTTPException(status_code=422, detail="A deferred decision requires its recorded reason")
     canonical = json.dumps({"type": payload.loop_type, "title": payload.title.strip().casefold(),
                             "description": payload.description.strip().casefold(),
-                            "source_type": payload.source_type, "source_id": payload.source_id},
+                            "source_type": payload.source_type},
                            sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
-    if payload.source_id:
-        duplicate = db.query(OpenLoopRecord).filter(
-            OpenLoopRecord.person_id == person_id,
-            OpenLoopRecord.caregiver_id == caregiver_id,
-            OpenLoopRecord.source_id == payload.source_id,
-            OpenLoopRecord.loop_type == payload.loop_type,
-            OpenLoopRecord.status.notin_(TERMINAL_STATES),
+    if payload.idempotency_key:
+        replay = db.query(OpenLoopOccurrence).filter(
+            OpenLoopOccurrence.person_id == person_id,
+            OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
         ).first()
-        if duplicate:
-            return _snapshot(duplicate)
+        if replay:
+            return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
+    if payload.source_id:
+        replay = db.query(OpenLoopOccurrence).filter(
+            OpenLoopOccurrence.person_id == person_id,
+            OpenLoopOccurrence.source_id == payload.source_id,
+        ).first()
+        if replay:
+            return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
+    recurrence = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == person_id,
+        OpenLoopRecord.caregiver_id == caregiver_id,
+        OpenLoopRecord.loop_type == payload.loop_type,
+        OpenLoopRecord.source_fingerprint == fingerprint,
+        OpenLoopRecord.status.notin_(TERMINAL_STATES),
+    ).order_by(OpenLoopRecord.created_at.asc()).first()
+    if recurrence:
+        occurrence = OpenLoopOccurrence(
+            loop_id=recurrence.id, person_id=person_id, caregiver_id=caregiver_id,
+            source_type=payload.source_type, source_id=payload.source_id,
+            source_fingerprint=fingerprint, evidence=payload.evidence,
+            idempotency_key=payload.idempotency_key,
+        )
+        db.add(occurrence)
+        before = _snapshot(recurrence)
+        _audit(db, recurrence, "recurrence_linked", before, payload.evidence, payload.idempotency_key)
+        db.commit()
+        return {**_snapshot(recurrence), "recurrence_detected": True, "occurrence_id": occurrence.id}
     loop = OpenLoopRecord(
         person_id=person_id, caregiver_id=caregiver_id, loop_type=payload.loop_type,
         title=payload.title.strip(), description=payload.description.strip(), evidence=payload.evidence,
@@ -343,10 +386,17 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
     _reassess(db, loop)
     db.add(loop)
     db.flush()
+    occurrence = OpenLoopOccurrence(
+        loop_id=loop.id, person_id=person_id, caregiver_id=caregiver_id,
+        source_type=payload.source_type, source_id=payload.source_id,
+        source_fingerprint=fingerprint, evidence=payload.evidence,
+        idempotency_key=payload.idempotency_key,
+    )
+    db.add(occurrence)
     _audit(db, loop, "created", None, payload.evidence, payload.idempotency_key)
     db.commit()
     db.refresh(loop)
-    return _snapshot(loop)
+    return {**_snapshot(loop), "recurrence_detected": False, "occurrence_id": occurrence.id}
 
 
 @router.get("")
