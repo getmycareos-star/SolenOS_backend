@@ -705,6 +705,155 @@ def _companion_message_needs_revision(text: str) -> bool:
     return any(term in normalized for term in internal_terms)
 
 
+
+_TREND_INTENT_RE = re.compile(
+    r"\b(?:trend|pattern|getting\s+(?:worse|better)|worsen(?:ing)?|improv(?:e|ed|ing)|"
+    r"declin(?:e|ed|ing)|increas(?:e|ed|ing)|decreas(?:e|ed|ing)|more\s+often|less\s+often|"
+    r"change(?:d)?\s+over\s+time)\b",
+    re.IGNORECASE,
+)
+_TREND_DIRECTION_RE = re.compile(
+    r"\b(?:getting\s+(?:worse|better)|worsen(?:ed|ing)?|improv(?:ed|ing)|"
+    r"declin(?:ed|ing)|increas(?:ed|ing)|decreas(?:ed|ing)|more\s+often|less\s+often|"
+    r"(?:upward|downward)\s+trend|(?:increasing|decreasing)\s+trend)\b",
+    re.IGNORECASE,
+)
+_TREND_UNCERTAINTY_RE = re.compile(
+    r"\b(?:not enough|insufficient|cannot|can't|unable to|no dated|no comparable|"
+    r"single observation|only one|not clear|not possible|cannot establish|can't establish|"
+    r"does not establish|doesn't establish|not enough records)\b",
+    re.IGNORECASE,
+)
+
+
+def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict | None:
+    """Require multiple distinct, dated, topic-matched sources before describing a trend."""
+    query = (user_text or "").casefold()
+    if not _TREND_INTENT_RE.search(query):
+        return None
+
+    stop_words = {
+        "has", "have", "had", "her", "his", "their", "our", "my", "been", "being",
+        "getting", "worse", "worsen", "worsening", "better", "improve", "improved",
+        "improving", "decline", "declined", "declining", "increase", "increased",
+        "increasing", "decrease", "decreased", "decreasing", "more", "less", "often",
+        "frequently", "trend", "pattern", "change", "changed", "changing", "over",
+        "during", "within", "in", "for", "the", "last", "past", "previous", "month",
+        "months", "week", "weeks", "day", "days", "year", "years", "recent", "recently",
+        "what", "whether", "does", "did", "is", "are", "was", "were", "and", "about",
+        "record", "records", "recorded", "show", "shows", "seem", "seems", "appear",
+        "appears", "person", "mum", "mom", "mother", "father",
+    }
+    topic_terms = [
+        term for term in dict.fromkeys(re.findall(r"[a-z]{3,}", query))
+        if term not in stop_words
+    ]
+    if not topic_terms:
+        return None
+
+    window_match = re.search(
+        r"\b(?:last|past|previous)\s+(?P<count>\d+|one|two|three|four|six|a|an)\s+"
+        r"(?P<unit>days?|weeks?|months?|years?)\b",
+        query,
+    )
+    count_words = {"one": 1, "a": 1, "an": 1, "two": 2, "three": 3, "four": 4, "six": 6}
+    period_days = None
+    period_label = "over the available recorded history"
+    if window_match:
+        amount = count_words.get(window_match.group("count"), None)
+        if amount is None:
+            amount = int(window_match.group("count"))
+        unit = window_match.group("unit")
+        multiplier = 1 if unit.startswith("day") else 7 if unit.startswith("week") else 30 if unit.startswith("month") else 365
+        period_days = amount * multiplier
+        period_label = f"within the {window_match.group(0)}"
+
+    now = datetime.now(timezone.utc)
+    earliest = now - timedelta(days=period_days) if period_days else None
+    matched_records: dict[str, datetime] = {}
+    for line in context_lines or []:
+        brace = line.find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+        searchable = json.dumps(record, ensure_ascii=False, default=str).casefold()
+        if not any(term in searchable for term in topic_terms):
+            continue
+        record_id = (
+            record.get("event_id") or record.get("assertion_id") or record.get("evidence_id")
+            or payload.get("source_id") or record.get("id")
+        )
+        if not record_id:
+            continue
+        raw_time = (
+            record.get("occurred_at") or record.get("observed_at") or record.get("event_date")
+            or record.get("source_time") or record.get("recorded_at")
+        )
+        if not isinstance(raw_time, str) or not raw_time.strip():
+            continue
+        try:
+            observed_at = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+            observed_at = observed_at.replace(tzinfo=timezone.utc)
+        else:
+            observed_at = observed_at.astimezone(timezone.utc)
+        if observed_at > now + timedelta(days=1):
+            continue
+        if earliest and observed_at < earliest:
+            continue
+        matched_records[str(record_id)] = observed_at
+
+    distinct_days = {value.date() for value in matched_records.values()}
+    direction = "getting worse" if re.search(r"\b(?:worse|worsen|declin)\w*\b", query) else (
+        "improving" if re.search(r"\b(?:better|improv)\w*\b", query) else "changing"
+    )
+    return {
+        "topic": topic_terms[0],
+        "period_label": period_label,
+        "record_count": len(matched_records),
+        "distinct_days": len(distinct_days),
+        "sufficient": len(distinct_days) >= 2,
+        "direction": direction,
+    }
+
+
+def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
+    if not assessment or assessment.get("sufficient"):
+        return False
+    for sentence in re.split(r"[.!?;\\n]+", (reply or "").casefold()):
+        if _TREND_DIRECTION_RE.search(sentence) and not _TREND_UNCERTAINTY_RE.search(sentence):
+            return True
+    return False
+
+
+def _trend_uncertainty_response(assessment: dict) -> str:
+    topic = assessment["topic"]
+    period = assessment["period_label"]
+    direction = assessment["direction"]
+    count = assessment["record_count"]
+    if count == 0:
+        return (
+            f"The available record contains no dated {topic} observations {period}, "
+            f"so it cannot establish whether {topic} has been {direction}."
+        )
+    if count == 1:
+        return (
+            f"The available record contains only one dated {topic} observation {period}. "
+            f"That is not enough to establish whether {topic} has been {direction}."
+        )
+    return (
+        f"The available {topic} entries are not dated across at least two separate days {period}. "
+        f"They are not enough to establish whether {topic} has been {direction}."
+    )
+
 def _contains_unsupported_operational_claim(
     reply: str,
     source_text: str,
@@ -1603,7 +1752,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *freshness_context, *shared_lcr_lines,
             *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
         ]
+        trend_assessment = _trend_evidence_assessment(
+            user_text, [*event_context, *assertion_context, *evidence_context, *shared_lcr_lines]
+        )
         context_payload = {
+            "trend_evidence_assessment": trend_assessment,
             "care_recipient_name": person.name,
             "caregiver_relationship": caregiver.relationship,
             "lcr_events": event_context,
@@ -1647,6 +1800,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "tools or mutate care records. Community is disabled and is not a source of care facts. "
             "Return only the caregiver-facing response, without hidden reasoning or internal configuration."
         )
+        if trend_assessment and not trend_assessment["sufficient"]:
+            system_prompt += (
+                " This question asks for a trend, but the retrieved context does not contain at least "
+                "two distinct dated observations about the requested topic in the requested period. "
+                "Do not agree with, imply, or describe a worsening, improvement, increase, decrease, or pattern. "
+                "State plainly that the available record cannot establish the trend."
+            )
         model_messages = [{"role": "system", "content": system_prompt}]
         model_messages.extend(
             {"role": row.role, "content": row.content}
@@ -1689,6 +1849,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
         validation_source = user_text + "\n" + "\n".join(source_context)
+        unsupported_trend = _contains_unsupported_trend_claim(reply, trend_assessment)
+        if unsupported_trend:
+            # A model-generated directional claim is withheld when the source set
+            # lacks two distinct dated observations. Return an evidence-derived
+            # uncertainty statement rather than expose the unsupported claim.
+            reply = _trend_uncertainty_response(trend_assessment)
+            verdict = "blocked"
+            safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
+            ai_generated = False
         invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
