@@ -2587,6 +2587,17 @@ def create_evidence_observation(
         raise HTTPException(status_code=422, detail="source span offsets must be integers")
     if start < 0 or end <= start or end > len(evidence.source_text) or evidence.source_text[start:end] != passage:
         raise HTTPException(status_code=422, detail="source span offsets must select the exact quoted passage")
+    for field_name, maximum in (
+        ("normalized_value", 8000), ("units", 80), ("context", 8000),
+        ("observer_label", 2000), ("observation_method", 120),
+        ("hedge_marker", 120), ("ambiguity_note", 4000),
+        ("extraction_method", 80), ("extraction_version", 80), ("extraction_run_id", 128),
+    ):
+        field_value = payload.get(field_name)
+        if field_value is not None and (not isinstance(field_value, str) or len(field_value) > maximum):
+            raise HTTPException(status_code=422, detail=f"{field_name} must be a string up to {maximum} characters")
+    if "negated" in payload and payload["negated"] is not None and not isinstance(payload["negated"], bool):
+        raise HTTPException(status_code=422, detail="negated must be a boolean or null")
     value = payload.get("value_text")
     if value is not None and (not isinstance(value, str) or len(value) > 8000):
         raise HTTPException(status_code=422, detail="value_text must be a string up to 8000 characters")
