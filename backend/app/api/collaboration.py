@@ -1788,6 +1788,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             retrieval_query, _rank_context_lines(retrieval_query, evidence_context, 4)
         )
         shared_lcr_lines = _filter_context_lines_to_query(retrieval_query, shared_lcr_lines)
+        source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
