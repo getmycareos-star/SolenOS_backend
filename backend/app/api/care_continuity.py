@@ -2637,13 +2637,13 @@ def create_evidence_observation(
     if "negated" in payload and payload["negated"] is not None and not isinstance(payload["negated"], bool):
         raise HTTPException(status_code=422, detail="negated must be a boolean or null")
     value = payload.get("value_text")
-    if status in {"unknown", "missing"}:
-        value = None
     if value is not None and (not isinstance(value, str) or len(value) > 8000):
         raise HTTPException(status_code=422, detail="value_text must be a string up to 8000 characters")
-    if status in {"unknown", "missing"} and value not in (None, ""):
-        raise HTTPException(status_code=422, detail="Unknown or missing observations cannot assert a value")
-    if status not in {"unknown", "missing"} and not isinstance(value, str):
+    if status in {"unknown", "missing"}:
+        if value not in (None, ""):
+            raise HTTPException(status_code=422, detail="Unknown or missing observations cannot assert a value")
+        value = None
+    elif not isinstance(value, str):
         raise HTTPException(status_code=422, detail="A value is required unless the observation is explicitly unknown or missing")
     observer_label = payload.get("observer_label")
     observer_id = payload.get("observer_caregiver_id")
