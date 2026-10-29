@@ -55,7 +55,20 @@ class OpenQuestion(Base):
     closed_at = Column(DateTime(timezone=True), nullable=True)
     closed_reason = Column(Text, nullable=True)
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    answered_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class OpenQuestionAnswerEvent(Base):
+    """Append-only attributed answer history for clarification questions."""
+    __tablename__ = "open_question_answer_events"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    question_id = Column(String, ForeignKey("open_questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    answer = Column(Text, nullable=False)
+    answer_provenance = Column(Text, nullable=False)
+    answered_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class Contradiction(Base):
@@ -119,6 +132,15 @@ class ContradictionResolutionEvent(Base):
     resolution_scope = Column(Text, nullable=True)
     evidence_ids = Column(JSONList, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def prevent_question_answer_history_mutation(session, flush_context, instances):
+    if any(
+        isinstance(item, OpenQuestionAnswerEvent)
+        for item in list(session.dirty) + list(session.deleted)
+    ):
+        raise ValueError("Question answer history is append-only and cannot be updated or deleted")
 
 
 @event.listens_for(Session, "before_flush")
