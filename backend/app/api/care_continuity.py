@@ -1368,6 +1368,50 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             entry["record_id"],
         )
     )
+    # Report recency metadata without inventing a universal stale threshold. Different
+    # care domains have different update cadences; timestamp presence is not freshness proof.
+    source_freshness = {}
+    def _recency_key(value):
+        try:
+            parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return (1, parsed.astimezone(timezone.utc).timestamp())
+        except (TypeError, ValueError, OverflowError):
+            return (0, str(value))
+
+    for source_name, source in sources.items():
+        rows = source.get("items") or []
+        recorded_values = [
+            (row.get("recorded_at") or row.get("created_at") or row.get("uploaded_at") or row.get("updated_at"))
+            for row in rows
+        ]
+        recorded_values = [value for value in recorded_values if value is not None]
+        event_values = [
+            (row.get("occurred_at") or row.get("observed_at") or row.get("effective_at"))
+            for row in rows
+        ]
+        event_values = [value for value in event_values if value is not None]
+        source_status = source.get("status", "unknown")
+        if source_status == "unavailable_schema":
+            freshness_status = "unavailable"
+        elif not rows:
+            freshness_status = "no_records_returned"
+        elif recorded_values:
+            freshness_status = "record_time_available"
+        else:
+            freshness_status = "record_time_missing"
+        source_freshness[source_name] = {
+            "status": freshness_status,
+            "record_count": len(rows),
+            "records_with_record_time": len(recorded_values),
+            "records_with_event_time": len(event_values),
+            "latest_recorded_at": max(recorded_values, key=_recency_key) if recorded_values else None,
+            "latest_event_at": max(event_values, key=_recency_key) if event_values else None,
+            "staleness_assessment": "not_assessed_without_domain_specific_threshold",
+            "interpretation_limit": "A timestamp establishes recorded time, not that the information remains current; no universal staleness interval is assumed.",
+        }
+
     required_missing = context.get("missing_required_sources") or []
     optional_missing = context.get("missing_optional_sources") or []
     bounded_sources = sorted(
@@ -1466,6 +1510,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "domains": domain_sources,
         "capabilities": capabilities,
         "assessment_quality": assessment_quality,
+        "freshness_assessment": {"sources": source_freshness, "policy": "Report recency metadata; do not label records stale without a domain-specific rule."},
         "current_care_reality": {
             "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "evidence_observations", "caregiver_observations", "caregiver_contexts"}][:100],
             "notice": "Records are reported with their source status. A record or missing record is not, by itself, proof of clinical truth or absence.",
