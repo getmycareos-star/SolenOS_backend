@@ -761,8 +761,11 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
     period_label = "over the available recorded history"
     if window_match:
         count_word = window_match.group("count")
-        amount = count_words.get(count_word, 1) if count_word else 1
-        if count_word and amount is None:
+        if not count_word:
+            amount = 1
+        elif count_word in count_words:
+            amount = count_words[count_word]
+        else:
             amount = int(count_word)
         unit = window_match.group("unit")
         multiplier = 1 if unit.startswith("day") else 7 if unit.startswith("week") else 30 if unit.startswith("month") else 365
