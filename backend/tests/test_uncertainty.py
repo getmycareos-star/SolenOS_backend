@@ -1360,15 +1360,18 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
         db.close()
 
         client = authorized_client(person_id)
+        source_text = "Caregiver reports three awakenings last night."
+        source_passage = "three awakenings last night"
+        source_span_start = source_text.index(source_passage)
         payload = {
             "observation_kind": "caregiver_report",
             "epistemic_status": "reported",
             "subject_label": "person receiving care",
             "attribute": "sleep_awakenings",
             "value_text": "three",
-            "source_passage": "three awakenings last night",
-            "source_span_start": 18,
-            "source_span_end": 45,
+            "source_passage": source_passage,
+            "source_span_start": source_span_start,
+            "source_span_end": source_span_start + len(source_passage),
             "extraction_method": "human_entered",
             "extraction_version": "test-v1",
         }
