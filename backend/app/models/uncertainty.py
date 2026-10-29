@@ -44,6 +44,7 @@ class OpenQuestion(Base):
     question = Column(Text, nullable=False)
     subject_type = Column(String, nullable=False)
     subject_id = Column(String, nullable=False)
+    claim_id = Column(String, ForeignKey("care_assertions.id", ondelete="SET NULL"), nullable=True, index=True)
     status = Column(String, nullable=False, default="open")
     priority = Column(SQLEnum(Priority), nullable=False, default=Priority.INFORMATIONAL)
     evidence_ids = Column(JSONList, nullable=True)
