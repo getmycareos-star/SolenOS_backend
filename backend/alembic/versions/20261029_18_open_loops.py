@@ -22,7 +22,7 @@ def upgrade() -> None:
             op.create_index(name, table, columns)
 
     if not inspect(bind).has_table("open_loop_records"):
-    op.create_table(
+        op.create_table(
             "open_loop_records",
             sa.Column("id", sa.String(), primary_key=True),
             sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id"), nullable=False),
@@ -75,7 +75,7 @@ def upgrade() -> None:
     ensure_index("ix_open_loop_source_fingerprint", "open_loop_records", ["person_id", "source_fingerprint"])
 
     if not inspect(bind).has_table("open_loop_events"):
-    op.create_table(
+        op.create_table(
             "open_loop_events",
             sa.Column("id", sa.String(), primary_key=True),
             sa.Column("loop_id", sa.String(), sa.ForeignKey("open_loop_records.id", ondelete="CASCADE"), nullable=False),
@@ -96,7 +96,7 @@ def upgrade() -> None:
     ensure_index("ix_open_loop_events_record_created", "open_loop_events", ["loop_id", "created_at"])
 
     if not inspect(bind).has_table("open_loop_dependencies"):
-    op.create_table(
+        op.create_table(
             "open_loop_dependencies",
             sa.Column("id", sa.String(), primary_key=True),
             sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id"), nullable=False),
