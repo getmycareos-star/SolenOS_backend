@@ -649,7 +649,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 if finding.get("change_type") == "conflicting":
                     epistemic_state = EpistemicState.CONFLICTING
                     gap_reason = GapReason.CONFLICTING
-                elif not persisted_evidence:
+                elif not finding_evidence:
                     epistemic_state = EpistemicState.UNKNOWN
                     gap_reason = GapReason.INSUFFICIENT_EVIDENCE
                 elif finding.get("certainty") != "supported" or finding.get("historical_only"):
