@@ -1274,3 +1274,96 @@ def test_analyze_endpoint_uses_persisted_shared_origin_for_independence_count():
         assert analysis["duplicate_evidence_groups"][0]["independent_corroboration"] is False
     finally:
         teardown_db()
+
+
+
+def test_claim_dependency_graph_is_persisted_person_scoped_cycle_safe_and_append_only():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import CareAssertion, EvidenceClaimDependency
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="claim-dependency-person", name="Claim Dependency Person")
+        caregiver = Caregiver(
+            id="claim-dependency-caregiver", name="Claim Dependency Caregiver",
+            email="claim-dependency@example.com", relationship="Family", person_id=person.id,
+        )
+        other_person = Person(id="claim-dependency-other", name="Other Person")
+        other_caregiver = Caregiver(
+            id="claim-dependency-other-caregiver", name="Other Caregiver",
+            email="claim-dependency-other@example.com", relationship="Family", person_id=other_person.id,
+        )
+        claim_a = CareAssertion(
+            id="claim-dependency-a", person_id=person.id, subject_type="sleep",
+            subject_id="sleep-1", field="daytime_function", assertion_kind="inference",
+            asserted_value="Daytime function may be affected", source_label="caregiver record",
+            source_text="Daytime function may be affected", evidence_ids=[],
+            assertion_status="unverified", created_by_caregiver_id=caregiver.id,
+        )
+        claim_b = CareAssertion(
+            id="claim-dependency-b", person_id=person.id, subject_type="sleep",
+            subject_id="sleep-1", field="night_waking", assertion_kind="report",
+            asserted_value="Caregiver reported two awakenings", source_label="caregiver report",
+            source_text="Caregiver reported two awakenings", evidence_ids=[],
+            assertion_status="reported", created_by_caregiver_id=caregiver.id,
+        )
+        other_claim = CareAssertion(
+            id="claim-dependency-private", person_id=other_person.id, subject_type="sleep",
+            subject_id="sleep-1", field="night_waking", assertion_kind="report",
+            asserted_value="Private report", source_label="other care record",
+            source_text="Private report", evidence_ids=[],
+            assertion_status="reported", created_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver, claim_a, claim_b, other_claim])
+        db.commit()
+        db.close()
+
+        client = authorized_client("claim-dependency-person")
+        created = client.post("/api/v1/care-continuity/claims/claim-dependency-a/dependencies", json={
+            "depends_on_claim_id": "claim-dependency-b",
+            "dependency_type": "derived_from",
+            "rationale": "The interpretation depends on the reported night-waking observation.",
+        })
+        assert created.status_code == 201, created.text
+        edge = created.json()
+        assert edge["person_id"] == "claim-dependency-person"
+        assert edge["created_by_caregiver_id"] == "claim-dependency-caregiver"
+
+        outgoing = client.get("/api/v1/care-continuity/claims/claim-dependency-a/dependencies")
+        incoming = client.get("/api/v1/care-continuity/claims/claim-dependency-b/dependencies")
+        assert outgoing.status_code == incoming.status_code == 200
+        assert any(item["id"] == edge["id"] and item["direction"] == "outgoing" for item in outgoing.json())
+        assert any(item["id"] == edge["id"] and item["direction"] == "incoming" for item in incoming.json())
+
+        duplicate = client.post("/api/v1/care-continuity/claims/claim-dependency-a/dependencies", json={
+            "depends_on_claim_id": "claim-dependency-b",
+            "dependency_type": "derived_from",
+            "rationale": "Duplicate edge must not be silently added.",
+        })
+        assert duplicate.status_code == 409
+
+        cycle = client.post("/api/v1/care-continuity/claims/claim-dependency-b/dependencies", json={
+            "depends_on_claim_id": "claim-dependency-a",
+            "dependency_type": "requires",
+            "rationale": "This edge would close a dependency cycle.",
+        })
+        assert cycle.status_code == 422
+        cross_person = client.post("/api/v1/care-continuity/claims/claim-dependency-a/dependencies", json={
+            "depends_on_claim_id": "claim-dependency-private",
+            "dependency_type": "derived_from",
+            "rationale": "Cross-person claims must be rejected.",
+        })
+        assert cross_person.status_code == 404
+
+        audit_db = TestingSessionLocal()
+        try:
+            persisted = audit_db.query(EvidenceClaimDependency).filter_by(id=edge["id"]).one()
+            persisted.rationale = "attempted rewrite"
+            with pytest.raises(ValueError, match="append-only"):
+                audit_db.commit()
+            audit_db.rollback()
+        finally:
+            audit_db.close()
+    finally:
+        teardown_db()
