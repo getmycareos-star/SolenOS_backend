@@ -673,7 +673,7 @@ def test_source_access_failure_creates_actionable_clarification():
     assert result["sufficiency"] == "insufficient_pending_resolution"
     assert any(
         "source access" in question["question"].lower()
-        and "permission" in question["reason"].lower()
+        and "denied" in question["reason"].lower()
         for question in result["clarification_questions"]
     )
     assert result["conclusion_confidence"] is None
