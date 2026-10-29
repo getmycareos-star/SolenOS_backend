@@ -105,6 +105,18 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
         teardown()
 
 
+def test_provenance_guard_allows_explicit_absence_but_rejects_unsupported_affirmation():
+    source = "Caregiver report: sleep was poor last night."
+    assert collaboration._contains_unsupported_care_claim(
+        "No professional-reported information is recorded in the supplied context.",
+        source,
+    ) is False
+    assert collaboration._contains_unsupported_care_claim(
+        "Professional-reported information confirms a diagnosis.",
+        source,
+    ) is True
+
+
 def test_companion_retrieval_expands_common_caregiving_paraphrases():
     sleep_record = 'LCR event evidence: {"event_id":"sleep-older","title":"Waking several times overnight"}'
     unrelated_record = 'LCR event evidence: {"event_id":"meal","title":"Lunch preference"}'
