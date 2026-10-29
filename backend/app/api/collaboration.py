@@ -1355,6 +1355,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "source_event_ids": saved_metadata.get("source_event_ids", []),
                 "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
                 "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+                "source_record_refs": (
+                    json.loads(saved_assistant.source_record_refs_json or "[]")
+                    if saved_assistant.source_record_refs_json else []
+                ),
                 "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
                 "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
                 "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {}),
