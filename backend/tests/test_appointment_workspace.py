@@ -511,7 +511,7 @@ def test_structured_source_observation_appears_in_current_care_projection(client
                 'sleep-structured-observation', :person_id, 'sleep-source-evidence',
                 'reported_observation', 'caregiver_reported', 'care recipient',
                 'sleep', 'woke twice overnight', 'woke twice overnight',
-                26, 46, 'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
+                20, 40, 'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
             )
         """), {
             "person_id": owner["person"]["id"],
@@ -528,8 +528,8 @@ def test_structured_source_observation_appears_in_current_care_projection(client
     assert item["source_collection"] == "evidence_observations"
     assert item["title"] == "sleep"
     assert item["evidence_ids"] == ["sleep-source-evidence"]
-    assert item["source_span_start"] == 26
-    assert item["source_span_end"] == 46
+    assert item["source_span_start"] == 20
+    assert item["source_span_end"] == 40
     assert item["source_passage"] == "woke twice overnight"
     assert item["epistemic_status"] == "caregiver_reported"
 
