@@ -423,9 +423,58 @@ class EvidenceFreshnessAssessment(Base):
     assessed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
 
 
+class EvidenceCompletenessPolicy(Base):
+    """Immutable, purpose-specific checklist; no universal completeness score."""
+    __tablename__ = "evidence_completeness_policies"
+    __table_args__ = (
+        UniqueConstraint(
+            "person_id", "domain_key", "purpose_key", "policy_version",
+            name="uq_evidence_completeness_policy_version",
+        ),
+        Index("ix_evidence_completeness_policies_person_domain", "person_id", "domain_key"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain_key = Column(String(80), nullable=False)
+    purpose_key = Column(String(120), nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    required_fields = Column(JSONList, nullable=False)
+    rationale = Column(Text, nullable=False)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EvidenceCompletenessAssessment(Base):
+    """Append-only assessment of source-link coverage for one explicit purpose."""
+    __tablename__ = "evidence_completeness_assessments"
+    __table_args__ = (
+        Index("ix_evidence_completeness_assessments_person_policy", "person_id", "policy_id", "assessed_at"),
+        Index("ix_evidence_completeness_assessments_person_subject", "person_id", "subject_type", "subject_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    policy_id = Column(String, ForeignKey("evidence_completeness_policies.id", ondelete="RESTRICT"), nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    subject_type = Column(String(80), nullable=False)
+    subject_id = Column(String(160), nullable=False)
+    assessment_status = Column(String(24), nullable=False)
+    required_fields = Column(JSONList, nullable=False)
+    satisfied_fields = Column(JSONList, nullable=False)
+    missing_fields = Column(JSONList, nullable=False)
+    field_evidence_json = Column(Text, nullable=False)
+    evidence_ids = Column(JSONList, nullable=False)
+    rationale = Column(Text, nullable=False)
+    assessment_basis = Column(String(48), nullable=False, default="linked_source_coverage_only")
+    semantic_sufficiency = Column(String(40), nullable=False, default="not_automatically_verified")
+    assessed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    assessed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 @event.listens_for(Session, "before_flush")
 def _enforce_evidence_freshness_append_only(session, flush_context, instances):
-    immutable = (EvidenceFreshnessPolicy, EvidenceFreshnessAssessment)
+    immutable = (EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment)
     if any(isinstance(obj, immutable) for obj in session.dirty):
         raise ValueError("Evidence freshness policies and assessments are append-only")
     if any(isinstance(obj, immutable) for obj in session.deleted):
