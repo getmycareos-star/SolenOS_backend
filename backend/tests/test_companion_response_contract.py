@@ -255,6 +255,165 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_companion_context_ranking_expands_common_caregiving_paraphrases():
+    appointment = 'LCR appointment evidence: {"appointment_id":"visit-old","title":"Neurology consultation"}'
+    unrelated = 'LCR appointment evidence: {"appointment_id":"meal","title":"Lunch planning"}'
+    ranked = collaboration._rank_context_lines("Tell me about the clinic visit", [unrelated, appointment], 1)
+    assert ranked == [appointment]
+    sleep_terms = collaboration._expanded_context_terms("What happened with her rest?")
+    assert {"rest", "sleep", "waking"}.issubset(sleep_terms)
+
+
+def test_companion_retrieves_matching_historical_event_beyond_recent_window(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "One older sleep observation is recorded; it does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Sleep observation from August",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="household",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated household event {index}",
+                description="A routine household activity was recorded.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        assert older_id in response.json()["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_replays_same_turn_without_second_inference(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The record contains one sleep note. It does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "2fbc5e2a-20f4-46db-a79a-43c18b5b0a70"
+        payload = {"person_id": person_id, "text": "What is recorded about sleep?", "client_turn_id": turn_id}
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        replay = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["session_id"] == first.json()["session_id"]
+        assert replay.json()["reply"] == first.json()["reply"]
+        assert replay.json()["source_record_refs"] == first.json()["source_record_refs"]
+        assert len(calls) == 1
+
+        history = client.get(
+            f"/api/v1/conversation/{first.json()['session_id']}",
+            headers=headers,
+        )
+        assert history.status_code == 200, history.text
+        assert [message["role"] for message in history.json()["messages"]] == ["user", "assistant"]
+        assert history.json()["messages"][-1]["persistence"] == "conversation_only"
+    finally:
+        teardown()
+
+
+def test_companion_turn_id_cannot_replay_across_people(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "A source-grounded answer for the first care record."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token_a, person_a, _ = create_session(client)
+        token_b, person_b, _ = create_session(client)
+        turn_id = "5f2a70e6-faf3-4eab-9a11-5f1fbc8e4d44"
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_a}"},
+            json={"person_id": person_a, "text": "What was recorded?", "client_turn_id": turn_id},
+        )
+        assert first.status_code == 200, first.text
+        replay = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_b}"},
+            json={"person_id": person_b, "text": "What was recorded?", "client_turn_id": turn_id},
+        )
+        assert replay.status_code == 409
+        assert "A source-grounded answer" not in replay.text
+    finally:
+        teardown()
+
+
+def test_companion_rejects_turn_id_reuse_with_changed_text(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The record does not establish that."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "4f31e28b-4b8b-4f40-8f9b-3a10f93a9f91"
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "What is recorded about sleep?", "client_turn_id": turn_id},
+        )
+        assert first.status_code == 200, first.text
+        changed = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "What is recorded about falls?", "client_turn_id": turn_id},
+        )
+        assert changed.status_code == 409, changed.text
+    finally:
+        teardown()
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
