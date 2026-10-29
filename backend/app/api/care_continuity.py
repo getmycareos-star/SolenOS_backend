@@ -733,10 +733,22 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         value["source_names"] = sorted(set(value["source_names"]))
         value["source_statuses"] = sorted(set(value["source_statuses"]))
         value["evidence_state"] = "supported_by_persisted_records" if value["record_count"] else "no_records_returned"
-    open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started"}
+    open_statuses = {"open", "active", "pending", "unresolved", "needs_review", "not_started", "follow_up_pending"}
+    closed_statuses = {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "known"}
     attention_items = []
     uncertainty_items = []
     missing_items = []
+    open_loops = []
+    open_loop_sources = {
+        "conflicts": "conflict_review",
+        "reconciliations": "reconciliation_review",
+        "uncertainties": "clarification",
+        "uncertainty_assessments": "uncertainty_review",
+        "information_gaps": "missing_information",
+        "missing_information": "missing_information",
+        "open_questions": "unanswered_question",
+        "follow_up_links": "follow_up",
+    }
     for item in all_items:
         status = str(item.get("status") or item.get("lifecycle_status") or item.get("assertion_status") or "").lower()
         source = item["source"]
@@ -750,10 +762,32 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
         }
-        if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments", "information_gaps", "missing_information", "open_questions"} and status not in {"resolved", "closed", "completed", "reconciled", "withdrawn", "retracted", "superseded", "cancelled", "known"}:
+        if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments", "information_gaps", "missing_information", "open_questions"} and status not in closed_statuses:
             (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments"} else missing_items).append(summary_item)
+
+        # Open loops are a read-only projection of persisted unresolved items.
+        # Do not infer an owner, deadline, clinical result, or completion state.
+        if source in open_loop_sources and status not in closed_statuses:
+            open_loops.append({
+                **summary_item,
+                "loop_type": open_loop_sources[source],
+                "description": str(item.get("description") or item.get("notes") or item.get("question") or item.get("topic") or "")[:1600],
+                "owner": item.get("owner") or item.get("assigned_to") or item.get("owner_id"),
+                "due_at": item.get("due_at"),
+                "recorded_status": status or "not_recorded",
+                "status_confidence": "explicitly_recorded" if status in open_statuses else "unresolved_source_record_status_not_explicit",
+            })
         elif source == "events" and (item.get("attention_candidate") is True or item.get("follow_up_candidate") is True):
             attention_items.append(summary_item)
+            open_loops.append({
+                **summary_item,
+                "loop_type": "care_event_follow_up",
+                "description": str(item.get("description") or item.get("title") or "")[:1600],
+                "owner": item.get("owner") or item.get("assigned_to") or None,
+                "due_at": item.get("due_at"),
+                "recorded_status": status or "not_recorded",
+                "status_confidence": "explicit_follow_up_flag",
+            })
         elif source == "follow_up_links" and status in open_statuses:
             attention_items.append(summary_item)
     capability_specs = {
@@ -818,6 +852,16 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "bounded": True,
         },
         "priorities": attention_items[:50],
+        "open_loops": {
+            "items": open_loops[:100],
+            "count": len(open_loops),
+            "has_more": len(open_loops) > 100,
+            "source_of_truth": "persisted_lcr_records",
+            "owner_assignment_policy": "only_explicitly_recorded",
+            "deadline_policy": "only_explicitly_recorded",
+            "completion_policy": "closed_only_by_persisted_closed_status",
+            "notice": "Open loops are unresolved record-derived items, not invented tasks. Unknown owners, due dates, and outcomes remain unknown.",
+        },
         "uncertainties_and_conflicts": uncertainty_items[:100],
         "missing_information": missing_items[:100],
         "confidence_assessment": {
