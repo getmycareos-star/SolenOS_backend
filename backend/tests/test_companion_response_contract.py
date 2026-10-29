@@ -52,6 +52,47 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The record contains one reported sleep observation."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _caregiver_id = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = str(__import__("uuid").uuid4())
+        body = {
+            "person_id": person_id,
+            "text": "What was recorded about sleep?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert first_data["written_to_lcr"] is False
+        assert first_data["persistence"] == "conversation_only"
+
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert retry.status_code == 200, retry.text
+        replay_data = retry.json()
+        assert replay_data["idempotent_replay"] is True
+        assert replay_data["session_id"] == first_data["session_id"]
+        assert replay_data["reply"] == first_data["reply"]
+        assert len(calls) == 1
+
+        changed = {**body, "text": "Tell me about the medication record."}
+        mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert mismatch.status_code == 409, mismatch.text
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
