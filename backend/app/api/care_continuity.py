@@ -3821,7 +3821,9 @@ def create_evidence_completeness_policy(payload: dict[str, Any], request: Reques
         raise HTTPException(status_code=422, detail="A rationale for this purpose-specific policy is required")
     if not isinstance(required_fields, list) or not required_fields or len(required_fields) > 100:
         raise HTTPException(status_code=422, detail="required_fields must be a non-empty list of at most 100 field identifiers")
-    fields = [str(value).strip().lower() for value in required_fields]
+    if any(not isinstance(value, str) for value in required_fields):
+        raise HTTPException(status_code=422, detail="required_fields must contain strings only")
+    fields = [value.strip().lower() for value in required_fields]
     if any(not COMPLETENESS_KEY_PATTERN.fullmatch(value) for value in fields) or len(fields) != len(set(fields)):
         raise HTTPException(status_code=422, detail="required_fields must contain unique lowercase field identifiers")
     existing = db.query(EvidenceCompletenessPolicy.id).filter(
