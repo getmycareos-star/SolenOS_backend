@@ -313,3 +313,41 @@ def test_corroboration_state_is_indeterminate_when_lineage_is_truncated():
     result = assess_corroboration([], [], ["a"], lineage_truncated=True)
     assert result["status"] == "indeterminate_due_to_truncated_lineage"
     assert result["review_required"] is True
+
+
+def test_contradiction_and_generic_related_links_do_not_prove_shared_origin():
+    from app.services.evidence_lineage import build_evidence_lineage
+
+    rows = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    for relationship_type in ("contradicts", "corroborates", "related_to", "duplicates"):
+        link = SimpleNamespace(
+            source_evidence_id="a",
+            related_evidence_id="b",
+            source_independence_status="unknown",
+            relationship_type=relationship_type,
+            origin_group_key=None,
+        )
+        lineage, independence = build_evidence_lineage(rows, [link], ["a", "b"])
+        assert "a" not in lineage and "b" not in lineage, relationship_type
+        assert independence["a"] == "independence_not_assessed", relationship_type
+        assert independence["b"] == "independence_not_assessed", relationship_type
+
+
+def test_explicit_shared_origin_status_and_forwarded_from_relationship_group_sources():
+    from app.services.evidence_lineage import build_evidence_lineage
+
+    rows = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    link = SimpleNamespace(
+        source_evidence_id="a", related_evidence_id="b",
+        source_independence_status="shared_origin", relationship_type="related_to",
+        origin_group_key=None,
+    )
+    lineage, independence = build_evidence_lineage(rows, [link], ["a", "b"])
+    assert lineage["a"] == lineage["b"]
+    assert independence["a"] == independence["b"] == "shared_origin"
