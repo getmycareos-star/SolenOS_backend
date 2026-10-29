@@ -329,3 +329,12 @@ The 15-case uncertainty benchmark reported 15 passed, 0 failed (100.00% for that
 
 Automatic source-family discovery, full dependency invalidation/re-review, universal typed cross-module links, task-specific confidence calibration, professional-authority policy, formal comparable-window trajectory analysis, and authentic-origin verification remain partial, unverified, or blocked. No capability group is marked complete solely because these workflows passed.
 
+
+
+### Latest evidence-grounded claim impact increment — 2026-10-29
+
+- Backend commit [claim assessment impact endpoint](https://github.com/getmycareos-star/SolenOS_backend/commit/f28562fb9cc46c9bc89a5b019f7dba11ca8b7835) adds a person-scoped, read-only endpoint that checks for missing assessments, claim evidence added after the latest assessment, unavailable previously assessed evidence, newer declared prerequisite assessments, and unresolved matching conflicts. It does not auto-resolve conflicts or claim clinical truth.
+- Backend commit [impact scope/review regression test](https://github.com/getmycareos-star/SolenOS_backend/commit/1988ba1afbd856186a80fc888e9866e66ca289c1) adds a test for the unassessed review gate and cross-record claim denial. The test result must be confirmed in Actions before this is marked verified.
+- Frontend commit [connect impact review to the LCR claim panel](https://github.com/getmycareos-star/SolenOS-landing/commit/637d5f1e96995ace0ae8ff520c5295f14e335e21) retrieves and displays persisted impact results, reasons, missing/unassessed evidence IDs, changed prerequisite claims, and unresolved conflicts. Failed reads explicitly do not imply the assessment is current.
+- Frontend commit [assert impact workflow contract](https://github.com/getmycareos-star/SolenOS-landing/commit/147eeaae6a8d9720ad5fedee8b166b77a18324bf) checks the UI connection and interpretation limits.
+- [ ] Current-main CI for the backend test commit and both frontend commits must pass. This endpoint is a deterministic review trigger, not a full semantic claim validator; policy-driven expiry, complete source freshness checks, and dependency-wide automatic invalidation remain incomplete.
