@@ -194,10 +194,9 @@ def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
     from app.models.care_continuity import CareStateRevision
 
     engine = create_engine("sqlite://")
-    Base.metadata.create_all(
-        engine,
-        tables=[Person.__table__, Caregiver.__table__, UncertaintyAssessment.__table__, CareStateRevision.__table__],
-    )
+    # Create the complete mapped schema so foreign-key dependencies used by
+    # the LCR projection are present regardless of SQLAlchemy table ordering.
+    Base.metadata.create_all(engine)
 
     analysis_old = {"epistemic_state": "unknown", "limitations": ["No current evidence."], "calibration_status": "not_calibrated"}
     analysis_new = {"epistemic_state": "partially_known", "limitations": ["Evidence is reported, not independently verified."], "calibration_status": "not_calibrated"}
