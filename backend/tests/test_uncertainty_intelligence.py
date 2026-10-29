@@ -107,6 +107,17 @@ def test_unavailable_source_is_not_treated_as_negative_finding():
     assert any("not available" in limitation for limitation in result["limitations"])
 
 
+def test_unsupported_assessment_task_fails_closed():
+    result = analyze_uncertainty(
+        claim="The care status is current.",
+        task="unregistered_high_consequence_workflow",
+        evidence=[{"id": "evidence-a", "text": "A caregiver report exists.", "source_type": "caregiver_report"}],
+    )
+    assert "unsupported_assessment_task" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+    assert result["conclusion_confidence"] is None
+
+
 def test_missing_task_is_rejected_instead_of_fabricating_assessment():
     with pytest.raises(ValueError):
         analyze_uncertainty(claim="A real claim", task="", evidence=[])
