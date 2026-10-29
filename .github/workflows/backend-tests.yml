@@ -183,14 +183,25 @@ jobs:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
               cur.execute("SELECT version_num FROM alembic_version")
               revision = cur.fetchone()[0]
-              if revision != "20261029_08_source_links":
-                  raise SystemExit(f"unexpected Alembic head after migration reconciliation: {revision}")
+          # Derive the expected head from the checked-out migration graph instead
+          # of freezing an obsolete revision literal in CI. ScriptDirectory also
+          # fails if the migration graph has multiple heads.
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          config = Config("backend/alembic.ini")
+          scripts = ScriptDirectory.from_config(config)
+          expected_revision = scripts.get_current_head()
+          if revision != expected_revision:
+              raise SystemExit(
+                  f"database migration head {revision!r} does not match code head {expected_revision!r}"
+              )
+          with conn.cursor() as cur:
               cur.execute("SELECT COUNT(*) FROM caregivers")
               count = cur.fetchone()[0]
               if count != 0:
                   raise SystemExit(f"expected empty fixture table, got {count} rows")
           conn.close()
-          print("PostgreSQL legacy-schema migration passed; no caregiver rows fabricated.")
+          print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
 
       - name: Verify privacy, sharing, audit, notification, reminder and handoff schema
