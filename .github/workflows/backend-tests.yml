@@ -43,6 +43,30 @@ jobs:
       - name: Run backend tests
         run: python -m pytest backend/tests -q
 
+      - name: Run uncertainty benchmark and publish measured score
+        run: |
+          python -m pytest backend/tests/test_uncertainty_benchmark.py -q --junitxml=/tmp/uncertainty-benchmark.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("/tmp/uncertainty-benchmark.xml").getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          tests = sum(int(suite.attrib.get("tests", 0)) for suite in suites)
+          failures = sum(int(suite.attrib.get("failures", 0)) for suite in suites)
+          errors = sum(int(suite.attrib.get("errors", 0)) for suite in suites)
+          skipped = sum(int(suite.attrib.get("skipped", 0)) for suite in suites)
+          executed = tests - skipped
+          passed = executed - failures - errors
+          score = round(100 * passed / executed, 2) if executed else 0.0
+          print(f"UNCERTAINTY_BENCHMARK_SCORE={score:.2f}")
+          print(f"UNCERTAINTY_BENCHMARK_PASSED={passed}")
+          print(f"UNCERTAINTY_BENCHMARK_EXECUTED={executed}")
+          print(f"UNCERTAINTY_BENCHMARK_FAILED={failures + errors}")
+          print(f"UNCERTAINTY_BENCHMARK_SKIPPED={skipped}")
+          if not executed or failures or errors or skipped:
+              raise SystemExit("Benchmark gate failed: zero executed, failing/error cases, or skipped cases.")
+          PY
+
   postgres-migration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
