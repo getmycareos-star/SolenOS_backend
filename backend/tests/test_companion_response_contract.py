@@ -63,7 +63,23 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
-        token, person_id, _caregiver_id = create_session(client)
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported restless sleep last night.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
         headers = {"Authorization": f"Bearer {token}"}
         turn_id = str(__import__("uuid").uuid4())
         body = {
@@ -76,6 +92,7 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         first_data = first.json()
         assert first_data["written_to_lcr"] is False
         assert first_data["persistence"] == "conversation_only"
+        assert event_id in first_data["source_event_ids"]
 
         retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
         assert retry.status_code == 200, retry.text
@@ -83,6 +100,7 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         assert replay_data["idempotent_replay"] is True
         assert replay_data["session_id"] == first_data["session_id"]
         assert replay_data["reply"] == first_data["reply"]
+        assert event_id in replay_data["source_event_ids"]
         assert len(calls) == 1
 
         restored = client.get(
