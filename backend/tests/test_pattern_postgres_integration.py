@@ -145,9 +145,15 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         ).all())
     finally:
         db.rollback()
-        # Remove only this test's rows, respecting the production foreign-key graph.
-        # Reconciliation can create significance assessments that reference a baseline;
-        # those assessments and their dimensions must be deleted before baselines.
+        # Remove only this test's rows in reverse foreign-key order. Changes
+        # reference significance assessments, so they must be removed before the
+        # assessment rows; patterns also reference changes and must go first.
+        db.query(Pattern).filter(
+            Pattern.person_id.in_([person_a_id, person_b_id])
+        ).delete(synchronize_session=False)
+        db.query(Change).filter(
+            Change.person_id.in_([person_a_id, person_b_id])
+        ).delete(synchronize_session=False)
         assessment_ids = db.query(SignificanceAssessment.id).filter(
             SignificanceAssessment.person_id.in_([person_a_id, person_b_id])
         ).subquery()
@@ -157,7 +163,7 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         db.query(SignificanceAssessment).filter(
             SignificanceAssessment.person_id.in_([person_a_id, person_b_id])
         ).delete(synchronize_session=False)
-        for model in (Pattern, Change, Baseline, CareEvent, Caregiver):
+        for model in (Baseline, CareEvent, Caregiver):
             db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.commit()
