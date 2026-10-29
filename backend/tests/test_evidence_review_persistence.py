@@ -411,6 +411,18 @@ def test_claim_assessments_require_exact_source_passages_and_preserve_version_hi
     assert third["status"] == "superseded"
     assert third["superseded_by_claim_id"] == replacement_claim_id
 
+    cycle = client_a.post(
+        f"/api/v1/care-continuity/claims/{replacement_claim_id}/assessments",
+        json={
+            "status": "superseded",
+            "rationale": "This would create a cycle and must be rejected.",
+            "policy_version": "claim-assessment-v1",
+            "superseded_by_claim_id": claim_id,
+            "evidence_links": [],
+        },
+    )
+    assert cycle.status_code == 422, cycle.text
+
     history = client_a.get(f"/api/v1/care-continuity/claims/{claim_id}/assessments")
     assert history.status_code == 200, history.text
     assert [item["id"] for item in history.json()] == [first["id"], second["id"], third["id"]]
