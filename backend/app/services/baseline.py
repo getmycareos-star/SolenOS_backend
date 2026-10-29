@@ -214,7 +214,6 @@ def build_baseline(
         window_end=window_end,
         event_count=event_count,
         frequency_per_period=frequency_per_period,
-        state_value=None,
         confidence=confidence,
         is_stable=baseline_complete,
         observation_density=observation_density,
