@@ -201,6 +201,68 @@ def test_alternative_with_unavailable_evidence_reference_fails_closed():
     assert result["conclusion_confidence"] is None
 
 
+def test_explicit_unknown_language_is_not_treated_as_a_negative_finding():
+    result = analyze_uncertainty(
+        claim="The current appointment status is unknown and not confirmed.",
+        task="summarize",
+        evidence=[{
+            "id": "appointment-report",
+            "text": "The caregiver reported an appointment.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+    )
+    assert result["explicit_uncertainty"] is True
+    assert "explicit_uncertainty" in result["classifications"]
+    assert result["epistemic_state"] == "partially_known"
+
+
+def test_ordinary_temporal_demonstrative_does_not_trigger_reference_ambiguity():
+    result = analyze_uncertainty(
+        claim="The appointment is scheduled for this morning.",
+        task="summarize",
+        evidence=[{
+            "id": "appointment-schedule",
+            "text": "Appointment scheduled for the morning.",
+            "source_type": "appointment_record",
+            "verified": True,
+            "observed_at": "2026-10-29T08:00:00Z",
+        }],
+        now=datetime(2026, 10, 29, 9, 0, tzinfo=timezone.utc),
+    )
+    assert "possible_reference_ambiguity" not in result["classifications"]
+
+
+def test_unanchored_pronoun_reference_is_flagged_for_clarification():
+    result = analyze_uncertainty(
+        claim="It happened after breakfast.",
+        task="summarize",
+        evidence=[{
+            "id": "event-report",
+            "text": "An event was reported after breakfast.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+    )
+    assert "possible_reference_ambiguity" in result["classifications"]
+    assert result["epistemic_state"] == "ambiguous"
+
+
+def test_expanded_causal_language_requires_review():
+    result = analyze_uncertainty(
+        claim="The medication triggered the fall.",
+        task="recommendation",
+        evidence=[{
+            "id": "fall-report-causal",
+            "text": "A fall was reported after medication was taken.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+    )
+    assert "causal_inference_review" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+
+
 def test_no_evidence_is_unknown_not_negative():
     result = analyze_uncertainty(
         claim="Medication status is not recorded.",
