@@ -1408,5 +1408,24 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
         )
         assert duplicate.status_code == 422, duplicate.text
         assert "Duplicate evidence IDs" in duplicate.text
+
+        baseline_not_in_evidence = client.post(
+            "/api/v1/uncertainty/analyze",
+            headers=auth,
+            json={
+                "person_id": person_id,
+                "subject_type": "care_record",
+                "subject_id": "current",
+                "field": "care_status",
+                "claim": "Care status may have changed.",
+                "task": "identify_change",
+                "evidence_ids": [],
+                "baseline_evidence_ids": ["not-requested"],
+                "required_fields": [],
+                "conflict_ids": [],
+            },
+        )
+        assert baseline_not_in_evidence.status_code == 422, baseline_not_in_evidence.text
+        assert "must also be included in evidence_ids" in baseline_not_in_evidence.text
     finally:
         teardown()
