@@ -159,8 +159,16 @@ def transition_change_confirmation(
     allowed_statuses = {"awaiting_confirmation", "confirmed", "rejected", "inconclusive"}
     if payload.status not in allowed_statuses:
         raise HTTPException(status_code=422, detail="Unsupported confirmation status")
-    if payload.status in {"rejected", "inconclusive"} and not (payload.reason or "").strip():
-        raise HTTPException(status_code=422, detail="A reason is required for rejected or inconclusive decisions")
+    if payload.status in {"confirmed", "rejected", "inconclusive"} and not (payload.reason or "").strip():
+        raise HTTPException(
+            status_code=422,
+            detail="A decision rationale is required for confirmed, rejected, or inconclusive decisions",
+        )
+    if payload.status == "confirmed" and not payload.evidence_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one persisted source event or assertion is required to confirm a change",
+        )
 
     change = (
         db.query(Change)
@@ -188,17 +196,25 @@ def transition_change_confirmation(
 
     supplied_evidence_ids = list(dict.fromkeys(payload.evidence_ids))
     if supplied_evidence_ids:
-        valid_ids = {
+        valid_event_ids = {
             row[0]
             for row in db.query(CareEvent.id).filter(
                 CareEvent.person_id == person_id,
                 CareEvent.id.in_(supplied_evidence_ids),
             ).all()
         }
+        valid_assertion_ids = {
+            row[0]
+            for row in db.query(CareAssertion.id).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.id.in_(supplied_evidence_ids),
+            ).all()
+        }
+        valid_ids = valid_event_ids | valid_assertion_ids
         if valid_ids != set(supplied_evidence_ids):
             raise HTTPException(
                 status_code=422,
-                detail="Every confirmation evidence reference must identify a persisted event in this care record",
+                detail="Every confirmation evidence reference must identify a persisted event or assertion in this care record",
             )
 
     transition = ChangeConfirmationEvent(
