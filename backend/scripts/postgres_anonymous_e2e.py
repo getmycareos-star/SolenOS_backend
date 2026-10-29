@@ -366,8 +366,98 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
         require(status == 200, f"new token should retain record access, got {status}")
 
+        # Open Loop Engine: real PostgreSQL persistence, idempotent retry, history,
+        # cross-person isolation, and concurrent append integrity. All fixtures are synthetic.
+        open_loop_payload = {
+            "loop_type": "awaiting_response",
+            "title": "CI-only clinic callback",
+            "description": "Synthetic test: callback has not yet been confirmed.",
+            "request_text": "Please confirm the appointment date.",
+            "recipient_label": "CI-only clinic",
+            "idempotency_key": "postgres-open-loop-create-retry-001",
+            "evidence": [{"kind": "ci_fixture", "text": "Synthetic integration test only."}],
+        }
+        status, open_loop = request(
+            "POST", "/api/v1/open-loops", token=token_a, body=open_loop_payload,
+        )
+        require(status == 201, f"Open Loop creation expected 201, got {status}: {open_loop}")
+        open_loop_id = open_loop["id"]
+        status, open_loop_retry = request(
+            "POST", "/api/v1/open-loops", token=token_a, body=open_loop_payload,
+        )
+        require(status == 201 and open_loop_retry.get("id") == open_loop_id,
+                f"Open Loop idempotent create retry created a duplicate or failed: {status}: {open_loop_retry}")
+        status, open_loop_list = request("GET", "/api/v1/open-loops", token=token_a)
+        require(status == 200 and sum(1 for item in open_loop_list.get("items", [])
+                                      if item.get("id") == open_loop_id) == 1,
+                f"Open Loop idempotent retry duplicated list records: {status}: {open_loop_list}")
+        status, cross_person_loop = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_b,
+        )
+        require(status == 404,
+                f"Cross-person Open Loop read must return 404, got {status}: {cross_person_loop}")
+
+        # Concurrent append attempts must not silently overwrite one another.
+        # This is intentionally a strict invariant; if it fails, the database-backed
+        # test should remain red rather than claiming concurrency safety.
+        from concurrent.futures import ThreadPoolExecutor
+        action_payloads = [
+            {"text": "CI-only action A", "evidence": [{"kind": "ci_fixture", "text": "action-A"}]},
+            {"text": "CI-only action B", "evidence": [{"kind": "ci_fixture", "text": "action-B"}]},
+        ]
+        def append_open_loop_action(payload):
+            return request(
+                "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+                token=token_a, body=payload,
+            )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            action_results = list(pool.map(append_open_loop_action, action_payloads))
+        require(all(status == 200 for status, _ in action_results),
+                f"Concurrent Open Loop action appends failed: {action_results}")
+        status, open_loop_after_actions = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        require(status == 200, f"Open Loop read after concurrent actions failed: {status}: {open_loop_after_actions}")
+        saved_actions = open_loop_after_actions["loop"].get("action_evidence", [])
+        require(len(saved_actions) == 2 and
+                {item.get("text") for item in saved_actions} >= {"CI-only action A", "CI-only action B"},
+                f"Concurrent Open Loop updates lost an append: {saved_actions}")
+        status, recorded_response = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/responses", token=token_a,
+            body={"text": "CI-only response received", "evidence": [{"kind": "ci_fixture", "text": "response"}]},
+        )
+        require(status == 200, f"Open Loop response event expected 200, got {status}: {recorded_response}")
+        status, open_loop_history = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}/history", token=token_a,
+        )
+        require(status == 200 and any(
+            event.get("event_type") == "response_recorded" for event in open_loop_history
+        ), f"Open Loop response audit event missing: {status}: {open_loop_history}")
+
         stop_server(server)
         server = start_server()
+        status, open_loop_after_restart = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        require(status == 200, f"Open Loop read after Uvicorn restart expected 200, got {status}: {open_loop_after_restart}")
+        persisted_loop = open_loop_after_restart.get("loop", {})
+        require(persisted_loop.get("id") == open_loop_id
+                and persisted_loop.get("status") == "open"
+                and len(persisted_loop.get("action_evidence", [])) == 2
+                and len(persisted_loop.get("response_evidence", [])) == 1,
+                f"Open Loop lifecycle/evidence did not persist across Uvicorn restart: {persisted_loop}")
+        status, open_loop_history_after_restart = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}/history", token=token_a,
+        )
+        require(status == 200 and any(
+            event.get("event_type") == "response_recorded" for event in open_loop_history_after_restart
+        ), f"Open Loop audit history did not persist across restart: {status}: {open_loop_history_after_restart}")
+        status, cross_person_loop_after_restart = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_b,
+        )
+        require(status == 404,
+                f"Open Loop isolation failed after restart, got {status}: {cross_person_loop_after_restart}")
+
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
         observations_after_restart = [
