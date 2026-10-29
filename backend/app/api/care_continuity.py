@@ -753,14 +753,22 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         status = str(item.get("status") or item.get("lifecycle_status") or item.get("assertion_status") or "").lower()
         source = item["source"]
         assessment_context = item.get("context") if isinstance(item.get("context"), list) else []
-        uncertainty_analysis = next(
+        uncertainty_context_entry = next(
             (
                 entry for entry in assessment_context
                 if isinstance(entry, dict)
-                and any(key in entry for key in ("limitations", "clarification_questions", "evidence_completeness"))
+                and (
+                    any(key in entry for key in ("limitations", "clarification_questions", "evidence_completeness"))
+                    or isinstance(entry.get("analysis"), dict)
+                )
             ),
             None,
         ) if source == "uncertainty_assessments" else None
+        uncertainty_analysis = (
+            uncertainty_context_entry.get("analysis")
+            if isinstance(uncertainty_context_entry, dict) and isinstance(uncertainty_context_entry.get("analysis"), dict)
+            else uncertainty_context_entry
+        )
         summary_item = {
             "id": str(item.get("id") or ""),
             "source": source,
