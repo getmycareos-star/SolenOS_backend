@@ -932,3 +932,68 @@ def test_conflict_candidates_match_context_and_overlapping_time_without_auto_res
         assert unaudited_resolution.status_code == 422
     finally:
         teardown_db()
+
+
+
+def test_conflict_matching_respects_context_and_explicit_time_intervals():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="conflict-scope-person", name="Conflict Scope Person")
+        caregiver = Caregiver(
+            id="conflict-scope-caregiver",
+            name="Conflict Scope Caregiver",
+            email="conflict-scope@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+        client = authorized_client("conflict-scope-person")
+
+        first = client.post("/api/v1/uncertainty/contradictions", json={
+            "person_id": "conflict-scope-person",
+            "subject_type": "daily_care",
+            "subject_id": "meal-1",
+            "field": "amount_eaten",
+            "description": "Report A",
+            "context_key": "breakfast",
+            "effective_from": "2026-10-01T08:00:00Z",
+            "effective_to": "2026-10-01T09:00:00Z",
+            "evidence_ids": [],
+        })
+        assert first.status_code == 200, first.text
+        first_id = first.json()["id"]
+
+        different_context_and_disjoint_time = client.post("/api/v1/uncertainty/contradictions", json={
+            "person_id": "conflict-scope-person",
+            "subject_type": "daily_care",
+            "subject_id": "meal-1",
+            "field": "amount_eaten",
+            "description": "Report B",
+            "context_key": "dinner",
+            "effective_from": "2026-10-01T18:00:00Z",
+            "effective_to": "2026-10-01T19:00:00Z",
+            "evidence_ids": [],
+        })
+        assert different_context_and_disjoint_time.status_code == 200, different_context_and_disjoint_time.text
+        assert first_id not in different_context_and_disjoint_time.json()["matching_candidate_ids"]
+
+        same_context_overlapping_time = client.post("/api/v1/uncertainty/contradictions", json={
+            "person_id": "conflict-scope-person",
+            "subject_type": "daily_care",
+            "subject_id": "meal-1",
+            "field": "amount_eaten",
+            "description": "Report C",
+            "context_key": "breakfast",
+            "effective_from": "2026-10-01T08:30:00Z",
+            "effective_to": "2026-10-01T09:30:00Z",
+            "evidence_ids": [],
+        })
+        assert same_context_overlapping_time.status_code == 200, same_context_overlapping_time.text
+        assert first_id in same_context_overlapping_time.json()["matching_candidate_ids"]
+    finally:
+        teardown_db()
