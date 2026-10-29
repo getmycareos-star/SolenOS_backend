@@ -34,6 +34,7 @@ class Baseline(Base):
     # Baseline provenance is explicit: legacy rows are not assigned a guessed
     # algorithm version or a coverage status based on event counts alone.
     coverage_status = Column(String(16), nullable=False, default="unknown", server_default="unknown")
+    history_completeness = Column(String(16), nullable=False, default="unknown", server_default="unknown")
     analysis_version = Column(String(64), nullable=False, default="legacy-unversioned", server_default="legacy-unversioned")
     documentation_bias_flag = Column(Boolean, nullable=False, default=False)
     evidence_ids = Column(JSONList, nullable=True)
