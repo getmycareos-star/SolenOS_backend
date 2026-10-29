@@ -422,6 +422,30 @@ def main():
         require(status == 404,
                 f"Cross-person Open Loop read must return 404, got {status}: {cross_person_loop}")
 
+        # Replaying the same mutation key must not duplicate an action event or evidence.
+        retry_action = {
+            "text": "CI-only action with stable retry key",
+            "evidence": [{"kind": "ci_fixture", "text": "same request retried"}],
+            "idempotency_key": "postgres-open-loop-action-retry-001",
+        }
+        first_action_status, _ = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+            token=token_a, body=retry_action,
+        )
+        retry_action_status, _ = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+            token=token_a, body=retry_action,
+        )
+        require(first_action_status == 200 and retry_action_status == 200,
+                f"Same-key Open Loop action retry failed: {first_action_status}, {retry_action_status}")
+        status, after_action_retry = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        retry_actions = [item for item in after_action_retry.get("loop", {}).get("action_evidence", [])
+                         if item.get("text") == retry_action["text"]]
+        require(status == 200 and len(retry_actions) == 1,
+                f"Same-key action retry duplicated evidence: {retry_actions}")
+
         # Concurrent append attempts must not silently overwrite one another.
         # This is intentionally a strict invariant; if it fails, the database-backed
         # test should remain red rather than claiming concurrency safety.
@@ -444,9 +468,11 @@ def main():
         )
         require(status == 200, f"Open Loop read after concurrent actions failed: {status}: {open_loop_after_actions}")
         saved_actions = open_loop_after_actions["loop"].get("action_evidence", [])
-        require(len(saved_actions) == 2 and
-                {item.get("text") for item in saved_actions} >= {"CI-only action A", "CI-only action B"},
-                f"Concurrent Open Loop updates lost an append: {saved_actions}")
+        require(len(saved_actions) == 3 and
+                {item.get("text") for item in saved_actions} >= {
+                    "CI-only action with stable retry key", "CI-only action A", "CI-only action B"
+                },
+                f"Concurrent Open Loop updates lost an append or idempotent retry duplicated one: {saved_actions}")
 
         # Retrying a mutation with the same idempotency key must return the
         # committed result and must not duplicate evidence or audit history.
