@@ -48,7 +48,7 @@ jobs:
       - name: Run situation-understanding benchmark
         id: benchmark
         continue-on-error: true
-        run: python -m pytest backend/tests/test_situation_understanding_benchmark.py backend/tests/test_longitudinal_messy_care_benchmark.py -q --junitxml=/tmp/situation-understanding-benchmark.xml
+        run: python -m pytest backend/tests/test_situation_understanding_benchmark.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/situation-understanding-benchmark.xml
 
       - name: Publish measured benchmark score and enforce gate
         if: always()
