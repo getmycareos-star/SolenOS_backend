@@ -614,6 +614,16 @@ def test_near_duplicate_candidates_are_bounded_and_never_claim_common_origin():
     assert all("confidence" not in candidate for candidate in result["candidate_groups"])
 
 
+def test_exact_normalized_duplicates_are_not_repeated_as_near_duplicates():
+    source = "The caregiver recorded a detailed note about the person's routine and support needs. " * 2
+    result = _near_duplicate_candidates([
+        SimpleNamespace(id="exact-a", source_text=source),
+        SimpleNamespace(id="exact-b", source_text="  " + source.upper().replace("  ", " ") + "  "),
+    ])
+    assert result["status"] == "completed"
+    assert result["candidate_groups"] == []
+
+
 def test_near_duplicate_candidates_fail_closed_when_comparison_limit_is_exceeded():
     from app.api.care_continuity import NEAR_DUPLICATE_MAX_RECORDS
 
