@@ -372,9 +372,9 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert trajectory["causal_inference"] == "not_performed"
     assert any(entry["record_id"] == "understanding-fact" for entry in trajectory["entries"])
     assert all("interpretation_limit" in entry for entry in trajectory["entries"])
-    assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] in {
-        "supported_by_persisted_records", "insufficient_evidence"
-    }
+    assert body["assessment"]["baseline_assessment"]["status"] == "not_established"
+    assert body["assessment"]["baseline_assessment"]["count"] == 0
+    assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] == "insufficient_evidence"
     repeated = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
     assert repeated.status_code == 200, repeated.text
     assert repeated.json()["status"] == "unchanged"
