@@ -105,7 +105,7 @@ class OpenLoopOccurrence(Base):
     __tablename__ = "open_loop_occurrences"
     __table_args__ = (
         UniqueConstraint("person_id", "idempotency_key", name="uq_open_loop_occurrence_idempotency"),
-        UniqueConstraint("person_id", "source_id", name="uq_open_loop_occurrence_source"),
+        UniqueConstraint("person_id", "source_type", "source_id", "loop_id", name="uq_open_loop_occurrence_source"),
         Index("ix_open_loop_occurrence_record_created", "loop_id", "created_at"),
     )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -344,9 +344,13 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         if replay:
             return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
     if payload.source_id:
-        replay = db.query(OpenLoopOccurrence).filter(
+        replay = db.query(OpenLoopOccurrence).join(
+            OpenLoopRecord, OpenLoopOccurrence.loop_id == OpenLoopRecord.id
+        ).filter(
             OpenLoopOccurrence.person_id == person_id,
+            OpenLoopOccurrence.source_type == payload.source_type,
             OpenLoopOccurrence.source_id == payload.source_id,
+            OpenLoopRecord.loop_type == payload.loop_type,
         ).first()
         if replay:
             return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
