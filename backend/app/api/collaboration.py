@@ -618,6 +618,7 @@ def _humanize_model_context_line(line: str) -> str:
         ("interpretation_limit", "interpretation limit"),
     )
     parts = []
+    freshness_is_policy_only = "not a truth judgment" in (line[:brace] or "").casefold()
     for key, label_text in fields:
         value = record.get(key)
         if value is None or value == "" or value == [] or value == {}:
@@ -631,6 +632,8 @@ def _humanize_model_context_line(line: str) -> str:
             flags=re.IGNORECASE,
         )
         parts.append(f"{label_text}: {value_text[:500]}")
+    if freshness_is_policy_only:
+        parts.append("interpretation limit: this is a policy review status, not a truth judgment")
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
 
 
@@ -932,6 +935,27 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         "sufficient": len(distinct_days) >= 2,
         "direction": direction,
     }
+
+
+
+_MEASUREMENT_REQUESTS = (
+    (re.compile(r"\\b(?:blood\\s+pressure|bp)\\b", re.IGNORECASE), re.compile(r"\\b(?:blood\\s+pressure|systolic|diastolic)\\b", re.IGNORECASE), "blood pressure reading"),
+    (re.compile(r"\\b(?:blood\\s+sugar|blood\\s+glucose|glucose)\\b", re.IGNORECASE), re.compile(r"\\b(?:blood\\s+sugar|blood\\s+glucose|glucose|mg\\s*/?\\s*dl|mmol\\s*/?\\s*l)\\b", re.IGNORECASE), "blood glucose reading"),
+    (re.compile(r"\\b(?:oxygen\\s+saturation|spo2|oxygen\\s+level)\\b", re.IGNORECASE), re.compile(r"\\b(?:oxygen\\s+saturation|spo2|oxygen\\s+level)\\b", re.IGNORECASE), "oxygen saturation reading"),
+    (re.compile(r"\\b(?:heart\\s+rate|pulse)\\b", re.IGNORECASE), re.compile(r"\\b(?:heart\\s+rate|pulse)\\b", re.IGNORECASE), "heart-rate reading"),
+    (re.compile(r"\\b(?:body\\s+temperature|temperature)\\b", re.IGNORECASE), re.compile(r"\\b(?:body\\s+temperature|temperature)\\b", re.IGNORECASE), "temperature reading"),
+    (re.compile(r"\\b(?:body\\s+weight|weight)\\b", re.IGNORECASE), re.compile(r"\\b(?:body\\s+weight|weight)\\b", re.IGNORECASE), "weight measurement"),
+)
+
+
+def _missing_requested_measurement_response(user_text: str, authorized_lines: list[str]) -> str | None:
+    """Prevent model-invented measurements when the requested measure is absent from retrieved records."""
+    question = user_text or ""
+    context = "\\n".join(authorized_lines or [])
+    for request_pattern, evidence_pattern, label in _MEASUREMENT_REQUESTS:
+        if request_pattern.search(question) and not evidence_pattern.search(context):
+            return f"I couldn't find a {label} in the available care record for the time you asked about."
+    return None
 
 
 def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
@@ -2027,6 +2051,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
         validation_source = user_text + "\n" + "\n".join(bounded_context)
+        missing_measurement_reply = _missing_requested_measurement_response(
+            user_text,
+            [*event_context, *assertion_context, *evidence_context, *shared_lcr_lines],
+        )
+        if missing_measurement_reply:
+            # The model may confidently invent a plausible vital sign. A requested
+            # measurement absent from the retrieved authorized sources is withheld
+            # deterministically, even if Qwen returns a fabricated numeric value.
+            reply = missing_measurement_reply
         unsupported_trend = _contains_unsupported_trend_claim(reply, trend_assessment)
         if unsupported_trend:
             # A model-generated directional claim is withheld when the source set
@@ -2097,6 +2130,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if unsupported_trend:
             verdict = "blocked"
             safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
+            ai_generated = False
+        elif missing_measurement_reply:
+            verdict = "blocked"
+            safety_note = "A requested measurement was not found in the retrieved authorized record; no value was inferred."
             ai_generated = False
         else:
             verdict = "passed"
