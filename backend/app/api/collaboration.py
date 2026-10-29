@@ -1428,6 +1428,28 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
+        if retrieval_terms:
+            matching_appointments = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.person_id == person_id,
+                    or_(*[
+                        column.ilike(f"%{term}%")
+                        for column in (
+                            Appointment.title, Appointment.status, Appointment.provider,
+                            Appointment.healthcare_org, Appointment.location,
+                        )
+                        for term in retrieval_terms
+                    ]),
+                )
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(30)
+                .all()
+            )
+            appointment_by_id = {
+                str(row.id): row for row in [*appointments, *matching_appointments]
+            }
+            appointments = list(appointment_by_id.values())
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
