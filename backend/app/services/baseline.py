@@ -9,6 +9,7 @@ from app.services.observation_coverage import assess_observation_coverage
 
 
 MAX_LONGITUDINAL_EVENTS = 5000
+BASELINE_ANALYSIS_VERSION = "longitudinal-baseline-v2"
 
 
 def _utc_now() -> datetime:
@@ -195,6 +196,8 @@ def build_baseline(
             and bool(existing.is_stable) == baseline_complete
             and same_density
             and bool(existing.documentation_bias_flag) == (not baseline_complete)
+            and existing.coverage_status == coverage["coverage_status"]
+            and existing.analysis_version == BASELINE_ANALYSIS_VERSION
         ):
             return existing
 
@@ -217,6 +220,8 @@ def build_baseline(
         confidence=confidence,
         is_stable=baseline_complete,
         observation_density=observation_density,
+        coverage_status=coverage["coverage_status"],
+        analysis_version=BASELINE_ANALYSIS_VERSION,
         documentation_bias_flag=not baseline_complete,
         state_value=(
             f"Historical event query was bounded to the most recent {MAX_LONGITUDINAL_EVENTS} eligible records; earlier history may be omitted."
