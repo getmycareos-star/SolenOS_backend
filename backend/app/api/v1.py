@@ -278,6 +278,14 @@ def list_caregivers(person_id: str, db: Session = Depends(get_db)):
 
 @router.post("/evidence", response_model=EvidenceSchema)
 def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = Depends(get_db)):
+    # Evidence confidence must not be supplied by a client until a task-specific
+    # calibration method has validation evidence. Preserve the field for wire
+    # compatibility, but reject numeric values rather than silently trusting them.
+    if evidence.confidence is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="Numeric evidence confidence is unavailable until a calibrated assessment method is configured.",
+        )
     # Reference validation is not authentication: bind both client-supplied IDs
     # to the server-issued bearer session before writing any evidence.
     _require_session_scope(
