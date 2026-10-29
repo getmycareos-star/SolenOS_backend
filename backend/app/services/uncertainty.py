@@ -332,7 +332,7 @@ class UncertaintyEngine:
         return query.order_by(ContradictionModel.created_at.desc()).all()
 
     def create_uncertainty_assessment(
-        self, assessment: UncertaintyAssessmentCreate
+        self, assessment: UncertaintyAssessmentCreate, *, commit: bool = True
     ) -> UncertaintyAssessmentModel:
         payload = self._scoped_payload(assessment.model_dump())
         scoped_person_id = self.person_id or payload["person_id"]
@@ -357,8 +357,12 @@ class UncertaintyEngine:
             db_assessment = UncertaintyAssessmentModel(id=new_id, **payload)
             self.db.add(db_assessment)
             # Old assessment supersession and new assessment creation are atomic.
-            self.db.commit()
-            self.db.refresh(db_assessment)
+            # Callers may include linked lifecycle records in the same transaction.
+            if commit:
+                self.db.commit()
+                self.db.refresh(db_assessment)
+            else:
+                self.db.flush()
             return db_assessment
         except Exception:
             self.db.rollback()
