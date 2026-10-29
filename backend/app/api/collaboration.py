@@ -24,7 +24,7 @@ from app.models.care import CareEvent, Caregiver, Person, Evidence as EvidenceMo
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.services.lcr_context import build_lcr_context
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
@@ -561,6 +561,23 @@ def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
         except (ValueError, TypeError, json.JSONDecodeError):
             continue
     return list(dict.fromkeys(identifiers))
+
+
+def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
+    """Extract typed source references from only the context lines selected for inference."""
+    references = []
+    for line in lines:
+        try:
+            payload = json.loads(line[line.index("{"):])
+            record_id = payload.get("source_id")
+            record_type = payload.get("source_type")
+            if record_id is not None and record_type:
+                reference = {"record_type": str(record_type), "record_id": str(record_id)}
+                if reference not in references:
+                    references.append(reference)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return references
 
 
 def _is_casual_greeting(text: str) -> bool:
