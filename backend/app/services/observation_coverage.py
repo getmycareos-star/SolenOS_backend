@@ -90,7 +90,7 @@ def assess_observation_coverage(
     else:
         status = "unknown"
         limitations = [
-            "The available coverage records do not establish observation status for the entire requested interval."
+            "No complete observation-coverage record establishes whether this domain was observed for the entire requested interval; available records do not establish observation status for uncovered or unrecorded intervals."
         ]
     return {
         "person_id": person_id, "subject_type": subject_type,
