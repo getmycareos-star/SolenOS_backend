@@ -770,6 +770,7 @@ def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch)
 
 def test_companion_session_and_idempotency_key_cannot_cross_person(monkeypatch):
     import uuid
+    from datetime import datetime, timedelta, timezone
 
     client = setup_client(monkeypatch)
 
