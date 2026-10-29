@@ -1219,6 +1219,69 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+    # Resolve a committed retry before allocating a new session. The key is
+    # checked against the bearer-scoped person/caregiver and original session.
+    if client_turn_id:
+        existing_pair = (
+            db.query(ConversationMessage, ConversationSession)
+            .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+            .filter(
+                ConversationMessage.client_turn_id == client_turn_id,
+                ConversationMessage.role == "assistant",
+            )
+            .first()
+        )
+        if existing_pair:
+            saved_assistant, saved_session = existing_pair
+            if (
+                saved_session.person_id != person_id
+                or saved_session.caregiver_id != caregiver_id
+                or saved_session.status != "active"
+            ):
+                raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+            if payload.session_id and payload.session_id != saved_session.id:
+                raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+            try:
+                saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+            except (TypeError, ValueError):
+                saved_metadata = {}
+            if saved_metadata.get("request_sha256") != request_sha256:
+                raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+            saved_history = (
+                db.query(ConversationMessage)
+                .filter_by(session_id=saved_session.id)
+                .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+                .all()
+            )
+            return {
+                "session_id": saved_session.id,
+                "person_id": person_id,
+                "reply": saved_assistant.content,
+                "guard_verdict": saved_assistant.guard_verdict,
+                "safety_note": saved_assistant.safety_note,
+                "confidence": None,
+                "evidence_ids": saved_metadata.get("evidence_ids", []),
+                "source_event_ids": saved_metadata.get("source_event_ids", []),
+                "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
+                "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+                "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
+                "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
+                "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {"status": "not_available_on_replay"}),
+                "ai_generated": saved_metadata.get("ai_generated", True),
+                "written_to_lcr": False,
+                "persistence": "conversation_only",
+                "messages": [{
+                    "role": row.role,
+                    "text": row.content,
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                    "guard_verdict": row.guard_verdict,
+                    "safety_note": row.safety_note,
+                } for row in saved_history],
+                "idempotent_replay": True,
+            }
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
