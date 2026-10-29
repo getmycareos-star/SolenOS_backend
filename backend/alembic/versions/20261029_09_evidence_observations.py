@@ -27,6 +27,7 @@ def upgrade() -> None:
             sa.Column("person_id", sa.String(), sa.ForeignKey("persons.id", ondelete="CASCADE"), nullable=False),
             sa.Column("evidence_id", sa.String(), sa.ForeignKey("evidence.id", ondelete="RESTRICT"), nullable=False),
             sa.Column("supersedes_observation_id", sa.String(), sa.ForeignKey("evidence_observations.id"), nullable=True),
+            sa.Column("correction_rationale", sa.Text(), nullable=True),
             sa.Column("observation_kind", sa.String(length=40), nullable=False),
             sa.Column("epistemic_status", sa.String(length=24), nullable=False),
             sa.Column("subject_label", sa.String(length=160), nullable=False),
@@ -56,7 +57,7 @@ def upgrade() -> None:
     else:
         columns = {c["name"] for c in inspect(bind).get_columns("evidence_observations")}
         expected = {
-            "id", "person_id", "evidence_id", "supersedes_observation_id", "observation_kind", "epistemic_status",
+            "id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status",
             "subject_label", "attribute", "value_text", "normalized_value", "units", "context",
             "occurred_at", "observed_at", "reported_at", "observer_label", "observer_caregiver_id",
             "observation_method", "source_passage", "source_span_start", "source_span_end", "negated",
@@ -69,6 +70,9 @@ def upgrade() -> None:
                 sa.ForeignKey("evidence_observations.id"), nullable=True,
             ))
             columns.add("supersedes_observation_id")
+        if "correction_rationale" not in columns:
+            op.add_column("evidence_observations", sa.Column("correction_rationale", sa.Text(), nullable=True))
+            columns.add("correction_rationale")
         if expected - columns:
             raise RuntimeError(f"Existing evidence_observations table is incomplete: {sorted(expected - columns)}")
     indexes = {i["name"] for i in inspect(bind).get_indexes("evidence_observations")}
