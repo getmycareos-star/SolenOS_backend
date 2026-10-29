@@ -1,13 +1,13 @@
 """Persist individual occurrences linked to unresolved open loops.
 
-Revision ID: 20261029_21_open_loop_occurrences
+Revision ID: 20261029_21_loop_occ
 Revises: 20261029_20_open_loops
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261029_21_open_loop_occurrences"
+revision = "20261029_21_loop_occ"
 down_revision = "20261029_20_open_loops"
 branch_labels = None
 depends_on = None
