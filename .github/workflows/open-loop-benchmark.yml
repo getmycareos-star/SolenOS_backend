@@ -7,6 +7,7 @@ on:
       - "backend/app/api/open_loops.py"
       - "backend/tests/test_open_loops.py"
       - "backend/tests/test_open_loop_benchmark.py"
+      - "backend/tests/test_open_loop_messy_scenarios.py"
       - "backend/app/models/**"
       - "backend/alembic/**"
       - ".github/workflows/open-loop-benchmark.yml"
