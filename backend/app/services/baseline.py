@@ -114,9 +114,15 @@ def build_baseline(
         window_end = baseline_window_end
     event_count = len(baseline_events)
     window_days = max((_ensure_utc(window_end) - _ensure_utc(window_start)).days, 1)
-    frequency_per_period = event_count / (window_days / 30.0) if event_count else 0.0
     coverage = assess_observation_coverage(db, person_id, event_type, window_start, window_end)
     coverage_complete = coverage["coverage_status"] == "covered"
+    # Do not expose a normalized occurrence rate without an explicit observation
+    # denominator. Counts remain available as recorded evidence, not as true rates.
+    frequency_per_period = (
+        event_count / (window_days / 30.0)
+        if coverage_complete and event_count
+        else 0.0 if coverage_complete else None
+    )
     # Event volume alone cannot establish a reliable baseline when the domain
     # may not have been observed. Coverage gates stability and confidence.
     confidence = (
