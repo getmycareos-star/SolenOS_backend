@@ -119,22 +119,53 @@ class UncertaintyEngine:
             return None
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
-        if "status" in update_data:
-            new_status = update_data["status"]
-            if new_status == "closed":
-                db_question.closed_at = datetime.now(timezone.utc)
-                db_question.answered_at = datetime.now(timezone.utc)
-            elif new_status == "open" and db_question.status != "open":
-                db_question.closed_at = None
-                db_question.answer = None
-                db_question.answer_provenance = None
+        new_status = update_data.get("status", db_question.status)
+        allowed_statuses = {"open", "answered", "declined", "closed", "unresolved"}
+        if new_status not in allowed_statuses:
+            raise ValueError(
+                "Unsupported question status. Use open, answered, declined, closed, or unresolved."
+            )
+
+        answer = update_data.get("answer", db_question.answer)
+        answer_provenance = update_data.get("answer_provenance", db_question.answer_provenance)
+        closed_reason = update_data.get("closed_reason", db_question.closed_reason)
+        if new_status == "answered":
+            if not isinstance(answer, str) or not answer.strip():
+                raise ValueError("An answered question requires a non-empty answer.")
+            if not isinstance(answer_provenance, str) or not answer_provenance.strip():
+                raise ValueError("An answered question requires answer provenance.")
+        elif new_status == "declined":
+            if not isinstance(closed_reason, str) or not closed_reason.strip():
+                raise ValueError("A declined question requires a recorded reason.")
+        elif new_status == "closed" and not (
+            (isinstance(answer, str) and answer.strip())
+            or (isinstance(closed_reason, str) and closed_reason.strip())
+        ):
+            raise ValueError("A question can only be closed with an answer or an explicit close reason.")
+
+        now = datetime.now(timezone.utc)
+        if new_status == "open" and db_question.status != "open":
+            # Reopening does not erase the previous answer; it remains part of the
+            # question's record until a separately recorded new answer supersedes it.
+            db_question.closed_at = None
+            db_question.closed_reason = None
+        elif new_status in {"answered", "declined", "closed"}:
+            db_question.closed_at = now
+            if new_status == "answered":
+                db_question.answered_at = now
+            elif new_status == "declined":
+                db_question.answered_at = None
 
         for field, value in update_data.items():
             setattr(db_question, field, value)
 
-        self.db.commit()
-        self.db.refresh(db_question)
-        return db_question
+        try:
+            self.db.commit()
+            self.db.refresh(db_question)
+            return db_question
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list_open_questions(
         self,
