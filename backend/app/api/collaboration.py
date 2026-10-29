@@ -1633,6 +1633,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
+        direct_evidence_terms, synonym_evidence_terms = _companion_query_terms(retrieval_query)
+        evidence_search_terms = list(dict.fromkeys(
+            [*sorted(direct_evidence_terms), *sorted(synonym_evidence_terms)]
+        ))[:8]
+        matching_evidence_rows = []
+        if evidence_search_terms:
+            evidence_search_filters = [
+                column.ilike(f"%{term}%")
+                for term in evidence_search_terms
+                for column in (EvidenceModel.source_text, EvidenceModel.type, EvidenceModel.source_type)
+            ]
+            matching_evidence_rows = (
+                evidence_query.filter(or_(*evidence_search_filters))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         linked_rows = (
             evidence_query.filter(EvidenceModel.id.in_(linked_ids))
             .order_by(EvidenceModel.uploaded_at.desc())
@@ -1653,7 +1670,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         evidence_rows = []
         seen_evidence_ids = set()
-        for row in [*document_rows, *linked_rows, *recent_rows]:
+        # Matching historical evidence is independent of the newest-upload windows.
+        for row in [*matching_evidence_rows, *document_rows, *linked_rows, *recent_rows]:
             row_id = str(row.id)
             if row_id not in seen_evidence_ids:
                 seen_evidence_ids.add(row_id)
