@@ -1706,7 +1706,7 @@ def test_claim_assessment_impact_requires_review_when_unassessed():
         assert body["status"] == "not_assessed"
         assert body["review_required"] is True
         assert "no_persisted_claim_assessment" in body["reasons"]
-        assert "clinical truth" in body["interpretation_limit"]
+        assert "not a claim-truth judgment" in body["interpretation_limit"]
 
         # The endpoint must not leak another care record's claim.
         other = CareAssertion(
