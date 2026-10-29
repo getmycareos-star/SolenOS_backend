@@ -188,7 +188,7 @@ def create_escalation(
     provenance: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    authorized_person_id, caregiver_id = _scoped_identity(request, db)
+    authorized_person_id, _ = _scoped_identity(request, db)
     if person_id != authorized_person_id or affected_person_id != authorized_person_id:
         raise HTTPException(status_code=403, detail="Escalation is scoped to the authenticated care record")
     linked_ids = list(evidence_ids or [])
