@@ -1852,3 +1852,53 @@ def test_future_dated_events_are_not_counted_as_occurrences_yet():
         db.close()
     finally:
         teardown_db()
+
+
+def test_truncated_longitudinal_history_never_claims_a_stable_baseline(monkeypatch):
+    setup_db()
+    try:
+        import app.services.baseline as baseline_service
+
+        monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
+        db = TestingSessionLocal()
+        person = Person(id="bounded-history-person", name="Bounded history test")
+        caregiver = Caregiver(
+            id="bounded-history-caregiver", name="Bounded history caregiver",
+            email="bounded-history@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for event_id, days_ago in (
+            ("bounded-old-event", 150),
+            ("bounded-baseline-event", 100),
+            ("bounded-current-event", 5),
+        ):
+            db.add(CareEvent(
+                id=event_id, person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=event_id, created_by_caregiver_id=caregiver.id,
+            ))
+        db.add(ObservationCoverage(
+            id="bounded-history-coverage", person_id=person.id, subject_type="mobility",
+            window_start=now - timedelta(days=100), window_end=now - timedelta(days=42),
+            coverage_status="covered", source_evidence_ids=[],
+            rationale="The included baseline interval was explicitly observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        counts = baseline_service.get_longitudinal_event_counts(db, person.id, "mobility", None, now)
+        assert counts["history_truncated"] is True
+        assert {event.id for event in counts["all_events"]} == {
+            "bounded-baseline-event", "bounded-current-event"
+        }
+        baseline = baseline_service.build_baseline(db, person.id, "mobility", None, now)
+        assert baseline is not None
+        assert baseline.confidence.value == "low"
+        assert baseline.is_stable is False
+        assert baseline.frequency_per_period is None
+        assert baseline.documentation_bias_flag is True
+        assert "bounded to the most recent 2" in baseline.state_value
+        db.close()
+    finally:
+        teardown_db()
