@@ -585,7 +585,23 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
     loop.action_evidence = [*(loop.action_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     _reassess(db, loop)
     _audit(db, loop, "action_recorded", before, payload.evidence, payload.idempotency_key)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request may commit this idempotency key after the first replay
+        # lookup. Roll back the losing mutation and return the committed winner.
+        db.rollback()
+        if payload.idempotency_key:
+            replay = _replay_event(
+                db, person_id, caregiver_id, loop_id,
+                "action_recorded", payload.idempotency_key,
+            )
+            if replay is not None:
+                return replay
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent Open Loop mutation conflicted; retry with the same idempotency key",
+        )
     db.refresh(loop)
     return _snapshot(loop)
 
