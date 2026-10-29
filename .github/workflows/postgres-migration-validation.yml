@@ -844,8 +844,9 @@ jobs:
               IF NOT EXISTS (
                 SELECT 1 FROM pg_indexes
                 WHERE schemaname='public' AND tablename='conversation_messages'
-                  AND indexname='uq_conversation_messages_client_turn_id'
-              ) THEN RAISE EXCEPTION 'Companion idempotency index was dropped during rollback'; END IF;
+                  AND indexdef ILIKE '%UNIQUE%'
+                  AND indexdef ILIKE '%(client_turn_id)%'
+              ) THEN RAISE EXCEPTION 'Companion client_turn_id uniqueness index/constraint was lost during rollback'; END IF;
             END
             \$\$;
           "
