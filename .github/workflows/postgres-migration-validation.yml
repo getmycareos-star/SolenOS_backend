@@ -184,8 +184,24 @@ jobs:
                         AND NOT tgisinternal
                   """).first()
                   assert claim_trigger is not None, "claim assessment immutability trigger missing"
+                  dependency_trigger = connection.exec_driver_sql("""
+                      SELECT 1 FROM pg_trigger
+                      WHERE tgname = 'trg_evidence_claim_dependencies_immutable'
+                        AND NOT tgisinternal
+                  """).first()
+                  assert dependency_trigger is not None, "claim dependency append-only trigger missing"
+                  resolution_scope_columns = {
+                      row[0] for row in connection.exec_driver_sql("""
+                          SELECT column_name FROM information_schema.columns
+                          WHERE table_schema = 'public'
+                            AND table_name = 'contradiction_resolution_events'
+                      """).all()
+                  }
+                  assert "resolution_scope" in resolution_scope_columns, "partial conflict resolution scope column missing"
               print("PASS evidence review append-only trigger")
               print("PASS claim assessment append-only trigger")
+              print("PASS claim dependency append-only trigger")
+              print("PASS persisted conflict resolution scope column")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
               (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
