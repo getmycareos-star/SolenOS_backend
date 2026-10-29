@@ -193,7 +193,7 @@ def _get_scoped(db, person_id, caregiver_id, loop_id, *, for_update=False):
     # evidence arrays. PostgreSQL's row lock makes concurrent append operations
     # reload the latest committed record instead of overwriting one another.
     if for_update and db.bind is not None and db.bind.dialect.name == "postgresql":
-        query = query.with_for_update()
+        query = query.with_for_update().populate_existing()
     loop = query.first()
     if loop is None:
         raise HTTPException(status_code=404, detail="Open loop not found")
