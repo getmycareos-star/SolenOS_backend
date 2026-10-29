@@ -353,11 +353,11 @@ class UncertaintyEngine:
             raise ValueError("Unsupported conflict resolution status")
         rationale = (update_data.get("resolution_notes") or "").strip()
         evidence_ids = update_data.get("evidence_ids", db_contradiction.evidence_ids) or []
+        if requested_status in {"resolved", "partially_resolved"} and not evidence_ids:
+            raise ValueError("Resolving a conflict requires linked evidence from the same care record")
         if requested_status == "partially_resolved":
             if not resolution_scope:
                 raise ValueError("A partial conflict resolution requires an explicit scope describing exactly what was resolved")
-            if not evidence_ids:
-                raise ValueError("A partial conflict resolution requires linked evidence for the resolved detail")
         audit_event_required = (
             status_changed
             or resolution_scope is not None
