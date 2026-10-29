@@ -7,6 +7,7 @@ A pass is not clinical validation or evidence of real-patient performance.
 """
 from datetime import datetime, timedelta, timezone
 import hashlib
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,11 +28,13 @@ from app.services.pattern_detection import detect_patterns
 from app.core.change_enums import ChangeType
 
 NOW = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+_benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL", "sqlite:///:memory:")
+_engine_options = {}
+if _benchmark_database_url.startswith("sqlite"):
+    _engine_options["connect_args"] = {"check_same_thread": False}
+    if _benchmark_database_url == "sqlite:///:memory:":
+        _engine_options["poolclass"] = StaticPool
+engine = create_engine(_benchmark_database_url, **_engine_options)
 TestingSessionLocal = sessionmaker(
     autocommit=False, autoflush=False, bind=engine, expire_on_commit=False
 )
@@ -404,3 +407,101 @@ def test_attention_candidate_confusion_matrix_uses_actual_service_outputs():
         "Actual alert decisions diverged from independently specified synthetic labels; "
         f"matrix TP={tp}, FP={fp}, FN={fn}, TN={tn}; outcomes={outcomes}"
     )
+
+
+
+def test_gradual_change_is_compared_only_when_each_window_is_covered():
+    """Synthetic independently labelled gradual rise across three covered windows."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "gradual")
+        # Historical rate is low; counts rise in successive covered periods.
+        for day in (160, 150, 140):
+            add_event(db, person, caregiver, "night_waking", day, f"Baseline waking {day}")
+        for day in (75, 65, 55, 45):
+            add_event(db, person, caregiver, "night_waking", day, f"First rise {day}")
+        for day in (35, 28, 21, 14, 7, 2):
+            add_event(db, person, caregiver, "night_waking", day, f"Later rise {day}")
+        add_coverage(db, person, caregiver, "night_waking",
+                     NOW - timedelta(days=180), NOW - timedelta(days=120), "covered")
+        add_coverage(db, person, caregiver, "night_waking",
+                     NOW - timedelta(days=120), NOW - timedelta(days=60), "covered")
+        add_coverage(db, person, caregiver, "night_waking",
+                     NOW - timedelta(days=60), NOW, "covered")
+        changes = detect_event_changes(db, person.id, "night_waking", None, NOW)
+        db.flush()
+        assert changes
+        assert all(change.person_id == person.id for change in changes)
+        # No confidence is fabricated where the system has no calibrated model.
+        assert all(change.confidence is None for change in changes)
+
+
+def test_persistent_observations_keep_time_bounds_and_source_event_links():
+    """Persistent change candidates must retain real event IDs and their temporal bounds."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "persistent")
+        for day in (160, 130, 100):
+            add_event(db, person, caregiver, "mobility", day, f"Earlier mobility {day}")
+        for day in (35, 28, 21, 14, 7, 1):
+            add_event(db, person, caregiver, "mobility", day, f"Recent mobility difficulty {day}")
+        add_complete_comparison_coverage(db, person, caregiver, "mobility", 160)
+        changes = detect_event_changes(db, person.id, "mobility", None, NOW)
+        db.flush()
+        assert changes
+        source_ids = {
+            row[0] for row in db.query(CareEvent.id).filter(CareEvent.person_id == person.id).all()
+        }
+        for change in changes:
+            assert set(change.evidence_ids).issubset(source_ids)
+            assert change.comparison_window_start is not None
+            assert change.comparison_window_end is not None
+            assert change.comparison_window_start <= change.comparison_window_end
+
+
+def test_conflicting_caregiver_reports_are_preserved_as_distinct_evidence():
+    """Opposing reports are not silently collapsed into one asserted fact."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "conflicting")
+        first = add_event(db, person, caregiver, "appetite", 1, "Caregiver A reports ate full dinner")
+        second = add_event(db, person, caregiver, "appetite", 1, "Caregiver B reports refused dinner")
+        counts = get_longitudinal_event_counts(db, person.id, "appetite", None, NOW)
+        ids = {event.id for event in counts["all_events"]}
+        assert first.id in ids and second.id in ids
+        assert first.id != second.id
+        # This event-count service must not claim which conflicting narrative is true.
+        assert len(ids) == 2
+
+
+def test_stale_events_remain_historical_but_do_not_enter_current_window():
+    """Old records remain available to the baseline without being treated as current."""
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "stale")
+        stale = add_event(db, person, caregiver, "sleep", 200, "Historical sleep disruption")
+        current = add_event(db, person, caregiver, "sleep", 2, "Current sleep disruption")
+        counts = get_longitudinal_event_counts(db, person.id, "sleep", None, NOW)
+        all_ids = {event.id for event in counts["all_events"]}
+        recent_ids = {event.id for event in counts["recent_events"]}
+        assert stale.id in all_ids
+        assert current.id in all_ids
+        assert stale.id not in recent_ids
+        assert current.id in recent_ids
+
+
+def test_cross_domain_situation_inputs_keep_source_domains_and_person_isolation():
+    """Downstream situation formation must cite changes from the same care record only."""
+    from app.services.situation_formation import detect_situations
+    with TestingSessionLocal() as db:
+        person_a, caregiver_a = make_person(db, "domains-a")
+        person_b, caregiver_b = make_person(db, "domains-b")
+        for day in (30, 20, 10, 2):
+            add_event(db, person_a, caregiver_a, "mobility", day, f"Mobility difficulty {day}")
+        for day in (25, 15, 5):
+            add_event(db, person_a, caregiver_a, "nutrition", day, f"Reduced intake {day}")
+        add_event(db, person_b, caregiver_b, "mobility", 1, "Other person's mobility event")
+        situations = detect_situations(db, person_a.id, NOW)
+        db.flush()
+        for situation in situations:
+            assert situation.person_id == person_a.id
+            assert set(situation.signal_types or []).issubset({"mobility", "nutrition"})
+            assert set(situation.signal_ids or {}).issubset({
+                event.id for event in db.query(CareEvent).filter(CareEvent.person_id == person_a.id).all()
+            })
