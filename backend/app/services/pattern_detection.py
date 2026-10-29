@@ -252,6 +252,11 @@ def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
             set(candidate.event_ids or []) == set(pattern.event_ids or [])
             and set(candidate.change_ids or []) == set(pattern.change_ids or [])
             and same_window
+            and candidate.pattern_metrics == pattern.pattern_metrics
+            and candidate.alternative_interpretations == pattern.alternative_interpretations
+            and candidate.frequency == pattern.frequency
+            and candidate.rate_per_period == pattern.rate_per_period
+            and candidate.pattern_strength == pattern.pattern_strength
         ):
             return candidate
 
