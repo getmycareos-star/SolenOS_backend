@@ -47,6 +47,19 @@ def upgrade() -> None:
             + ", ".join(sorted(required_policy_columns - policy_columns))
         )
 
+    policy_constraints = inspect(bind).get_unique_constraints("evidence_freshness_policies")
+    policy_indexes = inspect(bind).get_indexes("evidence_freshness_policies")
+    has_version_uniqueness = (
+        any(item.get("name") == "uq_evidence_freshness_policy_version"
+            and item.get("column_names") == ["person_id", "domain_key", "policy_version"]
+            for item in policy_constraints)
+        or any(item.get("unique")
+            and item.get("column_names") == ["person_id", "domain_key", "policy_version"]
+            for item in policy_indexes)
+    )
+    if not has_version_uniqueness:
+        raise RuntimeError("Existing evidence_freshness_policies lacks unique person/domain/version enforcement")
+
     if not inspector.has_table("evidence_freshness_assessments"):
         op.create_table(
             "evidence_freshness_assessments",
@@ -119,11 +132,27 @@ def upgrade() -> None:
                     f"CREATE TRIGGER {trigger_name} BEFORE UPDATE OR DELETE ON {table} "
                     "FOR EACH ROW EXECUTE FUNCTION prevent_evidence_freshness_mutation();"
                 )
+    elif bind.dialect.name == "sqlite":
+        for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
+            op.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_update
+                BEFORE UPDATE ON {table}
+                BEGIN
+                  SELECT RAISE(ABORT, 'Evidence freshness records are append-only.');
+                END;
+            """)
+            op.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS trg_{table}_no_delete
+                BEFORE DELETE ON {table}
+                BEGIN
+                  SELECT RAISE(ABORT, 'Evidence freshness records are append-only.');
+                END;
+            """)
+    else:
+        raise RuntimeError(f"Evidence freshness immutability is unsupported for {bind.dialect.name!r}")
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name == "postgresql":
-        for table in ("evidence_freshness_assessments", "evidence_freshness_policies"):
-            op.execute(f"DROP TRIGGER IF EXISTS trg_{table}_immutable ON {table};")
-        op.execute("DROP FUNCTION IF EXISTS prevent_evidence_freshness_mutation();")
-    op.drop_table("evidence_freshness_assessments")
-    op.drop_table("evidence_freshness_policies")
+    raise RuntimeError(
+        "Refusing to drop append-only freshness policy and assessment history. "
+        "Deploy a forward-only compatibility change instead."
+    )
