@@ -453,3 +453,77 @@ def test_rate_decrease_is_not_created_without_explicit_coverage():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_frequency_pattern_requires_covered_equal_windows_and_explains_measurements():
+    from app.models.care import CareEvent
+    from app.core.change_enums import PatternType
+    from app.services.pattern_detection import detect_patterns
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime.now(timezone.utc)
+        prior_start = now - timedelta(days=60)
+        current_start = now - timedelta(days=30)
+        # One event in the prior 30-day interval and three in the current interval.
+        for i, days_ago in enumerate((45, 20, 10, 5)):
+            db.add(CareEvent(
+                id=f"frequency-event-{i}", person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded mobility event {i}", created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"frequency-source-{i}"],
+            ))
+        db.add_all([
+            ObservationCoverage(
+                id="frequency-prior-coverage", person_id=person.id, subject_type="mobility",
+                window_start=prior_start, window_end=current_start, coverage_status="covered",
+                source_evidence_ids=[], rationale="Prior interval explicitly observed throughout.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="frequency-current-coverage", person_id=person.id, subject_type="mobility",
+                window_start=current_start, window_end=now, coverage_status="covered",
+                source_evidence_ids=[], rationale="Current interval explicitly observed throughout.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        frequency = [p for p in patterns if p.pattern_type == PatternType.FREQUENCY_INCREASE]
+        assert len(frequency) == 1
+        assert frequency[0].pattern_metrics["prior_event_count"] == 1
+        assert frequency[0].pattern_metrics["current_event_count"] == 3
+        assert frequency[0].pattern_metrics["absolute_rate_delta_per_30_days"] == 2.0
+        assert frequency[0].pattern_metrics["prior_coverage_status"] == "covered"
+        assert frequency[0].pattern_metrics["current_coverage_status"] == "covered"
+        assert frequency[0].confidence is None
+        assert "does not establish cause" in frequency[0].alternative_interpretations[0]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
+
+def test_frequency_pattern_is_withheld_when_coverage_is_unknown():
+    from app.models.care import CareEvent
+    from app.core.change_enums import PatternType
+    from app.services.pattern_detection import detect_patterns
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime.now(timezone.utc)
+        for i, days_ago in enumerate((45, 20, 10, 5)):
+            db.add(CareEvent(
+                id=f"frequency-unknown-event-{i}", person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded mobility event {i}", created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"frequency-unknown-source-{i}"],
+            ))
+        db.commit()
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        assert not any(
+            p.pattern_type in {PatternType.FREQUENCY_INCREASE, PatternType.FREQUENCY_DECREASE}
+            for p in patterns
+        )
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
