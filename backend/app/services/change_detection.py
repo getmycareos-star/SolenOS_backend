@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models.care import CareEvent
 from app.models.change import Baseline, Change
 from app.models.care_continuity import CareAssertion
+from app.services.observation_coverage import assess_observation_coverage
 from app.services.baseline import (
     build_baseline,
     compare_to_baseline,
@@ -28,6 +29,29 @@ def detect_event_changes(
     counts = get_longitudinal_event_counts(db, person_id, event_type, subject_id, now)
     current_count = counts["current_window_count"]
     comparison = compare_to_baseline(baseline, current_count, 42)
+    current_window_start = counts["current_window_start"]
+    baseline_coverage = assess_observation_coverage(
+        db, person_id, event_type, baseline.window_start, baseline.window_end
+    )
+    current_coverage = assess_observation_coverage(
+        db, person_id, event_type, current_window_start, now
+    )
+    comparison["baseline_coverage_status"] = baseline_coverage["coverage_status"]
+    comparison["current_coverage_status"] = current_coverage["coverage_status"]
+    comparison["baseline_coverage_fraction"] = baseline_coverage["coverage_fraction"]
+    comparison["current_coverage_fraction"] = current_coverage["coverage_fraction"]
+    comparison["baseline_coverage_has_records"] = bool(baseline_coverage["records"])
+    comparison["current_coverage_has_records"] = bool(current_coverage["records"])
+    # Explicitly partial/uncovered/unknown coverage makes a rate comparison
+    # non-comparable. With no coverage records, recorded-event candidates may
+    # still be shown, but the explanation must not claim a true occurrence rate.
+    explicit_incomplete_coverage = any(
+        has_records and status != "covered"
+        for has_records, status in (
+            (comparison["baseline_coverage_has_records"], comparison["baseline_coverage_status"]),
+            (comparison["current_coverage_has_records"], comparison["current_coverage_status"]),
+        )
+    )
     changes = []
     if baseline.event_count == 0 and current_count > 0:
         change = _create_change(
@@ -49,7 +73,8 @@ def detect_event_changes(
         )
         changes.append(change)
     elif (
-        baseline.event_count > 0
+        not explicit_incomplete_coverage
+        and baseline.event_count > 0
         and comparison.get("frequency_delta") is not None
         and comparison["frequency_delta"] > 0
     ):
@@ -139,8 +164,10 @@ def _create_change(
             f"Previous state: {previous_state}. Current state: {current_state}. "
             f"Current count: {current_count}. "
             f"Baseline count: {comparison.get('baseline_event_count', 'unknown')}. "
-            "Rates describe recorded events only; observation coverage is not measured, "
-            "so they do not establish the true occurrence rate."
+            "Rates describe recorded events only and do not establish causation. "
+            f"Baseline observation coverage: {comparison.get('baseline_coverage_status', 'unknown')}; "
+            f"current observation coverage: {comparison.get('current_coverage_status', 'unknown')}. "
+            "Unknown or incomplete coverage limits interpretation of the true occurrence rate."
         )
     if comparison.get("relative_change_percent") is not None:
         explanation += (
