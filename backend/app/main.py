@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -100,38 +101,24 @@ class RequestBodySizeLimitMiddleware:
         await send({'type': 'http.response.body', 'body': body, 'more_body': False})
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Own background worker tasks for the complete ASGI application lifespan."""
+    tasks = []
+    try:
+        app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
+        tasks.append(app.state.qwen_worker_task)
+        app.state.open_loop_maintenance_task = asyncio.create_task(open_loop_maintenance_loop())
+        tasks.append(app.state.open_loop_maintenance_task)
+        yield
+    finally:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
-@app.on_event("startup")
-async def start_qwen_background_worker():
-    app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
-
-@app.on_event("startup")
-async def start_open_loop_maintenance_worker():
-    app.state.open_loop_maintenance_task = asyncio.create_task(open_loop_maintenance_loop())
-
-
-@app.on_event("shutdown")
-async def stop_open_loop_maintenance_worker():
-    task = getattr(app.state, "open_loop_maintenance_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-
-
-@app.on_event("shutdown")
-async def stop_qwen_background_worker():
-    task = getattr(app.state, "qwen_worker_task", None)
-    if task is not None:
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
 # CORS is configurable per deployment. The Netlify production site is the
 # default; additional origins must be explicitly listed in CORS_ORIGINS.
