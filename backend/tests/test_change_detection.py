@@ -97,6 +97,8 @@ def test_baseline_selection_uses_longest_stable_window():
         assert baseline.is_stable is False
         assert baseline.observation_density is None
         assert baseline.documentation_bias_flag is True
+        assert baseline.coverage_status == "unknown"
+        assert baseline.analysis_version == "longitudinal-baseline-v2"
         db.close()
     finally:
         teardown_db()
