@@ -163,6 +163,20 @@ def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(
         conflict = client.post("/api/v1/conversation/message", headers=headers, json=changed)
         assert conflict.status_code == 409, conflict.text
         assert len(calls) == 1
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "person_id": other_person_id,
+                "text": payload["text"],
+                "client_turn_id": payload["client_turn_id"],
+            },
+        )
+        assert cross_person.status_code == 409, cross_person.text
+        assert first_data["reply"] not in cross_person.text
+        assert len(calls) == 1
     finally:
         teardown()
 
