@@ -268,6 +268,13 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # path parameter, bind the middleware scope to the session; the
             # route-level check still rejects a mismatched requested person.
             target_person_id = path_params.get("person_id") or request.query_params.get("person_id") or scoped_person_id
+        if path.startswith("/api/v1/uncertainty/"):
+            # Uncertainty create endpoints are scoped by the bearer session; read
+            # endpoints with a person_id path parameter retain that explicit target.
+            # Falling back to the session here prevents router-path resolution gaps
+            # from blocking scoped writes. Explicit mismatched path/body IDs are still
+            # rejected below before the request reaches the endpoint.
+            target_person_id = path_params.get("person_id") or request.query_params.get("person_id") or scoped_person_id
         if (
             path.startswith("/api/v1/community")
             or path == "/api/v1/upload"
