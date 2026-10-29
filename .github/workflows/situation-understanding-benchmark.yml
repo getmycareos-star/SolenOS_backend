@@ -86,6 +86,7 @@ jobs:
           test "${{ steps.benchmark.outcome }}" = "success"
 
 
+  # Keep PostgreSQL integration as a distinct gate; migration success is not an API test.
   postgres-longitudinal-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 15
