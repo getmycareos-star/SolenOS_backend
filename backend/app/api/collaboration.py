@@ -1674,14 +1674,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
     # new message pair and the uncommitted new session is rolled back by the request.
+    turn_recorded_at = datetime.now(timezone.utc)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        created_at=turn_recorded_at,
     ))
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        created_at=turn_recorded_at + timedelta(microseconds=1),
         client_turn_id=client_turn_id,
         response_metadata_json=json.dumps({
             "request_sha256": request_sha256,
