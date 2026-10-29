@@ -42,9 +42,9 @@ def detect_event_changes(
     comparison["current_coverage_fraction"] = current_coverage["coverage_fraction"]
     comparison["baseline_coverage_has_records"] = bool(baseline_coverage["records"])
     comparison["current_coverage_has_records"] = bool(current_coverage["records"])
-    # Explicitly partial/uncovered/unknown coverage makes a rate comparison
-    # non-comparable. With no coverage records, recorded-event candidates may
-    # still be shown, but the explanation must not claim a true occurrence rate.
+    # A rate comparison is defensible only when both windows are explicitly
+    # covered. Missing coverage is unknown, not a measured zero and not proof
+    # that reporting opportunities were equivalent.
     explicit_incomplete_coverage = any(
         has_records and status != "covered"
         for has_records, status in (
@@ -73,14 +73,16 @@ def detect_event_changes(
         )
         changes.append(change)
     elif (
-        not explicit_incomplete_coverage
+        comparison.get("baseline_coverage_status") == "covered"
+        and comparison.get("current_coverage_status") == "covered"
         and baseline.event_count > 0
         and comparison.get("frequency_delta") is not None
         and comparison["frequency_delta"] > 0
     ):
-        # Create an evidence-backed candidate for a higher normalized rate.
-        # Significance assessment determines whether it merits attention; there
-        # is no universal percentage threshold embedded in the detector.
+        # A higher normalized rate is a change claim only when both windows have
+        # explicit complete observation coverage. Otherwise fewer/more records
+        # may reflect reporting opportunity rather than an occurrence-rate change.
+        # Significance assessment has no universal percentage threshold.
         change = _create_change(
             db=db,
             person_id=person_id,
