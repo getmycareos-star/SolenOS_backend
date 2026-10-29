@@ -43,6 +43,9 @@ class ConversationSession(Base):
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
+    __table_args__ = (
+        UniqueConstraint("session_id", "client_turn_id", name="uq_conversation_messages_session_turn"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)
@@ -51,6 +54,10 @@ class ConversationMessage(Base):
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
     source_record_refs_json = Column(Text, nullable=False, default="[]", server_default="[]")
+    # Idempotency is attached to the caregiver's user turn, not the assistant row.
+    client_turn_id = Column(String(36), nullable=True)
+    request_fingerprint = Column(String(64), nullable=True)
+    response_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
