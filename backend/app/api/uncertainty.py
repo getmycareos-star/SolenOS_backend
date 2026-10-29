@@ -255,6 +255,11 @@ def analyze_and_persist_uncertainty(
         conflict_rows = []
 
     requested_evidence_ids = list(request.evidence_ids)
+    requested_baseline_ids = list(request.baseline_evidence_ids)
+    if len(requested_baseline_ids) != len(set(requested_baseline_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate baseline evidence IDs are not allowed.")
+    if not set(requested_baseline_ids).issubset(set(requested_evidence_ids)):
+        raise HTTPException(status_code=422, detail="Every baseline evidence ID must also be included in evidence_ids.")
     if requested_evidence_ids:
         evidence_rows = (
             engine.db.query(Evidence)
@@ -282,6 +287,8 @@ def analyze_and_persist_uncertainty(
                     # time_provenance describes how a time was established; it is
                     # not itself an event timestamp and must not be parsed as one.
                     "temporal_provenance": row.time_provenance,
+                    "role": "baseline" if row.id in requested_baseline_ids else "current",
+                    "is_baseline": row.id in requested_baseline_ids,
                 }
                 for row in evidence_rows
             ],
