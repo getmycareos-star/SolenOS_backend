@@ -47,9 +47,40 @@ def analyze_uncertainty(
         raise ValueError("task must identify the assessment purpose")
 
     now = now or datetime.now(timezone.utc)
-    items = [dict(item) for item in evidence if isinstance(item, dict)]
+    # Retain the supplied records for provenance, but separately identify repeated
+    # copies. Repetition is not independent corroboration and must never inflate
+    # the assessment's epistemic status.
+    raw_items = [dict(item) for item in evidence if isinstance(item, dict)]
     conflicts = [dict(item) for item in (unresolved_conflicts or []) if isinstance(item, dict)]
     required = [field.strip() for field in (required_fields or []) if isinstance(field, str) and field.strip()]
+    items = raw_items
+    duplicate_groups: list[dict[str, Any]] = []
+    seen_evidence_ids: dict[str, int] = {}
+    seen_source_text: dict[str, int] = {}
+    for index, item in enumerate(raw_items):
+        evidence_id = _text(item.get("id"))
+        source_text = " ".join(_text(item.get("text")).casefold().split())
+        duplicate_of = None
+        if evidence_id and evidence_id in seen_evidence_ids:
+            duplicate_of = seen_evidence_ids[evidence_id]
+        elif source_text and source_text in seen_source_text:
+            duplicate_of = seen_source_text[source_text]
+        if duplicate_of is not None:
+            duplicate_groups.append({
+                "record_index": index,
+                "duplicate_of_index": duplicate_of,
+                "reason": "same_evidence_id" if evidence_id and evidence_id in seen_evidence_ids else "identical_normalized_source_text",
+                "independent_corroboration": False,
+            })
+        else:
+            if evidence_id:
+                seen_evidence_ids[evidence_id] = index
+            if source_text:
+                seen_source_text[source_text] = index
+    independent_items = [
+        item for index, item in enumerate(raw_items)
+        if not any(group["record_index"] == index for group in duplicate_groups)
+    ]
     supplied_fields = {
         str(item.get("field")).strip().lower()
         for item in items if item.get("field") and item.get("value") not in (None, "")
@@ -70,6 +101,60 @@ def analyze_uncertainty(
     if not items:
         classifications.append("insufficient_evidence")
         limitations.append("No retrieved evidence records were supplied to this assessment.")
+    if duplicate_groups:
+        classifications.append("duplicate_evidence")
+        limitations.append("Repeated evidence records were detected and are not counted as independent corroboration.")
+    unavailable_reasons = {
+        "unavailable": "A required source is unavailable; absence from this assessment is not a negative finding.",
+        "inaccessible": "A required source is inaccessible; absence from this assessment is not a negative finding.",
+        "failed": "A required retrieval or processing operation failed; the result is incomplete, not a negative finding.",
+        "partial": "Only part of the relevant source material was retrieved; conclusions are bounded to the retrieved subset.",
+        "truncated": "Retrieved source material was truncated; conclusions cannot be treated as a complete review.",
+        "stale_cache": "The available material may be stale because a current source could not be confirmed.",
+    }
+    normalized_access = _text(source_access).lower()
+    if normalized_access in unavailable_reasons:
+        classifications.append("knowledge_boundary")
+        limitations.append(unavailable_reasons[normalized_access])
+    quality_limited = [
+        item for item in items
+        if _text(item.get("quality")).lower() in {"poor", "low", "unreadable", "partial", "unreliable"}
+        or item.get("readable") is False
+        or item.get("extraction_status") in {"failed", "partial", "unreadable"}
+    ]
+    if quality_limited:
+        classifications.append("low_quality_evidence")
+        limitations.append("At least one source has poor quality, incomplete extraction, or unreadable content.")
+    missing_source_metadata = [
+        item for item in items
+        if not _text(item.get("source_type")) and not _text(item.get("source"))
+    ]
+    if missing_source_metadata:
+        classifications.append("source_attribution_incomplete")
+        limitations.append("At least one evidence item lacks source-type attribution.")
+    missing_time = [
+        item for item in items
+        if item.get("temporal_scope") in {"current", "historical", "time_sensitive"}
+        and not _text(item.get("observed_at"))
+        and not _text(item.get("effective_at"))
+    ]
+    if missing_time:
+        classifications.append("temporal_uncertainty")
+        limitations.append("At least one time-sensitive evidence item has no usable observation or effective timestamp.")
+    if task in {"identify_change", "change_detection", "compare_state"} and not any(
+        item.get("is_baseline") is True or _text(item.get("role")).lower() == "baseline"
+        for item in items
+    ):
+        classifications.append("missing_baseline")
+        limitations.append("No explicit comparison baseline was supplied; a change cannot be established from this assessment alone.")
+    ambiguity_signals = [
+        item for item in items
+        if item.get("ambiguous") is True
+        or _text(item.get("interpretation_status")).lower() in {"ambiguous", "unresolved", "needs_clarification"}
+    ]
+    if ambiguity_signals:
+        classifications.append("ambiguous_source_interpretation")
+        limitations.append("At least one source has an explicitly unresolved interpretation.");
     if missing:
         classifications.append("missing_information")
         limitations.append("Required fields absent from the supplied evidence: " + ", ".join(missing))
@@ -105,19 +190,26 @@ def analyze_uncertainty(
     if stale:
         classifications.append("outdated_information")
         limitations.append("Evidence exceeded its explicitly supplied freshness limit.")
-    if source_access != "available":
+    if normalized_access not in {"available", ""} and normalized_access not in unavailable_reasons:
         classifications.append("knowledge_boundary")
-        limitations.append("A required source is not available; absence from this assessment is not a negative finding.")
+        limitations.append("A required source has a nonstandard access status; source completeness cannot be assumed.")
 
-    # Evidence completeness is descriptive, not a confidence estimate.
-    completeness = "insufficient" if not items or missing else ("partial" if conflicts or unverified or stale else "provided")
+    # Evidence completeness is descriptive, not a confidence estimate. Duplicate
+    # copies do not increase independent support, and a missing baseline blocks
+    # a change claim even if other records exist.
+    completeness = "insufficient" if not independent_items or missing else (
+        "partial" if conflicts or unverified or stale or quality_limited or missing_time
+        or duplicate_groups or normalized_access not in {"available", ""} else "provided"
+    )
     if conflicts:
         epistemic_state = "conflicting"
     elif "possible_reference_ambiguity" in classifications:
         epistemic_state = "ambiguous"
-    elif not items or missing or source_access != "available":
+    elif not independent_items or missing or normalized_access not in {"available", ""}:
         epistemic_state = "unknown"
-    elif unverified or stale or explicit_uncertainty:
+    elif ambiguity_signals:
+        epistemic_state = "ambiguous"
+    elif unverified or stale or explicit_uncertainty or quality_limited or missing_time:
         epistemic_state = "partially_known"
     else:
         epistemic_state = "partially_known"  # Evidence presence alone never proves a claim.
@@ -129,7 +221,11 @@ def analyze_uncertainty(
         "recommendation": "qualified_only" if items and not conflicts else "insufficient",
     }
     sufficiency = task_thresholds.get(task, "task_rule_not_defined")
-    if conflicts or missing or source_access != "available":
+    if (
+        conflicts or missing or normalized_access not in {"available", ""}
+        or ambiguity_signals or quality_limited
+        or (task in {"identify_change", "change_detection", "compare_state"} and "missing_baseline" in classifications)
+    ):
         sufficiency = "insufficient_pending_resolution"
     questions = []
     for field in missing:
@@ -177,6 +273,10 @@ def analyze_uncertainty(
         "alternatives": [],
         "clarification_questions": questions,
         "evidence_refs": evidence_refs,
+        "evidence_record_count": len(raw_items),
+        "independent_evidence_record_count": len(independent_items),
+        "duplicate_evidence_groups": duplicate_groups,
+        "source_access_status": normalized_access or "unspecified",
         "limitations": list(dict.fromkeys(limitations)),
         "review_required": bool(classifications or not items or conflicts or missing),
         "assessed_at": now.isoformat(),
