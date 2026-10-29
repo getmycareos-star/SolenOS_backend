@@ -558,7 +558,7 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     if not prior_messages:
         return current
     referential = re.search(
-        r"\\b(?:it|that|those|them|there|then|afterward|afterwards|"
+        r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
         r"what about|how about|what happened|why did that|why|how so|"
         r"the same|same thing|that appointment|this appointment|"
         r"what was that|and then|and what|what next)\\b",
@@ -571,7 +571,7 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
         for message in reversed(prior_messages[:8])
         if getattr(message, "role", None) == "user"
     ][:4]
-    return "\\n".join([current, *recent_user_turns]) if recent_user_turns else current
+    return "\n".join([current, *recent_user_turns]) if recent_user_turns else current
 
 
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
