@@ -617,7 +617,10 @@ jobs:
                 http://127.0.0.1:8080/api/v1/assistant/assist 2>/tmp/qwen-workflow-error || true)
               workflow_response=$(cat /tmp/qwen-workflow-response.json 2>/dev/null || true)
               if [ "$workflow_status" = "200" ]; then
-                if python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow" 2>/dev/null; then
+                if [ "$workflow" = "evidence_provenance" ] && python -c 'import json,sys; d=json.loads(sys.argv[1]); r=d["reply"].casefold(); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is False; assert d["provider_status"] == "not_required_deterministic"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert "caregiver-reported observation" in r; assert "no professional assessment is supplied" in r; assert "does not verify the underlying observation" in r, d' "$workflow_response" "$workflow" 2>/dev/null; then
+                  workflow_ready=1
+                  break
+                elif python -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["workflow"] == sys.argv[2]; assert d["ai_generated"] is True; assert d["provider_status"] == "available"; assert d["review_required"] is True; assert d["written_to_lcr"] is False; assert d["persistence"] == "read_only_assistance"; assert isinstance(d["reply"],str) and d["reply"].strip(), d' "$workflow_response" "$workflow" 2>/dev/null; then
                   workflow_ready=1
                   break
                 fi
