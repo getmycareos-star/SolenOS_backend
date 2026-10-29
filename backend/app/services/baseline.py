@@ -59,16 +59,20 @@ def get_longitudinal_event_counts(
     if subject_id:
         query = query.filter(CareEvent.id == subject_id)
     queried_events = query.order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc()).all()
-    # Exact source-evidence reuse is a duplicate-record signal. Do not deduplicate
-    # by title or nearby timestamps alone; those can represent distinct events.
+    # A copied event is only deduplicated when the same source evidence anchors
+    # the same occurrence time. Reusing one document to describe multiple events
+    # must not collapse distinct dated occurrences into one count.
     events = []
-    seen_source_signatures = set()
+    seen_event_identities = set()
     for event in queried_events:
         evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
-        identity = ("evidence", evidence_signature) if evidence_signature else ("event", event.id)
-        if identity in seen_source_signatures:
+        if evidence_signature:
+            identity = ("evidence-occurrence", evidence_signature, _ensure_utc(event.occurred_at))
+        else:
+            identity = ("event", event.id)
+        if identity in seen_event_identities:
             continue
-        seen_source_signatures.add(identity)
+        seen_event_identities.add(identity)
         events.append(event)
 
     six_weeks_ago = now - timedelta(days=42)
