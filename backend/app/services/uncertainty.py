@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -205,6 +206,30 @@ class UncertaintyEngine:
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
         payload["question"] = question_text
+        # Suppress only an exact normalized duplicate that is still open for the
+        # same person, subject, and claim. Similar wording is not treated as
+        # equivalent, and answered/declined questions do not block a new review.
+        question_key = re.sub(r"[\W_]+", " ", question_text.casefold()).strip()
+        existing_open = (
+            self.db.query(OpenQuestionModel)
+            .filter(
+                OpenQuestionModel.person_id == scoped_person_id,
+                OpenQuestionModel.subject_type == payload["subject_type"],
+                OpenQuestionModel.subject_id == payload["subject_id"],
+                OpenQuestionModel.claim_id == claim_id,
+                OpenQuestionModel.status == "open",
+            )
+            .order_by(OpenQuestionModel.asked_at.desc(), OpenQuestionModel.id.asc())
+            .limit(200)
+            .all()
+        )
+        if any(
+            re.sub(r"[\W_]+", " ", (row.question or "").casefold()).strip() == question_key
+            for row in existing_open
+        ):
+            raise ValueError(
+                "An equivalent open clarification question already exists for this claim and subject; review its status and answer history before asking again."
+            )
         db_question = OpenQuestionModel(**payload)
         try:
             self.db.add(db_question)
