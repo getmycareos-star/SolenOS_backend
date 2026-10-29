@@ -219,7 +219,11 @@ def test_future_dated_events_are_not_counted_as_current_observations():
         db.flush()
         counts = get_longitudinal_event_counts(db, person.id, "sleep", None, NOW)
         assert counts["current_window_count"] == 1
-        assert all(event.occurred_at <= NOW for event in counts["recent_events"])
+        assert all(
+            (event.occurred_at.replace(tzinfo=timezone.utc)
+             if event.occurred_at.tzinfo is None else event.occurred_at) <= NOW
+            for event in counts["recent_events"]
+        )
 
 
 def test_identical_source_lineage_is_not_counted_twice_in_longitudinal_history():
