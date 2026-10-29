@@ -38,11 +38,19 @@ def _require_person_scope(request: Request, db: Session, person_id: str) -> Anon
         .filter(
             AnonymousSession.token_hash == token_hash,
             AnonymousSession.revoked_at.is_(None),
-            AnonymousSession.expires_at > datetime.now(timezone.utc),
         )
         .first()
     )
     if session is None:
+        raise HTTPException(status_code=401, detail="The SolenOS care session is invalid or expired")
+    # SQLite returns timezone-naive datetimes for DateTime(timezone=True). Normalize
+    # the loaded value before expiry comparison so the API and tests use the same
+    # absolute-time semantics as PostgreSQL rather than relying on dialect-specific
+    # SQL string comparison for timestamps.
+    expires_at = session.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if expires_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=401, detail="The SolenOS care session is invalid or expired")
     if session.person_id != person_id:
         raise HTTPException(status_code=403, detail="This session cannot access the requested care record")
