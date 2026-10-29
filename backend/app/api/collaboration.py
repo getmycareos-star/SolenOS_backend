@@ -803,7 +803,9 @@ def _contains_unsupported_record_reference(reply: str, source_text: str) -> bool
     candidates = re.findall(
         r"(?i)\b(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|"
         r"(?:evidence|event|appointment|handoff|record|claim|assertion|source|decision|outcome)"
-        r"[\s:_#-]+[a-z0-9][a-z0-9_-]{5,})\b",
+        # A plain space is not enough: otherwise ordinary phrases such as
+        # "the record contains..." are misread as a fabricated record ID.
+        r"[:_#-]+[a-z0-9][a-z0-9_-]{5,})\b",
         reply or "",
     )
     normalized_source = (source_text or "").casefold()
