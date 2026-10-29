@@ -85,6 +85,16 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         assert replay_data["reply"] == first_data["reply"]
         assert len(calls) == 1
 
+        restored = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}",
+            headers=headers,
+        )
+        assert restored.status_code == 200, restored.text
+        restored_messages = restored.json()["messages"]
+        restored_assistant = next(row for row in restored_messages if row["role"] == "assistant")
+        assert restored_assistant["written_to_lcr"] is False
+        assert restored_assistant["persistence"] == "conversation_only"
+
         changed = {**body, "text": "Tell me about the medication record."}
         mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
         assert mismatch.status_code == 409, mismatch.text
