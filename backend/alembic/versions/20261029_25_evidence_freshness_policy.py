@@ -20,7 +20,26 @@ def upgrade() -> None:
     # Local/test imports may bootstrap ORM tables before Alembic starts.
     # Production PostgreSQL normally reaches this migration without these
     # tables. Reconcile both paths rather than failing on DuplicateTable.
-    if not inspector.has_table("evidence_freshness_policies"):
+    if bind.dialect.name == "postgresql":
+        # The existence check is advisory only: another bootstrap/migration
+        # connection can create the table between inspection and DDL. Let
+        # PostgreSQL arbitrate that race without aborting the transaction.
+        op.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS evidence_freshness_policies (
+                id VARCHAR PRIMARY KEY,
+                person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+                domain_key VARCHAR(80) NOT NULL,
+                policy_version VARCHAR(64) NOT NULL,
+                max_age_days INTEGER NULL,
+                historical_after_days INTEGER NULL,
+                rationale TEXT NOT NULL,
+                created_by_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL,
+                CONSTRAINT uq_evidence_freshness_policy_version
+                    UNIQUE (person_id, domain_key, policy_version)
+            )
+        """))
+    elif not inspector.has_table("evidence_freshness_policies"):
         op.create_table(
             "evidence_freshness_policies",
             sa.Column("id", sa.String(), primary_key=True),
@@ -60,7 +79,24 @@ def upgrade() -> None:
     if not has_version_uniqueness:
         raise RuntimeError("Existing evidence_freshness_policies lacks unique person/domain/version enforcement")
 
-    if not inspector.has_table("evidence_freshness_assessments"):
+    if bind.dialect.name == "postgresql":
+        op.execute(sa.text("""
+            CREATE TABLE IF NOT EXISTS evidence_freshness_assessments (
+                id VARCHAR PRIMARY KEY,
+                person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+                evidence_id VARCHAR NOT NULL REFERENCES evidence(id) ON DELETE CASCADE,
+                policy_id VARCHAR NOT NULL REFERENCES evidence_freshness_policies(id) ON DELETE RESTRICT,
+                policy_version VARCHAR(64) NOT NULL,
+                freshness_status VARCHAR(32) NOT NULL,
+                source_time TIMESTAMP WITH TIME ZONE NULL,
+                source_time_kind VARCHAR(32) NULL,
+                assessed_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                age_days INTEGER NULL,
+                rationale TEXT NOT NULL,
+                assessed_by_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id)
+            )
+        """))
+    elif not inspector.has_table("evidence_freshness_assessments"):
         op.create_table(
             "evidence_freshness_assessments",
             sa.Column("id", sa.String(), primary_key=True),
