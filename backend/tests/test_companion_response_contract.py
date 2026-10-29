@@ -209,6 +209,39 @@ def test_companion_idempotent_retry_replays_original_response_and_blocks_key_reu
         teardown()
 
 
+def test_evidence_provenance_is_deterministic_and_does_not_call_qwen(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("Explicit source-label classification must not call Qwen")
+
+    monkeypatch.setattr(collaboration, "qwen_chat", fail_if_called)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "evidence_provenance",
+                "text": (
+                    "Label the source of this claim: caregiver observed she seemed tired this morning. "
+                    "No professional assessment is supplied."
+                ),
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["provider_status"] == "not_required_deterministic"
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "read_only_assistance"
+        assert "caregiver-reported observation" in data["reply"].casefold()
+        assert "no professional assessment is supplied" in data["reply"].casefold()
+        assert "does not verify the underlying observation" in data["reply"].casefold()
+    finally:
+        teardown()
+
+
 def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
