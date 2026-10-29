@@ -1155,14 +1155,22 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
-    if (
-        _companion_reply_needs_revision(reply)
-        or _contains_unrequested_saba(reply, source_context)
-        or _contains_unsupported_care_claim(reply, source_context)
-        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
-    ):
-        # Ask the same local model to repair style and source fidelity. A second
-        # unsupported high-impact claim is rejected instead of shown to a caregiver.
+
+    def guard_failure_codes(candidate: str) -> list[str]:
+        failures = []
+        if _companion_reply_needs_revision(candidate):
+            failures.append("style_or_length")
+        if _contains_unrequested_saba(candidate, source_context):
+            failures.append("unrequested_token")
+        if _contains_unsupported_care_claim(candidate, source_context):
+            failures.append("unsupported_care_claim")
+        if _contains_unsupported_operational_claim(candidate, source_context, context_lines):
+            failures.append("unsupported_operational_claim")
+        return failures
+
+    first_guard_failures = guard_failure_codes(reply)
+    if first_guard_failures:
+        # Give the repair pass only guard categories; never log or expose care data.
         reply = await asyncio.to_thread(
             qwen_chat,
             [
@@ -1189,6 +1197,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                             "caregiver_request": payload.text.strip(),
                             "authorized_context": context_lines,
                             "draft_response": reply,
+                            "guardrail_failures": first_guard_failures,
                         },
                         ensure_ascii=False,
                     ),
@@ -1196,12 +1205,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             ],
             options={"temperature": 0, "num_predict": 96},
         )
-    if (
-        _companion_reply_needs_revision(reply)
-        or _contains_unrequested_saba(reply, source_context)
-        or _contains_unsupported_care_claim(reply, source_context)
-        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
-    ):
+    final_guard_failures = guard_failure_codes(reply)
+    if final_guard_failures:
+        logger.warning(
+            "Qwen response rejected by grounding guard: workflow=%s failures=%s",
+            payload.workflow,
+            ",".join(final_guard_failures),
+        )
         raise HTTPException(
             status_code=503,
             detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
