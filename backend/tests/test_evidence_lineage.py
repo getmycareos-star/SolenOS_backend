@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from app.services.evidence_lineage import build_evidence_lineage
+from app.services.evidence_lineage import build_evidence_lineage, find_exact_content_duplicate_candidates
 
 
 def test_parent_evidence_is_shared_origin_even_when_parent_is_not_selected():
@@ -180,3 +180,22 @@ def test_lineage_scope_follows_unselected_ancestor_source_reference_and_stays_pe
             assert scope["truncated"] is False
     finally:
         engine.dispose()
+
+
+
+def test_exact_content_duplicates_are_candidates_not_proof_of_shared_origin():
+    digest = "a" * 64
+    rows = [
+        SimpleNamespace(id="copy-a", source_text_sha256=digest),
+        SimpleNamespace(id="copy-b", source_text_sha256=digest),
+        SimpleNamespace(id="different", source_text_sha256="b" * 64),
+        SimpleNamespace(id="invalid-hash", source_text_sha256="not-a-hash"),
+    ]
+    candidates = find_exact_content_duplicate_candidates(
+        rows, ["copy-a", "copy-b", "different", "invalid-hash"]
+    )
+    assert len(candidates) == 1
+    assert candidates[0]["evidence_ids"] == ["copy-a", "copy-b"]
+    assert candidates[0]["common_origin_established"] is False
+    assert candidates[0]["independent_corroboration_established"] is False
+    assert candidates[0]["review_required"] is True
