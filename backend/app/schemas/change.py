@@ -103,7 +103,7 @@ class PatternBase(BaseModel):
     direction: Optional[ChangeDirection] = None
     confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
     evidence_count: int = 0
-    alternative_interpretations: Optional[List[dict[str, Any]]] = None
+    alternative_interpretations: Optional[List[Any]] = None
 
 
 class PatternCreate(PatternBase):
