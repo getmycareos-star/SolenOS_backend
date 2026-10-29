@@ -1522,7 +1522,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(40)
             .all()
         )
-        for event in recent_events:
+        direct_event_terms, synonym_event_terms = _companion_query_terms(retrieval_query)
+        event_search_terms = list(dict.fromkeys(
+            [*sorted(direct_event_terms), *sorted(synonym_event_terms)]
+        ))[:10]
+        matching_events = []
+        if event_search_terms:
+            event_search_filters = [
+                column.ilike(f"%{term}%")
+                for term in event_search_terms
+                for column in (CareEvent.title, CareEvent.description, CareEvent.event_type, CareEvent.status)
+            ]
+            matching_events = (
+                db.query(CareEvent)
+                .filter(CareEvent.person_id == person_id)
+                .filter(or_(*event_search_filters))
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(40)
+                .all()
+            )
+        all_events = []
+        seen_event_ids = set()
+        for event in [*recent_events, *matching_events]:
+            event_id = str(event.id)
+            if event_id not in seen_event_ids:
+                seen_event_ids.add(event_id)
+                all_events.append(event)
+        for event in all_events:
             source_event_ids.append(str(event.id))
             event_context.append(
                 "LCR event evidence: "
@@ -1599,7 +1625,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # retaining event-linked and other recent evidence within a strict bound.
         linked_ids = list(dict.fromkeys(
             str(evidence_id)
-            for event in recent_events
+            for event in all_events
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
