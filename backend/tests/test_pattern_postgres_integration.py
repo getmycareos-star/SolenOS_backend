@@ -110,12 +110,9 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
     finally:
         db.rollback()
         # Remove only this test's rows. Delete dependent assessments before source records.
-        for model in (Pattern, Change, CareEvent, Caregiver, Person):
-            if model is Pattern or model is Change or model is CareEvent or model is Caregiver or model is Person:
-                try:
-                    db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
-                except Exception:
-                    db.rollback()
+        for model in (Pattern, Change, CareEvent, Caregiver):
+            db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
+        db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.commit()
         db.close()
         engine.dispose()
