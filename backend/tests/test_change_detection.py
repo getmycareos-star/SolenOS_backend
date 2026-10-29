@@ -1816,3 +1816,39 @@ def test_observation_coverage_api_enforces_bearer_person_scope():
         assert cross_person_write.status_code == 403
     finally:
         teardown_db()
+
+
+def test_future_dated_events_are_not_counted_as_occurrences_yet():
+    setup_db()
+    try:
+        from app.services.baseline import get_longitudinal_event_counts
+
+        db = TestingSessionLocal()
+        person = Person(id="future-event-person", name="Future event test")
+        caregiver = Caregiver(
+            id="future-event-caregiver", name="Future event caregiver",
+            email="future-event@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        db.add_all([
+            CareEvent(
+                id="past-event", person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now - timedelta(days=100),
+                title="Past mobility event", created_by_caregiver_id=caregiver.id,
+            ),
+            CareEvent(
+                id="future-event", person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now + timedelta(days=2),
+                title="Future scheduled item", created_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        counts = get_longitudinal_event_counts(db, person.id, "mobility", None, now)
+        assert [event.id for event in counts["all_events"]] == ["past-event"]
+        assert counts["current_window_count"] == 0
+        assert counts["historical_count"] == 1
+        db.close()
+    finally:
+        teardown_db()
