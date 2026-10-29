@@ -1028,25 +1028,27 @@ def test_analyze_endpoint_does_not_accept_assumption_from_unverified_persisted_e
         db.close()
 
         client = authorized_client("person-analysis")
-        response = client.post(
-            "/api/v1/uncertainty/analyze",
-            json={
-                "person_id": "person-analysis",
-                "subject_type": "care_instruction",
-                "subject_id": "instruction-1",
-                "field": "current_instruction",
-                "claim": "The current care instruction is confirmed.",
-                "task": "recommendation",
-                "evidence_ids": ["evidence-analysis-unverified"],
-                "assumptions": [{
-                    "statement": "The report reflects the current instruction.",
-                    "status": "accepted",
-                    "supporting_evidence_ids": ["evidence-analysis-unverified"],
-                    "reviewed_by_caregiver_id": "caregiver-analysis",
-                    "resolution_rationale": "Reviewed against the supplied report.",
-                }],
-            },
-        )
+        payload = {
+            "person_id": "person-analysis",
+            "subject_type": "care_instruction",
+            "subject_id": "instruction-1",
+            "field": "current_instruction",
+            "claim": "The current care instruction is confirmed.",
+            "task": "recommendation",
+            "evidence_ids": ["evidence-analysis-unverified"],
+            "assumptions": [{
+                "statement": "The report reflects the current instruction.",
+                "status": "accepted",
+                "supporting_evidence_ids": ["evidence-analysis-unverified"],
+                "reviewed_by_caregiver_id": "different-caregiver",
+                "resolution_rationale": "Reviewed against the supplied report.",
+            }],
+        }
+        unauthorized = client.post("/api/v1/uncertainty/analyze", json=payload)
+        assert unauthorized.status_code == 403, unauthorized.text
+
+        payload["assumptions"][0]["reviewed_by_caregiver_id"] = "caregiver-analysis"
+        response = client.post("/api/v1/uncertainty/analyze", json=payload)
         assert response.status_code == 200, response.text
         analysis = response.json()["analysis"]
         assert analysis["assumptions"][0]["status"] == "unresolved"
