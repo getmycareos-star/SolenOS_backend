@@ -195,3 +195,51 @@ def test_time_bound_assertion_requires_actual_event_time(review_records):
     })
     assert response.status_code == 422
     assert "actual event time" in response.json()["detail"]
+
+
+def test_evidence_capture_preserves_distinct_provenance_and_hash(review_records):
+    import hashlib
+
+    client_a, _ = review_records
+    source_text = "Original caregiver note: two awakenings were recorded."
+    response = client_a.post("/api/v1/evidence", json={
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "source_text": source_text,
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+        "original_author": "Caregiver's handwritten note",
+        "reported_by_label": "Caregiver A",
+        "reported_by_caregiver_id": "review-caregiver-a",
+        "collected_by_caregiver_id": "review-caregiver-a",
+        "collected_at": "2026-10-29T08:00:00Z",
+        "occurred_at": "2026-10-28T22:00:00Z",
+        "occurred_at_timezone": "America/New_York",
+        "origin_channel": "manual_entry",
+        "original_source_reference": "family-sleep-log/2026-10-28",
+        "parent_evidence_id": "review-evidence-a",
+    })
+    assert response.status_code == 200, response.text
+    saved = response.json()
+    assert saved["source_text"] == source_text
+    assert saved["source_text_sha256"] == hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    assert saved["ingested_at"]
+    assert saved["uploaded_by_caregiver_id"] == "review-caregiver-a"
+    assert saved["reported_by_caregiver_id"] == "review-caregiver-a"
+    assert saved["collected_by_caregiver_id"] == "review-caregiver-a"
+    assert saved["original_author"] == "Caregiver's handwritten note"
+    assert saved["occurred_at"].startswith("2026-10-28T22:00:00")
+    assert saved["occurred_at_timezone"] == "America/New_York"
+    assert saved["parent_evidence_id"] == "review-evidence-a"
+
+
+def test_evidence_provenance_rejects_reporter_from_another_care_record(review_records):
+    client_a, _ = review_records
+    response = client_a.post("/api/v1/evidence", json={
+        "person_id": "review-person-a",
+        "type": "caregiver_report",
+        "source_text": "A report with a foreign reporter identity.",
+        "uploaded_by_caregiver_id": "review-caregiver-a",
+        "reported_by_caregiver_id": "review-caregiver-b",
+    })
+    assert response.status_code == 422, response.text
+    assert "reported_by_caregiver_id" in response.text
