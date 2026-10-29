@@ -2570,6 +2570,7 @@ def reconstruct_state_as_of(
 ):
     """Reconstruct one target's recorded state from its immutable revision history."""
     person_id, _caregiver_id = _scoped_identity(request, db)
+    as_of = as_of.replace(tzinfo=timezone.utc) if as_of.tzinfo is None else as_of.astimezone(timezone.utc)
     if not target_type.strip() or not target_id.strip():
         raise HTTPException(status_code=422, detail="Target type and ID are required")
     row = db.query(CareStateRevision).filter(
