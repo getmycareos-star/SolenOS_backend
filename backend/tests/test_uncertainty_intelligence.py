@@ -255,6 +255,18 @@ def test_unreadable_evidence_reduces_sufficiency_without_confidence_inflation():
     assert result["conclusion_confidence"] is None
 
 
+def test_assessment_never_claims_the_retrieved_evidence_set_is_complete():
+    result = analyze_uncertainty(
+        claim="The available note describes an appointment.",
+        task="summarize",
+        evidence=[{"id": "appointment-note", "text": "Appointment planned.", "source_type": "caregiver_report"}],
+    )
+    assert result["retrieval_scope"]["basis"] == "only_records_supplied_to_this_assessment"
+    assert result["retrieval_scope"]["completeness_verified"] is False
+    assert result["retrieval_scope"]["unknown_relevant_sources_may_exist"] is True
+    assert result["assumptions"] == []
+
+
 def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
     """Exercise the real mapped tables and SQLAlchemy transaction semantics on SQLite."""
     from sqlalchemy.orm import Session
