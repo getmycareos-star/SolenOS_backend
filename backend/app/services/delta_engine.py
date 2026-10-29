@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion, CareDeltaRun
 from app.models.uncertainty import Contradiction, InformationGap, OpenQuestion, UncertaintyAssessment
-from app.services.uncertainty_intelligence import analyze_uncertainty
+from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.core.uncertainty_enums import EpistemicState, GapReason, GapLifecycleStatus, Priority
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
@@ -621,14 +621,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     Evidence.person_id == person_id,
                     Evidence.id.in_(evidence_ids),
                 ).all()
-                persisted_evidence = [{
-                    "id": row.id,
-                    "source_type": row.source_type or row.type,
-                    "text": row.source_text,
-                    "verified": str(row.evidence_status or "").lower() == "verified",
-                    # This is provenance about the time, not an occurrence timestamp.
-                    "temporal_provenance": row.time_provenance,
-                } for row in evidence_rows]
+                persisted_evidence = [
+                    evidence_record_to_uncertainty_item(row)
+                    for row in evidence_rows
+                ]
 
             for finding in computed:
                 finding_name = str(finding.get("name") or "").strip()
