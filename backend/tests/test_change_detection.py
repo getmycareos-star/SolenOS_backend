@@ -1493,3 +1493,59 @@ def test_pattern_detection_finds_short_window_cluster_from_distinct_events():
     finally:
         db.close()
         teardown_db()
+
+
+def test_pattern_detail_returns_only_same_person_source_events():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="pattern-detail-person", name="Pattern detail person")
+        caregiver = Caregiver(
+            id="pattern-detail-caregiver", name="Pattern detail caregiver",
+            email="pattern-detail@example.com", relationship="Family", person_id=person.id,
+        )
+        other = Person(id="pattern-detail-other", name="Other person")
+        other_caregiver = Caregiver(
+            id="pattern-detail-other-caregiver", name="Other caregiver",
+            email="pattern-detail-other@example.com", relationship="Family", person_id=other.id,
+        )
+        db.add_all([person, caregiver, other, other_caregiver])
+        db.flush()
+        now = datetime.now(timezone.utc)
+        own_event = CareEvent(
+            id="pattern-detail-own-event", person_id=person.id, event_type="mobility",
+            status="recorded", occurred_at=now - timedelta(days=10), title="Own mobility observation",
+            created_by_caregiver_id=caregiver.id, evidence_ids=["own-evidence"],
+        )
+        foreign_event = CareEvent(
+            id="pattern-detail-foreign-event", person_id=other.id, event_type="mobility",
+            status="recorded", occurred_at=now - timedelta(days=9), title="Foreign mobility observation",
+            created_by_caregiver_id=other_caregiver.id, evidence_ids=["foreign-evidence"],
+        )
+        db.add_all([own_event, foreign_event])
+        from app.core.change_enums import PatternType, PatternStrength, ChangeDirection
+        pattern = Pattern(
+            id="pattern-detail-id", person_id=person.id, subject_type="mobility", subject_id="",
+            pattern_type=PatternType.RECURRENCE, pattern_strength=PatternStrength.EMERGING,
+            event_ids=[own_event.id, foreign_event.id], change_ids=[],
+            temporal_start=now - timedelta(days=10), temporal_end=now - timedelta(days=9),
+            direction=ChangeDirection.UNKNOWN, confidence=None, evidence_count=2,
+            alternative_interpretations=["Only same-person source records should be returned."],
+        )
+        db.add(pattern)
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        db.close()
+
+        response = TestClient(app).get(
+            f"/api/v1/change/patterns/{person_id}/pattern-detail-id",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["pattern"]["id"] == "pattern-detail-id"
+        assert [event["id"] for event in payload["events"]] == ["pattern-detail-own-event"]
+        assert all(event["id"] != "pattern-detail-foreign-event" for event in payload["events"])
+    finally:
+        teardown_db()
