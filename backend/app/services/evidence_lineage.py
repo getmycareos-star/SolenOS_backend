@@ -85,23 +85,35 @@ def build_evidence_lineage(
         if not left or not right:
             continue
         status = str(getattr(relationship, "source_independence_status", "") or "").strip().lower()
+        relationship_type = str(getattr(relationship, "relationship_type", "") or "").strip().casefold().replace("-", "_").replace(" ", "_")
         if status in INDEPENDENT_STATUSES:
             for evidence_id in (left, right):
                 if evidence_id in selected:
-                    independence.setdefault(evidence_id, "independent")
+                    independence[evidence_id] = "independent"
             continue
 
-        union(left, right)
-        for evidence_id in (left, right):
-            if evidence_id in selected:
-                independence[evidence_id] = "shared_origin"
-                shared_ids.add(evidence_id)
-
-        origin_group = str(getattr(relationship, "origin_group_key", "") or "").strip()
-        if origin_group:
-            node = "origin-group:" + origin_group
-            union(left, node)
-            union(right, node)
+        # Only explicit provenance/dependency relationships or an explicit
+        # shared-origin review establish a shared source. Contradiction,
+        # corroboration, generic relatedness, and duplicate-candidate links
+        # must not be misread as proof of common origin.
+        establishes_shared_origin = status == "shared_origin" or relationship_type in {
+            "same_origin", "copied_from", "forwarded_from", "derived_from",
+        }
+        if establishes_shared_origin:
+            union(left, right)
+            for evidence_id in (left, right):
+                if evidence_id in selected:
+                    independence[evidence_id] = "shared_origin"
+                    shared_ids.add(evidence_id)
+            origin_group = str(getattr(relationship, "origin_group_key", "") or "").strip()
+            if origin_group:
+                node = "origin-group:" + origin_group
+                union(left, node)
+                union(right, node)
+        else:
+            for evidence_id in (left, right):
+                if evidence_id in selected:
+                    independence.setdefault(evidence_id, "independence_not_assessed")
 
     groups: dict[str, list[str]] = {}
     for evidence_id in selected:
