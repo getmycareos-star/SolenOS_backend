@@ -2109,3 +2109,100 @@ def test_observation_coverage_api_rejects_future_or_invalid_windows():
         assert invalid.status_code == 422
     finally:
         teardown_db()
+
+
+def test_cross_domain_cooccurrence_uses_real_events_and_makes_no_causal_claim():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="cross-domain-person", name="Cross-domain test person")
+        caregiver = Caregiver(
+            id="cross-domain-caregiver", name="Cross-domain test caregiver",
+            email="cross-domain@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        events = [
+            CareEvent(
+                person_id=person.id, event_type="mobility_observation", status="recorded",
+                occurred_at=now - timedelta(days=2), title="Recorded mobility observation",
+                created_by_caregiver_id=caregiver.id,
+            ),
+            CareEvent(
+                person_id=person.id, event_type="sleep_disruption", status="recorded",
+                occurred_at=now - timedelta(days=1), title="Recorded sleep observation",
+                created_by_caregiver_id=caregiver.id,
+            ),
+            CareEvent(
+                person_id=person.id, event_type="routine_disruption", status="recorded",
+                occurred_at=now - timedelta(hours=2), title="Recorded routine observation",
+                created_by_caregiver_id=caregiver.id,
+            ),
+        ]
+        db.add_all(events)
+        db.commit()
+
+        from app.services.pattern_detection import detect_cross_domain_patterns
+        patterns = detect_cross_domain_patterns(db, person.id, now)
+        db.commit()
+        assert len(patterns) == 1
+        pattern = patterns[0]
+        assert pattern.subject_type == "cross_domain"
+        assert pattern.pattern_type.value == "convergence"
+        assert set(pattern.event_ids) == {event.id for event in events}
+        assert pattern.pattern_metrics["distinct_domain_count"] == 3
+        assert pattern.pattern_metrics["normalized_rate_available"] is False
+        explanation = " ".join(pattern.alternative_interpretations).lower()
+        assert "does not establish a shared cause" in explanation
+        assert pattern.confidence is None
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_cross_domain_pattern_retires_only_after_complete_scan_no_longer_supports_it():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="cross-domain-retire-person", name="Cross-domain lifecycle person")
+        caregiver = Caregiver(
+            id="cross-domain-retire-caregiver", name="Cross-domain lifecycle caregiver",
+            email="cross-domain-retire@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        events = [
+            CareEvent(
+                person_id=person.id, event_type=kind, status="recorded",
+                occurred_at=now - timedelta(hours=offset), title=f"Recorded {kind}",
+                created_by_caregiver_id=caregiver.id,
+            )
+            for kind, offset in (
+                ("mobility_observation", 48),
+                ("sleep_disruption", 24),
+                ("routine_disruption", 2),
+            )
+        ]
+        db.add_all(events)
+        db.commit()
+
+        from app.services.pattern_detection import detect_cross_domain_patterns
+        first = detect_cross_domain_patterns(db, person.id, now)
+        db.commit()
+        assert len(first) == 1
+        pattern_id = first[0].id
+
+        for event in events:
+            event.status = "invalidated"
+        db.commit()
+        second = detect_cross_domain_patterns(db, person.id, now)
+        db.commit()
+        assert second == []
+        retired = db.query(Pattern).filter(Pattern.id == pattern_id).one()
+        assert retired.is_active is False
+        assert any("does not prove" in note for note in retired.alternative_interpretations)
+        db.close()
+    finally:
+        teardown_db()
