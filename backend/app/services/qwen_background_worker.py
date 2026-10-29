@@ -196,7 +196,14 @@ async def process_one_qwen_job() -> bool:
         output = QwenModelOutput(
             job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id,
             workflow=result["workflow"], model_name=None, output_text=result["reply"],
-            output_metadata={"persistence": "read_only_assistance", "written_to_lcr": False},
+            output_metadata={
+                "persistence": "read_only_assistance",
+                "written_to_lcr": False,
+                "source_provenance_version": "qwen-source-records-v1",
+                "source_appointment_ids": result.get("source_appointment_ids", []),
+                "source_handoff_ids": result.get("source_handoff_ids", []),
+                "source_notification_ids": result.get("source_notification_ids", []),
+            },
             source_event_ids_json=json.dumps(result.get("source_event_ids", [])),
             source_evidence_ids_json=json.dumps(result.get("source_evidence_ids", [])),
             review_status="pending_review", review_required=True, written_to_lcr=False,
