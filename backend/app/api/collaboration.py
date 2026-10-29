@@ -1365,6 +1365,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 supplied_session_id=payload.session_id,
             )
 
+    created_session = False
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
@@ -1376,6 +1377,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
+        created_session = True
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
         db.commit()
@@ -1908,6 +1910,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 .first()
             )
             if prior_assistant_row:
+                if created_session and session.id != prior_assistant_row.session_id:
+                    # The losing concurrent request may have committed an empty
+                    # session before inference. Remove that orphan if it has no turns.
+                    try:
+                        orphan = db.query(ConversationSession).filter_by(
+                            id=session.id, person_id=person_id, caregiver_id=caregiver_id
+                        ).first()
+                        if orphan and not db.query(ConversationMessage).filter_by(session_id=orphan.id).first():
+                            db.delete(orphan)
+                            db.commit()
+                    except Exception:
+                        db.rollback()
                 return _companion_replay_response(
                     db,
                     prior_assistant_row,
