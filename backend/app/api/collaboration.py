@@ -515,11 +515,15 @@ _CONTEXT_SYNONYM_GROUPS = (
 )
 
 
-def _base_context_terms(text: str) -> set[str]:
-    return {
+def _ordered_context_terms(text: str) -> list[str]:
+    return list(dict.fromkeys(
         token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
         if token not in _CONTEXT_STOPWORDS
-    }
+    ))
+
+
+def _base_context_terms(text: str) -> set[str]:
+    return set(_ordered_context_terms(text))
 
 
 def _expanded_context_terms(text: str) -> set[str]:
@@ -1511,8 +1515,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         # Search query-matched historical events independently of the recent-event
         # window, so a relevant older event does not disappear as the record grows.
-        event_direct_terms = sorted(_base_context_terms(retrieval_query))
-        event_query_terms = (event_direct_terms + sorted(_expanded_context_terms(retrieval_query) - set(event_direct_terms)))[:12]
+        event_direct_terms = list(dict.fromkeys(
+            _ordered_context_terms(user_text) + _ordered_context_terms(retrieval_query)
+        ))
+        event_query_terms = (
+            event_direct_terms
+            + sorted(_expanded_context_terms(retrieval_query) - set(event_direct_terms))
+        )[:12]
         historical_events = []
         if event_query_terms:
             historical_events = (
@@ -1595,7 +1604,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .limit(30)
             .all()
         )
-        appointment_direct_terms = sorted(_base_context_terms(retrieval_query))
+        appointment_direct_terms = list(dict.fromkeys(
+            _ordered_context_terms(user_text) + _ordered_context_terms(retrieval_query)
+        ))
         appointment_query_terms = (
             appointment_direct_terms
             + sorted(_expanded_context_terms(retrieval_query) - set(appointment_direct_terms))
@@ -1654,8 +1665,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
-        evidence_direct_terms = sorted(_base_context_terms(retrieval_query))
-        evidence_query_terms = (evidence_direct_terms + sorted(_expanded_context_terms(retrieval_query) - set(evidence_direct_terms)))[:12]
+        evidence_direct_terms = list(dict.fromkeys(
+            _ordered_context_terms(user_text) + _ordered_context_terms(retrieval_query)
+        ))
+        evidence_query_terms = (
+            evidence_direct_terms
+            + sorted(_expanded_context_terms(retrieval_query) - set(evidence_direct_terms))
+        )[:12]
         matching_evidence_rows = []
         if evidence_query_terms:
             matching_evidence_rows = (
