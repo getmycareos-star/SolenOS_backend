@@ -1417,7 +1417,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         },
         {
             "dimension": "unresolved_items",
-            "status": "requires_review" if open_loops or uncertainty_items or missing_items else "no_open_items_returned",
+            "status": "requires_review" if open_loops or uncertainty_items or missing_items else "no_open_items_recorded_not_proof_of_absence",
             "basis": {
                 "open_loops": len(open_loops),
                 "uncertainties_and_conflicts": len(uncertainty_items),
