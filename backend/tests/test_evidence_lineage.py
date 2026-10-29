@@ -270,3 +270,46 @@ def test_lineage_scope_discovers_same_person_transfer_family_without_cross_perso
             assert "transfer-private" not in ids
     finally:
         engine.dispose()
+
+
+def test_corroboration_state_does_not_confuse_independence_with_claim_support():
+    from app.services.evidence_lineage import assess_corroboration
+    rows = [SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+            SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None)]
+    link = SimpleNamespace(source_evidence_id="a", related_evidence_id="b",
+        source_independence_status="independent", relationship_type="related", origin_group_key=None)
+    result = assess_corroboration(rows, [link], ["a", "b"])
+    assert result["status"] == "independent_sources_reviewed_claim_support_unassessed"
+    assert result["independent_corroboration_established"] is False
+    assert result["review_required"] is True
+
+
+def test_corroboration_state_requires_explicit_claim_or_detail_relationship():
+    from app.services.evidence_lineage import assess_corroboration
+    rows = [SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+            SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None)]
+    link = SimpleNamespace(source_evidence_id="a", related_evidence_id="b",
+        source_independence_status="independent", relationship_type="corroborates_detail", origin_group_key=None)
+    result = assess_corroboration(rows, [link], ["a", "b"])
+    assert result["status"] == "independent_corroboration_reviewed_for_specific_claim_or_detail"
+    assert result["independent_corroboration_established"] is True
+
+
+def test_corroboration_state_distinguishes_failed_attempt_from_no_assessment():
+    from app.services.evidence_lineage import assess_corroboration
+    rows = [SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+            SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None)]
+    link = SimpleNamespace(source_evidence_id="a", related_evidence_id="b",
+        source_independence_status="related", relationship_type="corroboration_attempt_failed",
+        origin_group_key="shared-message")
+    result = assess_corroboration(rows, [link], ["a", "b"])
+    assert result["status"] == "attempted_but_not_corroborated"
+    assert result["failed_corroboration_pairs"] == [["a", "b"]]
+    assert result["independent_corroboration_established"] is False
+
+
+def test_corroboration_state_is_indeterminate_when_lineage_is_truncated():
+    from app.services.evidence_lineage import assess_corroboration
+    result = assess_corroboration([], [], ["a"], lineage_truncated=True)
+    assert result["status"] == "indeterminate_due_to_truncated_lineage"
+    assert result["review_required"] is True
