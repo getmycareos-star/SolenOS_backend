@@ -314,3 +314,18 @@ Evidence:
 - Current frontend main is newer than the previously passing frontend checks. Its in-progress runs must finish before exact-head frontend verification is claimed. The Netlify deploy workflow has previously failed because deployment credentials were unavailable; a green frontend build is not a live deployment.
 
 No item above is promoted to COMPLETE based only on this verification run. The 18 groups remain PARTIAL/UNVERIFIED where their individual acceptance criteria and end-to-end proof are still open.
+## Exact-main verification — 2026-10-29
+
+Backend SHA: `afcf9e7e08f1c052eb7ce737f29a404d223ae43c`
+Frontend SHA: `f0fb5da7fe38f6b63771ea8141bf1644a33244de`
+
+- Backend test and PostgreSQL migration checks passed: https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40882581771
+- Backend test and container-build checks passed: https://github.com/getmycareos-star/SolenOS_backend/actions/runs/40882581643
+- Frontend checks passed: https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40882659788
+- Frontend build and tests passed: https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40882659595
+- Netlify deployment did not complete because deployment credentials are not configured: https://github.com/getmycareos-star/SolenOS-landing/actions/runs/40882659487
+
+The 15-case uncertainty benchmark reported 15 passed, 0 failed (100.00% for that benchmark only). The situation assessment now fingerprints its bounded person-scoped source view and reports when the source view changed since assessment; high-impact conclusions require human review. These checks do not prove that the live Railway service is serving the tested backend SHA or that Netlify deployed the frontend.
+
+Automatic source-family discovery, full dependency invalidation/re-review, universal typed cross-module links, task-specific confidence calibration, professional-authority policy, formal comparable-window trajectory analysis, and authentic-origin verification remain partial, unverified, or blocked. No capability group is marked complete solely because these workflows passed.
+
