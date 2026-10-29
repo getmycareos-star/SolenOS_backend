@@ -121,6 +121,7 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Open questions and information gaps have persisted records and lifecycle fields.
 - [x] Add a caregiver-facing LCR workflow that creates a clarification question tied to a selected source-attributed claim and its subject context, with optional same-record evidence links and explicit priority.
 - [x] Add a normalized `open_questions.claim_id` foreign key to `care_assertions`; creation validates both same-person ownership and matching subject scope, and the UI submits/displays the normalized link instead of relying on context JSON alone.
+- [x] Capture intended answerer role/optional label and an explicit necessary/optional/not-assessed state; necessary/optional judgments require a rationale, and answerer roles are validated rather than inferred from wording.
 - [x] Attribute each recorded answer to the session caregiver and preserve every answer version, provenance text, and timestamp in append-only history; expose a person-scoped answer-history API and reject cross-record history reads.
 - [x] Add SQLite ORM guards and a PostgreSQL append-only trigger for answer-history rows; migration workflow verifies the table and trigger.
 - [ ] Generate questions automatically only from traceable evidence gaps, track intended answerer/necessity, and avoid repeating questions already answered by sufficient current evidence.
