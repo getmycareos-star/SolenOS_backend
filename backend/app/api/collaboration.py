@@ -1924,18 +1924,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             failures = []
             if not isinstance(reply, str) or not reply.strip():
                 failures.append("empty_or_non_text")
-            if _companion_message_needs_revision(reply):
-                failures.append("clarity_or_length")
-            if _contains_unrequested_saba(reply, validation_source):
-                failures.append("unrequested_token")
-            if _contains_unsupported_care_claim(reply, validation_source):
-                failures.append("unsupported_care_claim")
-            if _contains_unsupported_operational_claim(reply, validation_source, source_context):
-                failures.append("unsupported_operational_claim")
-            if _contains_unsupported_record_reference(reply, validation_source):
-                failures.append("unsupported_record_reference")
-            if greeting_only and _greeting_reply_needs_revision(reply):
-                failures.append("greeting_style")
+            if isinstance(reply, str) and reply.strip():
+                if _companion_message_needs_revision(reply):
+                    failures.append("clarity_or_length")
+                if _contains_unrequested_saba(reply, validation_source):
+                    failures.append("unrequested_token")
+                if _contains_unsupported_care_claim(reply, validation_source):
+                    failures.append("unsupported_care_claim")
+                if _contains_unsupported_operational_claim(reply, validation_source, source_context):
+                    failures.append("unsupported_operational_claim")
+                if _contains_unsupported_record_reference(reply, validation_source):
+                    failures.append("unsupported_record_reference")
+                if greeting_only and _greeting_reply_needs_revision(reply):
+                    failures.append("greeting_style")
             logger.warning(
                 "Companion response rejected by grounding guard: failures=%s",
                 ",".join(failures or ["unclassified"]),
