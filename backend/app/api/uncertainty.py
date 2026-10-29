@@ -22,8 +22,10 @@ from app.schemas.uncertainty import (
 from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
+from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
+from app.models.care_continuity import EvidenceClaimDependency, CareAssertion
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -225,6 +227,104 @@ def get_subject_summary(
 ):
     _require_person_scope(engine, person_id)
     return engine.get_subject_summary(person_id, subject_type, subject_id)
+
+
+@router.post("/claims/dependencies", response_model=ClaimDependency)
+def create_claim_dependency(
+    dependency: ClaimDependencyCreate,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Persist a same-person, append-only, acyclic claim dependency."""
+    if engine.person_id is None or str(dependency.person_id) != str(engine.person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    if engine.caregiver_id is None:
+        raise HTTPException(status_code=403, detail="A session-bound reviewer is required")
+    if dependency.claim_id == dependency.depends_on_claim_id:
+        raise HTTPException(status_code=422, detail="A claim cannot depend on itself")
+    allowed_types = {"derived_from", "requires", "supports", "qualifies", "supersedes"}
+    if dependency.dependency_type not in allowed_types:
+        raise HTTPException(status_code=422, detail=f"dependency_type must be one of: {', '.join(sorted(allowed_types))}")
+    rationale = dependency.rationale.strip()
+    if not rationale:
+        raise HTTPException(status_code=422, detail="A dependency requires a non-empty rationale")
+
+    claims = engine.db.query(CareAssertion.id).filter(
+        CareAssertion.person_id == engine.person_id,
+        CareAssertion.id.in_([dependency.claim_id, dependency.depends_on_claim_id]),
+    ).all()
+    if {row[0] for row in claims} != {dependency.claim_id, dependency.depends_on_claim_id}:
+        raise HTTPException(status_code=404, detail="Both claims must exist in the authenticated care record")
+
+    existing = engine.db.query(EvidenceClaimDependency).filter(
+        EvidenceClaimDependency.person_id == engine.person_id,
+        EvidenceClaimDependency.claim_id == dependency.claim_id,
+        EvidenceClaimDependency.depends_on_claim_id == dependency.depends_on_claim_id,
+        EvidenceClaimDependency.dependency_type == dependency.dependency_type,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="This claim dependency already exists")
+
+    edges = engine.db.query(
+        EvidenceClaimDependency.claim_id,
+        EvidenceClaimDependency.depends_on_claim_id,
+    ).filter(EvidenceClaimDependency.person_id == engine.person_id).all()
+    graph = {}
+    for claim_id, depends_on_claim_id in edges:
+        graph.setdefault(claim_id, set()).add(depends_on_claim_id)
+    # A -> B means A depends on B. Adding A -> B creates a cycle iff B
+    # already reaches A through existing dependency edges.
+    pending = [dependency.depends_on_claim_id]
+    visited = set()
+    while pending:
+        node = pending.pop()
+        if node == dependency.claim_id:
+            raise HTTPException(status_code=422, detail="Claim dependency would create a cycle")
+        if node in visited:
+            continue
+        visited.add(node)
+        pending.extend(graph.get(node, ()))
+
+    record = EvidenceClaimDependency(
+        person_id=engine.person_id,
+        claim_id=dependency.claim_id,
+        depends_on_claim_id=dependency.depends_on_claim_id,
+        dependency_type=dependency.dependency_type,
+        rationale=rationale,
+        created_by_caregiver_id=engine.caregiver_id,
+    )
+    try:
+        engine.db.add(record)
+        engine.db.commit()
+        engine.db.refresh(record)
+        return record
+    except Exception:
+        engine.db.rollback()
+        raise
+
+
+@router.get("/claims/{claim_id}/dependencies")
+def list_claim_dependencies(
+    claim_id: str,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Return both dependencies and dependents for one scoped claim."""
+    claim = engine.db.query(CareAssertion.id).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == engine.person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    rows = engine.db.query(EvidenceClaimDependency).filter(
+        EvidenceClaimDependency.person_id == engine.person_id,
+        (EvidenceClaimDependency.claim_id == claim_id)
+        | (EvidenceClaimDependency.depends_on_claim_id == claim_id),
+    ).order_by(EvidenceClaimDependency.created_at.asc(), EvidenceClaimDependency.id.asc()).all()
+    return {
+        "claim_id": claim_id,
+        "dependencies": [ClaimDependency.model_validate(row).model_dump(mode="json") for row in rows if row.claim_id == claim_id],
+        "dependents": [ClaimDependency.model_validate(row).model_dump(mode="json") for row in rows if row.depends_on_claim_id == claim_id],
+        "notice": "Dependency links record declared relationships; they do not prove semantic entailment or clinical truth.",
+    }
 
 
 @router.post("/analyze", response_model=UncertaintyAnalysisResponse)
