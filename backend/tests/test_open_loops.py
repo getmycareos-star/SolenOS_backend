@@ -183,7 +183,7 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     verification_record = verified.json()["outcome_evidence"][-1]
     assert verification_record["verification_basis"] == "caregiver_attestation_with_persisted_source_link"
     assert verification_record["semantic_grounding_status"] == "not_automatically_verified"
-    assert "do not automatically establish semantic entailment" in verification_record["interpretation_limit"]
+    assert "does not automatically establish semantic entailment" in verification_record["interpretation_limit"]
 
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
