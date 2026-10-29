@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.care import CareEvent
-from app.models.change import Baseline
+from app.models.change import Baseline, Change
 from app.core.change_enums import BaselineType, BaselineConfidence
 from app.services.temporal_intelligence import utc_now
 from app.services.observation_coverage import assess_observation_coverage
@@ -65,7 +65,34 @@ def get_longitudinal_event_counts(
         CareEvent.occurred_at <= now + timedelta(seconds=1),
     )
     if subject_id:
-        query = query.filter(CareEvent.id == subject_id)
+        # A change's subject_id identifies the assessed subject, not a CareEvent
+        # primary key. Scope the event population through same-person, same-domain
+        # assessments' explicit source links instead of accidentally treating the
+        # subject identifier as an event identifier.
+        linked_event_ids = sorted({
+            event_id
+            for row in db.query(Change.evidence_ids)
+            .filter(
+                Change.person_id == person_id,
+                Change.subject_type == event_type,
+                Change.subject_id == subject_id,
+            )
+            .all()
+            for event_id in (row[0] or [])
+            if event_id
+        })
+        if not linked_event_ids:
+            return {
+                "total_events": 0,
+                "current_window_count": 0,
+                "historical_count": 0,
+                "current_window_start": now - timedelta(days=42),
+                "current_window_end": now,
+                "recent_events": [],
+                "all_events": [],
+                "history_truncated": False,
+            }
+        query = query.filter(CareEvent.id.in_(linked_event_ids))
     queried_events = (
         query.order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
         .limit(MAX_LONGITUDINAL_EVENTS + 1)
