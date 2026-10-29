@@ -5,6 +5,7 @@ Revises: 20261029_24_baseline_history
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision = "20261029_25_freshness"
 down_revision = "20261029_24_baseline_history"
