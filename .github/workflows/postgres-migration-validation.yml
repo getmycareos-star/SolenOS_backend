@@ -112,6 +112,8 @@ jobs:
               "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
               "evidence_freshness_policies": {"id", "person_id", "domain_key", "policy_version", "max_age_days", "historical_after_days", "rationale", "created_by_caregiver_id", "created_at"},
               "evidence_freshness_assessments": {"id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status", "source_time", "source_time_kind", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id"},
+              "evidence_completeness_policies": {"id", "person_id", "domain_key", "purpose_key", "policy_version", "required_fields", "rationale", "created_by_caregiver_id", "created_at"},
+              "evidence_completeness_assessments": {"id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id", "assessment_status", "required_fields", "satisfied_fields", "missing_fields", "field_evidence_json", "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency", "assessed_by_caregiver_id", "assessed_at"},
               "conversation_messages": {"id", "session_id", "role", "content", "evidence_ids_json", "source_record_refs_json", "created_at"},
           }
           for table, required in expected.items():
@@ -243,12 +245,19 @@ jobs:
                           (f"trg_{table}_immutable",),
                       ).first()
                       assert freshness_trigger is not None, f"append-only trigger missing for {table}"
+                  for table in ("evidence_completeness_policies", "evidence_completeness_assessments"):
+                      completeness_trigger = connection.exec_driver_sql(
+                          "SELECT 1 FROM pg_trigger WHERE tgname = %s AND NOT tgisinternal",
+                          (f"trg_{table}_immutable",),
+                      ).first()
+                      assert completeness_trigger is not None, f"append-only trigger missing for {table}"
               print("PASS evidence review append-only trigger")
               print("PASS claim assessment append-only trigger")
               print("PASS claim dependency append-only trigger")
               print("PASS persisted conflict resolution scope column")
               print("PASS clarification answer history append-only trigger")
               print("PASS append-only freshness policy and assessment triggers")
+              print("PASS append-only completeness policy and assessment triggers")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
               (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
@@ -351,6 +360,66 @@ jobs:
               "UPDATE evidence_freshness_assessments SET rationale = 'tampered' WHERE id = :id",
               "assessment",
           )
+          engine.dispose()
+          PY
+
+      - name: Verify completeness append-only triggers reject direct SQL mutation
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.exc import DBAPIError
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+
+          def assert_append_only(table, suffix):
+              person_id = f"completeness-trigger-person-{suffix}"
+              caregiver_id = f"completeness-trigger-caregiver-{suffix}"
+              policy_id = f"completeness-trigger-policy-{suffix}"
+              assessment_id = f"completeness-trigger-assessment-{suffix}"
+              with engine.connect() as connection:
+                  transaction = connection.begin()
+                  try:
+                      connection.execute(text("INSERT INTO persons (id, name) VALUES (:id, 'Completeness trigger test')"), {"id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO caregivers (id, name, relationship, person_id, timezone)
+                          VALUES (:id, 'Completeness trigger caregiver', 'family', :person_id, 'UTC')
+                      """), {"id": caregiver_id, "person_id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_completeness_policies
+                            (id, person_id, domain_key, purpose_key, policy_version, required_fields,
+                             rationale, created_by_caregiver_id)
+                          VALUES (:id, :person_id, 'care', 'handoff', 'v1', '["current_list"]',
+                                  'Direct SQL trigger test policy', :caregiver_id)
+                      """), {"id": policy_id, "person_id": person_id, "caregiver_id": caregiver_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_completeness_assessments
+                            (id, person_id, policy_id, policy_version, subject_type, subject_id,
+                             assessment_status, required_fields, satisfied_fields, missing_fields,
+                             field_evidence_json, evidence_ids, rationale, assessment_basis,
+                             semantic_sufficiency, assessed_by_caregiver_id)
+                          VALUES (:id, :person_id, :policy_id, 'v1', 'appointment', 'trigger-test',
+                                  'undetermined', '["current_list"]', '[]', '[]', '{}', '[]',
+                                  'Direct SQL trigger test assessment', 'linked_source_coverage_only',
+                                  'not_automatically_verified', :caregiver_id)
+                      """), {"id": assessment_id, "person_id": person_id, "policy_id": policy_id, "caregiver_id": caregiver_id})
+                      row_id = policy_id if table == "evidence_completeness_policies" else assessment_id
+                      try:
+                          connection.execute(text(f"UPDATE {table} SET rationale = 'tampered' WHERE id = :id"), {"id": row_id})
+                      except DBAPIError as exc:
+                          transaction.rollback()
+                          assert "append-only" in str(exc).lower(), f"unexpected trigger error for {table}: {exc}"
+                          print(f"PASS direct SQL mutation rejected for {table}")
+                          return
+                      transaction.rollback()
+                      raise AssertionError(f"Direct SQL mutation unexpectedly succeeded for {table}")
+                  finally:
+                      if transaction.is_active:
+                          transaction.rollback()
+
+          assert_append_only("evidence_completeness_policies", "policy")
+          assert_append_only("evidence_completeness_assessments", "assessment")
           engine.dispose()
           PY
 
@@ -620,7 +689,9 @@ jobs:
             INSERT INTO alembic_version (version_num) VALUES ('20261024_04');
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_26_companion_refs"
+          expected_head="$(python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; s=ScriptDirectory.from_config(Config("alembic.ini")); heads=s.get_heads(); assert len(heads)==1, heads; print(heads[0])')"
+          test -n "$expected_head"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "$expected_head"
           for table in care_facts care_fact_evidence care_record_relationships care_delta_items care_integrity_findings care_integrity_resolutions care_decisions decision_outcomes care_reconciliation_records care_follow_up_links care_review_decisions care_provenance_records care_timeline_entries care_change_assessments care_state_revisions care_assertions care_action_outcomes share_intakes qwen_background_jobs improvement_training_examples caregiver_profiles caregiver_roles caregiver_responsibilities caregiver_person_relationships caregiver_account_links caregiver_devices device_trust_records account_recovery_requests login_attempt_limits identity_audit_events qwen_model_outputs qwen_job_events qwen_safety_evaluations assessment_dimensions ai_output_rejections ai_safety_checks ai_safety_violations ai_model_versions ai_prompt_versions ai_inference_metrics ai_job_status_events ai_human_feedback ai_output_lcr_proposals ai_output_lcr_decisions care_record_identifiers care_record_sections care_record_links care_record_status_history care_fact_revisions care_assertion_revisions care_decision_revisions care_event_revisions care_observation_revisions care_change_revisions care_situation_revisions care_evidence_revisions care_record_retractions care_record_restorations appointment_workspace_records appointment_workspace_revisions shared_summary_expirations shared_summary_revocations shared_summary_access_logs shared_summary_downloads shared_summary_generation_jobs shared_summary_delivery_receipts shared_summary_consent_records shared_summary_disclosure_records shared_summary_link_events data_deletion_requests data_deletion_jobs data_export_requests privacy_incidents privacy_incident_events data_processing_records data_subject_requests sensitive_data_access_logs legal_holds audit_log_events audit_log_integrity_checks audit_log_access_records privileged_access_logs authorization_decisions failed_access_attempts evidence_source_relationships evidence_observations care_notifications care_notification_preferences notification_delivery_attempts notification_delivery_receipts notification_read_receipts care_reminders reminder_acknowledgements reminder_escalations handoff_records handoff_recipients handoff_access_logs handoff_acknowledgements delivery_failure_events change_confirmation_events contradiction_resolution_events evidence_review_records evidence_claim_dependencies open_question_answer_events evidence_freshness_policies evidence_freshness_assessments; do
             found="$(psql "$PSQL_URL" -Atc "SELECT to_regclass('public.$table')")"
             if [ "$found" != "$table" ]; then
@@ -648,7 +719,9 @@ jobs:
               ('job-qwen-backfill', 'p-qwen-backfill', 'c-qwen-backfill', 'completed', 'Summarize the appointment note', '', '[]', 'appointment', 'Preserve this exact completed suggestion.', '[\"event-source-1\"]', '[\"evidence-source-1\"]', 1);
           "
           python -m alembic upgrade head
-          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_26_companion_refs"
+          expected_head="$(python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; s=ScriptDirectory.from_config(Config("alembic.ini")); heads=s.get_heads(); assert len(heads)==1, heads; print(heads[0])')"
+          test -n "$expected_head"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "$expected_head"
           test "$(psql "$PSQL_URL" -Atc "SELECT result_text IS NULL FROM qwen_background_jobs WHERE id='job-qwen-backfill'")" = "t"
           test "$(psql "$PSQL_URL" -Atc "SELECT output_text FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "Preserve this exact completed suggestion."
           test "$(psql "$PSQL_URL" -Atc "SELECT source_event_ids_json FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = '["event-source-1"]'

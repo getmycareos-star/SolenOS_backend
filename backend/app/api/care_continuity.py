@@ -3821,7 +3821,9 @@ def create_evidence_completeness_policy(payload: dict[str, Any], request: Reques
         raise HTTPException(status_code=422, detail="A rationale for this purpose-specific policy is required")
     if not isinstance(required_fields, list) or not required_fields or len(required_fields) > 100:
         raise HTTPException(status_code=422, detail="required_fields must be a non-empty list of at most 100 field identifiers")
-    fields = [str(value).strip().lower() for value in required_fields]
+    if any(not isinstance(value, str) for value in required_fields):
+        raise HTTPException(status_code=422, detail="required_fields must contain strings only")
+    fields = [value.strip().lower() for value in required_fields]
     if any(not COMPLETENESS_KEY_PATTERN.fullmatch(value) for value in fields) or len(fields) != len(set(fields)):
         raise HTTPException(status_code=422, detail="required_fields must contain unique lowercase field identifiers")
     existing = db.query(EvidenceCompletenessPolicy.id).filter(
@@ -3925,8 +3927,12 @@ def assess_evidence_completeness(payload: dict[str, Any], request: Request, db: 
         raise HTTPException(status_code=422, detail="A not_assessed result cannot claim source links")
     normalized: dict[str, list[str]] = {}
     for field_name, values in field_evidence.items():
-        if not isinstance(values, list) or len(values) != len(set(values)) or any(not isinstance(value, str) or not value.strip() for value in values):
-            raise HTTPException(status_code=422, detail="Each field must map to a list of unique non-empty evidence IDs")
+        if not isinstance(field_name, str) or field_name not in required:
+            raise HTTPException(status_code=422, detail="field_evidence contains an invalid field identifier")
+        if not isinstance(values, list) or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise HTTPException(status_code=422, detail="Each field must map to a list of non-empty evidence IDs")
+        if len(values) != len(set(values)):
+            raise HTTPException(status_code=422, detail="Duplicate evidence IDs are not allowed within a field")
         normalized[field_name] = [value.strip() for value in values]
     evidence_ids = list(dict.fromkeys(value for values in normalized.values() for value in values))
     if len(evidence_ids) > 100:

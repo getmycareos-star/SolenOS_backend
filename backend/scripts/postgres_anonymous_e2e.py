@@ -568,19 +568,20 @@ def main():
         )
         require(status == 200, f"Open Loop read after concurrent actions failed: {status}: {open_loop_after_actions}")
         saved_actions = open_loop_after_actions["loop"].get("action_evidence", [])
-        require(len(saved_actions) == 3 and
+        require(len(saved_actions) == 4 and
                 {item.get("text") for item in saved_actions} >= {
-                    "CI-only action with stable retry key", "CI-only action A", "CI-only action B"
+                    "CI-only action with stable retry key",
+                    "CI-only concurrent retry action",
+                    "CI-only action A",
+                    "CI-only action B",
                 },
                 f"Concurrent Open Loop updates lost an append or idempotent retry duplicated one: {saved_actions}")
 
         # Retrying a mutation with the same idempotency key must return the
         # committed result and must not duplicate evidence or audit history.
-        retry_payload = {
-            "text": "CI-only action with retry key",
-            "evidence": [{"kind": "ci_fixture", "text": "retry evidence"}],
-            "idempotency_key": "postgres-open-loop-action-retry-001",
-        }
+        # Reuse the exact original request and key; changing the payload while
+        # reusing the key must be rejected (asserted above).
+        retry_payload = dict(retry_action)
         def retry_action(_):
             return request(
                 "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
@@ -606,7 +607,7 @@ def main():
         retry_event_count = sum(
             1 for event in history_after_retry
             if event.get("event_type") == "action_recorded"
-            and any(item.get("text") == "retry evidence" for item in event.get("evidence", []))
+            and any(item.get("text") == "same request retried" for item in event.get("evidence", []))
         )
         require(status == 200 and retry_event_count == 1,
                 f"Idempotent action retry duplicated audit events: {status}: {history_after_retry}")
