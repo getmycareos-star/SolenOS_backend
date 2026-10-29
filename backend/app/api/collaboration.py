@@ -1871,14 +1871,87 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        client_turn_id=client_turn_id,
     ))
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # Concurrent duplicate requests can both infer, but only one logical
+        # turn may commit. The loser replays the committed winner's response.
+        if not client_turn_id:
+            raise
+        saved_pair = (
+            db.query(ConversationMessage, ConversationSession)
+            .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+            .filter(
+                ConversationMessage.client_turn_id == client_turn_id,
+                ConversationMessage.role == "assistant",
+            )
+            .first()
+        )
+        if not saved_pair:
+            raise HTTPException(status_code=409, detail="This turn is already being processed; retry with the same turn ID")
+        saved_assistant, saved_session = saved_pair
+        if saved_session.person_id != person_id or saved_session.caregiver_id != caregiver_id:
+            raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+        try:
+            saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
+        except (TypeError, ValueError):
+            saved_metadata = {}
+        if saved_metadata.get("request_sha256") != request_sha256:
+            raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+        saved_history = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=saved_session.id)
+            .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+            .all()
+        )
+        return {
+            "session_id": saved_session.id,
+            "person_id": person_id,
+            "reply": saved_assistant.content,
+            "guard_verdict": saved_assistant.guard_verdict,
+            "safety_note": saved_assistant.safety_note,
+            "confidence": None,
+            "evidence_ids": saved_metadata.get("evidence_ids", []),
+            "source_event_ids": saved_metadata.get("source_event_ids", []),
+            "source_evidence_ids": saved_metadata.get("source_evidence_ids", []),
+            "source_appointment_ids": saved_metadata.get("source_appointment_ids", []),
+            "source_assertion_ids": saved_metadata.get("source_assertion_ids", []),
+            "source_lcr_context_ids": saved_metadata.get("source_lcr_context_ids", []),
+            "lcr_context_coverage": saved_metadata.get("lcr_context_coverage", {"status": "not_available_on_replay"}),
+            "ai_generated": saved_metadata.get("ai_generated", True),
+            "written_to_lcr": False,
+            "persistence": "conversation_only",
+            "messages": [{
+                "role": row.role,
+                "text": row.content,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "guard_verdict": row.guard_verdict,
+                "safety_note": row.safety_note,
+            } for row in saved_history],
+            "idempotent_replay": True,
+        }
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
