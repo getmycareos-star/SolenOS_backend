@@ -19,7 +19,7 @@ def upgrade() -> None:
     required_columns = {
         "id", "person_id", "claim_id", "claim_version", "status", "rationale",
         "policy_version", "evidence_links", "reviewed_by_caregiver_id",
-        "supersedes_assessment_id", "created_at",
+        "supersedes_assessment_id", "superseded_by_claim_id", "created_at",
     }
 
     if not inspector.has_table("evidence_claim_assessments"):
@@ -35,12 +35,20 @@ def upgrade() -> None:
             sa.Column("evidence_links", sa.Text(), nullable=False),
             sa.Column("reviewed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("supersedes_assessment_id", sa.String(), sa.ForeignKey("evidence_claim_assessments.id"), nullable=True),
+            sa.Column("superseded_by_claim_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("claim_id", "claim_version", name="uq_evidence_claim_assessment_version"),
         )
         inspector = inspect(bind)
     else:
         actual_columns = {column["name"] for column in inspector.get_columns("evidence_claim_assessments")}
+        # Safe additive reconciliation for a table created by an older app build.
+        if "superseded_by_claim_id" not in actual_columns:
+            op.add_column(
+                "evidence_claim_assessments",
+                sa.Column("superseded_by_claim_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
+            )
+            actual_columns.add("superseded_by_claim_id")
         missing_columns = required_columns - actual_columns
         if missing_columns:
             raise RuntimeError(
