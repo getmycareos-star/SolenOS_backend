@@ -25,6 +25,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 router = APIRouter(prefix="/daily-care/intelligence", tags=["daily-care-qwen"])
 
@@ -577,14 +578,33 @@ def review_daily_care_lcr_proposal(
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
+
+    change_intelligence_status = "not_required"
+    if payload.decision == "accept":
+        # A caregiver-approved assertion is now part of the authoritative LCR.
+        # Recompute derived change/pattern assessments from persisted sources rather
+        # than waiting for a later workspace refresh.
+        try:
+            reconcile_person_change_intelligence(db, person_id)
+            db.commit()
+            change_intelligence_status = "available"
+        except Exception:
+            db.rollback()
+            change_intelligence_status = "unavailable"
+
     return {
         "analysis_id": analysis_id,
+        "change_intelligence_status": change_intelligence_status,
         "proposal": proposal,
         "decision": payload.decision,
         "review_history_count": len(history),
         "written_to_lcr": payload.decision == "accept",
         "message": (
-            "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
+            (
+                "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
+                if change_intelligence_status == "available"
+                else "The assertion was saved, but change and pattern assessments could not be refreshed. Retry reassessment; do not submit the proposal again."
+            )
             if payload.decision == "accept" else
             "Review decision saved. No LCR assertion was created."
         ),
