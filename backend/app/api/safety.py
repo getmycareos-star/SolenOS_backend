@@ -94,7 +94,7 @@ def _sanitize_client_review_flags(
             "quality": SourceQuality.UNVERIFIED,
             "currentness": CurrentnessStatus.UNKNOWN_CURRENCY,
             "confidence": None,
-            "document_time": row.occurred_at,
+            "document_time": None,
             "uploaded_at": row.uploaded_at,
             "supports_claim": False,
             "contradicts_claim": False,
