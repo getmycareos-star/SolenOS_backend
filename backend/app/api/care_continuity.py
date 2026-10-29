@@ -752,6 +752,15 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     for item in all_items:
         status = str(item.get("status") or item.get("lifecycle_status") or item.get("assertion_status") or "").lower()
         source = item["source"]
+        assessment_context = item.get("context") if isinstance(item.get("context"), list) else []
+        uncertainty_analysis = next(
+            (
+                entry for entry in assessment_context
+                if isinstance(entry, dict)
+                and any(key in entry for key in ("limitations", "clarification_questions", "evidence_completeness"))
+            ),
+            None,
+        ) if source == "uncertainty_assessments" else None
         summary_item = {
             "id": str(item.get("id") or ""),
             "source": source,
@@ -762,6 +771,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
         }
+        if uncertainty_analysis is not None:
+            summary_item["uncertainty_analysis"] = uncertainty_analysis
         if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments", "information_gaps", "missing_information", "open_questions"} and status not in closed_statuses:
             (uncertainty_items if source in {"conflicts", "reconciliations", "uncertainties", "uncertainty_assessments"} else missing_items).append(summary_item)
 
