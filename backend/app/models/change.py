@@ -31,6 +31,10 @@ class Baseline(Base):
     confidence = Column(SQLEnum(BaselineConfidence), nullable=False, default=BaselineConfidence.MODERATE)
     is_stable = Column(Boolean, nullable=False, default=True)
     observation_density = Column(Float, nullable=True)
+    # Baseline provenance is explicit: legacy rows are not assigned a guessed
+    # algorithm version or a coverage status based on event counts alone.
+    coverage_status = Column(String(16), nullable=False, default="unknown", server_default="unknown")
+    analysis_version = Column(String(64), nullable=False, default="legacy-unversioned", server_default="legacy-unversioned")
     documentation_bias_flag = Column(Boolean, nullable=False, default=False)
     evidence_ids = Column(JSONList, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
