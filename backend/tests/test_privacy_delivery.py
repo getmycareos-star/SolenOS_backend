@@ -146,6 +146,39 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
 
+    # Summary references must resolve to real records belonging to this person.
+    from app.models.care import CareEvent, Evidence
+    other_owner = create_session(client, "Separate care record")
+    db = TestSessionLocal()
+    try:
+        db.add(Evidence(
+            id="handoff-summary-evidence-owned",
+            person_id=owner["person"]["id"],
+            type="document",
+            source_text="Caregiver-reported changes in the original note.",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.add(CareEvent(
+            id="handoff-summary-event-owned",
+            person_id=owner["person"]["id"],
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Caregiver-reported observation",
+            description="A source-linked observation for handoff validation.",
+            created_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.add(Evidence(
+            id="handoff-summary-evidence-other-person",
+            person_id=other_owner["person"]["id"],
+            type="document",
+            source_text="Private evidence from a different care record.",
+            uploaded_by_caregiver_id=other_owner["caregiver"]["id"],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
     # The recipient gets a durable in-app notification without care details.
     from app.models.notifications import CareNotification
     db = TestSessionLocal()
@@ -184,6 +217,28 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     )
     assert unreviewed.status_code == 422
 
+    unknown_source = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "This text has no resolvable source."},
+            "source_record_ids": ["made-up-record-id"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert unknown_source.status_code == 422
+
+    cross_person_source = client.put(
+        f"/api/v1/handoffs/{handoff['id']}/summary",
+        headers=owner_headers,
+        json={
+            "sections": {"lcr_summary": "This source belongs to another care record."},
+            "source_record_ids": ["handoff-summary-evidence-other-person"],
+            "caregiver_reviewed": True,
+        },
+    )
+    assert cross_person_source.status_code == 422
+
     attached = client.put(
         f"/api/v1/handoffs/{handoff['id']}/summary",
         headers=owner_headers,
@@ -192,7 +247,7 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
                 "lcr_summary": "Caregiver-reported changes.",
                 "open_loops": "Question to confirm at the next visit.",
             },
-            "source_record_ids": ["evidence-1", "care-event-1"],
+            "source_record_ids": ["handoff-summary-evidence-owned", "handoff-summary-event-owned"],
             "caregiver_reviewed": True,
         },
     )
@@ -204,7 +259,7 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
         headers=owner_headers,
         json={
             "sections": {"lcr_summary": "A later replacement."},
-            "source_record_ids": ["evidence-2"],
+            "source_record_ids": ["handoff-summary-evidence-owned"],
             "caregiver_reviewed": True,
         },
     )
@@ -236,7 +291,10 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     assert recipient_summary.status_code == 200, recipient_summary.text
     assert recipient_summary.json()["summary"]["sections"]["lcr_summary"] == "Caregiver-reported changes."
     assert recipient_summary.json()["summary"]["review_attestation"] == "client_declared_not_server_verified"
-    assert recipient_summary.json()["summary"]["source_id_validation"] == "not_server_verified"
+    assert recipient_summary.json()["summary"]["source_id_validation"] == "server_verified_person_scope_and_record_existence"
+    assert recipient_summary.json()["summary"]["source_record_tables"]["handoff-summary-evidence-owned"] == ["evidence"]
+    assert recipient_summary.json()["summary"]["source_record_tables"]["handoff-summary-event-owned"] == ["care_events"]
+    assert recipient_summary.json()["summary"]["semantic_grounding_status"] == "not_automatically_verified"
 
     from app.models.privacy_delivery import HandoffRecord
     db = TestSessionLocal()
