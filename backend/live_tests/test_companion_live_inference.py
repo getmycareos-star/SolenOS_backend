@@ -147,6 +147,8 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
             "does not contain", "does not include", "not specified", "not enough information",
             "doesn't say", "does not say",
         )), f"Qwen did not acknowledge missing evidence: {missing_data['reply']}"
+        assert missing_data["guard_verdict"] == "blocked"
+        assert missing_data["ai_generated"] is False
         assert missing_data["written_to_lcr"] is False
 
         # A single sleep observation cannot establish a longitudinal trend.
@@ -166,6 +168,8 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
             "not enough", "cannot establish", "can't establish", "not enough information",
             "only one", "single observation", "no baseline", "not enough records",
         )), f"Qwen inferred a trend from insufficient history: {trend_data['reply']!r}"
+        assert trend_data["guard_verdict"] == "blocked"
+        assert trend_data["ai_generated"] is False
         assert trend_data["written_to_lcr"] is False
 
         # Two conflicting synthetic records must remain a disagreement.
