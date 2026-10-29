@@ -65,6 +65,8 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    # Reuse this UUID only when retrying the exact same user turn.
+    client_turn_id: Optional[uuid.UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
