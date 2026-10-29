@@ -923,7 +923,8 @@ def test_structured_assertion_transition_is_persisted_idempotently_and_returns_s
         assert first[0].current_state == "needs assistance"
         assert first[0].change_direction.value == "unknown"
         assert first[0].significance_verdict.value == "insufficient_evidence"
-        assert first[0].persistence_days == 2
+        assert first[0].persistence_days is None
+        assert "not treated as continuous persistence" in first[0].explanation
         assert first[0].is_persistent is None
         assert set(first[0].evidence_ids) == set(assertion_ids)
 
