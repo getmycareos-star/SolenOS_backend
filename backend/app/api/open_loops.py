@@ -1,8 +1,10 @@
 """Persistent, evidence-backed open-loop tracking for caregiver continuity."""
+import asyncio
 import hashlib
 import json
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,7 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
 
 router = APIRouter(prefix="/open-loops", tags=["open-loops"])
@@ -752,3 +754,42 @@ def reassess_open_loops(request: Request, db: Session = Depends(get_db)):
             changed.append(loop.id)
     db.commit()
     return {"scanned": len(loops), "changed_ids": changed, "as_of": datetime.now(timezone.utc)}
+
+
+logger = logging.getLogger(__name__)
+ABANDONMENT_INACTIVITY_DAYS = 30
+OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS = 900
+
+
+async def open_loop_maintenance_loop():
+    """Periodic DB-backed review flagging; never closes an item automatically."""
+    while True:
+        await asyncio.sleep(OPEN_LOOP_MAINTENANCE_INTERVAL_SECONDS)
+        db = SessionLocal()
+        try:
+            now = datetime.now(timezone.utc)
+            cutoff = now - timedelta(days=ABANDONMENT_INACTIVITY_DAYS)
+            rows = db.query(OpenLoopRecord).filter(
+                OpenLoopRecord.status.in_({"open", "waiting"}),
+                OpenLoopRecord.updated_at <= cutoff,
+            ).limit(500).all()
+            changed = 0
+            for loop in rows:
+                before = _snapshot(loop)
+                prior_update = loop.updated_at
+                loop.status = "review_abandoned"
+                loop.inactive_since = prior_update.replace(tzinfo=timezone.utc) if prior_update and prior_update.tzinfo is None else prior_update
+                loop.updated_at = now
+                loop.version += 1
+                loop.priority_reasons = list(dict.fromkeys([*(loop.priority_reasons or []), "No recorded loop activity for 30 days; human review required"]))
+                _audit(db, loop, "abandoned_review_flagged", before, [{"policy_days": ABANDONMENT_INACTIVITY_DAYS}])
+                changed += 1
+            if changed:
+                db.commit()
+            else:
+                db.rollback()
+        except Exception:
+            db.rollback()
+            logger.exception("Open-loop maintenance failed; it will retry on the next interval")
+        finally:
+            db.close()
