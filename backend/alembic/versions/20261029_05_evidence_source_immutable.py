@@ -4,6 +4,7 @@ Revision ID: 20261029_05_evidence_immut
 Revises: 20261029_04_evidence_kind
 """
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261029_05_evidence_immut"
@@ -14,9 +15,20 @@ depends_on = None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    columns = {column["name"] for column in inspect(bind).get_columns("evidence")}
-    if not {"source_text", "source_text_sha256"}.issubset(columns):
-        raise RuntimeError("Evidence source text and fingerprint columns are required before immutability can be enforced")
+    inspector = inspect(bind)
+    if not inspector.has_table("evidence"):
+        raise RuntimeError("The evidence table must exist before source immutability can be enforced")
+    columns = {column["name"] for column in inspector.get_columns("evidence")}
+
+    # Some older account-oriented databases have an evidence table without the
+    # canonical text field. Add nullable fields without guessing which legacy
+    # column might represent source text. Existing unknown values stay unknown.
+    if "source_text" not in columns:
+        op.add_column("evidence", sa.Column("source_text", sa.Text(), nullable=True))
+        columns.add("source_text")
+    if "source_text_sha256" not in columns:
+        op.add_column("evidence", sa.Column("source_text_sha256", sa.String(length=64), nullable=True))
+        columns.add("source_text_sha256")
 
     if bind.dialect.name == "postgresql":
         op.execute("""
