@@ -15,7 +15,12 @@ on:
   pull_request:
     paths:
       - "backend/app/services/uncertainty_intelligence.py"
+      - "backend/app/services/baseline.py"
+      - "backend/app/services/change_detection.py"
+      - "backend/app/services/pattern_detection.py"
+      - "backend/app/api/change.py"
       - "backend/tests/test_situation_understanding_benchmark.py"
+      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
       - ".github/workflows/situation-understanding-benchmark.yml"
   workflow_dispatch:
 
