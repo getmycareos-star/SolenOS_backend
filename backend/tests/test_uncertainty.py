@@ -1367,6 +1367,8 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
             "attribute": "sleep_awakenings",
             "value_text": "three",
             "source_passage": "three awakenings last night",
+            "source_span_start": 18,
+            "source_span_end": 46,
             "extraction_method": "human_entered",
             "extraction_version": "test-v1",
         }
