@@ -279,6 +279,27 @@ jobs:
               summary_column = cur.fetchone()
               if not summary_column or summary_column[0] not in {"json", "jsonb"}:
                   raise SystemExit("handoff summary_snapshot JSON column is missing or has the wrong type")
+              cur.execute("""
+                  SELECT column_name FROM information_schema.columns
+                  WHERE table_schema='public' AND table_name='conversation_messages'
+              """)
+              companion_columns = {row[0] for row in cur.fetchall()}
+              required_companion_columns = {
+                  "client_turn_id", "response_metadata_json", "source_record_refs_json"
+              }
+              missing_companion_columns = required_companion_columns - companion_columns
+              if missing_companion_columns:
+                  raise SystemExit(
+                      f"conversation_messages missing Companion retry/provenance columns: {sorted(missing_companion_columns)}"
+                  )
+              cur.execute("""
+                  SELECT indexdef FROM pg_indexes
+                  WHERE schemaname='public' AND tablename='conversation_messages'
+                    AND indexname='uq_conversation_messages_client_turn_id'
+              """)
+              turn_index = cur.fetchone()
+              if not turn_index or "CREATE UNIQUE INDEX" not in turn_index[0].upper():
+                  raise SystemExit("Companion client_turn_id uniqueness index is missing")
           conn.close()
           print(f"PostgreSQL verified {len(required_tables)} privacy/delivery tables and the unique read-receipt index.")
           PY
