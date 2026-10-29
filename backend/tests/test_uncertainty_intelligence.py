@@ -309,6 +309,57 @@ def test_causal_claim_requires_evidence_review_before_recommendation():
     assert result["conclusion_confidence"] is None
 
 
+def test_shared_source_lineage_is_not_independent_even_when_text_differs():
+    result = analyze_uncertainty(
+        claim="Two records corroborate the same event.",
+        task="summarize",
+        evidence=[
+            {
+                "id": "original",
+                "text": "Original note says breakfast was missed.",
+                "source_type": "caregiver_report",
+                "source_lineage_id": "lineage-42",
+                "verified": True,
+            },
+            {
+                "id": "derived-summary",
+                "text": "Summary says breakfast was missed.",
+                "source_type": "derived_summary",
+                "source_lineage_id": "lineage-42",
+                "verified": True,
+            },
+        ],
+    )
+    assert result["independent_evidence_record_count"] == 1
+    assert result["duplicate_evidence_groups"][0]["reason"] == "shared_source_lineage"
+    assert result["duplicate_evidence_groups"][0]["independent_corroboration"] is False
+
+
+def test_explicitly_independent_sources_with_identical_text_are_not_collapsed():
+    result = analyze_uncertainty(
+        claim="Two independent witnesses report the same event.",
+        task="summarize",
+        evidence=[
+            {
+                "id": "witness-a",
+                "text": "Breakfast was missed.",
+                "source_type": "caregiver_report",
+                "source_independence_status": "independent",
+                "verified": True,
+            },
+            {
+                "id": "witness-b",
+                "text": "Breakfast was missed.",
+                "source_type": "professional_report",
+                "source_independence_status": "independent",
+                "verified": True,
+            },
+        ],
+    )
+    assert result["independent_evidence_record_count"] == 2
+    assert result["duplicate_evidence_groups"] == []
+
+
 def test_duplicate_source_text_is_not_independent_corroboration():
     result = analyze_uncertainty(
         claim="The appointment is confirmed.",
