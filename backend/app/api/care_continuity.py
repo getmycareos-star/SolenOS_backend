@@ -2513,3 +2513,168 @@ def list_evidence_source_relationships(evidence_id: str, request: Request, db: S
         "origin_group_key": row.origin_group_key, "rationale": row.rationale,
         "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id, "created_at": row.created_at,
     } for row in rows]
+
+
+OBSERVATION_KINDS = {
+    "direct_observation", "caregiver_report", "professional_observation",
+    "persons_own_report", "documented_record", "instrument_measurement",
+    "photo_video", "audio_transcript", "imported_information",
+    "historical_recollection", "derived_observation", "inference", "hypothesis",
+}
+OBSERVATION_EPISTEMIC_STATUSES = {
+    "reported", "observed", "inferred", "hypothesis", "unknown",
+    "missing", "disputed", "unverified", "superseded",
+}
+DIRECT_OBSERVATION_KINDS = {"direct_observation", "professional_observation", "instrument_measurement"}
+
+
+def _observation_datetime(value: Any, field_name: str):
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise HTTPException(status_code=422, detail=f"{field_name} must be an ISO-8601 timestamp string")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be a valid ISO-8601 timestamp") from exc
+    if parsed.tzinfo is None:
+        raise HTTPException(status_code=422, detail=f"{field_name} must include a timezone offset")
+    return parsed
+
+
+@router.post("/evidence/{evidence_id}/observations", status_code=201)
+def create_evidence_observation(
+    evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)
+):
+    """Persist a typed observation only when its quoted span exists in scoped original evidence."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    kind = payload.get("observation_kind")
+    status = payload.get("epistemic_status")
+    if not isinstance(kind, str) or kind not in OBSERVATION_KINDS:
+        raise HTTPException(status_code=422, detail="Unsupported observation kind")
+    if not isinstance(status, str) or status not in OBSERVATION_EPISTEMIC_STATUSES:
+        raise HTTPException(status_code=422, detail="Unsupported epistemic status")
+    subject = payload.get("subject_label")
+    attribute = payload.get("attribute")
+    passage = payload.get("source_passage")
+    extraction_method = payload.get("extraction_method")
+    extraction_version = payload.get("extraction_version")
+    if not isinstance(subject, str) or not subject.strip() or len(subject) > 160:
+        raise HTTPException(status_code=422, detail="subject_label is required and limited to 160 characters")
+    if not isinstance(attribute, str) or not attribute.strip() or len(attribute) > 160:
+        raise HTTPException(status_code=422, detail="attribute is required and limited to 160 characters")
+    if not isinstance(passage, str) or not passage:
+        raise HTTPException(status_code=422, detail="An exact non-empty source_passage is required")
+    if not isinstance(evidence.source_text, str) or passage not in evidence.source_text:
+        raise HTTPException(status_code=422, detail="source_passage must be an exact substring of the original evidence text")
+    start, end = payload.get("source_span_start"), payload.get("source_span_end")
+    occurrences = []
+    cursor = 0
+    while True:
+        found = evidence.source_text.find(passage, cursor)
+        if found < 0:
+            break
+        occurrences.append(found)
+        cursor = found + 1
+    if start is None and end is None:
+        if len(occurrences) != 1:
+            raise HTTPException(status_code=422, detail="Provide exact source offsets when the passage occurs more than once")
+        start, end = occurrences[0], occurrences[0] + len(passage)
+    if isinstance(start, bool) or isinstance(end, bool) or not isinstance(start, int) or not isinstance(end, int):
+        raise HTTPException(status_code=422, detail="source span offsets must be integers")
+    if start < 0 or end <= start or end > len(evidence.source_text) or evidence.source_text[start:end] != passage:
+        raise HTTPException(status_code=422, detail="source span offsets must select the exact quoted passage")
+    value = payload.get("value_text")
+    if value is not None and (not isinstance(value, str) or len(value) > 8000):
+        raise HTTPException(status_code=422, detail="value_text must be a string up to 8000 characters")
+    if status in {"unknown", "missing"} and value not in (None, ""):
+        raise HTTPException(status_code=422, detail="Unknown or missing observations cannot assert a value")
+    if status not in {"unknown", "missing"} and not isinstance(value, str):
+        raise HTTPException(status_code=422, detail="A value is required unless the observation is explicitly unknown or missing")
+    observer_label = payload.get("observer_label")
+    observer_id = payload.get("observer_caregiver_id")
+    method = payload.get("observation_method")
+    if status == "observed":
+        if kind not in DIRECT_OBSERVATION_KINDS or not isinstance(observer_label, str) or not observer_label.strip() or not isinstance(method, str) or not method.strip():
+            raise HTTPException(status_code=422, detail="Observed status requires a direct-observation kind, named observer, and method")
+    if observer_id is not None:
+        observer = db.query(Caregiver.id).filter(Caregiver.id == observer_id, Caregiver.person_id == person_id).first()
+        if observer is None:
+            raise HTTPException(status_code=422, detail="Observer caregiver must belong to the authorized care record")
+    # Prevent accidental duplicate extraction while preserving distinct source spans and epistemic states.
+    from app.models.care_continuity import EvidenceObservation
+    duplicate = db.query(EvidenceObservation.id).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+        EvidenceObservation.source_span_start == start,
+        EvidenceObservation.source_span_end == end,
+        EvidenceObservation.attribute == attribute.strip(),
+        EvidenceObservation.observation_kind == kind,
+        EvidenceObservation.epistemic_status == status,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="An observation with this source span and classification already exists")
+    row = EvidenceObservation(
+        person_id=person_id, evidence_id=evidence_id, observation_kind=kind, epistemic_status=status,
+        subject_label=subject.strip(), attribute=attribute.strip(), value_text=value,
+        normalized_value=payload.get("normalized_value"), units=payload.get("units"), context=payload.get("context"),
+        occurred_at=_observation_datetime(payload.get("occurred_at"), "occurred_at"),
+        observed_at=_observation_datetime(payload.get("observed_at"), "observed_at"),
+        reported_at=_observation_datetime(payload.get("reported_at"), "reported_at"),
+        observer_label=observer_label.strip() if isinstance(observer_label, str) else None,
+        observer_caregiver_id=observer_id, observation_method=method.strip() if isinstance(method, str) else None,
+        source_passage=passage, source_span_start=start, source_span_end=end,
+        negated=payload.get("negated") if isinstance(payload.get("negated"), bool) else None,
+        hedge_marker=payload.get("hedge_marker") if isinstance(payload.get("hedge_marker"), str) else None,
+        ambiguity_note=payload.get("ambiguity_note") if isinstance(payload.get("ambiguity_note"), str) else None,
+        extraction_method=extraction_method.strip() if isinstance(extraction_method, str) and extraction_method.strip() else "human_entered",
+        extraction_version=extraction_version.strip() if isinstance(extraction_version, str) and extraction_version.strip() else "manual-v1",
+        extraction_run_id=payload.get("extraction_run_id") if isinstance(payload.get("extraction_run_id"), str) else None,
+        created_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This source-span observation already exists") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence observation could not be persisted")
+        raise HTTPException(status_code=503, detail="Evidence observation could not be persisted") from exc
+    return _evidence_observation_response(row)
+
+
+def _evidence_observation_response(row):
+    return {
+        "id": row.id, "person_id": row.person_id, "evidence_id": row.evidence_id,
+        "observation_kind": row.observation_kind, "epistemic_status": row.epistemic_status,
+        "subject_label": row.subject_label, "attribute": row.attribute, "value_text": row.value_text,
+        "normalized_value": row.normalized_value, "units": row.units, "context": row.context,
+        "occurred_at": row.occurred_at, "observed_at": row.observed_at, "reported_at": row.reported_at,
+        "observer_label": row.observer_label, "observer_caregiver_id": row.observer_caregiver_id,
+        "observation_method": row.observation_method, "source_passage": row.source_passage,
+        "source_span_start": row.source_span_start, "source_span_end": row.source_span_end,
+        "negated": row.negated, "hedge_marker": row.hedge_marker, "ambiguity_note": row.ambiguity_note,
+        "extraction_method": row.extraction_method, "extraction_version": row.extraction_version,
+        "extraction_run_id": row.extraction_run_id, "created_by_caregiver_id": row.created_by_caregiver_id,
+        "recorded_at": row.recorded_at,
+    }
+
+
+@router.get("/evidence/{evidence_id}/observations")
+def list_evidence_observations(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    person_id, _ = _scoped_identity(request, db)
+    evidence = db.query(Evidence.id).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+    from app.models.care_continuity import EvidenceObservation
+    rows = db.query(EvidenceObservation).filter(
+        EvidenceObservation.person_id == person_id,
+        EvidenceObservation.evidence_id == evidence_id,
+    ).order_by(EvidenceObservation.source_span_start.asc(), EvidenceObservation.recorded_at.asc()).all()
+    return [_evidence_observation_response(row) for row in rows]
