@@ -1422,6 +1422,96 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         retrieval_query = _context_query_with_history(user_text, prior_messages)
+        direct_retrieval_terms = sorted(_base_context_terms(retrieval_query))
+        synonym_retrieval_terms = sorted(_expanded_context_terms(retrieval_query) - set(direct_retrieval_terms))
+        retrieval_terms = list(dict.fromkeys([*direct_retrieval_terms, *synonym_retrieval_terms]))[:24]
+
+        # Recent-event windows are useful for orientation but cannot be the only
+        # source of historical recall. Query matching events independently so an
+        # older relevant event remains eligible after newer events accumulate.
+        if retrieval_terms:
+            matching_event_rows = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(
+                        *[CareEvent.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.description.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.event_type.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareEvent.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(12)
+                .all()
+            )
+            known_event_ids = set(_context_record_ids(event_context, "event_id"))
+            for event in matching_event_rows:
+                event_id = str(event.id)
+                if event_id in known_event_ids:
+                    continue
+                known_event_ids.add(event_id)
+                line = "LCR event evidence (query-matched historical record): " + json.dumps({
+                    "event_id": event_id,
+                    "event_type": event.event_type,
+                    "status": event.status,
+                    "title": event.title,
+                    "description": (event.description or "")[:700],
+                    "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                    "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                    "evidence_ids": event.evidence_ids or [],
+                    "time_provenance": event.time_provenance,
+                    "confidence": event.confidence,
+                }, ensure_ascii=False)
+                event_context.append(line)
+                source_context.append(line)
+
+        # Query-matched evidence is retrieved independently of the newest-upload
+        # window, so older standalone documents are not lost as the record grows.
+        if retrieval_terms:
+            matching_evidence_rows = (
+                db.query(EvidenceModel)
+                .filter(
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                    or_(
+                        *[EvidenceModel.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[EvidenceModel.extra_metadata.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[EvidenceModel.type.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(12)
+                .all()
+            )
+            known_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
+            for evidence in matching_evidence_rows:
+                evidence_id = str(evidence.id)
+                if evidence_id in known_evidence_ids:
+                    continue
+                known_evidence_ids.add(evidence_id)
+                metadata = evidence.extra_metadata or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except (TypeError, ValueError):
+                        metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                line = "Caregiver-provided evidence (query-matched historical record): " + json.dumps({
+                    "evidence_id": evidence_id,
+                    "type": evidence.type,
+                    "filename": metadata.get("filename"),
+                    "mime_type": metadata.get("mime_type"),
+                    "status": evidence.evidence_status,
+                    "source_type": evidence.source_type,
+                    "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+                    "source_text": (evidence.source_text or "")[:700],
+                    "time_provenance": evidence.time_provenance,
+                    "confidence": evidence.confidence,
+                }, ensure_ascii=False)
+                evidence_context.append(line)
+                source_context.append(line)
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
