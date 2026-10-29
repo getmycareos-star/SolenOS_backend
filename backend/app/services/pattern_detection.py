@@ -5,6 +5,9 @@ from app.models.change import Change, Pattern
 from app.models.care import CareEvent
 from app.core.change_enums import PatternType, PatternStrength, ChangeDirection, ChangeType
 
+MAX_PATTERN_SOURCE_EVENTS = 1000
+MAX_PATTERN_CHANGE_ASSESSMENTS = 500
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -35,7 +38,15 @@ def detect_patterns(
     )
     if subject_id:
         changes_query = changes_query.filter(Change.subject_id == subject_id)
-    changes = changes_query.order_by(Change.created_at.asc()).all()
+    queried_changes = (
+        changes_query
+        .order_by(Change.created_at.desc(), Change.id.asc())
+        .limit(MAX_PATTERN_CHANGE_ASSESSMENTS + 1)
+        .all()
+    )
+    changes_truncated = len(queried_changes) > MAX_PATTERN_CHANGE_ASSESSMENTS
+    changes = queried_changes[:MAX_PATTERN_CHANGE_ASSESSMENTS]
+    changes.reverse()
 
     event_query = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
@@ -53,7 +64,15 @@ def detect_patterns(
         if not linked_ids:
             return []
         event_query = event_query.filter(CareEvent.id.in_(linked_ids))
-    source_events = event_query.order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc()).all()
+    queried_events = (
+        event_query
+        .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+        .limit(MAX_PATTERN_SOURCE_EVENTS + 1)
+        .all()
+    )
+    events_truncated = len(queried_events) > MAX_PATTERN_SOURCE_EVENTS
+    source_events = queried_events[:MAX_PATTERN_SOURCE_EVENTS]
+    source_events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
 
     canonical_events = []
     seen_identities = set()
@@ -75,6 +94,7 @@ def detect_patterns(
             events=canonical_events,
             changes=changes,
             now=now,
+            history_truncated=events_truncated,
         )
         if pattern:
             patterns.append(pattern)
@@ -104,6 +124,13 @@ def detect_patterns(
                 now=now,
             )
             if pattern:
+                if changes_truncated:
+                    _append_limit_note(
+                        db,
+                        pattern,
+                        "Change assessment history was bounded to the most recent "
+                        f"{MAX_PATTERN_CHANGE_ASSESSMENTS} records; earlier assessments were not included.",
+                    )
                 patterns.append(pattern)
         if len(group_changes) >= 2:
             pattern = _build_instability_pattern(
@@ -115,8 +142,23 @@ def detect_patterns(
                 now=now,
             )
             if pattern:
+                if changes_truncated:
+                    _append_limit_note(
+                        db,
+                        pattern,
+                        "Change assessment history was bounded to the most recent "
+                        f"{MAX_PATTERN_CHANGE_ASSESSMENTS} records; earlier assessments were not included.",
+                    )
                 patterns.append(pattern)
     return patterns
+
+
+def _append_limit_note(db: Session, pattern: Pattern, note: str) -> None:
+    alternatives = list(pattern.alternative_interpretations or [])
+    if note not in alternatives:
+        alternatives.append(note)
+        pattern.alternative_interpretations = alternatives
+        db.flush()
 
 
 def _persist_pattern(db: Session, pattern: Pattern) -> Pattern:
@@ -169,6 +211,7 @@ def _build_recurrence_pattern(
     events: List[CareEvent],
     changes: List[Change],
     now: datetime,
+    history_truncated: bool = False,
 ) -> Optional[Pattern]:
     ordered_events = sorted(
         events,
@@ -191,6 +234,13 @@ def _build_recurrence_pattern(
     change_ids = sorted({change.id for change in linked_changes})
     frequency_per_day = len(ordered_events) / span_days
     rate_per_30_days = len(ordered_events) / (span_days / 30.0)
+    alternatives = [
+        "Rates describe distinct linked records; observation coverage is not measured."
+    ]
+    if history_truncated:
+        alternatives.append(
+            f"Source event history was bounded to the most recent {MAX_PATTERN_SOURCE_EVENTS} records; earlier events were not included."
+        )
     pattern = Pattern(
         person_id=person_id,
         subject_type=subject_type,
@@ -206,9 +256,7 @@ def _build_recurrence_pattern(
         direction=ChangeDirection.UNKNOWN,
         confidence=None,
         evidence_count=len(event_ids),
-        alternative_interpretations=[
-            "Rates describe distinct linked records; observation coverage is not measured."
-        ],
+        alternative_interpretations=alternatives,
     )
     return _persist_pattern(db, pattern)
 
