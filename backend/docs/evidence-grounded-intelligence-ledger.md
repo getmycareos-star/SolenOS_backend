@@ -148,3 +148,28 @@ No group is marked fully complete in this ledger.
 - [Frontend checks](https://github.com/getmycareos-star/SolenOS-landing/actions/workflows/frontend-checks.yml?query=branch%3Amain)
 
 **Important:** This ledger is intentionally not a completion certificate. Items above marked partial or unverified still require implementation and/or evidence from current-main runs.
+
+### S. Whole-situation assessment and longitudinal projection — PARTIAL
+- [x] Build a person-scoped assessment from bounded persisted LCR sources; the projection is explicitly read-only and does not promote claims into verified facts.
+- [x] Expose source coverage, unavailable/missing sources, linked evidence counts, explicit non-calibrated confidence, and limitations.
+- [x] Project persisted unresolved conflicts, reconciliations, uncertainties, information gaps, unanswered questions, follow-up links, and flagged care events into open loops without inventing owners, deadlines, or outcomes.
+- [x] Persist immutable, person-scoped assessment snapshots; deduplicate semantically unchanged reassessments; retain history and return a projection diff when persisted records change.
+- [x] Add a bounded source-linked situation trajectory from persisted timeline, events, facts, observations, caregiver contexts, decisions, and outcomes. Event time and record time are kept distinct; entries with no recorded time remain unanchored.
+- [x] Explicitly label the trajectory as chronology only; temporal ordering does not establish causation.
+- [ ] Current-main CI must pass for the trajectory test and current assessment code before this change is verified.
+- [ ] Formal person-specific baseline model, robust comparable-observation change metrics, persistence/reversal classification, trajectory gap detection, and historical state-at-time reconstruction remain incomplete.
+- [ ] Capability metadata is coverage reporting, not proof that every listed domain has a complete reasoning engine.
+
+### T. Caregiver-facing situation orientation — PARTIAL
+- [x] Workspace orientation requests a fresh backend reassessment on entry; the backend is responsible for semantic deduplication.
+- [x] The UI displays persisted record coverage, open-loop count, a bounded recent trajectory, epistemic status, recorded temporal basis, and a no-causation warning.
+- [x] Situation-assessment retrieval failure does not suppress the existing saved-care view; the assessment panel is omitted when unavailable rather than fabricated.
+- [ ] Current-main frontend build and test evidence is pending for the latest UI change.
+- [ ] Add source-detail navigation from each trajectory item, explicit current-versus-baseline comparison, assessment history/diff UI, accessible open-loop lifecycle actions, and end-to-end browser/API verification.
+
+### U. Current implementation evidence added in this work — UNVERIFIED until current-main CI completes
+- [x] Backend implementation commit: [evidence-linked situation trajectory projection](https://github.com/getmycareos-star/SolenOS_backend/commit/734ea571d94a9eb54c897206555c83b13717c31c).
+- [x] Backend regression-test commit: [verify persisted trajectory and causal boundary](https://github.com/getmycareos-star/SolenOS_backend/commit/92a79e54ae8612db2aaa6f6a17b0e4c1fa846c4b).
+- [x] Frontend UI commit: [show persisted trajectory and open loops](https://github.com/getmycareos-star/SolenOS-landing/commit/a3a9eccfa9e31837d4eae69d230d9ea3c706c9f2).
+- [x] Frontend freshness commit: [reassess persisted evidence on workspace entry](https://github.com/getmycareos-star/SolenOS-landing/commit/69d13cac9e54a8614b99234d254be7acff1c27d5).
+- [ ] Passing CI for the exact latest backend and frontend commits is required before marking these additions verified.
