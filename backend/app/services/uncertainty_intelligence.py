@@ -335,7 +335,29 @@ def analyze_uncertainty(
         "classifications": list(dict.fromkeys(classifications)),
         "explicit_uncertainty": explicit_uncertainty,
         "uncertainty_in_source_evidence": evidence_uncertainty,
-        "inferred_uncertainty": bool(classifications) and not (explicit_uncertainty or evidence_uncertainty),
+        # A classification is not automatically evidence of uncertainty. For
+        # example, duplicate provenance is a quality finding, not a statement
+        # that the claim itself is uncertain. Keep inferred uncertainty limited
+        # to classifications that directly describe epistemic limitations.
+        "inferred_uncertainty": any(
+            classification in {
+                "insufficient_evidence",
+                "knowledge_boundary",
+                "low_quality_evidence",
+                "source_attribution_incomplete",
+                "temporal_uncertainty",
+                "missing_baseline",
+                "ambiguous_source_interpretation",
+                "missing_information",
+                "conflicting_evidence",
+                "possible_reference_ambiguity",
+                "causal_inference_review",
+                "source_verification_uncertainty",
+                "outdated_information",
+                "unsupported_assessment_task",
+            }
+            for classification in classifications
+        ) and not (explicit_uncertainty or evidence_uncertainty),
         "evidence_completeness": completeness,
         "source_reliability": "not_quantified",
         "conclusion_confidence": None,
@@ -366,7 +388,10 @@ def analyze_uncertainty(
         "duplicate_evidence_groups": duplicate_groups,
         "source_access_status": normalized_access or "unspecified",
         "limitations": list(dict.fromkeys(limitations)),
-        "review_required": bool(classifications or not items or conflicts or missing),
+        # This engine intentionally never upgrades evidence presence to a
+        # verified claim. Every result therefore remains reviewable; this flag
+        # must not become false merely because metadata checks found no issue.
+        "review_required": True,
         "assessed_at": now.isoformat(),
         "method": "deterministic_evidence_metadata_rules_v1",
     }
