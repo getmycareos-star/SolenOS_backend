@@ -1,6 +1,7 @@
 """API tests for explicit, versioned, person-scoped evidence freshness policies."""
 from datetime import datetime, timedelta, timezone
 import hashlib
+import pytest
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
