@@ -107,7 +107,7 @@ def assess(**overrides):
         ),
         (
             "U12_confidence_is_never_fabricated",
-            {"evidence": [{"id": "e1", "text": "A caregiver report is available.", "source_type": "caregiver_report", "verified": True}]},
+            {"evidence": [{"id": "e1", "text": "A caregiver report is available.", "verified": True}]},
             "source_attribution_incomplete",
             "partially_known",
             "insufficient",
