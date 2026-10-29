@@ -1703,16 +1703,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(evidence_context)
 
-        # Prior conversation can resolve a follow-up reference, but it remains
-        # conversational context only and is never care evidence.
-        prior_messages = (
-            db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
-            .limit(8)
-            .all()
-        )
-        retrieval_query = _context_query_with_history(user_text, prior_messages)
+        # The resolved retrieval_query was built before record lookup; conversation
+        # history remains context only and is never care evidence.
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
