@@ -58,6 +58,13 @@ class Evidence(Base):
     parent_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="SET NULL"), nullable=True)
     source_text_sha256 = Column(String(64), nullable=True)
     ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # Acquisition context is separate from upload identity and source event time.
+    # origin_device_ref is an optional opaque label; never store raw hardware identifiers.
+    reported_at = Column(DateTime(timezone=True), nullable=True)
+    collection_method = Column(String(80), nullable=True)
+    origin_device_ref = Column(String(160), nullable=True)
+    transfer_source = Column(String(160), nullable=True)
+    transfer_reference = Column(Text, nullable=True)
 
 
 @event.listens_for(Evidence, "before_insert")
