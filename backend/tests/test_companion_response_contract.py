@@ -59,20 +59,39 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
 
     def fake_qwen(base, model, messages, options=None):
         calls.append(messages)
-        return "I'm here to help."
+        return "The record contains one sleep observation. It does not establish a trend."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
-        token, person_id, _ = create_session(client)
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported that the person slept poorly last night.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
         turn_id = str(uuid.uuid4())
         headers = {"Authorization": f"Bearer {token}"}
-        body = {"person_id": person_id, "text": "Hi", "client_turn_id": turn_id}
+        body = {"person_id": person_id, "text": "What did we record about sleep?", "client_turn_id": turn_id}
 
         first = client.post("/api/v1/conversation/message", headers=headers, json=body)
         assert first.status_code == 200, first.text
         first_data = first.json()
         assert first_data["written_to_lcr"] is False
+        assert event_id in first_data["source_event_ids"]
 
         # Intentionally omit session_id on retry: the first response may have
         # been committed while its session_id was lost in transit.
@@ -82,10 +101,11 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
         assert retry_data["session_id"] == first_data["session_id"]
         assert retry_data["reply"] == first_data["reply"]
         assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert event_id in retry_data["source_event_ids"]
         assert retry_data["idempotent_replay"] is True
         assert len(calls) == 1
 
-        changed = {**body, "text": "Hi, tell me about medication."}
+        changed = {**body, "text": "Tell me about the medication record."}
         mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
         assert mismatch.status_code == 409, mismatch.text
         assert len(calls) == 1
@@ -94,7 +114,7 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
         cross_person = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {other_token}"},
-            json={"person_id": other_person_id, "text": "Hi", "client_turn_id": turn_id},
+            json={"person_id": other_person_id, "text": body["text"], "client_turn_id": turn_id},
         )
         assert cross_person.status_code == 409, cross_person.text
         assert first_data["reply"] not in cross_person.text
@@ -109,12 +129,12 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
             assert assistant.client_turn_id == turn_id
             metadata = __import__("json").loads(assistant.response_metadata_json)
             assert metadata["written_to_lcr"] is False
+            assert metadata["source_event_ids"] == [event_id]
             assert metadata["request_sha256"]
         finally:
             db.close()
     finally:
         teardown()
-
 
 def test_provenance_guard_allows_explicit_absence_but_rejects_unsupported_affirmation():
     source = "Caregiver report: sleep was poor last night."
