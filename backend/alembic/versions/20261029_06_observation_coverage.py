@@ -28,7 +28,7 @@ def upgrade() -> None:
             sa.Column("window_start", sa.DateTime(timezone=True), nullable=False),
             sa.Column("window_end", sa.DateTime(timezone=True), nullable=False),
             sa.Column("coverage_status", sa.String(length=16), nullable=False),
-            sa.Column("source_evidence_ids", sa.JSON(), nullable=False),
+            sa.Column("source_evidence_ids", sa.Text(), nullable=False),
             sa.Column("rationale", sa.Text(), nullable=False),
             sa.Column("recorded_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
