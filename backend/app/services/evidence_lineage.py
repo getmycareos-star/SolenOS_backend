@@ -166,15 +166,15 @@ def load_evidence_lineage_scope(
     relationship_limit = max(1, min(max_relationships, 2000))
 
     for _depth in range(depth_limit):
-        pending = frontier - set(evidence_by_id)
-        if not pending or len(evidence_by_id) >= node_limit:
+        if not frontier or len(evidence_by_id) >= node_limit:
             break
+        pending = frontier - set(evidence_by_id)
         available = node_limit - len(evidence_by_id)
         statement = select(*(evidence.c[name] for name in evidence_fields)).where(
             evidence.c.person_id == str(person_id),
             evidence.c.id.in_(sorted(pending)),
-        ).limit(available + 1)
-        found = [dict(row) for row in db.execute(statement).mappings().all()]
+        ).limit(available + 1) if pending else None
+        found = [dict(row) for row in db.execute(statement).mappings().all()] if statement is not None else []
         if len(found) > available:
             has_more = True
             truncated = True
@@ -190,11 +190,12 @@ def load_evidence_lineage_scope(
         current_ids = set(evidence_by_id)
         next_ids: set[str] = set()
         source_refs: set[str] = set()
-        for row in found:
-            parent_id = str(row.get("parent_evidence_id") or "").strip()
+        expansion_rows = [evidence_by_id[evidence_id] for evidence_id in sorted(frontier) if evidence_id in evidence_by_id]
+        for row in expansion_rows:
+            parent_id = str(getattr(row, "parent_evidence_id", "") or "").strip()
             if parent_id and parent_id not in evidence_by_id:
                 next_ids.add(parent_id)
-            source_ref = " ".join(str(row.get("original_source_reference") or "").split()).casefold()
+            source_ref = " ".join(str(getattr(row, "original_source_reference", "") or "").split()).casefold()
             if source_ref:
                 source_refs.add(source_ref)
 
