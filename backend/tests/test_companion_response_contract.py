@@ -1,5 +1,6 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
+import uuid
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -50,6 +51,71 @@ def create_session(client):
     assert response.status_code == 201, response.text
     data = response.json()
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
+
+
+def test_companion_idempotent_retry_replays_original_response_and_provenance(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "I'm here to help."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        turn_id = str(uuid.uuid4())
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {"person_id": person_id, "text": "Hi", "client_turn_id": turn_id}
+
+        first = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert first_data["written_to_lcr"] is False
+
+        # Intentionally omit session_id on retry: the first response may have
+        # been committed while its session_id was lost in transit.
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["session_id"] == first_data["session_id"]
+        assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert retry_data["idempotent_replay"] is True
+        assert len(calls) == 1
+
+        changed = {**body, "text": "Hi, tell me about medication."}
+        mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert mismatch.status_code == 409, mismatch.text
+        assert len(calls) == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
+            assert [row.role for row in rows] == ["user", "assistant"]
+            assistant = next(row for row in rows if row.role == "assistant")
+            assert assistant.client_turn_id == turn_id
+            metadata = __import__("json").loads(assistant.response_metadata_json)
+            assert metadata["written_to_lcr"] is False
+            assert metadata["request_sha256"]
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
+def test_companion_retrieval_expands_common_caregiving_paraphrases():
+    sleep_record = 'LCR event evidence: {"event_id":"sleep-older","title":"Waking several times overnight"}'
+    unrelated_record = 'LCR event evidence: {"event_id":"meal","title":"Lunch preference"}'
+    assert collaboration._rank_context_lines("Tell me about rest", [unrelated_record, sleep_record], 1) == [sleep_record]
+
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="One sleep observation is recorded."),
+    ]
+    assert collaboration._context_query_with_history("What about that?", prior).lower().find("sleep") >= 0
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
 
 
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
