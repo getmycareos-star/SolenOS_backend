@@ -316,3 +316,14 @@ def test_draft_rejects_unbounded_time_window(client, window_days):
         json={"window_days": window_days},
     )
     assert response.status_code == 422, response.text
+
+
+def test_handoff_explicit_evidence_reference_parser_keeps_only_declared_links():
+    from app.api.handoff_drafts import _explicit_evidence_ids
+
+    assert _explicit_evidence_ids({
+        "evidence_ids": '["evidence-a", "evidence-b"]',
+        "source_evidence_id": "evidence-c",
+    }) == ["evidence-a", "evidence-b", "evidence-c"]
+    assert _explicit_evidence_ids({"evidence_ids": None, "source_evidence_id": None}) == []
+    assert _explicit_evidence_ids({"evidence_ids": "evidence-d"}) == ["evidence-d"]
