@@ -87,6 +87,7 @@ class OpenQuestion(OpenQuestionBase):
     id: str
     asked_at: datetime
     answered_at: Optional[datetime] = None
+    answered_by_caregiver_id: Optional[str] = None
     closed_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
