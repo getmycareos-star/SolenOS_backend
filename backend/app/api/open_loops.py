@@ -655,7 +655,7 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "verification_basis": "caregiver_attestation_with_persisted_source_link",
         "semantic_grounding_status": "not_automatically_verified",
-        "interpretation_limit": "The API validates source-record existence and scope, not whether the source semantically proves the stated outcome or whether an action caused it.",
+        "interpretation_limit": "The API validates source-record existence and scope; source records do not automatically establish semantic entailment or causation.",
     }]
     loop.outcome_status = "outcome_verified"
     _audit(db, loop, "outcome_verified", before, payload.evidence, payload.idempotency_key)
