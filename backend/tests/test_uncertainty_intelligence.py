@@ -1,8 +1,11 @@
 """Behavioral tests for uncertainty intelligence. Fixtures are synthetic and test-only."""
 from datetime import datetime, timezone
+import json
 
 import pytest
+from sqlalchemy import Boolean, Column, DateTime, Float, MetaData, String, Table, Text, create_engine, insert
 
+from app.services.lcr_context import build_lcr_context
 from app.services.uncertainty_intelligence import analyze_uncertainty
 
 
@@ -81,3 +84,78 @@ def test_unavailable_source_is_not_treated_as_negative_finding():
 def test_missing_task_is_rejected_instead_of_fabricating_assessment():
     with pytest.raises(ValueError):
         analyze_uncertainty(claim="A real claim", task="", evidence=[])
+
+
+
+def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leakage():
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    assessments = Table(
+        "uncertainty_assessments",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("subject_type", String),
+        Column("subject_id", String),
+        Column("field", String),
+        Column("epistemic_state", String),
+        Column("confidence", Float),
+        Column("known_value", Text),
+        Column("gap_reason", String),
+        Column("context", Text),
+        Column("evidence_ids", Text),
+        Column("temporal_precision", String),
+        Column("assessed_at", DateTime),
+        Column("assessed_by_caregiver_id", String),
+        Column("superseded_by_assessment_id", String),
+        Column("is_active", Boolean),
+    )
+    metadata.create_all(engine)
+    analysis = {
+        "epistemic_state": "unknown",
+        "limitations": ["No retrieved evidence records were supplied to this assessment."],
+        "clarification_questions": [
+            {"target_field": "medication_status", "question": "What is currently known about medication_status?"}
+        ],
+        "calibration_status": "not_calibrated",
+    }
+    with engine.begin() as connection:
+        connection.execute(insert(assessments), [
+            {
+                "id": "assessment-active", "person_id": "person-a", "subject_type": "care_record",
+                "subject_id": "record-a", "field": "medication_status", "epistemic_state": "unknown",
+                "confidence": None, "known_value": None, "gap_reason": "INSUFFICIENT_EVIDENCE",
+                "context": json.dumps([analysis]), "evidence_ids": "[]", "temporal_precision": None,
+                "assessed_at": datetime(2026, 10, 29, tzinfo=timezone.utc),
+                "assessed_by_caregiver_id": None, "superseded_by_assessment_id": None, "is_active": True,
+            },
+            {
+                "id": "assessment-other-person", "person_id": "person-b", "subject_type": "care_record",
+                "subject_id": "record-b", "field": "medication_status", "epistemic_state": "known",
+                "confidence": None, "known_value": "must not leak", "gap_reason": None,
+                "context": json.dumps([{"private": "other person's context"}]), "evidence_ids": "[]",
+                "temporal_precision": None, "assessed_at": datetime(2026, 10, 29, tzinfo=timezone.utc),
+                "assessed_by_caregiver_id": None, "superseded_by_assessment_id": None, "is_active": True,
+            },
+            {
+                "id": "assessment-superseded", "person_id": "person-a", "subject_type": "care_record",
+                "subject_id": "record-a", "field": "medication_status", "epistemic_state": "known",
+                "confidence": None, "known_value": "old state", "gap_reason": None,
+                "context": json.dumps([{"superseded": True}]), "evidence_ids": "[]",
+                "temporal_precision": None, "assessed_at": datetime(2026, 10, 28, tzinfo=timezone.utc),
+                "assessed_by_caregiver_id": None, "superseded_by_assessment_id": "assessment-active", "is_active": False,
+            },
+        ])
+    from sqlalchemy.orm import Session
+    with Session(engine) as db:
+        context = build_lcr_context(db, "person-a", limit_per_source=10)
+    source = context["sources"]["uncertainty_assessments"]
+    assert source["returned_count"] == 1
+    item = source["items"][0]
+    assert item["id"] == "assessment-active"
+    assert item["context"][0]["limitations"] == analysis["limitations"]
+    assert item["context"][0]["clarification_questions"] == analysis["clarification_questions"]
+    assert "assessment-other-person" not in json.dumps(context)
+    assert "must not leak" not in json.dumps(context)
+    assert "assessment-superseded" not in json.dumps(context)
+    engine.dispose()
