@@ -383,6 +383,54 @@ def test_gradual_decline_detected_via_trend_requires_persisted_evidence_and_comp
         teardown_db()
 
 
+def test_trend_analysis_never_combines_different_subject_ids():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db, person, caregiver = _seed_person()
+        now = datetime.now(timezone.utc)
+        from app.core.change_enums import ChangeType, ChangeDirection
+        event_ids = []
+        for index, (subject_id, magnitude, days_ago) in enumerate(
+            (("left", 1.0, 90), ("left", 2.0, 60), ("right", 3.0, 30), ("right", 4.0, 5)),
+            start=1,
+        ):
+            event = _add_event(
+                db, person, caregiver, "mobility", f"Mobility observation {index}", days_ago
+            )
+            event_ids.append(event.id)
+            window_end = now - timedelta(days=days_ago)
+            db.add(Change(
+                person_id=person.id,
+                subject_type="mobility",
+                subject_id=subject_id,
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state=str(magnitude - 1),
+                current_state=str(magnitude),
+                previous_count=int(magnitude - 1),
+                current_count=int(magnitude),
+                baseline_id=None,
+                comparison_window_start=window_end - timedelta(days=20),
+                comparison_window_end=window_end,
+                confidence=None,
+                evidence_ids=[event.id],
+                magnitude=magnitude,
+                explanation="Source-linked assessment",
+                created_at=window_end,
+            ))
+        db.commit()
+
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        db.commit()
+        assert all(pattern.pattern_type.value != "trend" for pattern in patterns)
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_cold_start_no_baseline_no_false_positive():
     setup_db()
     try:
