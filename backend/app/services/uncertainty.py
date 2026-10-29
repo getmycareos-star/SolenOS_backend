@@ -401,6 +401,7 @@ class UncertaintyEngine:
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         resolution_scope = (update_data.pop("resolution_scope", None) or "").strip() or None
+        unresolved_remainder = (update_data.pop("unresolved_remainder", None) or "").strip() or None
         requested_status = update_data.get("resolution_status", db_contradiction.resolution_status)
         status_changed = requested_status != db_contradiction.resolution_status
         resolution_statuses = {"resolved", "partially_resolved", "qualified", "superseded", "reopened", "unresolved"}
@@ -413,9 +414,12 @@ class UncertaintyEngine:
         if requested_status == "partially_resolved":
             if not resolution_scope:
                 raise ValueError("A partial conflict resolution requires an explicit scope describing exactly what was resolved")
+            if not unresolved_remainder:
+                raise ValueError("A partial conflict resolution must preserve the unresolved remainder explicitly")
         audit_event_required = (
             status_changed
             or resolution_scope is not None
+            or unresolved_remainder is not None
             or ("resolution_notes" in update_data and update_data.get("resolution_notes") != db_contradiction.resolution_notes)
             or ("evidence_ids" in update_data and evidence_ids != (db_contradiction.evidence_ids or []))
         )
@@ -444,9 +448,19 @@ class UncertaintyEngine:
                     new_status=requested_status,
                     rationale=rationale,
                     resolution_scope=resolution_scope,
+                    unresolved_remainder=unresolved_remainder,
                     evidence_ids=list(evidence_ids),
                 )
                 self.db.add(event)
+
+            if status_changed:
+                db_contradiction.resolution_scope = resolution_scope if requested_status == "partially_resolved" else None
+                db_contradiction.unresolved_remainder = unresolved_remainder if requested_status == "partially_resolved" else None
+            elif resolution_scope is not None or unresolved_remainder is not None:
+                if resolution_scope is not None:
+                    db_contradiction.resolution_scope = resolution_scope
+                if unresolved_remainder is not None:
+                    db_contradiction.unresolved_remainder = unresolved_remainder
 
             for field, value in update_data.items():
                 if field == "resolved_by_caregiver_id":
