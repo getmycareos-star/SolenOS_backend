@@ -381,6 +381,17 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     trajectory = body["assessment"]["situation_trajectory"]
     assert trajectory["source_of_truth"] == "persisted_lcr_records"
     assert trajectory["causal_inference"] == "not_performed"
+    fact_entry = next(
+        item for item in trajectory["entries"]
+        if item["source"] == "facts" and item["record_id"] == "understanding-fact"
+    )
+    assert fact_entry["epistemic_status"] == "reported"
+    assert fact_entry["recorded_at"] is not None
+    assert fact_entry["interpretation_limit"].endswith("does not establish causation.")
+    assert "understanding-fact" in {item["id"] for item in body["assessment"]["current_care_reality"]["records"]}
+    trajectory = body["assessment"]["situation_trajectory"]
+    assert trajectory["source_of_truth"] == "persisted_lcr_records"
+    assert trajectory["causal_inference"] == "not_performed"
     assert any(entry["record_id"] == "understanding-fact" for entry in trajectory["entries"])
     assert all("interpretation_limit" in entry for entry in trajectory["entries"])
     assert body["assessment"]["baseline_assessment"]["status"] == "not_established"
