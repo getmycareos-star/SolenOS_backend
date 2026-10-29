@@ -1755,3 +1755,61 @@ def test_claim_assessment_impact_requires_review_when_unassessed():
         assert denied.status_code == 404
     finally:
         teardown_db()
+
+
+
+def test_exact_duplicate_source_text_does_not_inflate_independent_corroboration():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="exact-duplicate-person", name="Exact Duplicate Person")
+        caregiver = Caregiver(
+            id="exact-duplicate-caregiver",
+            name="Exact Duplicate Caregiver",
+            email="exact-duplicate@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        identical_text = "Caregiver reports three awakenings overnight."
+        db.add_all([
+            Evidence(
+                id="exact-duplicate-a", person_id=person.id, type="caregiver_report",
+                source_text=identical_text, uploaded_by_caregiver_id=caregiver.id,
+            ),
+            Evidence(
+                id="exact-duplicate-b", person_id=person.id, type="forwarded_message",
+                source_text=identical_text, uploaded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client("exact-duplicate-person")
+        response = client.post(
+            "/api/v1/uncertainty/analyze",
+            json={
+                "person_id": "exact-duplicate-person",
+                "subject_type": "sleep",
+                "subject_id": "overnight",
+                "field": "awakenings",
+                "claim": "Two independent sources confirm three awakenings.",
+                "task": "summarize",
+                "evidence_ids": ["exact-duplicate-a", "exact-duplicate-b"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        analysis = response.json()["analysis"]
+        assert analysis["independent_evidence_record_count"] is None
+        assert analysis["independent_evidence_count_status"] == "requires_source_independence_review"
+        assert analysis["review_required"] is True
+        candidates = analysis["exact_content_duplicate_candidates"]
+        assert len(candidates) == 1
+        assert candidates[0]["evidence_ids"] == ["exact-duplicate-a", "exact-duplicate-b"]
+        assert candidates[0]["common_origin_established"] is False
+        assert "exact_content_duplicate_candidate_review" in analysis["classifications"]
+    finally:
+        teardown_db()
