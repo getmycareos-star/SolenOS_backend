@@ -197,9 +197,37 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
             "expected": True, "observed": observed, "pass": observed is True,
         })
 
+        # Case 9: messy real-world comparison — three falls recorded over six
+        # weeks, with no falls in older records but no proof the earlier interval
+        # was fully observed. Report recurrence and the actual dates/count, while
+        # withholding a normalized rate and not claiming the falls began recently.
+        person, caregiver = _case_identity(db, "three-falls-six-weeks")
+        for event_id, days in (("falls-six-weeks-1", 35), ("falls-six-weeks-2", 19), ("falls-six-weeks-3", 4)):
+            _record_event(db, person, caregiver, event_id, days)
+        db.flush()
+        changes = detect_event_changes(db, person.id, "fall", None, REFERENCE_TIME)
+        patterns = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        first_observed = next((change for change in changes if change.change_type.value == "emergence"), None)
+        recurrence = next((pattern for pattern in patterns if pattern.pattern_type.value == "recurrence"), None)
+        observed = bool(
+            first_observed
+            and first_observed.baseline_coverage_status == "unknown"
+            and "absence cannot be inferred" in (first_observed.previous_state or "").lower()
+            and recurrence
+            and recurrence.evidence_count == 3
+            and recurrence.confidence is None
+            and recurrence.pattern_metrics
+            and recurrence.pattern_metrics.get("normalized_rate_available") is False
+            and len(recurrence.event_ids) == 3
+        )
+        outcomes.append({
+            "case": "three_falls_six_weeks_without_claiming_eight_month_absence",
+            "expected": True, "observed": observed, "pass": observed is True,
+        })
+
         score = sum(1 for outcome in outcomes if outcome["pass"]) / len(outcomes)
         report = {
-            "benchmark": "longitudinal-change-safeguards-v1",
+            "benchmark": "longitudinal-change-safeguards-v2",
             "reference_time": REFERENCE_TIME.isoformat(),
             "cases_passed": sum(1 for outcome in outcomes if outcome["pass"]),
             "cases_total": len(outcomes),
