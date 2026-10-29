@@ -752,7 +752,7 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         return None
 
     window_match = re.search(
-        r"\b(?:last|past|previous)\s+(?P<count>\d+|one|two|three|four|six|a|an)\s+"
+        r"\b(?:last|past|previous)\s+(?:(?P<count>\d+|one|two|three|four|six|a|an)\s+)?"
         r"(?P<unit>days?|weeks?|months?|years?)\b",
         query,
     )
@@ -760,9 +760,10 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
     period_days = None
     period_label = "over the available recorded history"
     if window_match:
-        amount = count_words.get(window_match.group("count"), None)
-        if amount is None:
-            amount = int(window_match.group("count"))
+        count_word = window_match.group("count")
+        amount = count_words.get(count_word, 1) if count_word else 1
+        if count_word and amount is None:
+            amount = int(count_word)
         unit = window_match.group("unit")
         multiplier = 1 if unit.startswith("day") else 7 if unit.startswith("week") else 30 if unit.startswith("month") else 365
         period_days = amount * multiplier
