@@ -134,6 +134,9 @@ import app.models.appointment_workspace  # register durable appointment workflow
 import app.api.open_loops  # register persistent open-loop tables before local schema bootstrap
 
 
-if not RAILWAY_RUNTIME:
+# Metadata bootstrap is strictly a local SQLite convenience. Running Alembic
+# against PostgreSQL imports this module to load model metadata; create_all()
+# there would pre-create new tables before their reviewed migrations execute.
+if engine.dialect.name == "sqlite" and not RAILWAY_RUNTIME:
     Base.metadata.create_all(bind=engine)
     ensure_database_schema()
