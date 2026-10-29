@@ -50,7 +50,7 @@ def assess_observation_coverage(
     if fraction == 1.0 and not has_noncovered:
         status = "covered"
         limitations: List[str] = []
-    elif covered_seconds > 0:
+    elif covered_seconds > 0 or any(r.coverage_status == "partial" for r in rows):
         status = "partial"
         limitations = ["Observation coverage is incomplete; event absence cannot be inferred for uncovered intervals."]
     elif rows and all(r.coverage_status == "uncovered" for r in rows):
