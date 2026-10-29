@@ -90,6 +90,17 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
         assert mismatch.status_code == 409, mismatch.text
         assert len(calls) == 1
 
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={"person_id": other_person_id, "text": "Hi", "client_turn_id": turn_id},
+        )
+        assert cross_person.status_code == 409, cross_person.text
+        assert first_data["reply"] not in cross_person.text
+        assert first_data["session_id"] not in cross_person.text
+        assert len(calls) == 1
+
         db = TestingSessionLocal()
         try:
             rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
