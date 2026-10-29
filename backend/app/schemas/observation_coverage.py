@@ -29,23 +29,30 @@ class ObservationCoverageCreate(BaseModel):
         return self
 
 
-class ObservationCoverageRecord(ObservationCoverageCreate):
+class ObservationCoverageRecord(BaseModel):
+    # Request validation requires explicit timezone offsets. Read models accept
+    # database-normalized timestamps; SQLite strips timezone metadata from
+    # timezone-aware columns, so normalize those values without rerunning the
+    # request-only validator.
     id: str
+    person_id: str
+    subject_type: str
+    window_start: datetime
+    window_end: datetime
+    coverage_status: CoverageStatus
+    source_evidence_ids: List[str]
+    rationale: str
     recorded_by_caregiver_id: str
     created_at: datetime
 
-    @field_validator("window_start", "window_end", mode="before")
+    @field_validator("window_start", "window_end", "created_at", mode="before")
     @classmethod
     def normalize_sqlite_naive_datetimes(cls, value):
-        # SQLite drops timezone metadata even for DateTime(timezone=True).
-        # Treat naive persisted values as UTC on output. Incoming request
-        # validation still rejects timestamps without explicit offsets.
         if isinstance(value, datetime) and (value.tzinfo is None or value.utcoffset() is None):
             return value.replace(tzinfo=timezone.utc)
         return value
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CoverageAssessment(BaseModel):
