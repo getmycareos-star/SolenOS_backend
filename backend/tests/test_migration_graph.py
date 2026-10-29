@@ -29,3 +29,5 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     assert "20261029_20_open_loops" in revision_ids
     assert "20261029_21_loop_occ" in revision_ids
     assert "20261029_22_conflict_hist" in revision_ids
+    assert "20261029_23_baseline_provenance" in revision_ids
+    assert "20261029_24_baseline_history" in revision_ids
