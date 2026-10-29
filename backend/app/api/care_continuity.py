@@ -1096,7 +1096,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     for source_name, source in sources.items():
         rows = source.get("items") or []
         for row in rows:
-            all_items.append({"source": source_name, **row})
+            normalized_row = dict(row)
+            # Structured observations store a single canonical evidence_id, while
+            # projections expose a uniform evidence_ids list. Preserve that link
+            # in every downstream LCR view instead of losing provenance at the
+            # situation-understanding projection boundary.
+            if source_name == "evidence_observations" and normalized_row.get("evidence_id"):
+                normalized_row["evidence_ids"] = [str(normalized_row["evidence_id"])]
+            all_items.append({"source": source_name, **normalized_row})
             ids = row.get("evidence_ids")
             if isinstance(ids, list):
                 evidence_ids.update(str(value) for value in ids if value)
