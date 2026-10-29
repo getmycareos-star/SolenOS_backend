@@ -13,4 +13,4 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     revision_ids = [revision.revision for revision in revisions]
 
     assert len(revision_ids) == len(set(revision_ids)), "duplicate Alembic revision IDs found"
-    assert script.get_heads() == ["20261029_07_claim_assessments"]
+    assert script.get_heads() == ["20261029_08_evidence_source_relationships"]
