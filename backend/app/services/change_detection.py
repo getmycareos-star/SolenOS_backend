@@ -54,7 +54,14 @@ def detect_event_changes(
         )
     )
     changes = []
-    if baseline.event_count == 0 and current_count > 0:
+    # An event can be newly observed in the records without being a new
+    # occurrence in real life. Call it an emergence only if the full baseline
+    # interval was explicitly observed and no matching event was recorded there.
+    if (
+        baseline.event_count == 0
+        and current_count > 0
+        and comparison.get("baseline_coverage_status") == "covered"
+    ):
         change = _create_change(
             db=db,
             person_id=person_id,
