@@ -536,13 +536,16 @@ def test_structured_source_observation_appears_in_current_care_projection(client
             INSERT INTO evidence_observations (
                 id, person_id, evidence_id, observation_kind, epistemic_status,
                 subject_label, attribute, value_text, source_passage,
-                source_span_start, source_span_end, extraction_method,
-                extraction_version, created_by_caregiver_id
+                source_span_start, source_span_end, context, observer_label,
+                observation_method, negated, hedge_marker, ambiguity_note,
+                extraction_method, extraction_version, created_by_caregiver_id
             ) VALUES (
                 'sleep-structured-observation', :person_id, 'sleep-source-evidence',
                 'reported_observation', 'caregiver_reported', 'care recipient',
                 'sleep', 'woke twice overnight', 'woke twice overnight',
-                20, 40, 'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
+                20, 40, 'After the usual evening routine', 'family caregiver',
+                'caregiver report', 0, 'reported as', 'Count not independently verified',
+                'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
             )
         """), {
             "person_id": owner["person"]["id"],
@@ -624,6 +627,16 @@ def test_structured_source_observation_appears_in_current_care_projection(client
         and row["source"] == "evidence_observations"
         for row in assessment["situation_trajectory"]["entries"]
     )
+    trajectory_observation = next(
+        row for row in assessment["situation_trajectory"]["entries"]
+        if row["record_id"] == "sleep-structured-observation"
+    )
+    assert trajectory_observation["context"] == "After the usual evening routine"
+    assert trajectory_observation["observer_label"] == "family caregiver"
+    assert trajectory_observation["observation_method"] == "caregiver report"
+    assert trajectory_observation["negated"] is False
+    assert trajectory_observation["hedge_marker"] == "reported as"
+    assert trajectory_observation["ambiguity_note"] == "Count not independently verified"
     shared_source_group = next(
         group for group in assessment["cross_domain_source_links"]["groups"]
         if group["evidence_id"] == "sleep-source-evidence"
