@@ -1694,6 +1694,8 @@ def test_pattern_detection_does_not_mix_source_events_across_subjects():
 def test_observation_coverage_api_persists_and_assesses_across_requests():
     setup_db()
     try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
         db = TestingSessionLocal()
         person = Person(id="coverage-api-person", name="Coverage API person")
         caregiver = Caregiver(
@@ -1751,6 +1753,8 @@ def test_observation_coverage_api_persists_and_assesses_across_requests():
 def test_observation_coverage_api_enforces_bearer_person_scope():
     setup_db()
     try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
         db = TestingSessionLocal()
         person_a = Person(id="coverage-scope-person-a", name="Person A")
         caregiver_a = Caregiver(
