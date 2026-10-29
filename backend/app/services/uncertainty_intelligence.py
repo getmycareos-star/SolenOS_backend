@@ -25,7 +25,12 @@ def _text(value: Any) -> str:
 
 
 def evidence_record_to_uncertainty_item(
-    row: Any, *, role: str = "current", is_baseline: bool = False
+    row: Any,
+    *,
+    role: str = "current",
+    is_baseline: bool = False,
+    source_lineage_id: Optional[str] = None,
+    source_independence_status: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Convert a persisted evidence row without promoting optional metadata to verified truth."""
     metadata: Dict[str, Any] = {}
@@ -51,11 +56,15 @@ def evidence_record_to_uncertainty_item(
     }
     for key in (
         "quality", "extraction_status", "temporal_scope", "observed_at", "effective_at",
-        "source_id", "origin_id", "source_lineage_id", "max_age_days", "ambiguous",
-        "interpretation_status",
+        "source_id", "origin_id", "source_lineage_id", "source_independence_status",
+        "max_age_days", "ambiguous", "interpretation_status",
     ):
         if key in metadata:
             item[key] = metadata[key]
+    if source_lineage_id:
+        item["source_lineage_id"] = source_lineage_id
+    if source_independence_status:
+        item["source_independence_status"] = source_independence_status
     return item
 
 
