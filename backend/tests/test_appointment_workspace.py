@@ -588,6 +588,73 @@ def test_structured_source_observation_appears_in_current_care_projection(client
     assert "sleep-structured-observation" not in other_response.text
     assert "woke twice overnight" not in other_response.text
 
+def test_observation_capture_validates_exact_source_span_and_person_scope(client):
+    test_client, owner, other = client
+    with engine.begin() as connection:
+        connection.execute(text("""
+            INSERT INTO evidence (
+                id, person_id, type, source_text, uploaded_by_caregiver_id
+            ) VALUES
+                ('capture-source-owner', :owner_id, 'caregiver_note',
+                 'Caregiver recorded: woke twice overnight.', :owner_caregiver_id),
+                ('capture-source-other', :other_id, 'caregiver_note',
+                 'Private report: missed breakfast.', :other_caregiver_id)
+        """), {
+            "owner_id": owner["person"]["id"],
+            "owner_caregiver_id": owner["caregiver"]["id"],
+            "other_id": other["person"]["id"],
+            "other_caregiver_id": other["caregiver"]["id"],
+        })
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    payload = {
+        "observation_kind": "reported_observation",
+        "epistemic_status": "caregiver_reported",
+        "subject_label": "care recipient",
+        "attribute": "sleep",
+        "value_text": "woke twice overnight",
+        "source_passage": "woke twice overnight",
+        "source_span_start": 20,
+        "source_span_end": 40,
+        "extraction_method": "test_fixture_manual_annotation",
+        "extraction_version": "test-fixture-v1",
+    }
+    created = test_client.post(
+        "/api/v1/care-continuity/evidence/capture-source-owner/observations",
+        headers=headers,
+        json=payload,
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["evidence_id"] == "capture-source-owner"
+    assert body["provenance_validation"] == "exact_source_text_substring_and_offsets_verified"
+    assert body["epistemic_status"] == "caregiver_reported"
+
+    wrong_span = test_client.post(
+        "/api/v1/care-continuity/evidence/capture-source-owner/observations",
+        headers=headers,
+        json={**payload, "source_span_start": 19},
+    )
+    assert wrong_span.status_code == 422, wrong_span.text
+
+    cross_person = test_client.post(
+        "/api/v1/care-continuity/evidence/capture-source-other/observations",
+        headers=headers,
+        json={**payload, "source_passage": "missed breakfast", "source_span_start": 23, "source_span_end": 39},
+    )
+    assert cross_person.status_code == 404, cross_person.text
+
+    with engine.begin() as connection:
+        persisted = connection.execute(text("""
+            SELECT id, person_id, evidence_id, source_span_start, source_span_end
+            FROM evidence_observations WHERE id = :id
+        """), {"id": body["id"]}).mappings().one()
+    assert persisted["person_id"] == owner["person"]["id"]
+    assert persisted["evidence_id"] == "capture-source-owner"
+    assert persisted["source_span_start"] == 20
+    assert persisted["source_span_end"] == 40
+
+
 def test_current_care_hides_superseded_observation_but_retains_history(client):
     test_client, owner, _ = client
     with engine.begin() as connection:
