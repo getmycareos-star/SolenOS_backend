@@ -477,6 +477,38 @@ def main():
         require(status == 200 and any(
             event.get("event_type") == "response_recorded" for event in open_loop_history_after_restart
         ), f"Open Loop audit history did not persist across restart: {status}: {open_loop_history_after_restart}")
+        # Race two mutually exclusive terminal transitions. Exactly one may
+        # win; the second must observe terminal state and conflict, not overwrite it.
+        lifecycle_payloads = [
+            ("POST", f"/api/v1/open-loops/{open_loop_id}/close",
+             {"text": "CI-only closure", "evidence": [{"kind": "ci_fixture", "text": "closure race"}]}),
+            ("POST", f"/api/v1/open-loops/{open_loop_id}/cancel",
+             {"text": "CI-only cancellation", "evidence": [{"kind": "ci_fixture", "text": "cancellation race"}]}),
+        ]
+        def apply_lifecycle(item):
+            method, path, body = item
+            return request(method, path, token=token_a, body=body)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            lifecycle_results = list(pool.map(apply_lifecycle, lifecycle_payloads))
+        require(sorted(status for status, _ in lifecycle_results) == [200, 409],
+                f"Conflicting close/cancel updates must serialize to one winner: {lifecycle_results}")
+        status, terminal_loop = request("GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a)
+        require(status == 200 and terminal_loop.get("loop", {}).get("status") in {"closed", "cancelled"},
+                f"Open Loop did not persist a valid terminal state after lifecycle race: {status}: {terminal_loop}")
+        status, reopened_loop = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/reopen", token=token_a,
+            body={"text": "CI-only reopening after conflict test", "evidence": [{"kind": "ci_fixture", "text": "reopen"}]},
+        )
+        require(status == 200 and reopened_loop.get("status") == "open",
+                f"Open Loop could not be reopened after terminal race: {status}: {reopened_loop}")
+        status, lifecycle_history = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}/history", token=token_a,
+        )
+        terminal_events = [event.get("event_type") for event in lifecycle_history
+                           if event.get("event_type") in {"closure_verified", "cancelled"}]
+        require(status == 200 and len(terminal_events) == 1
+                and any(event.get("event_type") == "reopened" for event in lifecycle_history),
+                f"Conflicting lifecycle race produced invalid audit history: {status}: {lifecycle_history}")
         status, cross_person_loop_after_restart = request(
             "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_b,
         )
