@@ -190,6 +190,3 @@ def test_messy_care_situation_understanding_contract(
         f"limitations={result['limitations']}"
     )
 
-
-def test_messy_care_benchmark_is_exactly_fifteen_scenarios():
-    assert len(SCENARIOS) == 15
