@@ -175,6 +175,64 @@ def test_analysis_propagates_missing_evidence_into_persisted_view_and_open_quest
 
 
 @pytest.mark.session_security
+def test_handoff_draft_preserves_active_unknown_assessment_and_excludes_superseded(
+    uncertainty_api_db,
+):
+    from app.models.uncertainty import UncertaintyAssessment
+    from app.core.uncertainty_enums import EpistemicState, GapReason
+
+    client = _client_for(uncertainty_api_db, "a")
+    with uncertainty_api_db() as db:
+        db.add_all([
+            UncertaintyAssessment(
+                id="assessment-current-unknown",
+                person_id="benchmark-person-a",
+                subject_type="medication",
+                subject_id="medication-1",
+                field="current_status",
+                epistemic_state=EpistemicState.UNKNOWN,
+                confidence=None,
+                known_value=None,
+                gap_reason=GapReason.NOT_DOCUMENTED,
+                evidence_ids=[],
+                is_active=True,
+            ),
+            UncertaintyAssessment(
+                id="assessment-superseded",
+                person_id="benchmark-person-a",
+                subject_type="medication",
+                subject_id="medication-1",
+                field="current_status",
+                epistemic_state=EpistemicState.KNOWN,
+                confidence=0.99,
+                known_value="taken",
+                gap_reason=None,
+                evidence_ids=[],
+                is_active=False,
+                superseded_by_assessment_id="assessment-current-unknown",
+            ),
+        ])
+        db.commit()
+
+    response = client.post(
+        "/api/v1/handoff-drafts/prepare",
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    status = payload["source_statuses"]["uncertainty_assessments"]
+    assert status["status"] == "available"
+    refs = [row for row in payload["source_references"] if row["source_table"] == "uncertainty_assessments"]
+    assert len(refs) == 1
+    assert refs[0]["source_id"] == "assessment-current-unknown"
+    assert refs[0]["epistemic_status"].lower().endswith("unknown")
+    assert refs[0]["details"]["confidence"] is None or "confidence" not in refs[0]["details"]
+    assert "uncertainty_assessments" in next(
+        section for section in payload["template_sections"] if section["key"] == "problems_uncertainty"
+    )["source_tables"]
+
+
+@pytest.mark.session_security
 def test_claim_dependency_graph_persists_and_rejects_cross_record_and_cycles(uncertainty_api_db):
     client = _client_for(uncertainty_api_db, "a")
     with uncertainty_api_db() as db:
