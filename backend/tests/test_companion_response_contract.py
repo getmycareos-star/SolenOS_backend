@@ -253,6 +253,14 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_companion_context_filter_excludes_unrelated_records_for_specific_question():
+    sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Sleep history","description":"Restless sleep."}'
+    household = 'LCR event evidence: {"event_id":"home-1","title":"Unrelated household note 1","description":"Household activity note."}'
+    selected = collaboration._filter_context_lines_to_query(
+        "What did we record about sleep?", [household, sleep]
+    )
+    assert selected == [sleep]
+
 def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(monkeypatch):
     client = setup_client(monkeypatch)
 
