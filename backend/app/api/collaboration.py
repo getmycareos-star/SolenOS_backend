@@ -495,6 +495,8 @@ _CONTEXT_STOPWORDS = {
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+    "record", "records", "recorded", "recording", "care", "caregiver", "person",
+    "pattern", "getting", "worse", "become", "trend", "observation", "observed",
 }
 
 
