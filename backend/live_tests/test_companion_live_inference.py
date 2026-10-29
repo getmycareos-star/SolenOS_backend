@@ -227,6 +227,8 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         assert medication_response.status_code == 200, medication_response.text
         medication_data = medication_response.json()
         medication_answer = medication_data["reply"].casefold()
+        assert medication_data["ai_generated"] is False
+        assert medication_data["guard_verdict"] == "blocked"
         assert medication_id in medication_data["source_event_ids"]
         assert any(marker in medication_answer for marker in (
             "prescriber", "clinician", "doctor", "pharmacist", "cannot advise",
