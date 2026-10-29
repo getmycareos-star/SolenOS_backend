@@ -34,10 +34,14 @@ def upgrade() -> None:
     )
     if not exists:
         if bind.dialect.name == "sqlite":
-            with op.batch_alter_table("evidence") as batch:
-                batch.create_unique_constraint(
-                    "uq_evidence_person_ingestion_key", ["person_id", "ingestion_key"]
-                )
+            # A unique index avoids SQLite's table-rebuild batch mode, which
+            # could otherwise remove previously installed evidence immutability triggers.
+            op.create_index(
+                "uq_evidence_person_ingestion_key",
+                "evidence",
+                ["person_id", "ingestion_key"],
+                unique=True,
+            )
         else:
             op.create_unique_constraint(
                 "uq_evidence_person_ingestion_key", "evidence", ["person_id", "ingestion_key"]
