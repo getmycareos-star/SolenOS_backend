@@ -250,6 +250,85 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_historical_event_outside_recent_window_is_retrieved_by_question(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older record says sleep was restless overnight; it does not establish a long-term trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        db = TestingSessionLocal()
+        now = datetime(2026, 10, 29, 12, 0)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Overnight rest observation",
+            description="Caregiver reported restless sleep and waking several times overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="daily_note",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Routine household observation {index}; no sleep details.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_source_row_ranking_prefers_relevance_over_recency():
+    from datetime import datetime, timedelta
+    now = datetime(2026, 10, 29, 12, 0)
+    recent_irrelevant = SimpleNamespace(
+        title="Lunch note", description="A routine meal observation.",
+        event_type="daily_note", status="recorded", occurred_at=now,
+    )
+    older_relevant = SimpleNamespace(
+        title="Overnight rest", description="Restless sleep and repeated waking.",
+        event_type="observation", status="recorded", occurred_at=now - timedelta(days=120),
+    )
+    ranked = collaboration._rank_source_rows(
+        "What happened with Mum's sleep?",
+        [recent_irrelevant, older_relevant],
+        ("title", "description", "event_type", "status"),
+        1,
+    )
+    assert ranked == [older_relevant]
+
+
 def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     prior = [
         SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
