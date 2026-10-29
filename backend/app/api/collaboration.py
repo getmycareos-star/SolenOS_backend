@@ -1481,13 +1481,37 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
-            .order_by(Appointment.scheduled_at.asc())
+        appointment_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        recent_appointments = (
+            appointment_query.order_by(Appointment.scheduled_at.desc())
             .limit(30)
             .all()
         )
+        matching_appointments = []
+        if retrieval_terms:
+            matching_appointments = (
+                appointment_query.filter(or_(
+                    *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.healthcare_org.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.preparation_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.travel_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(30)
+                .all()
+            )
+        appointments = []
+        seen_appointment_ids = set()
+        # Search older matching appointments separately from the recent timeline.
+        for appointment in [*matching_appointments[:12], *recent_appointments]:
+            if str(appointment.id) not in seen_appointment_ids:
+                seen_appointment_ids.add(str(appointment.id))
+                appointments.append(appointment)
+            if len(appointments) >= 30:
+                break
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
