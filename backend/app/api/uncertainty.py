@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
-from app.models.care import Evidence
+from app.models.care import Evidence, Person
 from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
@@ -254,6 +254,15 @@ def create_claim_dependency(
     ).all()
     if {row[0] for row in claims} != {dependency.claim_id, dependency.depends_on_claim_id}:
         raise HTTPException(status_code=404, detail="Both claims must exist in the authenticated care record")
+
+    # Serialize graph writes per care record on PostgreSQL. Without a parent-row
+    # lock, two concurrent inverse-edge requests could each pass a cycle check
+    # against the same pre-commit graph and create a cycle together.
+    scoped_person = engine.db.query(Person.id).filter(
+        Person.id == engine.person_id,
+    ).with_for_update().first()
+    if scoped_person is None:
+        raise HTTPException(status_code=404, detail="Care record not found")
 
     existing = engine.db.query(EvidenceClaimDependency).filter(
         EvidenceClaimDependency.person_id == engine.person_id,
