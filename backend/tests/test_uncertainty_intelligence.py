@@ -7,6 +7,7 @@ from sqlalchemy import Boolean, Column, DateTime, Float, MetaData, String, Table
 
 from app.services.lcr_context import build_lcr_context
 from app.services.uncertainty_intelligence import analyze_uncertainty
+from app.services.delta_engine import _match_finding_evidence
 
 
 def test_no_evidence_is_unknown_not_negative():
@@ -168,3 +169,15 @@ def test_lcr_context_exposes_active_persisted_analysis_without_cross_person_leak
     assert "must not leak" not in json.dumps(context)
     assert "assessment-superseded" not in json.dumps(context)
     engine.dispose()
+
+
+
+def test_delta_finding_evidence_requires_matching_stored_excerpt():
+    evidence = [
+        {"id": "evidence-medication", "text": "Caregiver reports: dose increased to 10 mg."},
+        {"id": "evidence-fall", "text": "Caregiver reports a fall yesterday."},
+    ]
+    matched = _match_finding_evidence(evidence, "dose increased to 10 mg")
+    assert [item["id"] for item in matched] == ["evidence-medication"]
+    assert _match_finding_evidence(evidence, "") == []
+    assert _match_finding_evidence(evidence, "reported dose changed to 10mg") == []
