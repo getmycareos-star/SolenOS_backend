@@ -241,6 +241,7 @@ class EvidenceClaimAssessment(Base):
     evidence_links = Column(JSONList, nullable=False)
     reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     supersedes_assessment_id = Column(String, ForeignKey("evidence_claim_assessments.id"), nullable=True)
+    superseded_by_claim_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
