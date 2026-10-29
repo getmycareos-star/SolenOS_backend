@@ -1918,8 +1918,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if not saved_pair:
             raise HTTPException(status_code=409, detail="This turn is already being processed; retry with the same turn ID")
         saved_assistant, saved_session = saved_pair
-        if saved_session.person_id != person_id or saved_session.caregiver_id != caregiver_id:
+        if (
+            saved_session.person_id != person_id
+            or saved_session.caregiver_id != caregiver_id
+            or saved_session.status != "active"
+        ):
             raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+        if payload.session_id and payload.session_id != saved_session.id:
+            raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
         try:
             saved_metadata = json.loads(saved_assistant.response_metadata_json or "{}")
         except (TypeError, ValueError):
