@@ -117,6 +117,8 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Add person-scoped, immutable domain-specific freshness policy versions with explicit max-age and/or historical boundaries; no universal default threshold is supplied.
 - [x] Add authenticated policy creation/list APIs and append-only freshness assessments with policy version, event/collection/upload source time, assessment time, age, rationale, and explicit unknown/future timestamp outcomes.
 - [x] Add assessment-history retrieval and UI controls in the LCR evidence review panel; failed history reads are not presented as an empty history.
+- [x] Pass explicit freshness assessment status, policy version, timestamp kind, and rationale into relevant Qwen support workflows; include freshness assessments and policies in family current-status and professional handoff provenance sections.
+- [x] Add Companion and professional-handoff API tests that assert freshness policy/assessment records appear as inspectable source references.
 - [x] Add a PostgreSQL migration with append-only database triggers and schema/trigger assertions; migration is idempotent when ORM metadata has pre-created the new tables.
 - [x] Add backend API tests for explicit-policy requirement, duplicate version rejection, stale/unknown time outcomes, persisted history, cross-person isolation, and ORM append-only behavior.
 - [ ] Current-main backend, PostgreSQL migration, and frontend checks must pass on the exact latest SHAs before this slice is verified.
@@ -161,6 +163,7 @@ No group is marked fully complete in this ledger. Source-lineage persistence and
 - [x] Add runtime rejection of generated UUID-shaped or explicitly labelled record identifiers that do not occur in the caregiver request or authorized source context; apply this guard to the shared Qwen support flow and Companion's primary/revision attempts.
 - [x] Include appointment, handoff, and notification record IDs in Qwen support results and persist them in immutable-per-output provenance metadata for background jobs.
 - [x] Add tests for fabricated versus authorized record identifiers and durable appointment/handoff/notification source metadata.
+- [x] Persist typed source-record references on Companion conversation messages, return them in the message response/history API, and render an inspectable source-reference list in the Companion UI.
 - [ ] This guard catches unsupported record identifiers only; it does not semantically prove that every natural-language claim is entailed by the cited source, nor does it validate arbitrary quotations. The full claim-by-claim grounding requirement remains incomplete.
 
 ### Q. Frontend evidence workflows — PARTIAL
