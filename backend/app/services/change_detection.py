@@ -83,7 +83,11 @@ def detect_event_changes(
             change_direction=ChangeDirection.INCREASING,
             previous_state=baseline_state,
             current_state=f"{current_count} event(s) recorded in the current observation window",
-            previous_count=0,
+            # A zero prior count is defensible only when the baseline was
+            # explicitly covered. Otherwise the prior count is unknown, not zero.
+            previous_count=(
+                0 if comparison.get("baseline_coverage_status") == "covered" else None
+            ),
             current_count=current_count,
             baseline_id=baseline.id,
             baseline=baseline,
