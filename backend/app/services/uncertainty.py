@@ -155,11 +155,31 @@ class UncertaintyEngine:
         return query.order_by(InformationGapModel.created_at.desc()).all()
 
     def create_open_question(self, question: OpenQuestionCreate) -> OpenQuestionModel:
-        db_question = OpenQuestionModel(**self._scoped_payload(question.model_dump()))
-        self.db.add(db_question)
-        self.db.commit()
-        self.db.refresh(db_question)
-        return db_question
+        payload = self._scoped_payload(question.model_dump())
+        scoped_person_id = self.person_id or payload["person_id"]
+        payload["person_id"] = scoped_person_id
+        if payload.get("status", "open") != "open":
+            raise ValueError("A new clarification question must start open.")
+        if payload.get("answer") or payload.get("answer_provenance"):
+            raise ValueError("A new clarification question cannot contain a pre-recorded answer.")
+        if payload.get("closed_reason"):
+            raise ValueError("A new clarification question cannot contain a closure reason.")
+        payload["evidence_ids"] = self._validate_person_evidence(
+            scoped_person_id, payload.get("evidence_ids")
+        ) or None
+        question_text = (payload.get("question") or "").strip()
+        if not question_text:
+            raise ValueError("A clarification question must contain non-empty text.")
+        payload["question"] = question_text
+        db_question = OpenQuestionModel(**payload)
+        try:
+            self.db.add(db_question)
+            self.db.commit()
+            self.db.refresh(db_question)
+            return db_question
+        except Exception:
+            self.db.rollback()
+            raise
 
     def update_open_question(
         self, question_id: str, update: OpenQuestionUpdate
