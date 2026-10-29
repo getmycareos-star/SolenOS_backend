@@ -48,12 +48,41 @@ class UncertaintyEngine:
             query = query.filter(model.person_id == self.person_id)
         return query
 
+    def _validate_person_evidence(self, person_id: str, evidence_ids) -> list:
+        from app.models.care import Evidence
+
+        ids = list(evidence_ids or [])
+        if len(ids) != len(set(ids)):
+            raise ValueError("Duplicate evidence IDs are not allowed.")
+        if ids:
+            count = self.db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(ids),
+            ).count()
+            if count != len(ids):
+                raise ValueError("Every evidence reference must belong to the same care record.")
+        return ids
+
     def create_information_gap(self, gap: InformationGapCreate) -> InformationGapModel:
-        db_gap = InformationGapModel(**self._scoped_payload(gap.model_dump()))
-        self.db.add(db_gap)
-        self.db.commit()
-        self.db.refresh(db_gap)
-        return db_gap
+        payload = self._scoped_payload(gap.model_dump())
+        scoped_person_id = self.person_id or payload["person_id"]
+        payload["person_id"] = scoped_person_id
+        if payload.get("lifecycle_status", GapLifecycleStatus.OPEN) != GapLifecycleStatus.OPEN:
+            raise ValueError("A new information gap must start open; transitions require an existing record.")
+        payload["evidence_ids"] = self._validate_person_evidence(
+            scoped_person_id, payload.get("evidence_ids")
+        ) or None
+        if payload.get("resolution_date") or payload.get("resolution_notes") or payload.get("resolution_mechanism"):
+            raise ValueError("A new information gap cannot carry a fabricated prior resolution.")
+        db_gap = InformationGapModel(**payload)
+        try:
+            self.db.add(db_gap)
+            self.db.commit()
+            self.db.refresh(db_gap)
+            return db_gap
+        except Exception:
+            self.db.rollback()
+            raise
 
     def update_information_gap(
         self, gap_id: str, update: InformationGapUpdate
@@ -65,21 +94,44 @@ class UncertaintyEngine:
             return None
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
-        if "lifecycle_status" in update_data:
-            new_status = update_data["lifecycle_status"]
-            if new_status == GapLifecycleStatus.RESOLVED:
-                db_gap.resolution_date = datetime.now(timezone.utc)
-            elif new_status == GapLifecycleStatus.OPEN and db_gap.lifecycle_status != GapLifecycleStatus.OPEN:
-                db_gap.resolution_date = None
-                db_gap.resolution_mechanism = None
-                db_gap.resolution_notes = None
+        scoped_person_id = self.person_id or db_gap.person_id
+        if "evidence_ids" in update_data:
+            update_data["evidence_ids"] = self._validate_person_evidence(
+                scoped_person_id, update_data["evidence_ids"]
+            ) or None
+
+        new_status = update_data.get("lifecycle_status", db_gap.lifecycle_status)
+        if new_status == GapLifecycleStatus.RESOLVED:
+            mechanism = update_data.get("resolution_mechanism", db_gap.resolution_mechanism)
+            notes = update_data.get("resolution_notes", db_gap.resolution_notes)
+            evidence_ids = update_data.get("evidence_ids", db_gap.evidence_ids) or []
+            if mechanism is None:
+                raise ValueError("Resolving an information gap requires an explicit resolution mechanism.")
+            if not isinstance(notes, str) or not notes.strip():
+                raise ValueError("Resolving an information gap requires a recorded rationale.")
+            if mechanism in {"new_evidence", "source_confirmation"} and not evidence_ids:
+                raise ValueError("This resolution mechanism requires linked supporting evidence.")
+            update_data["resolution_date"] = datetime.now(timezone.utc)
+        elif new_status == GapLifecycleStatus.REOPENED:
+            # Reopening means the earlier resolution no longer settles the question.
+            update_data["resolution_date"] = None
+            update_data["resolution_mechanism"] = None
+            update_data["resolution_notes"] = None
+        elif new_status == GapLifecycleStatus.OPEN and db_gap.lifecycle_status != GapLifecycleStatus.OPEN:
+            update_data["resolution_date"] = None
+            update_data["resolution_mechanism"] = None
+            update_data["resolution_notes"] = None
 
         for field, value in update_data.items():
             setattr(db_gap, field, value)
 
-        self.db.commit()
-        self.db.refresh(db_gap)
-        return db_gap
+        try:
+            self.db.commit()
+            self.db.refresh(db_gap)
+            return db_gap
+        except Exception:
+            self.db.rollback()
+            raise
 
     def list_information_gaps(
         self,
