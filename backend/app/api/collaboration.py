@@ -939,24 +939,51 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
 
 
 _MEASUREMENT_REQUESTS = (
-    (re.compile(r"\b(?:blood\s+pressure|bp)\b", re.IGNORECASE), re.compile(r"\b(?:blood\s+pressure|systolic|diastolic)\b", re.IGNORECASE), "blood pressure reading"),
-    (re.compile(r"\b(?:blood\s+sugar|blood\s+glucose|glucose)\b", re.IGNORECASE), re.compile(r"\b(?:blood\s+sugar|blood\s+glucose|glucose|mg\s*/?\s*dl|mmol\s*/?\s*l)\b", re.IGNORECASE), "blood glucose reading"),
-    (re.compile(r"\b(?:oxygen\s+saturation|spo2|oxygen\s+level)\b", re.IGNORECASE), re.compile(r"\b(?:oxygen\s+saturation|spo2|oxygen\s+level)\b", re.IGNORECASE), "oxygen saturation reading"),
-    (re.compile(r"\b(?:heart\s+rate|pulse)\b", re.IGNORECASE), re.compile(r"\b(?:heart\s+rate|pulse)\b", re.IGNORECASE), "heart-rate reading"),
-    (re.compile(r"\b(?:body\s+temperature|temperature)\b", re.IGNORECASE), re.compile(r"\b(?:body\s+temperature|temperature)\b", re.IGNORECASE), "temperature reading"),
-    (re.compile(r"\b(?:body\s+weight|weight)\b", re.IGNORECASE), re.compile(r"\b(?:body\s+weight|weight)\b", re.IGNORECASE), "weight measurement"),
+    (
+        re.compile(r"\b(?:blood\s+pressure|bp)\b", re.IGNORECASE),
+        re.compile(
+            r"(?:blood\s+pressure|systolic|diastolic|\bbp\b).{0,80}\b\d{2,3}\s*(?:/|over)\s*\d{2,3}\b"
+            r"|\b\d{2,3}\s*(?:/|over)\s*\d{2,3}\b.{0,80}(?:blood\s+pressure|systolic|diastolic|\bbp\b)",
+            re.IGNORECASE | re.DOTALL,
+        ),
+        "blood pressure reading",
+    ),
+    (
+        re.compile(r"\b(?:blood\s+sugar|blood\s+glucose|glucose)\b", re.IGNORECASE),
+        re.compile(r"(?:blood\s+sugar|blood\s+glucose|glucose).{0,80}\b\d+(?:\.\d+)?\s*(?:mg\s*/?\s*dl|mmol\s*/?\s*l)\b", re.IGNORECASE | re.DOTALL),
+        "blood glucose reading",
+    ),
+    (
+        re.compile(r"\b(?:oxygen\s+saturation|spo2|oxygen\s+level)\b", re.IGNORECASE),
+        re.compile(r"(?:oxygen\s+saturation|spo2|oxygen\s+level).{0,80}\b\d{2,3}\s*%", re.IGNORECASE | re.DOTALL),
+        "oxygen saturation reading",
+    ),
+    (
+        re.compile(r"\b(?:heart\s+rate|pulse)\b", re.IGNORECASE),
+        re.compile(r"(?:heart\s+rate|pulse).{0,80}\b\d{2,3}\s*(?:bpm|beats\s+per\s+minute)\b", re.IGNORECASE | re.DOTALL),
+        "heart-rate reading",
+    ),
+    (
+        re.compile(r"\b(?:body\s+temperature|temperature)\b", re.IGNORECASE),
+        re.compile(r"(?:body\s+temperature|temperature).{0,80}\b\d{2,3}(?:\.\d+)?\s*°?\s*[cf]\b", re.IGNORECASE | re.DOTALL),
+        "temperature reading",
+    ),
+    (
+        re.compile(r"\b(?:body\s+weight|weight)\b", re.IGNORECASE),
+        re.compile(r"(?:body\s+weight|weight).{0,80}\b\d+(?:\.\d+)?\s*(?:kg|kilograms?|lb|lbs|pounds?)\b", re.IGNORECASE | re.DOTALL),
+        "weight measurement",
+    ),
 )
 
 
 def _missing_requested_measurement_response(user_text: str, authorized_lines: list[str]) -> str | None:
-    """Prevent model-invented measurements when the requested measure is absent from retrieved records."""
+    """Prevent model-invented numeric measurements when no matching value is sourced."""
     question = user_text or ""
     context = "\n".join(authorized_lines or [])
-    for request_pattern, evidence_pattern, label in _MEASUREMENT_REQUESTS:
-        if request_pattern.search(question) and not evidence_pattern.search(context):
+    for request_pattern, value_pattern, label in _MEASUREMENT_REQUESTS:
+        if request_pattern.search(question) and not value_pattern.search(context):
             return f"I couldn't find a {label} in the available care record for the time you asked about."
     return None
-
 
 def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
     if not assessment or assessment.get("sufficient"):
@@ -2053,7 +2080,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,
-            [*event_context, *assertion_context, *evidence_context, *shared_lcr_lines],
+            [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
         )
         if missing_measurement_reply:
             # The model may confidently invent a plausible vital sign. A requested
