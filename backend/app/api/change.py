@@ -164,11 +164,6 @@ def transition_change_confirmation(
             status_code=422,
             detail="A decision rationale is required for confirmed, rejected, or inconclusive decisions",
         )
-    if payload.status == "confirmed" and not payload.evidence_ids:
-        raise HTTPException(
-            status_code=422,
-            detail="At least one persisted source event or assertion is required to confirm a change",
-        )
 
     change = (
         db.query(Change)
@@ -192,6 +187,12 @@ def transition_change_confirmation(
         raise HTTPException(
             status_code=409,
             detail=f"Invalid confirmation transition from {previous_status} to {payload.status}",
+        )
+
+    if payload.status == "confirmed" and not payload.evidence_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="At least one persisted source event or assertion is required to confirm a change",
         )
 
     supplied_evidence_ids = list(dict.fromkeys(payload.evidence_ids))
