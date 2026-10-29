@@ -141,3 +141,5 @@ jobs:
           if not tests or failures or errors or skipped:
               raise SystemExit("PostgreSQL longitudinal integration gate failed.")
           PY
+
+# CI retrigger: validate the corrected longitudinal fixture and PostgreSQL integration path.
