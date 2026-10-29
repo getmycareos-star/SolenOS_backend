@@ -13,7 +13,7 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     revision_ids = [revision.revision for revision in revisions]
 
     assert len(revision_ids) == len(set(revision_ids)), "duplicate Alembic revision IDs found"
-    assert script.get_heads() == ["20261029_14_question_answer_history"]
+    assert script.get_heads() == ["20261029_14_q_answer_hist"]
 
     # These migrations must remain reachable from the canonical head: they add
     # append-only coverage and record baseline/current coverage provenance.
@@ -21,4 +21,4 @@ def test_migration_graph_has_one_canonical_head_and_unique_revision_ids():
     assert "20261029_11_cov_prov" in revision_ids
     assert "20261029_12_claim_deps" in revision_ids
     assert "20261029_13_conflict_scope" in revision_ids
-    assert "20261029_14_question_answer_history" in revision_ids
+    assert "20261029_14_q_answer_hist" in revision_ids
