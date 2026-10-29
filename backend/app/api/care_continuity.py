@@ -14,7 +14,7 @@ import hashlib
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, or_, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -27,7 +27,7 @@ from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -393,6 +393,132 @@ def list_claim_assessments(
         .order_by(EvidenceClaimAssessment.claim_version.asc())
         .all()
     )
+
+
+CLAIM_DEPENDENCY_TYPES = {"derived_from", "requires", "supports", "contradicts", "contextualizes"}
+CLAIM_DAG_TYPES = {"derived_from", "requires"}
+
+
+@router.post("/claims/{claim_id}/dependencies", status_code=201)
+def create_claim_dependency(
+    claim_id: str,
+    payload: dict[str, Any],
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Append a person-scoped claim relationship; dependency edges cannot form cycles."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    claim = db.query(CareAssertion).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    target_id = str(payload.get("depends_on_claim_id") or "").strip()
+    relationship_type = str(payload.get("dependency_type") or "").strip().lower()
+    rationale = str(payload.get("rationale") or "").strip()
+    if not target_id or not rationale:
+        raise HTTPException(status_code=422, detail="depends_on_claim_id and a non-empty rationale are required")
+    if relationship_type not in CLAIM_DEPENDENCY_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported claim dependency type")
+    if target_id == claim_id:
+        raise HTTPException(status_code=422, detail="A claim cannot depend on itself")
+    if not caregiver_id:
+        raise HTTPException(status_code=403, detail="A caregiver identity is required to link claim dependencies")
+    target = db.query(CareAssertion.id).filter(
+        CareAssertion.id == target_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if target is None:
+        # Do not disclose whether an ID exists in another person's care record.
+        raise HTTPException(status_code=404, detail="Dependency target claim not found")
+
+    if relationship_type in CLAIM_DAG_TYPES:
+        edges = db.query(
+            EvidenceClaimDependency.claim_id,
+            EvidenceClaimDependency.depends_on_claim_id,
+        ).filter(
+            EvidenceClaimDependency.person_id == person_id,
+            EvidenceClaimDependency.dependency_type.in_(CLAIM_DAG_TYPES),
+        ).all()
+        adjacency: dict[str, list[str]] = {}
+        for source_id, dependency_id in edges:
+            adjacency.setdefault(str(source_id), []).append(str(dependency_id))
+        # Adding claim -> target is cyclic exactly when target already reaches claim.
+        pending = [target_id]
+        visited: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current == claim_id:
+                raise HTTPException(status_code=422, detail="Claim dependency would create a cycle")
+            if current in visited:
+                continue
+            visited.add(current)
+            pending.extend(adjacency.get(current, []))
+
+    row = EvidenceClaimDependency(
+        person_id=person_id,
+        claim_id=claim_id,
+        depends_on_claim_id=target_id,
+        dependency_type=relationship_type,
+        rationale=rationale,
+        created_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This exact claim relationship already exists") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Claim dependency could not be persisted")
+        raise HTTPException(status_code=503, detail="Claim dependency could not be persisted") from exc
+    return {
+        "id": row.id,
+        "person_id": row.person_id,
+        "claim_id": row.claim_id,
+        "depends_on_claim_id": row.depends_on_claim_id,
+        "dependency_type": row.dependency_type,
+        "rationale": row.rationale,
+        "created_by_caregiver_id": row.created_by_caregiver_id,
+        "created_at": row.created_at,
+    }
+
+
+@router.get("/claims/{claim_id}/dependencies")
+def list_claim_dependencies(
+    claim_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return incoming and outgoing edges for one claim, without leaking other care records."""
+    person_id, _ = _scoped_identity(request, db)
+    claim = db.query(CareAssertion.id).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    rows = db.query(EvidenceClaimDependency).filter(
+        EvidenceClaimDependency.person_id == person_id,
+        or_(
+            EvidenceClaimDependency.claim_id == claim_id,
+            EvidenceClaimDependency.depends_on_claim_id == claim_id,
+        ),
+    ).order_by(EvidenceClaimDependency.created_at.asc(), EvidenceClaimDependency.id.asc()).all()
+    return [{
+        "id": row.id,
+        "person_id": row.person_id,
+        "claim_id": row.claim_id,
+        "depends_on_claim_id": row.depends_on_claim_id,
+        "dependency_type": row.dependency_type,
+        "rationale": row.rationale,
+        "created_by_caregiver_id": row.created_by_caregiver_id,
+        "created_at": row.created_at,
+        "direction": "outgoing" if row.claim_id == claim_id else "incoming",
+    } for row in rows]
 
 
 RESOURCES = {
