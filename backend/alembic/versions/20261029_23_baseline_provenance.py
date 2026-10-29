@@ -4,6 +4,7 @@ Revises: 20261029_22_conflict_hist
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import inspect
 
 revision = "20261029_23_baseline_provenance"
 down_revision = "20261029_22_conflict_hist"
@@ -12,26 +13,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Existing baselines cannot be retroactively assigned a coverage state or
-    # algorithm version that their original rows did not record.
-    op.add_column(
-        "baselines",
-        sa.Column(
-            "coverage_status",
-            sa.String(length=16),
-            nullable=False,
-            server_default="unknown",
-        ),
+    # This revision may follow a partially reconciled schema where the ORM
+    # or an earlier deployed migration path already created one or both fields.
+    # Preserve existing values and add only missing columns; never infer a
+    # legacy baseline's historical coverage or algorithm version.
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    if not inspector.has_table("baselines"):
+        raise RuntimeError("The baselines table must exist before baseline provenance is added.")
+    existing = {column["name"] for column in inspector.get_columns("baselines")}
+    columns = (
+        ("coverage_status", sa.String(length=16), "unknown"),
+        ("analysis_version", sa.String(length=64), "legacy-unversioned"),
     )
-    op.add_column(
-        "baselines",
-        sa.Column(
-            "analysis_version",
-            sa.String(length=64),
-            nullable=False,
-            server_default="legacy-unversioned",
-        ),
-    )
+    for name, column_type, default in columns:
+        if name not in existing:
+            op.add_column(
+                "baselines",
+                sa.Column(name, column_type, nullable=False, server_default=default),
+            )
+            existing.add(name)
 
 
 def downgrade() -> None:
