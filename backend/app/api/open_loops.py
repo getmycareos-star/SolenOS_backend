@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import Base, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
+from app.models.care import Evidence
 
 router = APIRouter(prefix="/open-loops", tags=["open-loops"])
 
@@ -592,8 +593,28 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
         return replay
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
-    if loop.loop_type == "professional_input" and not payload.evidence:
-        raise HTTPException(status_code=422, detail="Professional input requires source evidence; caregiver text alone cannot establish it")
+    if loop.loop_type == "professional_input":
+        if not payload.evidence:
+            raise HTTPException(status_code=422, detail="Professional input requires source evidence; caregiver text alone cannot establish it")
+        evidence_ids = {
+            str(item.get("evidence_id", "")).strip()
+            for item in payload.evidence
+            if isinstance(item, dict) and str(item.get("evidence_id", "")).strip()
+        }
+        if not evidence_ids:
+            raise HTTPException(
+                status_code=422,
+                detail="Professional input must reference an existing care-record evidence ID; caregiver notes alone are not source evidence",
+            )
+        verified_ids = {
+            row.id for row in db.query(Evidence).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).all()
+        }
+        if verified_ids != evidence_ids:
+            # Do not reveal whether an unrecognized evidence ID belongs to another person.
+            raise HTTPException(status_code=404, detail="Referenced source evidence was not found in this care record")
     before = _snapshot(loop)
     loop.response_evidence = [*(loop.response_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
     loop.last_contact_at = datetime.now(timezone.utc)
@@ -704,8 +725,14 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
         raise HTTPException(status_code=409, detail="Closure requires evidence")
     if loop.loop_type in {"awaiting_response", "professional_input"} and not loop.response_evidence:
         raise HTTPException(status_code=409, detail="A response must be recorded before closure")
-    if loop.loop_type == "professional_input" and not any(item.get("evidence") for item in (loop.response_evidence or []) if isinstance(item, dict)):
-        raise HTTPException(status_code=409, detail="Professional input has not been substantiated by source evidence")
+    if loop.loop_type == "professional_input" and not any(
+        isinstance(item, dict) and any(
+            isinstance(source, dict) and source.get("evidence_id")
+            for source in (item.get("evidence") or [])
+        )
+        for item in (loop.response_evidence or [])
+    ):
+        raise HTTPException(status_code=409, detail="Professional input has not been substantiated by an existing care-record source")
     if loop.loop_type == "missing_information" and (loop.missing_information or loop.outcome_status != "outcome_verified"):
         raise HTTPException(status_code=409, detail="Required information must be obtained, validated, and recorded as a verified outcome")
     has_recorded_reconciliation = any(
