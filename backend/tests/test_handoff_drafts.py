@@ -10,6 +10,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence
 from app.models.action import Action
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 from app.models.time_location import Appointment
 
 engine = create_engine(
@@ -353,3 +354,66 @@ def test_handoff_explicit_evidence_reference_parser_keeps_only_declared_links():
     }) == ["evidence-a", "evidence-b", "evidence-c"]
     assert _explicit_evidence_ids({"evidence_ids": None, "source_evidence_id": None}) == []
     assert _explicit_evidence_ids({"evidence_ids": "evidence-d"}) == ["evidence-d"]
+
+
+
+def test_professional_handoff_includes_freshness_policy_and_assessment_provenance(client):
+    test_client, session = client
+    token = session["access_token"]
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    db = TestSessionLocal()
+    try:
+        source_time = datetime.now(timezone.utc) - timedelta(days=45)
+        evidence = Evidence(
+            id="handoff-freshness-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="A dated care document",
+            uploaded_by_caregiver_id=caregiver_id,
+            occurred_at=source_time,
+            collected_at=source_time,
+        )
+        policy = EvidenceFreshnessPolicy(
+            id="handoff-freshness-policy",
+            person_id=person_id,
+            domain_key="document_history",
+            policy_version="v1",
+            max_age_days=30,
+            historical_after_days=180,
+            rationale="Explicit caregiver-selected review boundary.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        assessment = EvidenceFreshnessAssessment(
+            id="handoff-freshness-assessment",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            policy_id=policy.id,
+            policy_version=policy.policy_version,
+            freshness_status="needs_review",
+            source_time=source_time,
+            source_time_kind="event_occurrence",
+            assessed_at=datetime.now(timezone.utc),
+            age_days=45,
+            rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
+            assessed_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, policy, assessment])
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    refs = {item["source_id"]: item for item in body["source_references"]}
+    assert "handoff-freshness-assessment" in refs
+    assert "handoff-freshness-policy" in refs
+    assert refs["handoff-freshness-assessment"]["record_status"] == "needs_review"
+    assert refs["handoff-freshness-policy"]["record_status"] == "v1"
+    assert body["source_statuses"]["evidence_freshness_assessments"]["status"] == "available"
+    assert body["source_statuses"]["evidence_freshness_policies"]["status"] == "available"
