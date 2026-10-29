@@ -233,7 +233,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     serialized_messages = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Caregiver reported that sleep was poor last night." in serialized_messages
     assert "Caregiver reports poor sleep before breakfast." in serialized_messages
-    assert approved.json()["proposal"]["source_ids"][0] in serialized_messages
+    assert approved.json()["proposal"]["source_ids"][0] not in serialized_messages
 
 
 def test_daily_care_proposal_cannot_be_reviewed_by_another_caregiver_session(monkeypatch):
