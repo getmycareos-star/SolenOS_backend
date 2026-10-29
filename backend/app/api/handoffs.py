@@ -7,6 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
+from sqlalchemy import MetaData, Table, inspect, select
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
@@ -48,6 +49,61 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
     return str(session.person_id), str(session.caregiver_id)
+
+
+def _validate_summary_source_record_ids(db: Session, person_id: str, source_ids: list[str]) -> dict[str, list[str]]:
+    """Verify source references resolve to persisted records owned by this care record.
+
+    This verifies existence and person scope only; it does not prove that summary
+    prose is semantically entailed by those records. Unknown and cross-person IDs
+    intentionally share the same error to avoid disclosing another person's data.
+    """
+    allowed_tables = (
+        "evidence", "evidence_uploads", "care_events", "care_facts",
+        "care_assertions", "appointments", "appointment_workspace_records",
+        "open_loop_records", "information_gaps", "open_questions",
+        "care_decisions", "decision_outcomes", "care_timeline_entries",
+    )
+    if len(source_ids) != len(set(source_ids)):
+        raise HTTPException(status_code=422, detail="Summary source record IDs must be unique")
+    if not source_ids:
+        return {}
+
+    try:
+        inspector = inspect(db.get_bind())
+        existing_tables = set(inspector.get_table_names())
+        metadata = MetaData()
+        resolved: dict[str, list[str]] = {source_id: [] for source_id in source_ids}
+        for table_name in allowed_tables:
+            if table_name not in existing_tables:
+                continue
+            columns = {column["name"] for column in inspector.get_columns(table_name)}
+            if not {"id", "person_id"}.issubset(columns):
+                continue
+            table = Table(table_name, metadata, autoload_with=db.get_bind())
+            for source_id in source_ids:
+                found = db.execute(
+                    select(table.c.id)
+                    .where(table.c.id == source_id, table.c.person_id == person_id)
+                    .limit(1)
+                ).first()
+                if found is not None:
+                    resolved[source_id].append(table_name)
+        missing = [source_id for source_id, tables in resolved.items() if not tables]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail="Every summary source ID must resolve to an existing record in the authenticated care record",
+            )
+        return resolved
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Summary source references could not be verified against the care-record database",
+        ) from exc
 
 
 def _has_required_consent(db: Session, person_id: str, caregiver_id: str) -> bool:
@@ -474,14 +530,22 @@ def attach_handoff_summary(
     if handoff.summary_snapshot is not None:
         raise HTTPException(status_code=409, detail="A summary snapshot is already attached; create a new handoff to replace it")
 
+    validated_source_records = _validate_summary_source_record_ids(
+        db, person_id, payload.source_record_ids
+    )
     snapshot = {
         "sections": payload.sections,
         "source_record_ids": payload.source_record_ids,
+        "source_record_tables": validated_source_records,
         "prepared_at": payload.prepared_at.isoformat() if payload.prepared_at else None,
         "stored_at": now.isoformat(),
         "caregiver_reviewed": True,
         "review_attestation": "client_declared_not_server_verified",
-        "source_id_validation": "not_server_verified" if payload.source_record_ids else "not_supplied",
+        "source_id_validation": (
+            "server_verified_person_scope_and_record_existence"
+            if payload.source_record_ids else "not_supplied"
+        ),
+        "semantic_grounding_status": "not_automatically_verified",
     }
     canonical = json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     snapshot["content_sha256"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
