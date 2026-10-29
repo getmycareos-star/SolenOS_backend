@@ -173,6 +173,54 @@ def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depe
         for row in rows
     ]
 
+
+@router.get("/evidence/{evidence_id}/integrity")
+def get_evidence_source_integrity(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    """Compare the stored source-text hash with the current persisted text, within session scope."""
+    person_id, _ = _scoped_identity(request, db)
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence not found")
+
+    stored_hash = evidence.source_text_sha256
+    computed_hash = (
+        hashlib.sha256(evidence.source_text.encode("utf-8")).hexdigest()
+        if evidence.source_text is not None
+        else None
+    )
+    if stored_hash is None:
+        integrity_status = "unavailable"
+    elif computed_hash is None or not __import__("hmac").compare_digest(stored_hash, computed_hash):
+        integrity_status = "mismatch"
+    else:
+        integrity_status = "match"
+
+    def iso(value):
+        return value.isoformat() if value is not None else None
+
+    return {
+        "evidence_id": evidence.id,
+        "person_id": evidence.person_id,
+        "source_text_integrity_status": integrity_status,
+        "stored_source_text_sha256": stored_hash,
+        "recomputed_source_text_sha256": computed_hash,
+        "hash_scope": "exact UTF-8 encoding of the currently stored source_text field",
+        "original_file_authenticity_verified": False,
+        "uploaded_by_caregiver_id": evidence.uploaded_by_caregiver_id,
+        "original_author": evidence.original_author,
+        "reported_by_label": evidence.reported_by_label,
+        "reported_by_caregiver_id": evidence.reported_by_caregiver_id,
+        "collected_by_caregiver_id": evidence.collected_by_caregiver_id,
+        "collected_at": iso(evidence.collected_at),
+        "occurred_at": iso(evidence.occurred_at),
+        "occurred_at_timezone": evidence.occurred_at_timezone,
+        "uploaded_at": iso(evidence.uploaded_at),
+        "ingested_at": iso(evidence.ingested_at),
+    }
+
 RESOURCES = {
     "facts": "care_facts",
     "fact-evidence": "care_fact_evidence",
