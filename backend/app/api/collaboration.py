@@ -986,12 +986,12 @@ def _missing_requested_measurement_response(user_text: str, authorized_lines: li
     return None
 
 _MEDICATION_CHANGE_REQUEST_RE = re.compile(
-    r"\\b(?:should|can|may|could|would)\\s+(?:i|we|you)\\s+"
-    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip|take\\s+more|take\\s+less)\\b"
-    r".{0,80}\\b(?:dose|medication|medicine|pill|tablet|prescription)\\b"
-    r"|\\b(?:is\\s+it|would\\s+it\\s+be)\\s+(?:safe|okay|all\\s+right)\\s+to\\s+"
-    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip)\\b"
-    r".{0,80}\\b(?:dose|medication|medicine|pill|tablet|prescription)\\b",
+    r"\b(?:should|can|may|could|would)\s+(?:i|we|you)\s+"
+    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip|take\s+more|take\s+less)\b"
+    r".{0,80}\b(?:dose|medication|medicine|pill|tablet|prescription)\b"
+    r"|\b(?:is\s+it|would\s+it\s+be)\s+(?:safe|okay|all\s+right)\s+to\s+"
+    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip)\b"
+    r".{0,80}\b(?:dose|medication|medicine|pill|tablet|prescription)\b",
     re.IGNORECASE | re.DOTALL,
 )
 
