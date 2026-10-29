@@ -225,6 +225,24 @@ def test_explicit_baseline_allows_only_a_possible_change_assessment():
     assert result["conclusion_confidence"] is None
 
 
+def test_baseline_without_current_observation_cannot_establish_change():
+    result = analyze_uncertainty(
+        claim="Appetite changed.",
+        task="identify_change",
+        evidence=[{
+            "id": "baseline-only",
+            "text": "Usual breakfast yesterday.",
+            "source_type": "caregiver_report",
+            "role": "baseline",
+            "is_baseline": True,
+        }],
+    )
+    assert "missing_baseline" in result["classifications"]
+    assert result["comparison_basis"]["explicit_baseline_present"] is True
+    assert result["comparison_basis"]["separate_comparison_observation_present"] is False
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+
+
 def test_failed_or_truncated_source_is_not_a_negative_finding():
     result = analyze_uncertainty(
         claim="No appointment is listed.",
