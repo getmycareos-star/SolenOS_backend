@@ -23,6 +23,10 @@ from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.models.care import Evidence
+from app.models.observation_coverage import ObservationCoverage
+from app.schemas.observation_coverage import ObservationCoverageCreate
+from app.services.observation_coverage import assess_observation_coverage
+from pydantic import ValidationError
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, CareAssertion
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
@@ -872,6 +876,135 @@ def current_care_projection(
         "notice": "This is a bounded record view, not a clinical conclusion. Conflicting claims remain separate; unavailable sources may make this view incomplete.",
     }
 
+
+
+@router.post("/observation-coverage", status_code=201)
+def create_observation_coverage(payload: dict[str, Any], request: Request, db: Session = Depends(get_db)):
+    """Persist an explicit observation-coverage interval under the authenticated person's identity."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("observation_coverage"):
+        raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
+
+    allowed = {"subject_type", "window_start", "window_end", "coverage_status", "source_evidence_ids", "rationale"}
+    unknown = set(payload) - allowed
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Unsupported observation-coverage fields: {sorted(unknown)}")
+    try:
+        validated = ObservationCoverageCreate(person_id=person_id, **payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    evidence_ids = validated.source_evidence_ids
+    if len(evidence_ids) != len(set(evidence_ids)):
+        raise HTTPException(status_code=422, detail="Duplicate source evidence IDs are not allowed")
+    if evidence_ids:
+        found = {
+            str(row[0]) for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(evidence_ids),
+            ).all()
+        }
+        if found != set(evidence_ids):
+            raise HTTPException(status_code=422, detail="Every source evidence ID must belong to the authenticated person's care record")
+
+    record = ObservationCoverage(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        subject_type=validated.subject_type,
+        window_start=validated.window_start,
+        window_end=validated.window_end,
+        coverage_status=validated.coverage_status,
+        source_evidence_ids=evidence_ids,
+        rationale=validated.rationale,
+        recorded_by_caregiver_id=caregiver_id,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return {
+        "id": record.id,
+        "person_id": record.person_id,
+        "subject_type": record.subject_type,
+        "window_start": _jsonable(record.window_start),
+        "window_end": _jsonable(record.window_end),
+        "coverage_status": record.coverage_status,
+        "source_evidence_ids": list(record.source_evidence_ids or []),
+        "rationale": record.rationale,
+        "recorded_by_caregiver_id": record.recorded_by_caregiver_id,
+        "created_at": _jsonable(record.created_at),
+    }
+
+
+@router.get("/observation-coverage")
+def list_observation_coverage(
+    request: Request,
+    subject_type: str | None = None,
+    limit: int = Query(default=100, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """List only the authenticated person's recorded observation-coverage intervals."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("observation_coverage"):
+        raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
+    query = db.query(ObservationCoverage).filter(ObservationCoverage.person_id == person_id)
+    if subject_type:
+        query = query.filter(ObservationCoverage.subject_type == subject_type)
+    rows = query.order_by(ObservationCoverage.window_start.desc(), ObservationCoverage.id.asc()).limit(limit + 1).all()
+    return {
+        "items": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "window_start": _jsonable(row.window_start),
+                "window_end": _jsonable(row.window_end),
+                "coverage_status": row.coverage_status,
+                "source_evidence_ids": list(row.source_evidence_ids or []),
+                "rationale": row.rationale,
+                "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
+                "created_at": _jsonable(row.created_at),
+            }
+            for row in rows[:limit]
+        ],
+        "count": min(len(rows), limit),
+        "has_more": len(rows) > limit,
+        "source_of_truth": "persisted_person_scoped_observation_coverage",
+    }
+
+
+@router.get("/observation-coverage/assessment")
+def get_observation_coverage_assessment(
+    subject_type: str = Query(min_length=1, max_length=120),
+    window_start: datetime = Query(),
+    window_end: datetime = Query(),
+    request: Request = None,
+    db: Session = Depends(get_db),
+):
+    """Assess recorded coverage; never infer that no event occurred during an unobserved interval."""
+    person_id, _ = _scoped_identity(request, db)
+    if not inspect(db.get_bind()).has_table("observation_coverage"):
+        raise HTTPException(status_code=503, detail="Observation coverage storage is not available until schema migration completes")
+    try:
+        result = assess_observation_coverage(db, person_id, subject_type, window_start, window_end)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    result["records"] = [
+        {
+            "id": row.id,
+            "subject_type": row.subject_type,
+            "window_start": _jsonable(row.window_start),
+            "window_end": _jsonable(row.window_end),
+            "coverage_status": row.coverage_status,
+            "source_evidence_ids": list(row.source_evidence_ids or []),
+            "rationale": row.rationale,
+            "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
+            "created_at": _jsonable(row.created_at),
+        }
+        for row in result["records"]
+    ]
+    result["window_start"] = _jsonable(result["window_start"])
+    result["window_end"] = _jsonable(result["window_end"])
+    result["source_of_truth"] = "persisted_person_scoped_observation_coverage"
+    return result
 
 
 def _build_situation_understanding_assessment(db: Session, person_id: str) -> dict[str, Any]:
