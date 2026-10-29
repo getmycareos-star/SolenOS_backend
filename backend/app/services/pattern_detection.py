@@ -347,8 +347,12 @@ def _build_recurrence_pattern(
         ]
         if len(local_datetimes) == len(ordered_events) and local_datetimes:
             local_time_distribution = {
-                "hour_of_day_counts": dict(sorted(Counter(value.hour for value in local_datetimes).items())),
-                "day_of_week_counts": dict(sorted(Counter(value.weekday() for value in local_datetimes).items())),
+                "hour_of_day_counts": {
+                    str(hour): count for hour, count in sorted(Counter(value.hour for value in local_datetimes).items())
+                },
+                "day_of_week_counts": {
+                    str(day): count for day, count in sorted(Counter(value.weekday() for value in local_datetimes).items())
+                },
                 "timezone_ids": sorted({event.occurred_at_timezone for event in ordered_events}),
             }
             local_time_distribution_status = "descriptive_only_no_causal_association"
