@@ -126,43 +126,63 @@ def load_evidence_lineage_scope(
 ) -> dict[str, Any]:
     """Load a bounded, same-person provenance closure for workflow evidence.
 
-    The caller's visible LCR rows are intentionally not the boundary of lineage:
-    an older, unselected ancestor may establish that two visible records share an
-    origin. This loader follows explicit parent links, normalized source references,
-    and persisted relationship edges. It never uses text similarity and never
-    queries another person's records.
+    Uses reflected columns so legacy/partial schemas remain explicitly usable.
+    The visible LCR rows are not the lineage boundary: an older unselected
+    ancestor may establish that two visible records share an origin. Only
+    explicit parent/source references and persisted relationship edges count.
     """
-    from sqlalchemy import func, or_
-    from app.models.care import Evidence
-    from app.models.care_continuity import EvidenceSourceRelationship
+    from types import SimpleNamespace
+    from sqlalchemy import MetaData, Table, func, or_, select
 
     seeds = {str(value).strip() for value in seed_evidence_ids if str(value).strip()}
     if not seeds:
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
 
+    bind = db.get_bind()
+    available_tables = set(__import__("sqlalchemy").inspect(bind).get_table_names())
+    if "evidence" not in available_tables:
+        return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
+    metadata = MetaData()
+    metadata.reflect(bind=bind, only=[
+        name for name in ("evidence", "evidence_source_relationships")
+        if name in available_tables
+    ])
+    evidence = metadata.tables["evidence"]
+    links = metadata.tables.get("evidence_source_relationships")
+    if "id" not in evidence.c or "person_id" not in evidence.c:
+        return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
+
+    evidence_fields = [
+        name for name in ("id", "person_id", "parent_evidence_id", "original_source_reference")
+        if name in evidence.c
+    ]
     evidence_by_id: dict[str, Any] = {}
     relationships_by_id: dict[str, Any] = {}
     frontier = set(seeds)
     has_more = False
     truncated = False
+    depth_limit = max(1, min(max_depth, 20))
+    node_limit = max(1, min(max_nodes, 1000))
+    relationship_limit = max(1, min(max_relationships, 2000))
 
-    for _depth in range(max(1, min(max_depth, 20))):
+    for _depth in range(depth_limit):
         pending = frontier - set(evidence_by_id)
-        if not pending or len(evidence_by_id) >= max_nodes:
+        if not pending or len(evidence_by_id) >= node_limit:
             break
-        available = max_nodes - len(evidence_by_id)
-        found = db.query(Evidence).filter(
-            Evidence.person_id == str(person_id),
-            Evidence.id.in_(sorted(pending)),
-        ).limit(available + 1).all()
+        available = node_limit - len(evidence_by_id)
+        statement = select(*(evidence.c[name] for name in evidence_fields)).where(
+            evidence.c.person_id == str(person_id),
+            evidence.c.id.in_(sorted(pending)),
+        ).limit(available + 1)
+        found = [dict(row) for row in db.execute(statement).mappings().all()]
         if len(found) > available:
             has_more = True
             truncated = True
             found = found[:available]
         for row in found:
-            evidence_by_id[str(row.id)] = row
+            evidence_by_id[str(row["id"])] = SimpleNamespace(**row)
 
-        if len(evidence_by_id) >= max_nodes:
+        if len(evidence_by_id) >= node_limit:
             has_more = True
             truncated = True
             break
@@ -171,73 +191,103 @@ def load_evidence_lineage_scope(
         next_ids: set[str] = set()
         source_refs: set[str] = set()
         for row in found:
-            parent_id = str(getattr(row, "parent_evidence_id", "") or "").strip()
+            parent_id = str(row.get("parent_evidence_id") or "").strip()
             if parent_id and parent_id not in evidence_by_id:
                 next_ids.add(parent_id)
-            source_ref = " ".join(str(getattr(row, "original_source_reference", "") or "").split()).casefold()
+            source_ref = " ".join(str(row.get("original_source_reference") or "").split()).casefold()
             if source_ref:
                 source_refs.add(source_ref)
 
-        # A matching explicit source reference is provenance, not a semantic
-        # similarity signal. Bound matches so a bad/shared identifier cannot
-        # expand retrieval without limit.
-        if source_refs:
-            ref_rows = db.query(Evidence).filter(
-                Evidence.person_id == str(person_id),
-                Evidence.original_source_reference.isnot(None),
-                func.lower(func.trim(Evidence.original_source_reference)).in_(sorted(source_refs)),
-            ).limit(max_nodes - len(evidence_by_id) + 1).all()
-            if len(ref_rows) > max_nodes - len(evidence_by_id):
+        if source_refs and "original_source_reference" in evidence.c:
+            available = node_limit - len(evidence_by_id)
+            if available <= 0:
                 has_more = True
                 truncated = True
-                ref_rows = ref_rows[:max_nodes - len(evidence_by_id)]
+                break
+            ref_statement = select(*(evidence.c[name] for name in evidence_fields)).where(
+                evidence.c.person_id == str(person_id),
+                evidence.c.original_source_reference.isnot(None),
+                func.lower(func.trim(evidence.c.original_source_reference)).in_(sorted(source_refs)),
+            ).limit(available + 1)
+            ref_rows = [dict(row) for row in db.execute(ref_statement).mappings().all()]
+            if len(ref_rows) > available:
+                has_more = True
+                truncated = True
+                ref_rows = ref_rows[:available]
             for row in ref_rows:
-                if str(row.id) not in evidence_by_id:
-                    evidence_by_id[str(row.id)] = row
-                    next_ids.add(str(row.id))
+                evidence_id = str(row["id"])
+                if evidence_id not in evidence_by_id:
+                    evidence_by_id[evidence_id] = SimpleNamespace(**row)
+                    next_ids.add(evidence_id)
 
-        # Relationship edges are strictly person-scoped. Discover adjacent
-        # evidence IDs, then load those nodes on the next bounded iteration.
-        relationship_rows = db.query(EvidenceSourceRelationship).filter(
-            EvidenceSourceRelationship.person_id == str(person_id),
-            or_(
-                EvidenceSourceRelationship.source_evidence_id.in_(sorted(current_ids)),
-                EvidenceSourceRelationship.related_evidence_id.in_(sorted(current_ids)),
-            ),
-        ).limit(max_relationships + 1).all()
-        if len(relationship_rows) > max_relationships:
-            has_more = True
-            truncated = True
-            relationship_rows = relationship_rows[:max_relationships]
-        for row in relationship_rows:
-            relationships_by_id[str(row.id)] = row
-            for linked_id in (row.source_evidence_id, row.related_evidence_id):
-                linked_id = str(linked_id)
-                if linked_id not in evidence_by_id:
-                    next_ids.add(linked_id)
+        if links is not None and {"person_id", "source_evidence_id", "related_evidence_id"}.issubset(links.c.keys()):
+            relationship_fields = [
+                name for name in (
+                    "id", "person_id", "source_evidence_id", "related_evidence_id",
+                    "source_independence_status", "origin_group_key", "relationship_type",
+                    "rationale", "created_at",
+                ) if name in links.c
+            ]
+            remaining = relationship_limit - len(relationships_by_id)
+            if remaining <= 0:
+                has_more = True
+                truncated = True
+                break
+            link_statement = select(*(links.c[name] for name in relationship_fields)).where(
+                links.c.person_id == str(person_id),
+                or_(
+                    links.c.source_evidence_id.in_(sorted(current_ids)),
+                    links.c.related_evidence_id.in_(sorted(current_ids)),
+                ),
+            ).limit(remaining + 1)
+            link_rows = [dict(row) for row in db.execute(link_statement).mappings().all()]
+            if len(link_rows) > remaining:
+                has_more = True
+                truncated = True
+                link_rows = link_rows[:remaining]
+            for row in link_rows:
+                key = str(row.get("id") or (
+                    str(row.get("source_evidence_id")) + ":" + str(row.get("related_evidence_id"))
+                    + ":" + str(row.get("relationship_type"))
+                ))
+                relationships_by_id[key] = SimpleNamespace(**row)
+                for linked_id in (row.get("source_evidence_id"), row.get("related_evidence_id")):
+                    linked_id = str(linked_id or "").strip()
+                    if linked_id and linked_id not in evidence_by_id:
+                        next_ids.add(linked_id)
         frontier = next_ids
 
-    # If the depth budget ends while explicit IDs remain unresolved, report the
-    # scope as truncated rather than interpreting unvisited lineage as absent.
     if frontier - set(evidence_by_id):
         has_more = True
         truncated = True
 
-    # Include edges between discovered nodes, while preserving the hard query cap.
+    # Include edges between discovered nodes while preserving the hard cap.
     discovered = sorted(evidence_by_id)
-    if discovered and len(relationships_by_id) < max_relationships:
-        remaining = max_relationships - len(relationships_by_id)
-        extra = db.query(EvidenceSourceRelationship).filter(
-            EvidenceSourceRelationship.person_id == str(person_id),
-            EvidenceSourceRelationship.source_evidence_id.in_(discovered),
-            EvidenceSourceRelationship.related_evidence_id.in_(discovered),
-        ).limit(remaining + 1).all()
+    if links is not None and discovered and len(relationships_by_id) < relationship_limit:
+        relationship_fields = [
+            name for name in (
+                "id", "person_id", "source_evidence_id", "related_evidence_id",
+                "source_independence_status", "origin_group_key", "relationship_type",
+                "rationale", "created_at",
+            ) if name in links.c
+        ]
+        remaining = relationship_limit - len(relationships_by_id)
+        statement = select(*(links.c[name] for name in relationship_fields)).where(
+            links.c.person_id == str(person_id),
+            links.c.source_evidence_id.in_(discovered),
+            links.c.related_evidence_id.in_(discovered),
+        ).limit(remaining + 1)
+        extra = [dict(row) for row in db.execute(statement).mappings().all()]
         if len(extra) > remaining:
             has_more = True
             truncated = True
             extra = extra[:remaining]
         for row in extra:
-            relationships_by_id[str(row.id)] = row
+            key = str(row.get("id") or (
+                str(row.get("source_evidence_id")) + ":" + str(row.get("related_evidence_id"))
+                + ":" + str(row.get("relationship_type"))
+            ))
+            relationships_by_id[key] = SimpleNamespace(**row)
 
     return {
         "evidence_rows": list(evidence_by_id.values()),
