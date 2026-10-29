@@ -1590,3 +1590,65 @@ def test_claim_dependency_graph_is_persisted_person_scoped_cycle_safe_and_append
             audit_db.close()
     finally:
         teardown_db()
+
+
+def test_safety_response_validation_rejects_unpersisted_evidence_ids():
+    """Evidence IDs supplied to safety validation must resolve inside the bearer-scoped record."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="safety-person-1", name="Safety Person")
+        caregiver = Caregiver(
+            id="safety-caregiver-1",
+            name="Safety Caregiver",
+            email="safety-caregiver@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        response = client.post(
+            "/api/v1/safety/validate-response",
+            params={
+                "candidate_response": "The record confirms the medication was changed.",
+                "claims": "The medication was changed.",
+                "evidence_ids": "not-a-persisted-evidence-id",
+                "risk_class": "informational",
+            },
+        )
+        assert response.status_code == 404
+        assert "not found in this care record" in response.json()["detail"]
+    finally:
+        teardown_db()
+
+
+def test_safety_audit_history_rejects_cross_record_person_id():
+    """Audit history cannot be read by swapping a person ID in the URL."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="safety-person-own", name="Own Person")
+        other_person = Person(id="safety-person-other", name="Other Person")
+        caregiver = Caregiver(
+            id="safety-caregiver-own",
+            name="Own Caregiver",
+            email="safety-caregiver-own@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, other_person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        response = client.get("/api/v1/safety/audit/safety-person-other")
+        assert response.status_code == 403
+    finally:
+        teardown_db()
