@@ -381,3 +381,71 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+
+def test_recurrence_uses_full_included_event_span_for_coverage_denominator():
+    """Older events remain visible, but rates require coverage across the whole span."""
+    Base.metadata.create_all(bind=engine)
+    db = Session()
+    try:
+        # A 90-day source query previously discarded the two older occurrences,
+        # making the longitudinal pattern incomplete without saying so.
+        person, caregiver = _case_identity(db, "year-long-recurrence-covered")
+        for event_id, days in (
+            ("year-recurrence-150d", 150),
+            ("year-recurrence-100d", 100),
+            ("year-recurrence-30d", 30),
+        ):
+            _record_event(db, person, caregiver, event_id, days)
+        _add_full_coverage(db, person, caregiver, REFERENCE_TIME - timedelta(days=180))
+        db.flush()
+
+        patterns = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        recurrence = next((p for p in patterns if p.pattern_type.value == "recurrence"), None)
+        assert recurrence is not None
+        assert set(recurrence.event_ids) == {
+            "year-recurrence-150d",
+            "year-recurrence-100d",
+            "year-recurrence-30d",
+        }
+        assert recurrence.pattern_metrics["distinct_event_records"] == 3
+        assert recurrence.pattern_metrics["analysis_window_days"] == 150.0
+        assert recurrence.pattern_metrics["normalized_rate_available"] is True
+        assert recurrence.rate_per_period is not None
+
+        # The same old events with only recent coverage still support a
+        # descriptive recurrence, but cannot support a rate over 150 days.
+        person, caregiver = _case_identity(db, "year-long-recurrence-partial-coverage")
+        for event_id, days in (
+            ("year-partial-150d", 150),
+            ("year-partial-100d", 100),
+            ("year-partial-30d", 30),
+        ):
+            _record_event(db, person, caregiver, event_id, days)
+        db.add(ObservationCoverage(
+            id=f"year-partial-current-{person.id}",
+            person_id=person.id,
+            subject_type="fall",
+            window_start=REFERENCE_TIME - timedelta(days=90),
+            window_end=REFERENCE_TIME,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="Only the most recent 90 days were explicitly observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.flush()
+        patterns = detect_patterns(db, person.id, "fall", None, REFERENCE_TIME)
+        recurrence = next((p for p in patterns if p.pattern_type.value == "recurrence"), None)
+        assert recurrence is not None
+        assert set(recurrence.event_ids) == {
+            "year-partial-150d",
+            "year-partial-100d",
+            "year-partial-30d",
+        }
+        assert recurrence.pattern_metrics["analysis_window_days"] == 150.0
+        assert recurrence.pattern_metrics["normalized_rate_available"] is False
+        assert recurrence.rate_per_period is None
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
