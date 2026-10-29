@@ -27,6 +27,8 @@ class BaselineBase(BaseModel):
     confidence: BaselineConfidence = BaselineConfidence.MODERATE
     is_stable: bool = True
     observation_density: Optional[float] = None
+    coverage_status: str = "unknown"
+    analysis_version: str = "legacy-unversioned"
     documentation_bias_flag: bool = False
     evidence_ids: Optional[List[str]] = None
 
