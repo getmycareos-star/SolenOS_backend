@@ -373,6 +373,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
 
     evidence_lineage: dict[str, Any] = {
         "status": "not_assessed",
+        "evidence_ids_considered": [],
         "groups": [],
         "relationship_records_examined": 0,
         "relationship_history_bounded": True,
@@ -382,61 +383,70 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
             "does not establish common origin or independent corroboration."
         ),
     }
-    evidence_source = sources.get("evidence", {})
-    evidence_items = evidence_source.get("items", [])
+    # Seed lineage from every evidence reference present in the bounded LCR
+    # projection, not only the most recent evidence rows. This lets a visible
+    # event/decision/appointment/handoff reference retain the provenance of an
+    # older source that is outside the visible evidence page.
+    selected_ids: set[str] = set()
+
+    def collect_evidence_ids(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for child_key, child_value in value.items():
+                if child_key in {"evidence_id", "source_evidence_id", "related_evidence_id"}:
+                    if isinstance(child_value, (str, int)) and str(child_value).strip():
+                        selected_ids.add(str(child_value).strip())
+                elif child_key == "evidence_ids":
+                    if isinstance(child_value, (list, tuple, set)):
+                        selected_ids.update(
+                            str(item).strip() for item in child_value
+                            if isinstance(item, (str, int)) and str(item).strip()
+                        )
+                    elif isinstance(child_value, str):
+                        parsed = _safe_value(child_value, "evidence_ids")
+                        if isinstance(parsed, list):
+                            selected_ids.update(
+                                str(item).strip() for item in parsed
+                                if isinstance(item, (str, int)) and str(item).strip()
+                            )
+                collect_evidence_ids(child_value, child_key)
+        elif isinstance(value, (list, tuple)):
+            for child in value:
+                collect_evidence_ids(child, key)
+
+    collect_evidence_ids(sources)
+    evidence_items = sources.get("evidence", {}).get("items", [])
+    selected_ids.update(
+        str(item.get("id")).strip() for item in evidence_items
+        if isinstance(item, dict) and item.get("id")
+    )
+
     relationship_table = metadata.tables.get("evidence_source_relationships")
-    if relationship_table is not None and "person_id" in relationship_table.c:
-        relationship_rows = db.execute(
-            select(*relationship_table.c).where(
-                relationship_table.c.person_id == str(person_id)
-            ).order_by(
-                desc(relationship_table.c.created_at)
-                if "created_at" in relationship_table.c else relationship_table.c.id
-            ).limit(min(limit * 3, 150) + 1)
-        ).mappings().all()
-        relationship_has_more = len(relationship_rows) > min(limit * 3, 150)
-        relationship_rows = relationship_rows[:min(limit * 3, 150)]
-        from types import SimpleNamespace
-        from app.services.evidence_lineage import build_evidence_lineage
-        selected_ids = [str(item.get("id")) for item in evidence_items if item.get("id")]
-        lineage_by_id, independence_by_id = build_evidence_lineage(
-            [SimpleNamespace(**item) for item in evidence_items],
-            [SimpleNamespace(**dict(row)) for row in relationship_rows],
+    evidence_table = metadata.tables.get("evidence")
+    if selected_ids and relationship_table is not None and evidence_table is not None:
+        from app.services.evidence_lineage import (
+            load_evidence_lineage_scope,
+            summarize_evidence_lineage,
+        )
+        lineage_scope = load_evidence_lineage_scope(db, str(person_id), selected_ids)
+        lineage_summary = summarize_evidence_lineage(
+            lineage_scope["evidence_rows"],
+            lineage_scope["relationships"],
             selected_ids,
         )
-        group_members: dict[str, list[str]] = {}
-        for evidence_id, lineage_id in lineage_by_id.items():
-            group_members.setdefault(lineage_id, []).append(evidence_id)
         evidence_lineage.update({
+            **lineage_summary,
             "status": "assessed_bounded_subset",
-            "groups": [
-                {
-                    "lineage_id": lineage_id,
-                    "evidence_ids": sorted(ids),
-                    "source_independence_status": (
-                        "shared_origin" if any(independence_by_id.get(eid) == "shared_origin" for eid in ids)
-                        else "unassessed"
-                    ),
-                    "origin_group_keys": sorted({
-                        str(getattr(link, "origin_group_key", "") or "").strip()
-                        for link in [SimpleNamespace(**dict(row)) for row in relationship_rows]
-                        if str(getattr(link, "origin_group_key", "") or "").strip()
-                        and (
-                            str(getattr(link, "source_evidence_id", "") or "") in ids
-                            or str(getattr(link, "related_evidence_id", "") or "") in ids
-                        )
-                    }),
-                    "basis": "explicit_persisted_provenance",
-                    "interpretation_limit": "A lineage link is not proof that the linked claim is true.",
-                }
-                for lineage_id, ids in sorted(group_members.items())
-            ],
-            "relationship_records_examined": len(relationship_rows),
-            "relationship_history_bounded": relationship_has_more,
+            "relationship_records_examined": len(lineage_scope["relationships"]),
+            "relationship_history_bounded": bool(lineage_scope["has_more"]),
+            "scope_truncated": bool(lineage_scope["truncated"]),
+            "lineage_nodes_examined": len(lineage_scope["evidence_rows"]),
+            "interpretation_limit": (
+                lineage_summary["interpretation_limit"]
+                + " Retrieval is person-scoped and bounded; unreturned lineage is unknown, not absent."
+            ),
         })
-    else:
-        evidence_lineage["status"] = "unavailable_schema" if evidence_items else "not_assessed"
-
+    elif selected_ids:
+        evidence_lineage["status"] = "unavailable_schema"
     schema_status = "complete" if not missing_required and not missing_optional else "partial"
     return {
         "person_id": str(person_id),
