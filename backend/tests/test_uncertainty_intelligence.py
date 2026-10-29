@@ -220,6 +220,42 @@ def test_delta_finding_evidence_requires_matching_stored_excerpt():
     assert _match_finding_evidence(evidence, "reported dose changed to 10mg") == []
 
 
+def test_duplicate_provenance_is_not_misreported_as_inferred_claim_uncertainty():
+    result = analyze_uncertainty(
+        claim="Caregiver recorded the same observation twice.",
+        task="summarize",
+        evidence=[
+            {"id": "evidence-a", "text": "Caregiver reported breakfast intake.", "source_type": "caregiver_report", "verified": True},
+            {"id": "evidence-b", "text": "Caregiver reported breakfast intake.", "source_type": "caregiver_report", "verified": True},
+        ],
+    )
+    assert "duplicate_evidence" in result["classifications"]
+    assert result["inferred_uncertainty"] is False
+    assert result["epistemic_state"] == "partially_known"
+    assert result["conclusion_confidence"] is None
+
+
+def test_review_is_required_even_when_supplied_evidence_metadata_has_no_detected_issue():
+    result = analyze_uncertainty(
+        claim="Caregiver reported breakfast intake.",
+        task="summarize",
+        evidence=[
+            {
+                "id": "evidence-verified",
+                "text": "Caregiver reported breakfast intake.",
+                "source_type": "caregiver_report",
+                "verified": True,
+                "observed_at": "2026-10-28T08:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 10, 28, 9, 0, tzinfo=timezone.utc),
+    )
+    assert result["epistemic_state"] == "partially_known"
+    assert result["review_required"] is True
+    assert result["conclusion_confidence"] is None
+    assert result["calibration_status"] == "not_calibrated"
+
+
 def test_duplicate_source_text_is_not_independent_corroboration():
     result = analyze_uncertainty(
         claim="The appointment is confirmed.",
