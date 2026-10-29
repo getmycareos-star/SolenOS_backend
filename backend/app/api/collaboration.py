@@ -1304,6 +1304,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_appointment_ids: list[str] = []
     source_assertion_ids: list[str] = []
     source_lcr_context_ids: list[str] = []
+    source_lcr_record_refs: list[dict[str, str]] = []
     source_freshness_assessment_ids: list[str] = []
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
 
@@ -1795,7 +1796,13 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
-    return {"session_id": session.id, "person_id": person_id, "messages": [{"role": row.role, "text": row.content, "created_at": row.created_at.isoformat() if row.created_at else None} for row in rows]}
+    return {"session_id": session.id, "person_id": person_id, "messages": [{
+        "role": row.role,
+        "text": row.content,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "evidence_ids": json.loads(row.evidence_ids_json or "[]"),
+        "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
+    } for row in rows]}
 
 
 class NotificationPreferenceUpdate(BaseModel):
