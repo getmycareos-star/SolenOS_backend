@@ -1273,7 +1273,7 @@ def test_coverage_assessment_api_rejects_naive_query_timestamps():
 
         client = TestClient(app)
         response = client.get(
-            f"/change/coverage/{person_id}",
+            f"/api/v1/change/coverage/{person_id}",
             params={
                 "subject_type": "mobility",
                 "window_start": "2026-10-01T00:00:00",
