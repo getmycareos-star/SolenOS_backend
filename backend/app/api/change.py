@@ -353,6 +353,70 @@ def list_patterns(
     return query.order_by(Pattern.created_at.desc(), Pattern.id.asc()).offset(offset).limit(limit).all()
 
 
+@router.get("/patterns/{person_id}/{pattern_id}")
+def get_pattern_detail(
+    person_id: str,
+    pattern_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Return one persisted pattern with only same-person source events and changes."""
+    _require_person_scope(request, db, person_id)
+    pattern = (
+        db.query(Pattern)
+        .filter(Pattern.id == pattern_id, Pattern.person_id == person_id)
+        .first()
+    )
+    if pattern is None:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    event_ids = list(dict.fromkeys(pattern.event_ids or []))
+    change_ids = list(dict.fromkeys(pattern.change_ids or []))
+    events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(event_ids))
+        .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
+        .all()
+        if event_ids else []
+    )
+    changes = (
+        db.query(Change)
+        .filter(Change.person_id == person_id, Change.id.in_(change_ids))
+        .order_by(Change.created_at.asc(), Change.id.asc())
+        .all()
+        if change_ids else []
+    )
+    return {
+        "pattern": pattern,
+        "events": [
+            {
+                "id": event.id,
+                "event_type": event.event_type,
+                "status": event.status,
+                "occurred_at": event.occurred_at,
+                "recorded_at": event.recorded_at,
+                "title": event.title,
+                "description": event.description,
+                "evidence_ids": event.evidence_ids or [],
+                "time_provenance": event.time_provenance,
+            }
+            for event in events
+        ],
+        "changes": [
+            {
+                "id": change.id,
+                "change_type": change.change_type.value,
+                "change_direction": change.change_direction.value,
+                "previous_state": change.previous_state,
+                "current_state": change.current_state,
+                "explanation": change.explanation,
+                "evidence_ids": change.evidence_ids or [],
+                "confirmation_status": change.confirmation_status,
+            }
+            for change in changes
+        ],
+    }
+
+
 @router.get("/situations/detect", response_model=List[SituationResponse])
 def detect_situations_endpoint(
     person_id: str,
