@@ -10,6 +10,7 @@ on:
       - ".github/workflows/situation-understanding-benchmark.yml"
   pull_request:
     paths:
+      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
       - "backend/app/services/uncertainty_intelligence.py"
       - "backend/tests/test_situation_understanding_benchmark.py"
       - ".github/workflows/situation-understanding-benchmark.yml"
