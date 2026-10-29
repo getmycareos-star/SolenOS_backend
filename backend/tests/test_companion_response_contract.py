@@ -395,6 +395,17 @@ def test_grounding_rejects_fabricated_record_identifiers_and_accepts_authorized_
     ) is False
 
 
+def test_grounding_reference_validator_allows_natural_record_phrasing_and_rejects_prefixed_ids():
+    assert collaboration._contains_unsupported_record_reference(
+        "The record contains one reported sleep observation.",
+        "Caregiver reported restless sleep last night.",
+    ) is False
+    assert collaboration._contains_unsupported_record_reference(
+        "The appointment record:visit_abcdef confirms the date.",
+        "The appointment date is not established.",
+    ) is True
+
+
 def test_grounding_reference_validator_does_not_treat_unreferenced_plain_language_as_a_record_id():
     assert collaboration._contains_unsupported_record_reference(
         "The available information does not establish why this happened.",
