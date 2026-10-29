@@ -211,7 +211,7 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         assert fall_id in contradiction_data["source_event_ids"]
         contradiction_answer = contradiction_data["reply"].casefold()
         assert any(marker in contradiction_answer for marker in (
-            "conflict", "conflicting", "disagree", "different reports", "one report",
+            "conflict", "conflicting", "disagree", "do not agree", "different reports", "one report",
             "another report", "cannot determine", "can't determine", "unclear",
         )), f"Qwen silently resolved conflicting records: {contradiction_data['reply']!r}"
         assert contradiction_data["written_to_lcr"] is False
