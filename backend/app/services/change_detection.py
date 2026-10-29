@@ -30,6 +30,7 @@ def detect_event_changes(
     counts = get_longitudinal_event_counts(db, person_id, event_type, subject_id, now)
     current_count = counts["current_window_count"]
     comparison = compare_to_baseline(baseline, current_count, 42)
+    comparison["baseline_history_truncated"] = bool(counts.get("history_truncated"))
     current_window_start = counts["current_window_start"]
     baseline_coverage = assess_observation_coverage(
         db, person_id, event_type, baseline.window_start, baseline.window_end
@@ -57,7 +58,11 @@ def detect_event_changes(
     # An event can be newly observed in the records without being a new
     # occurrence in real life. Call it an emergence only if the full baseline
     # interval was explicitly observed and no matching event was recorded there.
-    if baseline.event_count == 0 and current_count > 0:
+    if (
+        baseline.event_count == 0
+        and current_count > 0
+        and not comparison.get("baseline_history_truncated", False)
+    ):
         # Preserve the newly recorded event as a reviewable candidate even when
         # historical coverage is unknown. The candidate must describe the first
         # appearance in available records, not assert that the event began now.

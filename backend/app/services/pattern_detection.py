@@ -113,15 +113,20 @@ def detect_patterns(
     # Frequency comparisons are emitted only when both adjacent 30-day windows
     # have explicit complete observation coverage. They remain descriptive
     # candidates, not proof of cause or clinical significance.
-    frequency_pattern = _build_frequency_pattern(
-        db=db,
-        person_id=person_id,
-        subject_type=subject_type,
-        subject_id=subject_id or "",
-        events=canonical_events,
-        changes=changes,
-        now=now,
-    )
+    # A truncated source-event query cannot supply exact denominators for
+    # adjacent-window rates. Withhold frequency patterns rather than treating
+    # the bounded subset as the full occurrence count.
+    frequency_pattern = None
+    if not events_truncated:
+        frequency_pattern = _build_frequency_pattern(
+            db=db,
+            person_id=person_id,
+            subject_type=subject_type,
+            subject_id=subject_id or "",
+            events=canonical_events,
+            changes=changes,
+            now=now,
+        )
     if frequency_pattern:
         patterns.append(frequency_pattern)
 
@@ -453,7 +458,8 @@ def _build_recurrence_pattern(
     coverage = assess_observation_coverage(
         db, person_id, subject_type, coverage_window_start, now
     )
-    fully_observed = coverage["coverage_status"] == "covered"
+    coverage_complete = coverage["coverage_status"] == "covered"
+    rate_supported = coverage_complete and not history_truncated
     # Event recurrence is supported by multiple distinct source events, but a
     # rate requires an explicit observation denominator across the comparison span.
     interval_days = [
@@ -462,7 +468,7 @@ def _build_recurrence_pattern(
     ]
     frequency_per_day = (
         len(ordered_events) / coverage_window_days
-        if fully_observed and coverage_window_days > 0 else None
+        if rate_supported and coverage_window_days > 0 else None
     )
     rate_per_30_days = (
         len(ordered_events) / (coverage_window_days / 30.0)
@@ -524,10 +530,11 @@ def _build_recurrence_pattern(
             else "Too few inter-event intervals for even a descriptive variability estimate."
         ),
         "observation_coverage_status": coverage["coverage_status"],
-        "normalized_rate_available": fully_observed,
+        "normalized_rate_available": rate_supported,
+        "source_history_truncated": history_truncated,
     }
     alternatives = []
-    if not fully_observed:
+    if not coverage_complete:
         alternatives.append(
             "Recurrence is based on distinct recorded events. A normalized frequency/rate is withheld because observation coverage across the event span is not explicitly complete."
         )
@@ -535,7 +542,7 @@ def _build_recurrence_pattern(
         alternatives.extend(coverage["limitations"])
     if history_truncated:
         alternatives.append(
-            f"Source event history was bounded to the most recent {MAX_PATTERN_SOURCE_EVENTS} records; earlier events were not included."
+            f"Source event history was bounded to the most recent {MAX_PATTERN_SOURCE_EVENTS} records; the normalized rate is withheld because the event denominator may be incomplete."
         )
     pattern = Pattern(
         person_id=person_id,

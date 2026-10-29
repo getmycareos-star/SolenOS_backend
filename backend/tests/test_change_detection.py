@@ -1902,3 +1902,88 @@ def test_truncated_longitudinal_history_never_claims_a_stable_baseline(monkeypat
         db.close()
     finally:
         teardown_db()
+
+
+def test_truncated_source_history_withholds_rate_and_frequency_patterns(monkeypatch):
+    setup_db()
+    try:
+        import app.services.pattern_detection as pattern_service
+
+        monkeypatch.setattr(pattern_service, "MAX_PATTERN_SOURCE_EVENTS", 2)
+        db = TestingSessionLocal()
+        person = Person(id="bounded-pattern-person", name="Bounded pattern test")
+        caregiver = Caregiver(
+            id="bounded-pattern-caregiver", name="Bounded pattern caregiver",
+            email="bounded-pattern@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for event_id, days_ago in (
+            ("bounded-pattern-event-1", 20),
+            ("bounded-pattern-event-2", 10),
+            ("bounded-pattern-event-3", 1),
+        ):
+            db.add(CareEvent(
+                id=event_id, person_id=person.id, event_type="fall",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=event_id, created_by_caregiver_id=caregiver.id,
+            ))
+        db.add(ObservationCoverage(
+            id="bounded-pattern-coverage", person_id=person.id, subject_type="fall",
+            window_start=now - timedelta(days=90), window_end=now,
+            coverage_status="covered", source_evidence_ids=[],
+            rationale="The benchmark interval was explicitly observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        patterns = pattern_service.detect_patterns(db, person.id, "fall", None, now)
+        recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
+        assert recurrence.rate_per_period is None
+        assert recurrence.pattern_metrics["normalized_rate_available"] is False
+        assert recurrence.pattern_metrics["source_history_truncated"] is True
+        assert any("denominator may be incomplete" in note for note in recurrence.alternative_interpretations or [])
+        assert all(item.pattern_type.value not in {"frequency_increase", "frequency_decrease"} for item in patterns)
+        db.close()
+    finally:
+        teardown_db()
+
+
+def test_truncated_baseline_history_does_not_claim_emergence(monkeypatch):
+    setup_db()
+    try:
+        import app.services.baseline as baseline_service
+
+        monkeypatch.setattr(baseline_service, "MAX_LONGITUDINAL_EVENTS", 2)
+        db = TestingSessionLocal()
+        person = Person(id="bounded-emergence-person", name="Bounded emergence test")
+        caregiver = Caregiver(
+            id="bounded-emergence-caregiver", name="Bounded emergence caregiver",
+            email="bounded-emergence@example.com", relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for event_id, days_ago in (
+            ("bounded-emergence-event-1", 20),
+            ("bounded-emergence-event-2", 10),
+            ("bounded-emergence-event-3", 1),
+        ):
+            db.add(CareEvent(
+                id=event_id, person_id=person.id, event_type="mobility",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=event_id, created_by_caregiver_id=caregiver.id,
+            ))
+        db.add(ObservationCoverage(
+            id="bounded-emergence-coverage", person_id=person.id, subject_type="mobility",
+            window_start=now - timedelta(days=180), window_end=now - timedelta(days=42),
+            coverage_status="covered", source_evidence_ids=[],
+            rationale="The stated historical interval was explicitly observed.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        changes = detect_event_changes(db, person.id, "mobility", None, now)
+        assert all(change.change_type.value != "emergence" for change in changes)
+        db.close()
+    finally:
+        teardown_db()
