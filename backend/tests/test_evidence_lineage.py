@@ -50,3 +50,24 @@ def test_non_independent_reviewed_relationship_unifies_lineage_and_overrides_ind
     lineage, independence = build_evidence_lineage(rows, [relationship], ["a", "b"])
     assert lineage["a"] == lineage["b"]
     assert independence == {"a": "shared_origin", "b": "shared_origin"}
+
+
+def test_lineage_summary_exposes_explicit_origin_and_limits():
+    from app.services.evidence_lineage import summarize_evidence_lineage
+
+    evidence = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    link = SimpleNamespace(
+        source_evidence_id="b",
+        related_evidence_id="a",
+        source_independence_status="shared_origin",
+        origin_group_key="forwarded-note-9",
+    )
+    result = summarize_evidence_lineage(evidence, [link], ["a", "b"])
+    assert result["status"] == "assessed"
+    assert len(result["groups"]) == 1
+    assert result["groups"][0]["evidence_ids"] == ["a", "b"]
+    assert result["groups"][0]["origin_group_keys"] == ["forwarded-note-9"]
+    assert "does not prove" in result["interpretation_limit"]
