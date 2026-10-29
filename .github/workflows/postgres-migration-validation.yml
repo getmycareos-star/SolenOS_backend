@@ -325,6 +325,77 @@ jobs:
           engine.dispose()
           PY
 
+      - name: Verify clarification answer history trigger rejects direct SQL mutation
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.exc import DBAPIError
+          from sqlalchemy.orm import Session
+          from app.models.care import Caregiver, Person
+          from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent
+          from app.core.uncertainty_enums import Priority
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with Session(engine) as db:
+              person = Person(id="question-answer-trigger-person", name="Question answer trigger test")
+              caregiver = Caregiver(
+                  id="question-answer-trigger-caregiver",
+                  name="Question answer trigger caregiver",
+                  email="question-answer-trigger@example.invalid",
+                  relationship="Family",
+                  person_id=person.id,
+                  timezone="UTC",
+              )
+              db.add_all([person, caregiver])
+              db.flush()
+              question = OpenQuestion(
+                  id="question-answer-trigger-question",
+                  person_id=person.id,
+                  question="Was the appointment attended?",
+                  subject_type="appointment",
+                  subject_id="appointment-trigger-test",
+                  priority=Priority.INFORMATIONAL,
+                  status="answered",
+                  answer="Caregiver reports attendance.",
+                  answer_provenance="Caregiver report recorded during the test.",
+                  answered_by_caregiver_id=caregiver.id,
+              )
+              db.add(question)
+              db.flush()
+              event = OpenQuestionAnswerEvent(
+                  id="question-answer-trigger-event",
+                  question_id=question.id,
+                  person_id=person.id,
+                  answer="Caregiver reports attendance.",
+                  answer_provenance="Caregiver report recorded during the test.",
+                  answered_by_caregiver_id=caregiver.id,
+              )
+              db.add(event)
+              db.commit()
+
+          with engine.connect() as connection:
+              transaction = connection.begin()
+              try:
+                  connection.execute(text("""
+                      UPDATE open_question_answer_events
+                      SET answer = 'tampered answer'
+                      WHERE id = 'question-answer-trigger-event'
+                  """))
+              except DBAPIError as exc:
+                  transaction.rollback()
+                  assert "append-only" in str(exc).lower(), f"unexpected database error: {exc}"
+                  print("PASS direct SQL answer-history mutation rejected by PostgreSQL trigger")
+              else:
+                  transaction.rollback()
+                  raise AssertionError("direct SQL mutation unexpectedly changed immutable answer history")
+              finally:
+                  if transaction.is_active:
+                      transaction.rollback()
+          engine.dispose()
+          PY
+
       - name: Exercise anonymous care continuity against PostgreSQL over HTTP
         working-directory: backend
         run: python scripts/postgres_anonymous_e2e.py
