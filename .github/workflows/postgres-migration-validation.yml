@@ -103,7 +103,7 @@ jobs:
               "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
               "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "created_at"},
               "evidence_source_relationships": {"id", "person_id", "source_evidence_id", "related_evidence_id", "relationship_type", "source_independence_status", "origin_group_key", "rationale", "reviewed_by_caregiver_id", "created_at"},
-              "evidence_observations": {"id", "person_id", "evidence_id", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
+              "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
