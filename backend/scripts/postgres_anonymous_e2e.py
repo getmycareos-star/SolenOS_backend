@@ -387,10 +387,35 @@ def main():
         )
         require(status == 201 and open_loop_retry.get("id") == open_loop_id,
                 f"Open Loop idempotent create retry created a duplicate or failed: {status}: {open_loop_retry}")
+        # Race two identical create requests. A unique database constraint plus
+        # retry recovery must converge on one durable loop instead of returning 500.
+        from concurrent.futures import ThreadPoolExecutor
+        concurrent_create_payload = {
+            "loop_type": "awaiting_response",
+            "title": "CI-only concurrent idempotency callback",
+            "description": "Synthetic race test for duplicate create retries.",
+            "request_text": "Confirm the synthetic callback.",
+            "recipient_label": "CI-only test recipient",
+            "idempotency_key": "postgres-open-loop-concurrent-create-001",
+            "evidence": [{"kind": "ci_fixture", "text": "Concurrent idempotency race only."}],
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_creates = list(pool.map(
+                lambda _: request("POST", "/api/v1/open-loops", token=token_a, body=concurrent_create_payload),
+                range(2),
+            ))
+        require(all(status == 201 for status, _ in concurrent_creates),
+                f"Concurrent duplicate Open Loop creates must both resolve successfully: {concurrent_creates}")
+        concurrent_ids = {payload.get("id") for _, payload in concurrent_creates}
+        require(len(concurrent_ids) == 1 and None not in concurrent_ids,
+                f"Concurrent duplicate creates did not converge to one loop: {concurrent_creates}")
+        concurrent_loop_id = next(iter(concurrent_ids))
         status, open_loop_list = request("GET", "/api/v1/open-loops", token=token_a)
         require(status == 200 and sum(1 for item in open_loop_list.get("items", [])
-                                      if item.get("id") == open_loop_id) == 1,
-                f"Open Loop idempotent retry duplicated list records: {status}: {open_loop_list}")
+                                      if item.get("id") == open_loop_id) == 1
+                and sum(1 for item in open_loop_list.get("items", [])
+                        if item.get("id") == concurrent_loop_id) == 1,
+                f"Open Loop idempotency created duplicate list records: {status}: {open_loop_list}")
         status, cross_person_loop = request(
             "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_b,
         )
