@@ -35,9 +35,9 @@ def upgrade() -> None:
             ),
         )
     indexes = {item["name"] for item in inspect(bind).get_indexes("conversation_messages")}
-    if "uq_conversation_messages_client_turn_id" not in indexes:
+    if "ix_conversation_messages_client_turn_id" not in indexes:
         op.create_index(
-            "uq_conversation_messages_client_turn_id",
+            "ix_conversation_messages_client_turn_id",
             "conversation_messages",
             ["client_turn_id"],
             unique=True,
