@@ -1304,6 +1304,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_appointment_ids: list[str] = []
     source_assertion_ids: list[str] = []
     source_lcr_context_ids: list[str] = []
+    source_freshness_assessment_ids: list[str] = []
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
 
     if emergency:
@@ -1527,12 +1528,48 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
+        freshness_context: list[str] = []
+        if source_evidence_ids:
+            freshness_rows = (
+                db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
+                .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
+                .filter(
+                    EvidenceFreshnessAssessment.person_id == person_id,
+                    EvidenceFreshnessAssessment.evidence_id.in_(source_evidence_ids),
+                )
+                .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
+                .limit(50)
+                .all()
+            )
+            seen_freshness_pairs = set()
+            for assessment, policy in freshness_rows:
+                pair = (str(assessment.evidence_id), str(assessment.policy_id))
+                if pair in seen_freshness_pairs:
+                    continue
+                seen_freshness_pairs.add(pair)
+                source_freshness_assessment_ids.append(str(assessment.id))
+                freshness_context.append(
+                    "Recorded freshness policy application (not a truth judgment): "
+                    + json.dumps({
+                        "assessment_id": str(assessment.id),
+                        "evidence_id": str(assessment.evidence_id),
+                        "domain_key": policy.domain_key,
+                        "policy_version": assessment.policy_version,
+                        "freshness_status": assessment.freshness_status,
+                        "source_time_kind": assessment.source_time_kind,
+                        "source_time": assessment.source_time.isoformat() if assessment.source_time else None,
+                        "age_days": assessment.age_days,
+                        "rationale": assessment.rationale,
+                    }, ensure_ascii=False, default=str)
+                )
+        source_lcr_record_refs = _context_record_refs(shared_lcr_lines)
         lineage_context_line = (
             "Evidence source lineage metadata (explicit provenance only; not proof of truth or independence): "
             + json.dumps(evidence_lineage_context, ensure_ascii=False, default=str)
         )
         source_context = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines,
+            *event_context, *assertion_context, *appointment_context, *evidence_context,
+            *freshness_context, *shared_lcr_lines,
             *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
         ]
         context_payload = {
@@ -1542,6 +1579,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "caregiver_approved_lcr_assertions": assertion_context,
             "appointments": appointment_context,
             "caregiver_provided_evidence": evidence_context,
+            "evidence_freshness_assessments": freshness_context,
             "shared_lcr_context": shared_lcr_lines,
             "lcr_context_coverage": lcr_context_coverage,
             "evidence_lineage": evidence_lineage_context,
@@ -1688,14 +1726,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
     # new message pair and the uncommitted new session is rolled back by the request.
+    source_record_refs = []
+    for record_type, identifiers in (
+        ("care_event", source_event_ids),
+        ("care_evidence", source_evidence_ids),
+        ("appointment", source_appointment_ids),
+        ("care_assertion", source_assertion_ids),
+        ("freshness_assessment", source_freshness_assessment_ids),
+    ):
+        source_record_refs.extend(
+            {"record_type": record_type, "record_id": str(identifier)}
+            for identifier in dict.fromkeys(identifiers)
+        )
+    source_record_refs.extend(source_lcr_record_refs)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        source_record_refs_json="[]",
     ))
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
     )
     db.add(assistant_row)
     db.commit()
@@ -1719,6 +1772,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_appointment_ids": source_appointment_ids,
         "source_assertion_ids": source_assertion_ids,
         "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "source_record_refs": source_record_refs,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
         "written_to_lcr": False,
