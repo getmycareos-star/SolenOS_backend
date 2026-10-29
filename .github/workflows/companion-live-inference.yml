@@ -51,7 +51,7 @@ jobs:
           done
           docker logs solenos-live-ollama
           exit 1
-      - name: Download the exact configured model
+      - name: Download the default-model candidate under test
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
       - name: Run live Companion inference evaluation
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
