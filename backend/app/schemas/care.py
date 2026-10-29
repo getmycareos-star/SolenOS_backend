@@ -76,6 +76,12 @@ class EvidenceBase(BaseModel):
     origin_channel: Optional[str] = None
     original_source_reference: Optional[str] = None
     parent_evidence_id: Optional[str] = None
+    reported_at: Optional[datetime] = None
+    collection_method: Optional[str] = Field(None, max_length=80)
+    # Opaque caller-defined label only; do not send IMEI, serial number, or advertising ID.
+    origin_device_ref: Optional[str] = Field(None, max_length=160)
+    transfer_source: Optional[str] = Field(None, max_length=160)
+    transfer_reference: Optional[str] = Field(None, max_length=2000)
 
 
 class EvidenceCreate(EvidenceBase):
