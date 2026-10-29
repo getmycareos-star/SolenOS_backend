@@ -253,6 +253,60 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         teardown()
 
 
+def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The record includes a caregiver report of restless sleep."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        now = datetime.now(timezone.utc)
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=120),
+            title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(days=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Household activity note {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert "restless sleep" in data["reply"].casefold()
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_observation_exists(monkeypatch):
     client = setup_client(monkeypatch)
 
