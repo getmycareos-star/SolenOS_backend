@@ -1130,7 +1130,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         summary_item = {
             "id": str(item.get("id") or ""),
             "source": source,
-            "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("event_type") or source)[:240],
+            "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or source)[:240],
             "status": status or str(item.get("epistemic_state") or item.get("epistemic_status") or "not_recorded").lower(),
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
             "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
@@ -1308,7 +1308,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         trajectory_entries.append({
             "source": item["source"],
             "record_id": str(item.get("id") or ""),
-            "title": str(item.get("title") or item.get("topic") or item.get("fact_type") or item.get("field") or item.get("event_type") or item["source"])[:240],
+            "title": str(item.get("title") or item.get("topic") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or item["source"])[:240],
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
             "event_time": event_time,
             "recorded_at": recorded_time,
