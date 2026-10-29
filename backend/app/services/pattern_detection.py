@@ -11,6 +11,9 @@ from app.services.observation_coverage import assess_observation_coverage
 
 MAX_PATTERN_SOURCE_EVENTS = 1000
 MAX_PATTERN_CHANGE_ASSESSMENTS = 500
+# Keep a bounded but genuinely longitudinal source window. Ninety days hid
+# otherwise valid recurrence across longer care histories.
+MAX_PATTERN_LOOKBACK_DAYS = 365
 
 
 def _utc_now() -> datetime:
@@ -34,7 +37,7 @@ def detect_patterns(
 ) -> List[Pattern]:
     """Detect recurrence from persisted source events, not repeated assessment rows."""
     now = _ensure_utc(datetime.now(timezone.utc) if reference_time is None else reference_time)
-    window_start = now - timedelta(days=90)
+    window_start = now - timedelta(days=MAX_PATTERN_LOOKBACK_DAYS)
     # Superseded assessments are historical observations, not disposable rows.
     # Include them in longitudinal analysis while excluding explicitly rejected
     # or inconclusive assessments from pattern evidence.
@@ -453,7 +456,11 @@ def _build_recurrence_pattern(
     # Rates require coverage over the entire analysis window, including time
     # before the first event and after the last event. Coverage only between
     # event timestamps cannot establish a valid denominator.
-    coverage_window_start = now - timedelta(days=90)
+    # The observation denominator must cover every event included in the
+    # recurrence, not merely the most recent 90 days. Keep a 90-day minimum
+    # window for recent-only histories, but extend it to the earliest included
+    # event when the pattern spans further back.
+    coverage_window_start = min(now - timedelta(days=90), distinct_times[0])
     coverage_window_days = (now - coverage_window_start).total_seconds() / 86400.0
     coverage = assess_observation_coverage(
         db, person_id, subject_type, coverage_window_start, now
