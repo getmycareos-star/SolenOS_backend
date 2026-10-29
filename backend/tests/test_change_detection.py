@@ -2271,3 +2271,38 @@ def test_authenticated_reassessment_persists_cross_domain_convergence():
     finally:
         teardown_db()
 
+def test_invalidating_last_source_event_retires_active_emergence_assessment():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="invalidated-source-person", name="Invalidated source test")
+        caregiver = Caregiver(
+            id="invalidated-source-caregiver", name="Invalidated source caregiver",
+            email="invalidated-source@example.com", relationship="Family", person_id=person.id,
+        )
+        event = CareEvent(
+            id="invalidated-source-event", person_id=person.id, event_type="fall",
+            status="recorded", occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Recorded fall", created_by_caregiver_id=caregiver.id, evidence_ids=["source-evidence"],
+        )
+        db.add_all([person, caregiver, event])
+        db.commit()
+
+        from app.services.change_detection import detect_event_changes
+        changes = detect_event_changes(db, person.id, "fall", None)
+        emergence = next(change for change in changes if change.change_type.value == "emergence")
+        db.commit()
+        assert emergence.is_active is True
+
+        event.status = "invalidated"
+        db.commit()
+        assert detect_event_changes(db, person.id, "fall", None) == []
+        db.commit()
+
+        historical = db.query(Change).filter_by(id=emergence.id).one()
+        assert historical.is_active is False
+        assert "no eligible source events remain" in historical.explanation.lower()
+        db.close()
+    finally:
+        teardown_db()
+
