@@ -463,9 +463,15 @@ def _build_acceleration_pattern(
     if len(directions) != 1:
         return None
     magnitudes = [float(change.magnitude) for change in unique_ordered]
-    if not all(
-        magnitudes[index + 1] > magnitudes[index]
+    successive_deltas = [
+        magnitudes[index + 1] - magnitudes[index]
         for index in range(len(magnitudes) - 1)
+    ]
+    # A monotonic trend alone is not acceleration. The successive change
+    # magnitudes themselves must increase across at least three intervals.
+    if not all(delta > 0 for delta in successive_deltas) or not all(
+        successive_deltas[index + 1] > successive_deltas[index]
+        for index in range(len(successive_deltas) - 1)
     ):
         return None
     temporal_start = min(_ensure_utc(change.comparison_window_start) for change in unique_ordered)
