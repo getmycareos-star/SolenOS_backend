@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -232,4 +234,28 @@ def test_reused_idempotency_key_cannot_commit_a_second_mutation():
     listed = client.get("/api/v1/open-loops", headers=headers)
     assert listed.status_code == 200, listed.text
     assert len(listed.json()["items"]) == 1
+
+def test_overdue_filter_is_applied_before_pagination_and_reports_total():
+    client = TestClient(app)
+    _, headers = session(client, "Deadline recipient")
+    now = datetime.now(timezone.utc)
+    create_loop(
+        client, headers, "follow_up", title="Future follow-up",
+        deadline_at=(now + timedelta(days=2)).isoformat(),
+        deadline_source="explicit_user",
+    )
+    overdue_loop = create_loop(
+        client, headers, "follow_up", title="Past follow-up",
+        deadline_at=(now - timedelta(days=2)).isoformat(),
+        deadline_source="explicit_user",
+    )
+
+    response = client.get(
+        "/api/v1/open-loops?overdue=true&limit=1", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["count"] == 1
+    assert [item["id"] for item in body["items"]] == [overdue_loop["id"]]
+    assert body["items"][0]["overdue"] is True
 
