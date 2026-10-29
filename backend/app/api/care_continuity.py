@@ -833,6 +833,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "situation_reassessment": ["follow_up_links", "appointments", "information_gaps", "uncertainties", "events"],
         "situation_evolution_tracking": ["events", "facts", "decisions", "decision_outcomes", "timeline"],
         "situation_confidence_assessment": ["evidence", "provenance", "uncertainties", "uncertainty_assessments", "conflicts", "reconciliations", "assertions"],
+        "situation_trajectory_reconstruction": ["timeline", "events", "facts", "decisions", "decision_outcomes", "caregiver_observations"],
     }
     capabilities = {}
     for capability, source_names in capability_specs.items():
@@ -844,6 +845,43 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "evidence_state": "supported_by_persisted_records" if records else "insufficient_evidence",
             "unavailable_sources": unavailable,
         }
+    # A source-linked chronology is not a causal explanation. Preserve event time and
+    # record time separately, and leave temporal anchors unknown when not recorded.
+    trajectory_sources = {
+        "events", "timeline", "facts", "caregiver_observations", "caregiver_contexts",
+        "caregiver_perspectives", "decisions", "decision_outcomes",
+    }
+    trajectory_entries = []
+    for item in all_items:
+        if item["source"] not in trajectory_sources:
+            continue
+        event_time = item.get("occurred_at") or item.get("observed_at") or item.get("effective_at")
+        recorded_time = item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at")
+        if not event_time and not recorded_time:
+            temporal_basis = "time_not_recorded"
+        elif event_time:
+            temporal_basis = "event_time_recorded"
+        else:
+            temporal_basis = "record_time_only"
+        trajectory_entries.append({
+            "source": item["source"],
+            "record_id": str(item.get("id") or ""),
+            "title": str(item.get("title") or item.get("topic") or item.get("fact_type") or item.get("field") or item.get("event_type") or item["source"])[:240],
+            "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
+            "event_time": event_time,
+            "recorded_at": recorded_time,
+            "temporal_basis": temporal_basis,
+            "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
+            "interpretation_limit": "Source-linked chronology only; sequence does not establish causation.",
+        })
+    trajectory_entries.sort(
+        key=lambda entry: (
+            str(entry.get("event_time") or entry.get("recorded_at") or ""),
+            str(entry.get("recorded_at") or ""),
+            entry["source"],
+            entry["record_id"],
+        )
+    )
     required_missing = context.get("missing_required_sources") or []
     optional_missing = context.get("missing_optional_sources") or []
     return {
@@ -872,6 +910,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "longitudinal_context": {
             "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions"}][:100],
             "bounded": True,
+        },
+        "situation_trajectory": {
+            "entries": trajectory_entries[:100],
+            "count": len(trajectory_entries),
+            "has_more": len(trajectory_entries) > 100,
+            "ordering": "event_time_then_record_time; missing timestamps remain unanchored",
+            "causal_inference": "not_performed",
+            "source_of_truth": "persisted_lcr_records",
         },
         "priorities": attention_items[:50],
         "open_loops": {
