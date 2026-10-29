@@ -28,15 +28,15 @@ def upgrade() -> None:
     indexes = inspector.get_indexes("conversation_messages")
     constraints = inspector.get_unique_constraints("conversation_messages")
     exists = any(
-        set(item.get("column_names") or []) == {"session_id", "client_turn_id"}
+        set(item.get("column_names") or []) == {"client_turn_id"}
         for item in [*indexes, *constraints]
         if item.get("unique", True)
     )
     if not exists:
         op.create_index(
-            "uq_conversation_session_client_turn",
+            "uq_conversation_messages_client_turn_id",
             "conversation_messages",
-            ["session_id", "client_turn_id"],
+            ["client_turn_id"],
             unique=True,
         )
 
