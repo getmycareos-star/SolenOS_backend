@@ -76,6 +76,10 @@ def _near_duplicate_candidates(evidence_rows: list[Any]) -> dict[str, Any]:
     for index, left_id in enumerate(ids):
         for right_id in ids[index + 1:]:
             left, right = normalized[left_id], normalized[right_id]
+            # Exact normalized duplicates are already reported separately; keep this
+            # collection for near-duplicates only to avoid duplicating the same finding.
+            if left == right:
+                continue
             # Similarity is a candidate-generation heuristic only, not a probability,
             # source-independence assessment, or verification decision.
             if SequenceMatcher(None, left, right, autojunk=False).ratio() >= NEAR_DUPLICATE_RATIO:
