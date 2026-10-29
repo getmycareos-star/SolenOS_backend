@@ -1568,6 +1568,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             temporal_basis = "record_time_only"
         trajectory_entries.append({
             "source": item["source"],
+            "domain": source_domains.get(item["source"], "unmapped_source"),
             "record_id": str(item.get("id") or ""),
             "title": str(item.get("title") or item.get("topic") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or item["source"])[:240],
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
@@ -1586,6 +1587,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     for row in coverage_rows:
         trajectory_entries.append({
             "source": "observation_coverage",
+            "domain": "observation_coverage",
             "record_id": str(row.id),
             "title": f"{row.subject_type} observation coverage: {row.coverage_status}",
             "epistemic_status": "explicitly_recorded_coverage",
