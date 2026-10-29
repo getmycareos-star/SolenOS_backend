@@ -258,6 +258,15 @@ def test_recurrence_pattern_persists_inter_event_interval_metrics():
         assert metrics["normalized_rate_available"] is False
         assert metrics["observation_coverage_status"] == "unknown"
         assert "no calibrated regularity threshold" in metrics["regularity_interpretation"]
+        # Expire ORM state and reload to prove the metrics were serialized to
+        # the database, not merely attached to the in-memory result.
+        from app.models.change import Pattern
+        from app.schemas.change import Pattern as PatternSchema
+        db.expire_all()
+        persisted = db.query(Pattern).filter(Pattern.id == recurrence.id).one()
+        assert persisted.pattern_metrics["inter_event_intervals_days"] == [2.0, 5.0, 1.0]
+        api_pattern = PatternSchema.model_validate(persisted)
+        assert api_pattern.pattern_metrics["observation_coverage_status"] == "unknown"
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
