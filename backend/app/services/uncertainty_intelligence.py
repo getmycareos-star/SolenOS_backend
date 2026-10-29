@@ -211,9 +211,14 @@ def analyze_uncertainty(
     )
     if conflicts:
         epistemic_state = "conflicting"
-    elif "possible_reference_ambiguity" in classifications:
+    elif "possible_reference_ambiguity" in classifications or ambiguity_signals:
         epistemic_state = "ambiguous"
-    elif not independent_items or missing or normalized_access not in {"available", ""}:
+    elif (
+        not independent_items or missing or normalized_access not in {"available", ""}
+        or (task in {"identify_change", "change_detection", "compare_state"} and "missing_baseline" in classifications)
+    ):
+        # A present observation does not establish the separate claim that it
+        # represents a change when the comparison prerequisite is missing.
         epistemic_state = "unknown"
     elif ambiguity_signals:
         epistemic_state = "ambiguous"
