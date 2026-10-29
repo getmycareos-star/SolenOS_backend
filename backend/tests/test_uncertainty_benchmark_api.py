@@ -12,7 +12,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
+import app.main as main_module
 from app.main import app
 from app.models.care import Caregiver, Person
 from app.models.anonymous_session import AnonymousSession
@@ -36,6 +37,7 @@ def uncertainty_api_db():
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = TestingSessionLocal
     try:
         with TestingSessionLocal() as db:
             for suffix in ("a", "b"):
@@ -52,6 +54,7 @@ def uncertainty_api_db():
         yield TestingSessionLocal
     finally:
         app.dependency_overrides.clear()
+        main_module.SessionLocal = DefaultSessionLocal
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
 
