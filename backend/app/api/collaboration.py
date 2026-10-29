@@ -1358,6 +1358,45 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
                 .all()
             )
+            saved_history_payload = []
+            for history_row in saved_history:
+                try:
+                    history_metadata = json.loads(history_row.response_metadata_json or "{}")
+                except (TypeError, ValueError):
+                    history_metadata = {}
+                if not isinstance(history_metadata, dict):
+                    history_metadata = {}
+                try:
+                    history_evidence_ids = json.loads(history_row.evidence_ids_json or "[]")
+                except (TypeError, ValueError):
+                    history_evidence_ids = []
+                if not isinstance(history_evidence_ids, list):
+                    history_evidence_ids = []
+                try:
+                    history_source_refs = json.loads(history_row.source_record_refs_json or "[]")
+                except (TypeError, ValueError):
+                    history_source_refs = []
+                if not isinstance(history_source_refs, list):
+                    history_source_refs = []
+                saved_history_payload.append({
+                    "role": history_row.role,
+                    "text": history_row.content,
+                    "created_at": history_row.created_at.isoformat() if history_row.created_at else None,
+                    "guard_verdict": history_row.guard_verdict,
+                    "safety_note": history_row.safety_note,
+                    "evidence_ids": history_evidence_ids,
+                    "source_event_ids": history_metadata.get("source_event_ids", []),
+                    "source_evidence_ids": history_metadata.get("source_evidence_ids", []),
+                    "source_appointment_ids": history_metadata.get("source_appointment_ids", []),
+                    "source_assertion_ids": history_metadata.get("source_assertion_ids", []),
+                    "source_freshness_assessment_ids": history_metadata.get("source_freshness_assessment_ids", []),
+                    "source_lcr_context_ids": history_metadata.get("source_lcr_context_ids", []),
+                    "lcr_context_coverage": history_metadata.get("lcr_context_coverage", {}),
+                    "source_record_refs": history_source_refs,
+                    "ai_generated": history_metadata.get("ai_generated", history_row.role == "assistant" and history_row.guard_verdict == "passed"),
+                    "written_to_lcr": False,
+                    "persistence": "conversation_only",
+                })
             try:
                 saved_evidence_ids = json.loads(saved_assistant.evidence_ids_json or "[]")
             except (TypeError, ValueError):
@@ -1390,13 +1429,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "written_to_lcr": False,
                 "persistence": "conversation_only",
                 "idempotent_replay": True,
-                "messages": [{
-                    "role": row.role,
-                    "text": row.content,
-                    "created_at": row.created_at.isoformat() if row.created_at else None,
-                    "guard_verdict": row.guard_verdict,
-                    "safety_note": row.safety_note,
-                } for row in saved_history],
+                "messages": saved_history_payload,
             }
 
     if payload.session_id:
