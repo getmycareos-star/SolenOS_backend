@@ -35,3 +35,46 @@ def test_lcr_context_decodes_persisted_jsonlist_text_without_guessing_plain_text
     assert _safe_value('{"reported": true}', "context_payload") == {"reported": True}
     assert _safe_value("not-json", "evidence_ids") == "not-json"
     assert _safe_value('["not-a-list-field"]', "source_text") == '["not-a-list-field"]'
+
+def test_lcr_context_includes_only_person_scoped_structured_evidence_observations():
+    from sqlalchemy import Integer, Text
+    from app.services.lcr_context import build_lcr_context
+
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    observations = Table(
+        "evidence_observations",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("evidence_id", String, nullable=False),
+        Column("attribute", String, nullable=False),
+        Column("value_text", Text),
+        Column("source_span_start", Integer, nullable=False),
+        Column("source_span_end", Integer, nullable=False),
+    )
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(observations.insert(), [
+            {"id": "owner-observation", "person_id": "person-a", "evidence_id": "evidence-a",
+             "attribute": "sleep", "value_text": "reported waking overnight",
+             "source_span_start": 10, "source_span_end": 37},
+            {"id": "private-observation", "person_id": "person-b", "evidence_id": "evidence-b",
+             "attribute": "mobility", "value_text": "private mobility detail",
+             "source_span_start": 0, "source_span_end": 24},
+        ])
+
+    try:
+        context = build_lcr_context(
+            __import__("sqlalchemy").orm.Session(engine), "person-a", limit_per_source=10
+        )
+        rows = context["sources"]["evidence_observations"]["items"]
+        assert [row["id"] for row in rows] == ["owner-observation"]
+        assert rows[0]["evidence_id"] == "evidence-a"
+        assert rows[0]["source_span_start"] == 10
+        assert "private mobility detail" not in str(context)
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
