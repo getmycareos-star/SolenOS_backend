@@ -2144,3 +2144,125 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         teardown_db()
         Base.metadata.drop_all(bind=engine)
 
+
+def test_conflict_partial_resolution_reopen_and_history_preserve_unresolved_remainder():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-conflict-lifecycle", name="Conflict lifecycle test")
+        caregiver = Caregiver(
+            id="caregiver-conflict-lifecycle",
+            name="Conflict lifecycle caregiver",
+            email="conflict-lifecycle@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        db.add_all([
+            Evidence(
+                id="conflict-evidence-a",
+                person_id=person.id,
+                type="document",
+                source_text="Discharge summary lists the medicine as discontinued.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="document",
+            ),
+            Evidence(
+                id="conflict-evidence-b",
+                person_id=person.id,
+                type="document",
+                source_text="The current medication list still includes the medicine.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="document",
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        created = client.post(
+            "/api/v1/uncertainty/contradictions",
+            json={
+                "person_id": person.id,
+                "subject_type": "medication",
+                "subject_id": "medicine-1",
+                "field": "status",
+                "description": "One source says discontinued while another lists the medicine as current.",
+                "evidence_ids": ["conflict-evidence-a", "conflict-evidence-b"],
+            },
+        )
+        assert created.status_code == 200, created.text
+        conflict_id = created.json()["id"]
+        assert created.json()["resolution_status"] == "unresolved"
+
+        # A partial resolution must name both the resolved scope and what remains
+        # unresolved; rejected transitions must not append history or mutate state.
+        rejected = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_scope": "The discharge summary date was confirmed.",
+                "resolution_notes": "Attempted partial resolution without preserving the remaining question.",
+                "evidence_ids": ["conflict-evidence-a"],
+            },
+        )
+        assert rejected.status_code == 422, rejected.text
+        unchanged = client.get(
+            f"/api/v1/uncertainty/contradictions/person-conflict-lifecycle"
+        )
+        assert unchanged.status_code == 200, unchanged.text
+        assert unchanged.json()[0]["resolution_status"] == "unresolved"
+        history = client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history")
+        assert history.status_code == 200, history.text
+        assert history.json() == []
+
+        partial = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_scope": "The discharge summary date was confirmed.",
+                "unresolved_remainder": "Whether the medicine is currently prescribed remains unconfirmed.",
+                "resolution_notes": "Only the document date was reconciled; medication status remains disputed.",
+                "evidence_ids": ["conflict-evidence-a"],
+            },
+        )
+        assert partial.status_code == 200, partial.text
+        assert partial.json()["resolution_status"] == "partially_resolved"
+        assert partial.json()["resolution_scope"] == "The discharge summary date was confirmed."
+        assert partial.json()["unresolved_remainder"] == "Whether the medicine is currently prescribed remains unconfirmed."
+
+        history = client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history")
+        assert history.status_code == 200, history.text
+        assert len(history.json()) == 1
+        assert history.json()[0]["previous_status"] == "unresolved"
+        assert history.json()[0]["new_status"] == "partially_resolved"
+        assert history.json()[0]["resolution_scope"] == "The discharge summary date was confirmed."
+        assert history.json()[0]["unresolved_remainder"] == "Whether the medicine is currently prescribed remains unconfirmed."
+
+        reopened = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "reopened",
+                "resolution_notes": "A new caregiver report disputes the partial interpretation; preserve the prior audit trail.",
+            },
+        )
+        assert reopened.status_code == 200, reopened.text
+        assert reopened.json()["resolution_status"] == "reopened"
+        assert reopened.json()["resolution_scope"] is None
+        assert reopened.json()["unresolved_remainder"] is None
+
+        history = client.get(f"/api/v1/uncertainty/contradictions/{conflict_id}/history")
+        assert history.status_code == 200, history.text
+        assert len(history.json()) == 2
+        assert [(event["previous_status"], event["new_status"]) for event in history.json()] == [
+            ("unresolved", "partially_resolved"),
+            ("partially_resolved", "reopened"),
+        ]
+        assert history.json()[0]["unresolved_remainder"] == "Whether the medicine is currently prescribed remains unconfirmed."
+    finally:
+        teardown_db()
+
