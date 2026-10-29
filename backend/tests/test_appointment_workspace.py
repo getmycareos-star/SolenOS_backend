@@ -326,8 +326,16 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
                 (id, person_id, question, status, priority, asked_at, created_by_caregiver_id)
             VALUES
                 ('open-question-1', :person_id, 'Confirm whether the appointment date is Monday or Tuesday',
+                 'open', 1, CURRENT_TIMESTAMP, :caregiver_id),
+                ('open-question-closed', :person_id, 'Question already answered', 'answered',
+                 2, CURRENT_TIMESTAMP, :caregiver_id),
+                ('open-question-other-person', :other_person_id, 'Private question for another person',
                  'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
-        """), {"person_id": owner["person"]["id"], "caregiver_id": owner["caregiver"]["id"]})
+        """), {
+            "person_id": owner["person"]["id"],
+            "other_person_id": other["person"]["id"],
+            "caregiver_id": owner["caregiver"]["id"],
+        })
         connection.execute(text("""
             INSERT INTO care_facts (id, person_id, fact_type, fact_value, epistemic_status, created_at, updated_at)
             VALUES ('understanding-fact', :person_id, 'mobility', 'Caregiver-reported mobility change',
@@ -352,6 +360,10 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
         and item["due_at"] is None
         for item in loops["items"]
     ), loops
+    loop_ids = {item["id"] for item in loops["items"]}
+    assert "open-question-closed" not in loop_ids
+    assert "open-question-other-person" not in loop_ids
+    assert "Private question for another person" not in str(body["assessment"])
     assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] in {
         "supported_by_persisted_records", "insufficient_evidence"
     }
