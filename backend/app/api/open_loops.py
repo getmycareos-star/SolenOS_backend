@@ -14,6 +14,7 @@ from sqlalchemy import (
     UniqueConstraint, and_, or_
 )
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.database import Base, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
@@ -415,7 +416,32 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
     )
     db.add(occurrence)
     _audit(db, loop, "created", None, payload.evidence, payload.idempotency_key)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Concurrent retries can both pass the initial lookup. The unique
+        # occurrence constraint is the database arbiter; after rollback, return
+        # the already committed record for the same idempotency/source key.
+        db.rollback()
+        replay_query = db.query(OpenLoopOccurrence).filter(
+            OpenLoopOccurrence.person_id == person_id,
+        )
+        if payload.idempotency_key:
+            replay_query = replay_query.filter(
+                OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
+            )
+        elif payload.source_id:
+            replay_query = replay_query.filter(
+                OpenLoopOccurrence.source_type == payload.source_type,
+                OpenLoopOccurrence.source_id == payload.source_id,
+            )
+        else:
+            raise HTTPException(status_code=409, detail="Open Loop creation conflicted with a concurrent write")
+        replay = replay_query.first()
+        if replay is None:
+            raise HTTPException(status_code=409, detail="Open Loop creation conflicted with a concurrent write")
+        existing = _get_scoped(db, person_id, caregiver_id, replay.loop_id)
+        return {**_snapshot(existing), "recurrence_detected": True, "occurrence_id": replay.id}
     db.refresh(loop)
     return {**_snapshot(loop), "recurrence_detected": False, "occurrence_id": occurrence.id}
 
