@@ -166,9 +166,20 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         ).delete(synchronize_session=False)
         for model in (Baseline, CareEvent, Caregiver):
             db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
-        db.query(CareStateRevision).filter(
-            CareStateRevision.person_id.in_([person_a_id, person_b_id])
-        ).delete(synchronize_session=False)
+        # The audit listener records revisions for ORM writes, while this
+        # fixture cleanup intentionally uses SQL bulk deletes. Explicitly delete
+        # the fixture's revision rows and assert the FK dependency is gone before
+        # deleting the person rows; this catches cleanup regressions at the source.
+        from sqlalchemy import text
+        db.execute(
+            text("DELETE FROM care_state_revisions WHERE person_id IN (:person_a, :person_b)"),
+            {"person_a": person_a_id, "person_b": person_b_id},
+        )
+        remaining_revisions = db.execute(
+            text("SELECT count(*) FROM care_state_revisions WHERE person_id IN (:person_a, :person_b)"),
+            {"person_a": person_a_id, "person_b": person_b_id},
+        ).scalar_one()
+        assert remaining_revisions == 0, "test fixture audit revisions must be removed before fixture persons"
         db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.commit()
         db.close()
