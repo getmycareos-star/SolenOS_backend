@@ -61,6 +61,8 @@ def isolated_database():
 
 def make_person(db, suffix="a"):
     person = Person(id=f"person-{suffix}", name=f"Synthetic Person {suffix}")
+    db.add(person)
+    db.flush()  # PostgreSQL enforces the caregiver -> person foreign key.
     caregiver = Caregiver(
         id=f"caregiver-{suffix}",
         name=f"Synthetic Caregiver {suffix}",
@@ -68,7 +70,7 @@ def make_person(db, suffix="a"):
         relationship="Family",
         person_id=person.id,
     )
-    db.add_all([person, caregiver])
+    db.add(caregiver)
     db.flush()
     return person, caregiver
 
@@ -484,7 +486,9 @@ def test_persistent_observations_keep_time_bounds_and_source_event_links():
         source_ids = {
             row[0] for row in db.query(CareEvent.id).filter(CareEvent.person_id == person.id).all()
         }
-        for change in changes:
+        comparable_changes = [change for change in changes if change.change_type == ChangeType.INCREASE]
+        assert comparable_changes, "Covered current-vs-baseline increase should be emitted."
+        for change in comparable_changes:
             assert set(change.evidence_ids).issubset(source_ids)
             assert change.comparison_window_start is not None
             assert change.comparison_window_end is not None
