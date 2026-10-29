@@ -74,11 +74,11 @@ def upgrade() -> None:
         if missing:
             raise RuntimeError(f"{table} is missing required columns: {', '.join(sorted(missing))}")
 
-    indexes = {
+    indexes = (
         ("ix_evidence_completeness_policies_person_domain", "evidence_completeness_policies", ["person_id", "domain_key"]),
         ("ix_evidence_completeness_assessments_person_policy", "evidence_completeness_assessments", ["person_id", "policy_id", "assessed_at"]),
         ("ix_evidence_completeness_assessments_person_subject", "evidence_completeness_assessments", ["person_id", "subject_type", "subject_id"]),
-    }
+    )
     for name, table, columns in indexes:
         current = {index["name"] for index in inspect(bind).get_indexes(table)}
         if name not in current:
