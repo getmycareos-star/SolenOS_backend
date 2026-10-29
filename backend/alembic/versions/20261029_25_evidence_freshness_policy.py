@@ -57,6 +57,7 @@ def upgrade() -> None:
             sa.Column("policy_version", sa.String(length=64), nullable=False),
             sa.Column("freshness_status", sa.String(length=32), nullable=False),
             sa.Column("source_time", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("source_time_kind", sa.String(length=32), nullable=True),
             sa.Column("assessed_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("age_days", sa.Integer(), nullable=True),
             sa.Column("rationale", sa.Text(), nullable=False),
@@ -67,9 +68,12 @@ def upgrade() -> None:
     assessment_columns = {column["name"] for column in inspector.get_columns("evidence_freshness_assessments")}
     required_assessment_columns = {
         "id", "person_id", "evidence_id", "policy_id", "policy_version",
-        "freshness_status", "source_time", "assessed_at", "age_days",
+        "freshness_status", "source_time", "source_time_kind", "assessed_at", "age_days",
         "rationale", "assessed_by_caregiver_id",
     }
+    if "source_time_kind" not in assessment_columns:
+        op.add_column("evidence_freshness_assessments", sa.Column("source_time_kind", sa.String(length=32), nullable=True))
+        assessment_columns.add("source_time_kind")
     if required_assessment_columns - assessment_columns:
         raise RuntimeError(
             "Existing evidence_freshness_assessments table is incomplete: "
