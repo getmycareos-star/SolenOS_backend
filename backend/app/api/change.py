@@ -19,7 +19,7 @@ from app.schemas.change import (
     ChangeConfirmationRequest,
     ChangeConfirmationTransitionResponse,
 )
-from app.services.change_detection import detect_event_changes, detect_assertion_changes
+from app.services.change_detection import detect_event_changes, detect_assertion_changes, detect_numeric_observation_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
 from app.models.care import Evidence
@@ -147,6 +147,7 @@ def reassess_changes(person_id: str, request: Request, db: Session = Depends(get
         # persisted source events. It does not assert causal relationships.
         detect_cross_domain_patterns(db, person_id)
         detect_assertion_changes(db, person_id)
+        detect_numeric_observation_changes(db, person_id)
         db.commit()
     except Exception as exc:
         db.rollback()
