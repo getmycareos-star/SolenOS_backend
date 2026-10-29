@@ -527,6 +527,36 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     return [line for _, _, line in scored[:limit]]
 
 
+def _rank_source_rows(query: str, rows: list, fields: tuple[str, ...], limit: int) -> list:
+    """Rank authorized ORM rows by evidence relevance; timestamps break ties only."""
+    if limit <= 0 or not rows:
+        return []
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    scored = []
+    for index, row in enumerate(rows):
+        parts = []
+        for field in fields:
+            value = getattr(row, field, None)
+            if isinstance(value, (dict, list, tuple)):
+                value = json.dumps(value, ensure_ascii=False, default=str)
+            if value is not None:
+                parts.append(str(value))
+        searchable = " ".join(parts).casefold()
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", searchable))
+        score = 3 * len(direct_terms & record_terms) + len(synonym_terms & record_terms)
+        timestamp = None
+        for field in ("occurred_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at"):
+            candidate = getattr(row, field, None)
+            if candidate is not None and hasattr(candidate, "timestamp"):
+                timestamp = candidate
+                break
+        recency = timestamp.timestamp() if timestamp is not None else 0
+        scored.append((score, recency, index, row))
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return [row for _, _, _, row in scored[:limit]]
+
+
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
     current = (current_text or "").strip()
