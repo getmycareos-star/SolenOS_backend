@@ -79,6 +79,7 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         assert first_data["written_to_lcr"] is False
         assert first_data["persistence"] == "conversation_only"
         assert event_id in first_data["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in first_data["source_record_refs"]
         retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
         assert retry.status_code == 200, retry.text
         replay = retry.json()
@@ -86,6 +87,7 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         assert replay["session_id"] == first_data["session_id"]
         assert replay["reply"] == first_data["reply"]
         assert event_id in replay["source_event_ids"]
+        assert {"record_type": "care_event", "record_id": event_id} in replay["source_record_refs"]
         assert len(calls) == 1
         restored = client.get(f"/api/v1/conversation/{first_data['session_id']}", headers=headers)
         assert restored.status_code == 200, restored.text
