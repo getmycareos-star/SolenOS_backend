@@ -460,7 +460,7 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
             prerequisite = db.query(OpenLoopRecord).filter(
                 OpenLoopRecord.id == dep.prerequisite_id, OpenLoopRecord.person_id == person_id,
                 OpenLoopRecord.caregiver_id == caregiver_id).first()
-            if prerequisite and prerequisite.status not in TERMINAL_STATES:
+            if prerequisite and prerequisite.status != "closed":
                 blockers.append({"id": prerequisite.id, "title": prerequisite.title, "status": prerequisite.status})
         loop._mandatory_blockers = blockers
         items.append(_snapshot(loop))
@@ -476,7 +476,7 @@ def get_loop(loop_id: str, request: Request, db: Session = Depends(get_db)):
     blockers = []
     for dep in deps:
         prerequisite = _get_scoped(db, person_id, caregiver_id, dep.prerequisite_id)
-        if dep.mandatory and prerequisite.status not in TERMINAL_STATES:
+        if dep.mandatory and prerequisite.status != "closed":
             blockers.append({"id": prerequisite.id, "title": prerequisite.title, "status": prerequisite.status})
     loop._mandatory_blockers = blockers
     return {"loop": _snapshot(loop), "history": [
@@ -629,8 +629,8 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
         OpenLoopDependency.mandatory.is_(True)).all()
     for dep in blockers:
         prerequisite = _get_scoped(db, person_id, caregiver_id, dep.prerequisite_id)
-        if prerequisite.status not in TERMINAL_STATES:
-            raise HTTPException(status_code=409, detail="A mandatory prerequisite remains unresolved")
+        if prerequisite.status != "closed":
+            raise HTTPException(status_code=409, detail="A mandatory prerequisite must be verified closed; cancellation does not satisfy dependencies")
     if not payload.evidence:
         raise HTTPException(status_code=409, detail="Closure requires evidence")
     if loop.loop_type in {"awaiting_response", "professional_input"} and not loop.response_evidence:
@@ -649,6 +649,35 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
     loop.closure_result = "verified"
     loop.closure_actor = "session_caregiver"
     loop.closed_at = datetime.now(timezone.utc)
+
+    # A mandatory dependent becomes actionable only when every prerequisite
+    # reaches verified "closed". Cancellation deliberately does not unblock it.
+    dependent_edges = db.query(OpenLoopDependency).filter(
+        OpenLoopDependency.prerequisite_id == loop.id,
+        OpenLoopDependency.removed_at.is_(None),
+        OpenLoopDependency.mandatory.is_(True),
+    ).all()
+    for edge in dependent_edges:
+        dependent = _get_scoped(db, person_id, caregiver_id, edge.dependent_id)
+        if dependent.status in TERMINAL_STATES:
+            continue
+        active_edges = db.query(OpenLoopDependency).filter(
+            OpenLoopDependency.dependent_id == dependent.id,
+            OpenLoopDependency.removed_at.is_(None),
+            OpenLoopDependency.mandatory.is_(True),
+        ).all()
+        all_verified_closed = all(
+            _get_scoped(db, person_id, caregiver_id, active_edge.prerequisite_id).status == "closed"
+            for active_edge in active_edges
+        )
+        if all_verified_closed and dependent.status == "blocked":
+            dependent_before = _snapshot(dependent)
+            dependent.status = "open"
+            _reassess(db, dependent)
+            _audit(db, dependent, "dependency_unblocked", dependent_before, [
+                {"verified_closed_prerequisite_id": loop.id}
+            ])
+
     _audit(db, loop, "closure_verified", before, payload.evidence, payload.idempotency_key)
     db.commit()
     db.refresh(loop)
@@ -720,7 +749,7 @@ def add_dependency(loop_id: str, payload: DependencyInput, request: Request, db:
     db.add(OpenLoopDependency(person_id=person_id, caregiver_id=caregiver_id,
                               prerequisite_id=prerequisite.id, dependent_id=dependent.id, mandatory=payload.mandatory))
     before = _snapshot(dependent)
-    dependent.status = "blocked" if payload.mandatory and prerequisite.status not in TERMINAL_STATES else dependent.status
+    dependent.status = "blocked" if payload.mandatory and prerequisite.status != "closed" else dependent.status
     _reassess(db, dependent)
     _audit(db, dependent, "dependency_added", before, [{"prerequisite_id": prerequisite.id}])
     db.commit()
@@ -768,7 +797,7 @@ def reassess_open_loops(request: Request, db: Session = Depends(get_db)):
         deps = db.query(OpenLoopDependency).filter(
             OpenLoopDependency.dependent_id == loop.id, OpenLoopDependency.removed_at.is_(None),
             OpenLoopDependency.mandatory.is_(True)).all()
-        unresolved = any(_get_scoped(db, person_id, caregiver_id, dep.prerequisite_id).status not in TERMINAL_STATES for dep in deps)
+        unresolved = any(_get_scoped(db, person_id, caregiver_id, dep.prerequisite_id).status != "closed" for dep in deps)
         if unresolved:
             loop.status = "blocked"
         elif loop.status == "blocked":
