@@ -164,21 +164,30 @@ def main():
 
         # Real HTTP + PostgreSQL change/pattern reconciliation after late-arriving
         # source events. These are synthetic CI records, never production care data.
+        status, pattern_session = request(
+            "POST",
+            "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL pattern E2E person C", "caregiver_name": "PostgreSQL pattern E2E caregiver C"},
+        )
+        require(status == 201, f"pattern E2E session creation expected 201, got {status}: {pattern_session}")
+        token_c = pattern_session["access_token"]
+        person_c = pattern_session["person"]["id"]
+        caregiver_c = pattern_session["caregiver"]["id"]
         pattern_event_ids = []
         for suffix, days_ago in (("old", 20), ("middle", 10), ("recent", 2)):
             event_time = datetime.now(timezone.utc) - timedelta(days=days_ago)
             status, event_record = request(
                 "POST",
                 "/api/v1/events",
-                token=token_a,
+                token=token_c,
                 body={
-                    "person_id": person_a,
+                    "person_id": person_c,
                     "event_type": "fall",
                     "status": "recorded",
                     "occurred_at": event_time.isoformat(),
                     "title": f"CI-only fall event {suffix}",
                     "description": "Synthetic integration fixture; not a real care report.",
-                    "created_by_caregiver_id": caregiver_a,
+                    "created_by_caregiver_id": caregiver_c,
                     "time_provenance": "ci_fixture",
                     "tags": ["ci_fixture", "change_intelligence"],
                 },
@@ -187,7 +196,7 @@ def main():
             pattern_event_ids.append(event_record["id"])
 
         status, persisted_patterns = request(
-            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_a,
+            "GET", f"/api/v1/change/patterns/{person_c}?subject_type=fall", token=token_c,
         )
         require(status == 200, f"pattern list expected 200, got {status}: {persisted_patterns}")
         recurrence_patterns = [
@@ -202,7 +211,7 @@ def main():
         )
         persisted_recurrence_id = recurrence_patterns[0]["id"]
         status, cross_person_patterns = request(
-            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_b,
+            "GET", f"/api/v1/change/patterns/{person_c}?subject_type=fall", token=token_b,
         )
         require(
             status == 403,
@@ -371,7 +380,7 @@ def main():
         )
         require(status == 200, f"coverage read after application restart expected 200, got {status}: {coverage_after_restart}")
         status, patterns_after_restart = request(
-            "GET", f"/api/v1/change/patterns/{person_a}?subject_type=fall", token=token_a,
+            "GET", f"/api/v1/change/patterns/{person_c}?subject_type=fall", token=token_c,
         )
         require(status == 200, f"pattern read after application restart expected 200, got {status}: {patterns_after_restart}")
         require(
