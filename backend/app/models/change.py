@@ -107,6 +107,8 @@ class Pattern(Base):
     confidence = Column(Float, nullable=True, default=None)
     evidence_count = Column(Integer, nullable=False, default=0)
     alternative_interpretations = Column(JSONList, nullable=True)
+    # Descriptive, reproducible metrics derived from distinct source-event timestamps.
+    pattern_metrics = Column(JSONList, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     superseded_by_pattern_id = Column(String, ForeignKey("patterns.id"), nullable=True)
