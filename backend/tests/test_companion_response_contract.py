@@ -105,6 +105,17 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
         assert retry_data["idempotent_replay"] is True
         assert len(calls) == 1
 
+        restored = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}",
+            headers=headers,
+        )
+        assert restored.status_code == 200, restored.text
+        restored_messages = restored.json()["messages"]
+        restored_assistant = next(row for row in restored_messages if row["role"] == "assistant")
+        assert event_id in restored_assistant["source_event_ids"]
+        assert restored_assistant["written_to_lcr"] is False
+        assert restored_assistant["persistence"] == "conversation_only"
+
         changed = {**body, "text": "Tell me about the medication record."}
         mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
         assert mismatch.status_code == 409, mismatch.text
@@ -117,6 +128,11 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
             json={"person_id": other_person_id, "text": body["text"], "client_turn_id": turn_id},
         )
         assert cross_person.status_code == 409, cross_person.text
+        cross_history = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert cross_history.status_code == 404
         assert first_data["reply"] not in cross_person.text
         assert first_data["session_id"] not in cross_person.text
         assert len(calls) == 1
