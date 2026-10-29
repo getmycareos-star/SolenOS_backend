@@ -1186,6 +1186,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "situation_confidence_assessment": ["evidence", "provenance", "uncertainties", "uncertainty_assessments", "conflicts", "reconciliations", "assertions"],
         "situation_trajectory_reconstruction": ["timeline", "events", "facts", "decisions", "decision_outcomes", "caregiver_observations"],
     }
+    capability_specs["observation_coverage_awareness"] = ["observation_coverage"]
     capabilities = {}
     for capability, source_names in capability_specs.items():
         records = sum(len((sources.get(source_name) or {}).get("items") or []) for source_name in source_names)
@@ -1196,6 +1197,50 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "evidence_state": "supported_by_persisted_records" if records else "insufficient_evidence",
             "unavailable_sources": unavailable,
         }
+    capabilities["observation_coverage_awareness"] = {
+        "source_names": ["observation_coverage"],
+        "record_count": coverage_count,
+        "evidence_state": "supported_by_persisted_records" if coverage_count else "insufficient_evidence",
+        "unavailable_sources": [] if coverage_table_available else ["observation_coverage"],
+    }
+    # Observation coverage is distinct from event evidence: an unobserved interval
+    # must never be represented as evidence that an event did not occur.
+    coverage_table_available = inspect(db.get_bind()).has_table("observation_coverage")
+    coverage_rows = []
+    coverage_count = 0
+    if coverage_table_available:
+        coverage_count = db.query(func.count(ObservationCoverage.id)).filter(
+            ObservationCoverage.person_id == person_id
+        ).scalar() or 0
+        coverage_rows = (
+            db.query(ObservationCoverage)
+            .filter(ObservationCoverage.person_id == person_id)
+            .order_by(desc(ObservationCoverage.window_start), ObservationCoverage.id.asc())
+            .limit(100)
+            .all()
+        )
+    observation_coverage = {
+        "items": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "window_start": row.window_start,
+                "window_end": row.window_end,
+                "coverage_status": row.coverage_status,
+                "source_evidence_ids": list(row.source_evidence_ids or []),
+                "rationale": row.rationale,
+                "recorded_at": row.created_at,
+                "recorded_by_caregiver_id": row.recorded_by_caregiver_id,
+                "interpretation_limit": "Observation coverage describes whether a domain was recorded as observed; it does not prove that an event did or did not occur.",
+            }
+            for row in coverage_rows
+        ],
+        "count": coverage_count,
+        "has_more": coverage_count > len(coverage_rows),
+        "status": "available" if coverage_table_available else "unavailable_schema",
+        "source_of_truth": "persisted_person_scoped_observation_coverage",
+        "absence_rule": "No coverage record means unknown, not no events.",
+    }
     # A source-linked chronology is not a causal explanation. Preserve event time and
     # record time separately, and leave temporal anchors unknown when not recorded.
     trajectory_sources = {
@@ -1224,6 +1269,20 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "temporal_basis": temporal_basis,
             "evidence_ids": item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [],
             "interpretation_limit": "Source-linked chronology only; sequence does not establish causation.",
+        })
+    for row in coverage_rows:
+        trajectory_entries.append({
+            "source": "observation_coverage",
+            "record_id": str(row.id),
+            "title": f"{row.subject_type} observation coverage: {row.coverage_status}",
+            "epistemic_status": "explicitly_recorded_coverage",
+            "event_time": row.window_start,
+            "recorded_at": row.created_at,
+            "window_end": row.window_end,
+            "coverage_status": row.coverage_status,
+            "evidence_ids": list(row.source_evidence_ids or []),
+            "temporal_basis": "explicit_observation_window",
+            "interpretation_limit": "Observation coverage describes observation opportunity, not whether an event occurred or did not occur.",
         })
     trajectory_entries.sort(
         key=lambda entry: (
@@ -1262,6 +1321,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions"}][:100],
             "bounded": True,
         },
+        "observation_coverage": observation_coverage,
         "situation_trajectory": {
             "entries": trajectory_entries[:100],
             "count": len(trajectory_entries),
