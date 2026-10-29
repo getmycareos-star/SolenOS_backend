@@ -28,6 +28,33 @@ def detect_event_changes(
     now = _ensure_utc(reference_time) or datetime.now(timezone.utc)
     baseline = build_baseline(db, person_id, event_type, subject_id, now)
     if not baseline:
+        # If all eligible source events were corrected or invalidated, there is
+        # no baseline to rebuild. Retire prior machine-derived event assessments
+        # rather than leaving claims active solely because the source disappeared.
+        stale = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person_id,
+                Change.subject_type == event_type,
+                Change.subject_id == (subject_id or ""),
+                Change.is_active.is_(True),
+                Change.change_type.in_((
+                    ChangeType.INCREASE, ChangeType.DECREASE,
+                    ChangeType.EMERGENCE, ChangeType.RECURRENCE,
+                )),
+                Change.confirmation_status.in_(("detected", "awaiting_confirmation")),
+            )
+            .order_by(Change.created_at.asc(), Change.id.asc())
+            .all()
+        )
+        for item in stale:
+            item.is_active = False
+            item.explanation = (
+                (item.explanation or "Longitudinal change assessment.")
+                + " This assessment is no longer active because no eligible source events remain for reassessment. The historical assessment is retained; this does not establish what happened in the real world."
+            )
+        if stale:
+            db.flush()
         return []
     counts = get_longitudinal_event_counts(db, person_id, event_type, subject_id, now)
     current_count = counts["current_window_count"]
