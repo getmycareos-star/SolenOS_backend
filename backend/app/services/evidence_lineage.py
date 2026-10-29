@@ -183,9 +183,10 @@ def assess_corroboration(
         if kind in {"corroboration_attempt_failed", "not_corroborating", "does_not_corroborate"}:
             failed_pairs.add(pair)
 
-    if corroborating_pairs:
-        status, established, review_required = "independent_corroboration_reviewed_for_specific_claim_or_detail", True, False
-    elif failed_pairs:
+    # Evidence-to-evidence relationships do not carry a claim identifier in
+    # this contract. Even a reviewed "corroborates" label therefore cannot
+    # establish support for the free-text claim currently being assessed.
+    if failed_pairs:
         status, established, review_required = "attempted_but_not_corroborated", False, True
     elif shared_pairs and not independent_pairs:
         status, established, review_required = "shared_origin_only", False, True
@@ -198,6 +199,7 @@ def assess_corroboration(
             "independent_source_pairs": [list(pair) for pair in sorted(independent_pairs)],
             "shared_origin_pairs": [list(pair) for pair in sorted(shared_pairs)],
             "failed_corroboration_pairs": [list(pair) for pair in sorted(failed_pairs)],
+            "relationship_labelled_corroborates_pairs": [list(pair) for pair in sorted(corroborating_pairs)],
             "independent_corroboration_established": established, "review_required": review_required,
             "source_independence_by_evidence_id": {key: independence[key] for key in sorted(independence)},
             "interpretation_limit": "A reviewed source relationship supports only its recorded scope. Source independence does not prove claim truth; corroboration must be explicitly linked to the particular claim or detail."}
