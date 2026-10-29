@@ -142,6 +142,10 @@ def test_decrease_requires_complete_coverage_for_both_comparison_windows():
         assert decreases, "A lower rate with complete coverage in both windows should be assessed"
         assert "Baseline observation coverage: covered" in decreases[0].explanation
         assert "current observation coverage: covered" in decreases[0].explanation
+        assert decreases[0].baseline_coverage_status == "covered"
+        assert decreases[0].current_coverage_status == "covered"
+        assert decreases[0].baseline_coverage_fraction == pytest.approx(1.0)
+        assert decreases[0].current_coverage_fraction == pytest.approx(1.0)
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
