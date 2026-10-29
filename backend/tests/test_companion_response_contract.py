@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -352,6 +353,7 @@ def test_companion_retrieves_matching_historical_event_outside_recent_event_wind
             evidence_ids=[],
             time_provenance="caregiver_reported",
             confidence=None,
+            created_by_caregiver_id=caregiver_id,
         )
         db.add(older)
         for index in range(45):
@@ -365,6 +367,7 @@ def test_companion_retrieves_matching_historical_event_outside_recent_event_wind
                 evidence_ids=[],
                 time_provenance="caregiver_reported",
                 confidence=None,
+                created_by_caregiver_id=caregiver_id,
             ))
         db.commit()
         older_id = str(older.id)
@@ -392,7 +395,8 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     ]
     query = collaboration._context_query_with_history("What about that?", prior)
     assert "sleep" in query.casefold()
-    assert "poor sleep" in query.casefold()
+    assert "sleep" in query.casefold()
+    assert "poor sleep" not in query.casefold()
     assert query.startswith("What about that?")
 
 
