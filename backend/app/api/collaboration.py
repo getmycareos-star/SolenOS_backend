@@ -505,7 +505,7 @@ _CONTEXT_STOPWORDS = {
 
 _COMPANION_SYNONYM_GROUPS = (
     frozenset({"sleep", "rest", "waking", "awake", "overnight", "insomnia"}),
-    frozenset({"appointment", "visit", "clinic", "doctor", "consultation", "specialist"}),
+    frozenset({"appointment", "visit", "clinic", "doctor", "consultation", "specialist", "next", "upcoming", "soon", "scheduled"}),
     frozenset({"medication", "medicine", "medicines", "pill", "pills", "dose", "dosage", "prescription"}),
     frozenset({"fall", "falls", "fell", "slip", "slipped", "stumble", "stumbled"}),
     frozenset({"pain", "ache", "aching", "sore", "soreness", "hurt", "hurting"}),
@@ -558,8 +558,9 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     # When any record matches the question, zero-overlap records are noise,
     # not a reason to fill the context window with unrelated recent history.
     relevant = [item for item in scored if item[0] > 0]
-    selected = relevant if relevant else scored
-    return [line for _, _, line in selected[:limit]]
+    # If a substantive query has no matching record, do not fill the prompt with
+    # unrelated recent items. Empty context is safer than a misleading answer.
+    return [line for _, _, line in relevant[:limit]]
 
 
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
