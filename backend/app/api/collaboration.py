@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -980,6 +981,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_handoff_ids: list[str] = []
     source_notification_ids: list[str] = []
     source_freshness_assessment_ids: list[str] = []
+    source_freshness_status = "not_applicable"
 
     # Data minimization: do not send private LCR events or appointments to
     # Daily Capture, document-only or Community assistance. Each workflow gets
@@ -1076,29 +1078,41 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "document_validity_renewal", "emergency_readiness", "care_transition",
     }
     if payload.workflow in freshness_workflows:
-        freshness_rows = (
-            db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
-            .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
-            .filter(EvidenceFreshnessAssessment.person_id == person_id)
-            .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
-            .limit(50)
-            .all()
+        freshness_schema_available = (
+            inspect(db.get_bind()).has_table("evidence_freshness_assessments")
+            and inspect(db.get_bind()).has_table("evidence_freshness_policies")
         )
-        seen_freshness_pairs = set()
-        for assessment, policy in freshness_rows:
-            pair = (str(assessment.evidence_id), str(assessment.policy_id))
-            if pair in seen_freshness_pairs:
-                continue
-            seen_freshness_pairs.add(pair)
-            source_freshness_assessment_ids.append(str(assessment.id))
+        if not freshness_schema_available:
+            source_freshness_status = "unavailable_schema"
             context_lines.append(
-                f"Recorded freshness policy application [{assessment.id}] for evidence [{assessment.evidence_id}]: "
-                f"domain={policy.domain_key}; policy_version={assessment.policy_version}; "
-                f"status={assessment.freshness_status}; source_time_kind={assessment.source_time_kind or 'unknown'}; "
-                f"source_time={assessment.source_time.isoformat() if assessment.source_time else 'unknown'}; "
-                f"age_days={assessment.age_days if assessment.age_days is not None else 'unknown'}; "
-                f"rationale={assessment.rationale}. This is a policy application, not a truth judgment."
+                "Freshness assessment source is unavailable in this database schema. "
+                "Currentness is unknown; do not infer that evidence is current or stale."
             )
+        else:
+            freshness_rows = (
+                db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
+                .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
+                .filter(EvidenceFreshnessAssessment.person_id == person_id)
+                .order_by(EvidenceFreshnessAssessment.assessed_at.desc())
+                .limit(50)
+                .all()
+            )
+            source_freshness_status = "available" if freshness_rows else "no_assessments_returned"
+            seen_freshness_pairs = set()
+            for assessment, policy in freshness_rows:
+                pair = (str(assessment.evidence_id), str(assessment.policy_id))
+                if pair in seen_freshness_pairs:
+                    continue
+                seen_freshness_pairs.add(pair)
+                source_freshness_assessment_ids.append(str(assessment.id))
+                context_lines.append(
+                    f"Recorded freshness policy application [{assessment.id}] for evidence [{assessment.evidence_id}]: "
+                    f"domain={policy.domain_key}; policy_version={assessment.policy_version}; "
+                    f"status={assessment.freshness_status}; source_time_kind={assessment.source_time_kind or 'unknown'}; "
+                    f"source_time={assessment.source_time.isoformat() if assessment.source_time else 'unknown'}; "
+                    f"age_days={assessment.age_days if assessment.age_days is not None else 'unknown'}; "
+                    f"rationale={assessment.rationale}. This is a policy application, not a truth judgment."
+                )
 
     # These workflows cannot infer live account, permission, delivery, or persistence
     # state from caregiver prose. Make the absence explicit to Qwen so the
@@ -1251,6 +1265,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_handoff_ids": source_handoff_ids,
         "source_notification_ids": source_notification_ids,
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "source_freshness_status": source_freshness_status,
         "provider_status": "available",
     }
 
