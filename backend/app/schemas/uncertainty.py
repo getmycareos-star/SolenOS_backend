@@ -118,6 +118,7 @@ class ContradictionCreate(ContradictionBase):
 class ContradictionUpdate(BaseModel):
     resolution_status: Optional[str] = None
     resolution_notes: Optional[str] = None
+    resolution_scope: Optional[str] = Field(None, min_length=1, max_length=4000)
     resolved_by_caregiver_id: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
 
