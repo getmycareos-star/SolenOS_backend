@@ -23,7 +23,7 @@ _UNCERTAINTY_PATTERNS = (
 )
 _CAUSAL_PATTERNS = (
     re.compile(
-        r"\b(caused by|caused|because of|due to|resulted in|led to|triggered by|"
+        r"\b(caused by|caused|because of|due to|resulted in|led to|triggered by|triggered|"
         r"contributed to|precipitated by|brought on by|as a result of)\b",
         re.I,
     ),
