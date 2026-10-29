@@ -450,6 +450,145 @@ def list_claim_assessments(
     )
 
 
+@router.get("/claims/{claim_id}/assessment-impact")
+def get_claim_assessment_impact(
+    claim_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Report deterministic reasons an existing claim assessment may need review.
+
+    This endpoint does not verify truth, calculate confidence, or automatically
+    rewrite an assessment. It compares the current claim/evidence links with the
+    latest persisted assessment and checks declared prerequisite assessments.
+    """
+    person_id, _caregiver_id = _scoped_identity(request, db)
+    claim = db.query(CareAssertion).filter(
+        CareAssertion.id == claim_id,
+        CareAssertion.person_id == person_id,
+    ).first()
+    if claim is None:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    latest = (
+        db.query(EvidenceClaimAssessment)
+        .filter(
+            EvidenceClaimAssessment.person_id == person_id,
+            EvidenceClaimAssessment.claim_id == claim_id,
+        )
+        .order_by(EvidenceClaimAssessment.claim_version.desc())
+        .first()
+    )
+    if latest is None:
+        return {
+            "claim_id": claim_id,
+            "person_id": person_id,
+            "status": "not_assessed",
+            "assessment_id": None,
+            "assessment_version": None,
+            "review_required": True,
+            "reasons": ["no_persisted_claim_assessment"],
+            "missing_evidence_ids": [],
+            "unassessed_claim_evidence_ids": list(claim.evidence_ids or []),
+            "changed_prerequisite_claim_ids": [],
+            "interpretation_limit": "This is a deterministic review trigger, not a claim-truth judgment or calibrated confidence score.",
+        }
+
+    links = latest.evidence_links if isinstance(latest.evidence_links, list) else []
+    assessed_ids = {
+        str(item.get("evidence_id"))
+        for item in links
+        if isinstance(item, dict) and item.get("evidence_id")
+    }
+    claim_evidence_ids = {str(item) for item in (claim.evidence_ids or [])}
+    missing_evidence_ids = []
+    if assessed_ids:
+        existing = {
+            str(row[0])
+            for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id.in_(sorted(assessed_ids)),
+            ).all()
+        }
+        missing_evidence_ids = sorted(assessed_ids - existing)
+
+    unassessed_claim_evidence_ids = sorted(claim_evidence_ids - assessed_ids)
+    reasons = []
+    if missing_evidence_ids:
+        reasons.append("previously_linked_evidence_is_unavailable")
+    if unassessed_claim_evidence_ids:
+        reasons.append("claim_has_evidence_not_in_latest_assessment")
+
+    # A declared prerequisite assessment that changed after this assessment
+    # invalidates the assumption that this dependent assessment reflects it.
+    dependency_edges = db.query(EvidenceClaimDependency).filter(
+        EvidenceClaimDependency.person_id == person_id,
+        EvidenceClaimDependency.claim_id == claim_id,
+        EvidenceClaimDependency.dependency_type.in_({"derived_from", "requires"}),
+    ).all()
+    changed_prerequisite_claim_ids = []
+    for edge in dependency_edges:
+        prerequisite = (
+            db.query(EvidenceClaimAssessment)
+            .filter(
+                EvidenceClaimAssessment.person_id == person_id,
+                EvidenceClaimAssessment.claim_id == edge.depends_on_claim_id,
+            )
+            .order_by(EvidenceClaimAssessment.claim_version.desc())
+            .first()
+        )
+        if prerequisite and prerequisite.created_at and latest.created_at:
+            latest_time = latest.created_at
+            prerequisite_time = prerequisite.created_at
+            # SQLite may return naive timestamps while PostgreSQL returns aware ones.
+            if latest_time.tzinfo is None and prerequisite_time.tzinfo is not None:
+                latest_time = latest_time.replace(tzinfo=timezone.utc)
+            elif latest_time.tzinfo is not None and prerequisite_time.tzinfo is None:
+                prerequisite_time = prerequisite_time.replace(tzinfo=timezone.utc)
+            if prerequisite_time > latest_time:
+                changed_prerequisite_claim_ids.append(edge.depends_on_claim_id)
+    if changed_prerequisite_claim_ids:
+        reasons.append("prerequisite_claim_assessment_changed")
+
+    # Conflicts are surfaced rather than resolved by recency, frequency, or
+    # a majority of reports. A human must assess their scope and relevance.
+    from app.models.uncertainty import Contradiction
+    unresolved_conflicts = db.query(Contradiction).filter(
+        Contradiction.person_id == person_id,
+        Contradiction.subject_id == claim.subject_id,
+        Contradiction.field == claim.field,
+        Contradiction.resolution_status.notin_({"resolved", "superseded"}),
+    ).order_by(Contradiction.created_at.asc(), Contradiction.id.asc()).limit(50).all()
+    if unresolved_conflicts:
+        reasons.append("matching_conflicts_remain_unresolved")
+
+    review_required = bool(reasons) or latest.status in {"unverified", "uncertain", "conflicting", "missing_evidence", "stale"}
+    return {
+        "claim_id": claim_id,
+        "person_id": person_id,
+        "status": "review_required" if review_required else "current_for_linked_sources",
+        "assessment_id": latest.id,
+        "assessment_version": latest.claim_version,
+        "assessment_status": latest.status,
+        "review_required": review_required,
+        "reasons": reasons,
+        "missing_evidence_ids": missing_evidence_ids,
+        "unassessed_claim_evidence_ids": unassessed_claim_evidence_ids,
+        "changed_prerequisite_claim_ids": sorted(set(changed_prerequisite_claim_ids)),
+        "unresolved_conflicts": [
+            {
+                "conflict_id": item.id,
+                "field": item.field,
+                "description": item.description,
+                "resolution_status": item.resolution_status,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in unresolved_conflicts
+        ],
+        "interpretation_limit": "A current assessment means only that these deterministic review triggers were not found in the bounded query. It does not establish clinical truth, semantic entailment, evidence completeness, source independence, or causal validity.",
+    }
+
+
 CLAIM_DEPENDENCY_TYPES = {"derived_from", "requires", "supports", "contradicts", "contextualizes"}
 CLAIM_DAG_TYPES = {"derived_from", "requires"}
 
