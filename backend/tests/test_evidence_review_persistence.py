@@ -652,8 +652,8 @@ def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(r
             "evidence_ids": ["review-evidence-b"],
         },
     )
-    assert foreign.status_code == 422, foreign.text
-    assert "All evidence IDs must belong" in foreign.text
+    assert foreign.status_code == 404, foreign.text
+    assert "outside this care record" in foreign.text
 
     missing = client_a.post(
         "/api/v1/care-continuity/action-outcomes",
@@ -664,7 +664,7 @@ def test_generic_care_continuity_writes_reject_foreign_or_missing_evidence_ids(r
             "evidence_ids": ["evidence-that-does-not-exist"],
         },
     )
-    assert missing.status_code == 422, missing.text
+    assert missing.status_code == 404, missing.text
 
     valid = client_a.post(
         "/api/v1/care-continuity/action-outcomes",
