@@ -1180,3 +1180,97 @@ def test_structured_observation_requires_exact_source_and_preserves_correction_h
         db.close()
     finally:
         teardown_db()
+
+
+def test_analyze_endpoint_uses_persisted_shared_origin_for_independence_count():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import EvidenceSourceRelationship
+
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="person-lineage-analysis", name="Lineage Analysis Person")
+        caregiver = Caregiver(
+            id="caregiver-lineage-analysis",
+            name="Lineage Analysis Caregiver",
+            email="lineage-analysis@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = [
+            Evidence(
+                id="evidence-derived-a",
+                person_id=person.id,
+                type="derived_summary",
+                source_text="Breakfast intake was low.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="derived_summary",
+                evidence_status="verified",
+            ),
+            Evidence(
+                id="evidence-derived-b",
+                person_id=person.id,
+                type="derived_summary",
+                source_text="Breakfast consumption was limited.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="derived_summary",
+                evidence_status="verified",
+            ),
+            Evidence(
+                id="evidence-origin-root",
+                person_id=person.id,
+                type="caregiver_report",
+                source_text="Original caregiver report about breakfast intake.",
+                uploaded_by_caregiver_id=caregiver.id,
+                source_type="caregiver_report",
+                evidence_status="verified",
+            ),
+        ]
+        db.add_all([person, caregiver, *evidence])
+        db.flush()
+        db.add_all([
+            EvidenceSourceRelationship(
+                person_id=person.id,
+                source_evidence_id="evidence-derived-a",
+                related_evidence_id="evidence-origin-root",
+                relationship_type="derived_from",
+                source_independence_status="shared_origin",
+                origin_group_key="breakfast-origin-group",
+                rationale="Derived summary references the original caregiver report.",
+                reviewed_by_caregiver_id=caregiver.id,
+            ),
+            EvidenceSourceRelationship(
+                person_id=person.id,
+                source_evidence_id="evidence-derived-b",
+                related_evidence_id="evidence-origin-root",
+                relationship_type="derived_from",
+                source_independence_status="shared_origin",
+                origin_group_key="breakfast-origin-group",
+                rationale="Second derived summary references the same original report.",
+                reviewed_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        db.close()
+
+        client = authorized_client("person-lineage-analysis")
+        response = client.post(
+            "/api/v1/uncertainty/analyze",
+            json={
+                "person_id": "person-lineage-analysis",
+                "subject_type": "daily_care",
+                "subject_id": "breakfast",
+                "field": "intake",
+                "claim": "Two independent sources corroborate low breakfast intake.",
+                "task": "summarize",
+                "evidence_ids": ["evidence-derived-a", "evidence-derived-b"],
+            },
+        )
+        assert response.status_code == 200, response.text
+        analysis = response.json()["analysis"]
+        assert analysis["independent_evidence_record_count"] == 1
+        assert analysis["duplicate_evidence_groups"][0]["reason"] == "shared_source_lineage"
+        assert analysis["duplicate_evidence_groups"][0]["independent_corroboration"] is False
+    finally:
+        teardown_db()
