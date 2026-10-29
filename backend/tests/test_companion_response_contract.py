@@ -285,6 +285,7 @@ def test_companion_retries_replay_the_committed_turn_without_duplicate_messages(
         try:
             rows = db.query(ConversationMessage).all()
             assert [row.role for row in rows] == ["user", "assistant"]
+            assert rows[0].created_at < rows[1].created_at
             assert {row.client_turn_id for row in rows} == {"retry-turn-0001"}
         finally:
             db.close()
