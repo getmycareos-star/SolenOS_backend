@@ -352,7 +352,7 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert body["assessment"]["person_id"] == owner["person"]["id"]
     assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
     assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
-    assert len(body["assessment"]["capabilities"]) == 20
+    assert len(body["assessment"]["capabilities"]) == 21
     loops = body["assessment"]["open_loops"]
     assert loops["source_of_truth"] == "persisted_lcr_records"
     assert any(
@@ -367,6 +367,11 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert "open-question-closed" not in loop_ids
     assert "open-question-other-person" not in loop_ids
     assert "Private question for another person" not in str(body["assessment"])
+    trajectory = body["assessment"]["situation_trajectory"]
+    assert trajectory["source_of_truth"] == "persisted_lcr_records"
+    assert trajectory["causal_inference"] == "not_performed"
+    assert any(entry["record_id"] == "understanding-fact" for entry in trajectory["entries"])
+    assert all("interpretation_limit" in entry for entry in trajectory["entries"])
     assert body["assessment"]["capabilities"]["baseline_establishment"]["evidence_state"] in {
         "supported_by_persisted_records", "insufficient_evidence"
     }
