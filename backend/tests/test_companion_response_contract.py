@@ -94,6 +94,15 @@ def test_companion_retry_replays_original_reply_and_rejects_changed_text(monkeyp
         assistant = next(row for row in restored.json()["messages"] if row["role"] == "assistant")
         assert assistant["written_to_lcr"] is False
         assert assistant["persistence"] == "conversation_only"
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={"person_id": other_person_id, "text": body["text"], "client_turn_id": turn_id},
+        )
+        assert cross_person.status_code == 409, cross_person.text
+
         changed = {**body, "text": "Tell me about the medication record."}
         mismatch = client.post("/api/v1/conversation/message", headers=headers, json=changed)
         assert mismatch.status_code == 409, mismatch.text
