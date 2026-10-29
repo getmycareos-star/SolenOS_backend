@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
+from app.models.care import Evidence
 
 pytestmark = pytest.mark.session_security
 
@@ -157,6 +158,65 @@ def test_professional_input_requires_source_evidence():
         json={"text": "A professional responded", "evidence": []},
     )
     assert response.status_code == 422, response.text
+
+
+def test_professional_input_requires_existing_person_scoped_source_evidence():
+    client = TestClient(app)
+    person_a, headers_a = session(client, "Care recipient A")
+    person_b, headers_b = session(client, "Care recipient B")
+    loop_a = create_loop(client, headers_a, "professional_input", title="Confirm source-backed professional input")
+    db = TestSessionLocal()
+    try:
+        db.add(Evidence(
+            id="professional-source-evidence-a",
+            person_id=person_a["person"]["id"],
+            type="document",
+            source_text="Synthetic CI document source; not real care information.",
+            uploaded_by_caregiver_id=person_a["caregiver"]["id"],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    caregiver_note_only = client.post(
+        f"/api/v1/open-loops/{loop_a['id']}/responses",
+        headers=headers_a,
+        json={"text": "Caregiver says a professional replied",
+              "evidence": [{"kind": "caregiver_recorded", "text": "A professional called"}]},
+    )
+    assert caregiver_note_only.status_code == 422, caregiver_note_only.text
+
+    foreign_source = client.post(
+        f"/api/v1/open-loops/{loop_a['id']}/responses",
+        headers=headers_a,
+        json={"text": "A professional replied",
+              "evidence": [{"kind": "care_record_source", "evidence_id": "evidence-from-another-person"}]},
+    )
+    assert foreign_source.status_code == 404, foreign_source.text
+
+    accepted = client.post(
+        f"/api/v1/open-loops/{loop_a['id']}/responses",
+        headers=headers_a,
+        json={"text": "The professional response is linked to an existing record",
+              "evidence": [{"kind": "care_record_source", "evidence_id": "professional-source-evidence-a"}]},
+    )
+    assert accepted.status_code == 200, accepted.text
+    closed = client.post(
+        f"/api/v1/open-loops/{loop_a['id']}/close",
+        headers=headers_a,
+        json={"text": "Source-backed response reviewed",
+              "evidence": [{"kind": "closure_review", "text": "Reviewed against source record"}]},
+    )
+    assert closed.status_code == 200, closed.text
+
+    loop_b = create_loop(client, headers_b, "professional_input", title="Foreign source must not be visible")
+    denied = client.post(
+        f"/api/v1/open-loops/{loop_b['id']}/responses",
+        headers=headers_b,
+        json={"text": "Attempt to reference another care record",
+              "evidence": [{"kind": "care_record_source", "evidence_id": "professional-source-evidence-a"}]},
+    )
+    assert denied.status_code == 404, denied.text
 
 
 def test_dependency_cycle_is_rejected_and_prerequisite_blocks_dependent():
