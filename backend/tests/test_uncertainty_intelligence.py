@@ -6,8 +6,33 @@ import pytest
 from sqlalchemy import Boolean, Column, DateTime, Float, MetaData, String, Table, Text, create_engine, insert
 
 from app.services.lcr_context import build_lcr_context
-from app.services.uncertainty_intelligence import analyze_uncertainty
+from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.services.delta_engine import _match_finding_evidence
+
+
+def test_persisted_evidence_projection_keeps_time_provenance_separate_from_timestamp():
+    from types import SimpleNamespace
+
+    row = SimpleNamespace(
+        id="evidence-1",
+        source_type="document",
+        type="document",
+        source_text="Follow-up date is not stated.",
+        evidence_status="unverified",
+        time_provenance="reported_by_caregiver",
+        extra_metadata=json.dumps({
+            "quality": "partial",
+            "readable": True,
+            "extraction_status": "partial",
+            "temporal_scope": "time_sensitive",
+        }),
+    )
+    item = evidence_record_to_uncertainty_item(row)
+    assert item["temporal_provenance"] == "reported_by_caregiver"
+    assert "observed_at" not in item
+    assert item["quality"] == "partial"
+    assert item["readable"] is True
+    assert item["extraction_status"] == "partial"
 
 
 def test_no_evidence_is_unknown_not_negative():
