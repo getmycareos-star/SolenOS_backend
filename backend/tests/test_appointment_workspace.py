@@ -451,6 +451,13 @@ def test_observation_coverage_api_persists_and_isolates_person_records(client):
     assert created.json()["person_id"] == owner["person"]["id"]
     assert created.json()["coverage_status"] == "covered"
 
+    situation = test_client.post("/api/v1/care-continuity/situation-understanding/reassess", headers=headers)
+    assert situation.status_code == 200, situation.text
+    coverage_projection = situation.json()["assessment"]["observation_coverage"]
+    assert coverage_projection["source_of_truth"] == "persisted_person_scoped_observation_coverage"
+    assert any(item["id"] == created.json()["id"] for item in coverage_projection["items"])
+    assert "not no events" in coverage_projection["absence_rule"]
+
     own_records = test_client.get("/api/v1/care-continuity/observation-coverage?subject_type=mobility", headers=headers)
     other_records = test_client.get("/api/v1/care-continuity/observation-coverage?subject_type=mobility", headers=other_headers)
     assert own_records.status_code == 200, own_records.text
