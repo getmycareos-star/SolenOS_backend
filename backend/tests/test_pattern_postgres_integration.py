@@ -17,6 +17,10 @@ from app.models.change import Baseline, Change, Pattern
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+# CI may supply psycopg while backend test dependencies install psycopg2-binary.
+# Normalize only the SQLAlchemy driver prefix; preserve host, database and credentials.
+if DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")),
     reason="requires a real PostgreSQL DATABASE_URL",
