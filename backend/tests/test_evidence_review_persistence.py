@@ -49,38 +49,47 @@ def issue_client(person_id: str) -> TestClient:
 
 @pytest.fixture
 def review_records():
+    # This fixture uses a shared in-memory SQLite connection; always reset it,
+    # including after setup failures, so test order cannot leak records.
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     db = SessionLocal()
-    person_a = Person(id="review-person-a", name="Person A")
-    caregiver_a = Caregiver(
-        id="review-caregiver-a", name="Caregiver A", email="review-a@example.com",
-        relationship="Family", person_id=person_a.id,
-    )
-    person_b = Person(id="review-person-b", name="Person B")
-    caregiver_b = Caregiver(
-        id="review-caregiver-b", name="Caregiver B", email="review-b@example.com",
-        relationship="Family", person_id=person_b.id,
-    )
-    db.add_all([person_a, caregiver_a, person_b, caregiver_b])
-    db.flush()
-    evidence_a = Evidence(
-        id="review-evidence-a", person_id=person_a.id, type="caregiver_report",
-        source_text="Caregiver reports that the appointment occurred.",
-        uploaded_by_caregiver_id=caregiver_a.id, source_type="caregiver_report",
-        time_provenance="reported_by_caregiver",
-    )
-    evidence_b = Evidence(
-        id="review-evidence-b", person_id=person_b.id, type="caregiver_report",
-        source_text="Separate care record evidence.",
-        uploaded_by_caregiver_id=caregiver_b.id, source_type="caregiver_report",
-    )
-    db.add_all([evidence_a, evidence_b])
-    db.commit()
-    db.close()
-    yield issue_client(person_a.id), issue_client(person_b.id)
-    app.dependency_overrides.clear()
-    Base.metadata.drop_all(bind=engine)
+    try:
+        person_a = Person(id="review-person-a", name="Person A")
+        caregiver_a = Caregiver(
+            id="review-caregiver-a", name="Caregiver A", email="review-a@example.com",
+            relationship="Family", person_id=person_a.id,
+        )
+        person_b = Person(id="review-person-b", name="Person B")
+        caregiver_b = Caregiver(
+            id="review-caregiver-b", name="Caregiver B", email="review-b@example.com",
+            relationship="Family", person_id=person_b.id,
+        )
+        db.add_all([person_a, caregiver_a, person_b, caregiver_b])
+        db.flush()
+        person_a_id = person_a.id
+        person_b_id = person_b.id
+        evidence_a = Evidence(
+            id="review-evidence-a", person_id=person_a_id, type="caregiver_report",
+            source_text="Caregiver reports that the appointment occurred.",
+            uploaded_by_caregiver_id=caregiver_a.id, source_type="caregiver_report",
+            time_provenance="reported_by_caregiver",
+        )
+        evidence_b = Evidence(
+            id="review-evidence-b", person_id=person_b_id, type="caregiver_report",
+            source_text="Separate care record evidence.",
+            uploaded_by_caregiver_id=caregiver_b.id, source_type="caregiver_report",
+        )
+        db.add_all([evidence_a, evidence_b])
+        db.commit()
+    finally:
+        db.close()
+    try:
+        yield issue_client(person_a_id), issue_client(person_b_id)
+    finally:
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
 
 
 CRITERIA = [
