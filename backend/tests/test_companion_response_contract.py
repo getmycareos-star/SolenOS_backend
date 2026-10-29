@@ -801,3 +801,74 @@ def test_companion_paraphrase_ranking_covers_appointments_and_medication_terms()
         "Was the pill recorded?", [unrelated_sleep, medication], 1
     ) == [medication]
 
+
+
+def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = []
+
+    def fake_qwen(base, model, messages, options=None):
+        captured.append(messages)
+        return "The older note records restless sleep. It does not establish a longer-term trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        db = TestingSessionLocal()
+        older = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=120), title="Sleep history",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id, event_type="observation", status="recorded",
+                occurred_at=now - timedelta(days=index + 1),
+                title=f"Unrelated routine note {index}",
+                description=f"Household activity note {index}.",
+                evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        first = client.post(
+            "/api/v1/conversation/message", headers=headers,
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert older_id in first_data["source_event_ids"]
+        assert first_data["written_to_lcr"] is False
+
+        follow_up = client.post(
+            "/api/v1/conversation/message", headers=headers,
+            json={
+                "person_id": person_id, "session_id": first_data["session_id"],
+                "text": "What about that?",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        follow_up_data = follow_up.json()
+        assert older_id in follow_up_data["source_event_ids"]
+        assert older_id in captured[-1][-1]["content"]
+        assert "has mum's sleep been getting worse" not in captured[-1][-1]["content"].casefold()
+        assert follow_up_data["written_to_lcr"] is False
+
+        history = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}", headers=headers
+        )
+        assert history.status_code == 200, history.text
+        assert [row["role"] for row in history.json()["messages"]] == [
+            "user", "assistant", "user", "assistant"
+        ]
+    finally:
+        teardown()
