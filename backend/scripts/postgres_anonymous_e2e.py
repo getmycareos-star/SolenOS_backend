@@ -714,7 +714,7 @@ def main():
         persisted_loop = open_loop_after_restart.get("loop", {})
         require(persisted_loop.get("id") == open_loop_id
                 and persisted_loop.get("status") == "open"
-                and len(persisted_loop.get("action_evidence", [])) == 3
+                and len(persisted_loop.get("action_evidence", [])) == 4
                 and len(persisted_loop.get("response_evidence", [])) == 1,
                 f"Open Loop lifecycle/evidence did not persist across Uvicorn restart: {persisted_loop}")
         status, open_loop_history_after_restart = request(
