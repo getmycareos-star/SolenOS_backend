@@ -1,6 +1,13 @@
 name: Companion live Qwen inference evaluation
 
 on:
+  push:
+    branches: [fix/companion-recovery-rebased-2026-10-29]
+    paths:
+      - "backend/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - ".github/workflows/companion-live-inference.yml"
   pull_request:
     paths:
       - "backend/**"
