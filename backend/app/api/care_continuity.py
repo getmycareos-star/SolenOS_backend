@@ -809,6 +809,7 @@ def current_care_projection(
             "claim_count": len(claim_refs),
             "source_span_start": row.get("source_span_start") if source_name == "evidence_observations" else None,
             "source_span_end": row.get("source_span_end") if source_name == "evidence_observations" else None,
+            "source_passage": row.get("source_passage") if source_name == "evidence_observations" else None,
             "negated": row.get("negated") if source_name == "evidence_observations" else None,
             "hedge_marker": row.get("hedge_marker") if source_name == "evidence_observations" else None,
             "ambiguity_note": row.get("ambiguity_note") if source_name == "evidence_observations" else None,
