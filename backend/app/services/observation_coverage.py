@@ -43,7 +43,9 @@ def assess_observation_coverage(
             covered_seconds += int((right - left).total_seconds())
             cursor = right
     window_seconds = int((end - start).total_seconds())
-    fraction = covered_seconds / window_seconds if window_seconds > 0 else None
+    has_explicit_interval_status = any(r.coverage_status in {"covered", "uncovered"} for r in rows)
+    # No coverage rows means unknown, not a measured 0% observation rate.
+    fraction = covered_seconds / window_seconds if window_seconds > 0 and has_explicit_interval_status else None
     has_noncovered = any(r.coverage_status != "covered" for r in rows)
     if fraction == 1.0 and not has_noncovered:
         status = "covered"
