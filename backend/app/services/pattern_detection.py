@@ -104,6 +104,7 @@ def detect_patterns(
         subject_type=subject_type,
         subject_id=subject_id or "",
         events=canonical_events,
+        changes=changes,
         now=now,
     )
     if frequency_pattern:
@@ -296,6 +297,7 @@ def _build_frequency_pattern(
     subject_type: str,
     subject_id: str,
     events: List[CareEvent],
+    changes: List[Change],
     now: datetime,
 ) -> Optional[Pattern]:
     """Compare adjacent 30-day event rates only with complete observation coverage."""
@@ -351,13 +353,10 @@ def _build_frequency_pattern(
         pattern_strength=PatternStrength.EMERGING if len(event_ids) >= 3 else PatternStrength.WEAK,
         event_ids=event_ids,
         change_ids=sorted({
-            change.id for change in db.query(Change).filter(
-                Change.person_id == person_id,
-                Change.subject_type == subject_type,
-                Change.is_active.is_(True),
-                Change.evidence_ids != None,
-            ).all()
-            if set(change.evidence_ids or []).intersection(event_ids)
+            change.id for change in changes
+            if (change.subject_id or "") == subject_id
+            and change.is_active
+            and set(change.evidence_ids or []).intersection(event_ids)
         }),
         temporal_start=prior_start,
         temporal_end=now,
