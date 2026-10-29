@@ -1375,6 +1375,7 @@ def _companion_replay_response(
         "source_appointment_ids": metadata.get("source_appointment_ids", []),
         "source_assertion_ids": metadata.get("source_assertion_ids", []),
         "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+        "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
         "source_record_refs": source_record_refs,
         "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
         "ai_generated": metadata.get("ai_generated", saved_assistant.guard_verdict == "passed"),
@@ -2026,6 +2027,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "source_appointment_ids": source_appointment_ids,
         "source_assertion_ids": source_assertion_ids,
         "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": ai_generated,
     }
