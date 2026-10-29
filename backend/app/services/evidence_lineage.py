@@ -125,6 +125,72 @@ def build_evidence_lineage(
 
 
 
+
+def assess_corroboration(
+    evidence_rows: Iterable[Any],
+    relationships: Iterable[Any],
+    selected_evidence_ids: Iterable[str],
+    *,
+    lineage_truncated: bool = False,
+) -> dict[str, Any]:
+    """Return explicit, conservative corroboration state for selected evidence."""
+    rows = list(evidence_rows)
+    links = list(relationships)
+    selected = sorted({str(value).strip() for value in selected_evidence_ids if str(value).strip()})
+    if lineage_truncated:
+        return {"status": "indeterminate_due_to_truncated_lineage", "evidence_ids_considered": selected,
+                "independent_source_pairs": [], "shared_origin_pairs": [], "failed_corroboration_pairs": [],
+                "independent_corroboration_established": False, "review_required": True,
+                "interpretation_limit": "The bounded provenance closure was truncated; absence of a relationship cannot be treated as proof of independence or no corroboration."}
+    if not selected:
+        return {"status": "no_evidence", "evidence_ids_considered": [], "independent_source_pairs": [],
+                "shared_origin_pairs": [], "failed_corroboration_pairs": [],
+                "independent_corroboration_established": False, "review_required": False,
+                "interpretation_limit": "No evidence was supplied for this assessment."}
+
+    selected_set = set(selected)
+    _, independence = build_evidence_lineage(rows, links, selected)
+    independent_pairs: set[tuple[str, str]] = set()
+    shared_pairs: set[tuple[str, str]] = set()
+    failed_pairs: set[tuple[str, str]] = set()
+    corroborating_pairs: set[tuple[str, str]] = set()
+    for link in links:
+        left = str(getattr(link, "source_evidence_id", "") or "").strip()
+        right = str(getattr(link, "related_evidence_id", "") or "").strip()
+        if left not in selected_set or right not in selected_set or left == right:
+            continue
+        pair = tuple(sorted((left, right)))
+        source_status = str(getattr(link, "source_independence_status", "") or "").strip().casefold()
+        kind = str(getattr(link, "relationship_type", "") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        if source_status in INDEPENDENT_STATUSES:
+            independent_pairs.add(pair)
+            if kind in {"corroborates_claim", "corroborates_detail", "independently_corroborates"}:
+                corroborating_pairs.add(pair)
+        else:
+            shared_pairs.add(pair)
+        if kind in {"corroboration_attempt_failed", "not_corroborating", "does_not_corroborate"}:
+            failed_pairs.add(pair)
+
+    if corroborating_pairs:
+        status, established, review_required = "independent_corroboration_reviewed_for_specific_claim_or_detail", True, False
+    elif failed_pairs:
+        status, established, review_required = "attempted_but_not_corroborated", False, True
+    elif shared_pairs and not independent_pairs:
+        status, established, review_required = "shared_origin_only", False, True
+    elif independent_pairs:
+        status, established, review_required = "independent_sources_reviewed_claim_support_unassessed", False, True
+    else:
+        status, established, review_required = "corroboration_not_assessed", False, True
+
+    return {"status": status, "evidence_ids_considered": selected,
+            "independent_source_pairs": [list(pair) for pair in sorted(independent_pairs)],
+            "shared_origin_pairs": [list(pair) for pair in sorted(shared_pairs)],
+            "failed_corroboration_pairs": [list(pair) for pair in sorted(failed_pairs)],
+            "independent_corroboration_established": established, "review_required": review_required,
+            "source_independence_by_evidence_id": {key: independence[key] for key in sorted(independence)},
+            "interpretation_limit": "A reviewed source relationship supports only its recorded scope. Source independence does not prove claim truth; corroboration must be explicitly linked to the particular claim or detail."}
+
+
 def find_exact_content_duplicate_candidates(
     evidence_rows: Iterable[Any],
     selected_evidence_ids: Iterable[str],
