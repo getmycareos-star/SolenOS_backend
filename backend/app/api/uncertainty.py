@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence
-from app.models.uncertainty import Contradiction as ContradictionModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -22,7 +22,7 @@ from app.schemas.uncertainty import (
 from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
-from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState
+from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
@@ -325,8 +325,60 @@ def analyze_and_persist_uncertainty(
             gap_reason=gap_reason,
             context=[analysis],
             evidence_ids=evidence_ids or None,
-        )
+        ),
+        commit=False,
     )
+    try:
+        # Clarification questions are durable care-continuity records, not merely
+        # text in an API response. Deduplicate against existing open questions and
+        # commit them atomically with the assessment/supersession transition.
+        for question_data in analysis.get("clarification_questions", []):
+            question_text = str(question_data.get("question") or "").strip()
+            if not question_text:
+                continue
+            target_field = str(question_data.get("target_field") or request.field)
+            priority_value = str(question_data.get("priority") or "medium").lower()
+            priority = Priority.HIGH if priority_value == "high" else (
+                Priority.CRITICAL if priority_value == "critical" else Priority.MEDIUM
+            )
+            existing_question = engine.db.query(OpenQuestionModel).filter(
+                OpenQuestionModel.person_id == request.person_id,
+                OpenQuestionModel.subject_type == request.subject_type,
+                OpenQuestionModel.subject_id == request.subject_id,
+                OpenQuestionModel.question == question_text,
+                OpenQuestionModel.status == "open",
+            ).first()
+            context_link = {
+                "origin": "uncertainty_analysis",
+                "assessment_id": persisted.id,
+                "target_field": target_field,
+                "reason": str(question_data.get("reason") or "Clarification required by the uncertainty assessment."),
+            }
+            if existing_question is not None:
+                existing_context = list(existing_question.context or [])
+                if not any(
+                    isinstance(item, dict) and item.get("assessment_id") == persisted.id
+                    for item in existing_context
+                ):
+                    existing_context.append(context_link)
+                    existing_question.context = existing_context
+                continue
+            engine.db.add(OpenQuestionModel(
+                person_id=request.person_id,
+                question=question_text,
+                subject_type=request.subject_type,
+                subject_id=request.subject_id,
+                status="open",
+                priority=priority,
+                evidence_ids=None,
+                context=[context_link],
+                created_by_caregiver_id=engine.caregiver_id,
+            ))
+        engine.db.commit()
+        engine.db.refresh(persisted)
+    except Exception:
+        engine.db.rollback()
+        raise
     return {
         "assessment_id": persisted.id,
         "person_id": persisted.person_id,
