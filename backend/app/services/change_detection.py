@@ -65,10 +65,10 @@ def detect_event_changes(
             change_direction=ChangeDirection.INCREASING,
             previous_state=(
                 f"{comparison['baseline_frequency_per_period']:.3f} events per 30 days "
-                f"over {comparison['baseline_window_days']} observed days"
+                f"over {comparison['baseline_window_days']} calendar days"
             ),
             current_state=(
-                f"{current_count} events over {comparison['current_window_days']} observed days "
+                f"{current_count} events over {comparison['current_window_days']} calendar days "
                 f"({(current_count / (comparison['current_window_days'] / 30.0)):.3f} per 30 days)"
             ),
             previous_count=baseline.event_count,
@@ -138,7 +138,9 @@ def _create_change(
             f"{subject_type} was assessed against its recorded baseline. "
             f"Previous state: {previous_state}. Current state: {current_state}. "
             f"Current count: {current_count}. "
-            f"Baseline count: {comparison.get('baseline_event_count', 'unknown')}."
+            f"Baseline count: {comparison.get('baseline_event_count', 'unknown')}. "
+            "Rates describe recorded events only; observation coverage is not measured, "
+            "so they do not establish the true occurrence rate."
         )
     if comparison.get("relative_change_percent") is not None:
         explanation += (
