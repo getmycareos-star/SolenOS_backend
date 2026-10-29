@@ -427,6 +427,69 @@ def test_api_detect_changes():
         teardown_db()
 
 
+
+def test_reassessment_persists_recurrence_pattern_from_real_care_events():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-pattern-api", name="Pattern API Person")
+        caregiver = Caregiver(
+            id="caregiver-pattern-api",
+            name="Pattern API Caregiver",
+            email="pattern-api@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index, days_ago in enumerate((28, 14, 2), start=1):
+            db.add(
+                CareEvent(
+                    person_id=person.id,
+                    event_type="fall",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=days_ago),
+                    title=f"Persisted fall observation {index}",
+                    created_by_caregiver_id=caregiver.id,
+                )
+            )
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        person_id = person.id
+        db.close()
+
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/change/changes/reassess",
+            params={"person_id": person_id},
+            headers={"Authorization": f"Bearer {token}"},
+            json={},
+        )
+        assert response.status_code == 200, response.text
+
+        persisted = client.get(
+            f"/api/v1/change/patterns/{person_id}",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert persisted.status_code == 200, persisted.text
+        recurrence = [
+            item for item in persisted.json()
+            if item["pattern_type"] == "recurrence" and item["is_active"]
+        ]
+        assert len(recurrence) == 1
+        assert recurrence[0]["evidence_count"] == 3
+        assert recurrence[0]["confidence"] is None
+        assert "observation coverage is not measured" in " ".join(
+            recurrence[0].get("alternative_interpretations") or []
+        ).lower()
+    finally:
+        teardown_db()
+
+
 def test_api_detect_situations():
     setup_db()
     try:
