@@ -472,6 +472,66 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert other_view.json()["status"] == "not_assessed"
     assert "Caregiver-reported mobility change" not in other_view.text
 
+def test_state_revision_as_of_reconstructs_historical_state_and_isolates_people(client):
+    import json
+    from app.models.care_continuity import CareStateRevision
+
+    test_client, owner, other = client
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    db = TestSessionLocal()
+    try:
+        db.add_all([
+            CareStateRevision(
+                id="history-revision-1",
+                person_id=owner["person"]["id"],
+                target_type="care_events",
+                target_id="history-event-1",
+                revision_number=1,
+                change_kind="created",
+                before_state=None,
+                after_state=json.dumps({"status": "reported", "description": "Caregiver reports poor sleep"}),
+                evidence_ids=["history-evidence-1"],
+                changed_by_caregiver_id=owner["caregiver"]["id"],
+                changed_at=datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc),
+            ),
+            CareStateRevision(
+                id="history-revision-2",
+                person_id=owner["person"]["id"],
+                target_type="care_events",
+                target_id="history-event-1",
+                revision_number=2,
+                change_kind="updated",
+                before_state=json.dumps({"status": "reported", "description": "Caregiver reports poor sleep"}),
+                after_state=json.dumps({"status": "reviewed", "description": "Source passage reviewed; cause remains unknown"}),
+                evidence_ids=["history-evidence-1", "history-evidence-2"],
+                changed_by_caregiver_id=owner["caregiver"]["id"],
+                changed_at=datetime(2026, 10, 29, 10, 0, tzinfo=timezone.utc),
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    url = "/api/v1/care-continuity/state-revisions/care_events/history-event-1/as-of"
+    earlier = test_client.get(url, headers=owner_headers, params={"as_of": "2026-10-28T23:59:00Z"})
+    assert earlier.status_code == 200, earlier.text
+    assert earlier.json()["revision_number"] == 1
+    assert earlier.json()["state"]["status"] == "reported"
+    assert earlier.json()["evidence_ids"] == ["history-evidence-1"]
+
+    later = test_client.get(url, headers=owner_headers, params={"as_of": "2026-10-29T12:00:00Z"})
+    assert later.status_code == 200, later.text
+    assert later.json()["revision_number"] == 2
+    assert later.json()["state"]["status"] == "reviewed"
+    assert "cause remains unknown" in later.json()["state"]["description"]
+    assert later.json()["historical_state_source"] == "persisted_care_state_revision"
+    assert "does not establish facts" in later.json()["interpretation_limit"]
+
+    cross_person = test_client.get(url, headers=other_headers, params={"as_of": "2026-10-29T12:00:00Z"})
+    assert cross_person.status_code == 404, cross_person.text
+
+
 def test_observation_coverage_api_persists_and_isolates_person_records(client):
     test_client, owner, other = client
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
