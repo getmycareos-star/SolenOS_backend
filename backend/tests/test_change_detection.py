@@ -1160,8 +1160,8 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
             id="coverage-rate-window",
             person_id=person.id,
             subject_type="fall",
-            window_start=earlier,
-            window_end=later,
+            window_start=now - timedelta(days=90),
+            window_end=now,
             coverage_status="covered",
             source_evidence_ids=[],
             rationale="The caregiver explicitly recorded observation coverage for this interval.",
@@ -1174,7 +1174,7 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
         db.commit()
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
         assert recurrence.rate_per_period is not None
-        assert recurrence.rate_per_period == pytest.approx(2.0)
+        assert recurrence.rate_per_period == pytest.approx(2.0 / 3.0)
         assert not any(
             "rate is withheld" in note.lower()
             for note in (recurrence.alternative_interpretations or [])
