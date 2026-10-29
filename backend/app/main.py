@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import os
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -117,6 +118,8 @@ async def lifespan(app: FastAPI):
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
@@ -978,18 +981,24 @@ def readiness_check(db: Session = Depends(get_db)):
         required_tables = set(Base.metadata.tables.keys())
         missing_tables = required_tables - existing_tables
     except SQLAlchemyError as exc:
+        logger.warning("Readiness database probe failed: exception_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
     except Exception as exc:
+        logger.warning("Readiness ORM schema inspection failed: exception_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
+        logger.warning("Readiness ORM tables missing: tables=%s", ",".join(sorted(missing_tables)))
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
+        logger.warning("Readiness schema-difference check failed: exception_type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
+        # Schema diffs contain structural names/types only; never log row values.
+        logger.warning("Readiness ORM schema differences: differences=%s", json.dumps(differences[:40], default=str))
         raise HTTPException(status_code=503, detail="Database schema is incomplete")
 
     migration_state = "not_checked"
@@ -1012,6 +1021,11 @@ def readiness_check(db: Session = Depends(get_db)):
                 for row in db.execute(text("SELECT version_num FROM alembic_version")).all()
             }
             if not expected_heads or applied_heads != expected_heads:
+                logger.warning(
+                    "Readiness Alembic heads mismatch: expected=%s applied=%s",
+                    ",".join(sorted(expected_heads)),
+                    ",".join(sorted(applied_heads)),
+                )
                 raise HTTPException(status_code=503, detail="Database migrations are not current")
 
             required_migration_tables = set([
@@ -1071,6 +1085,10 @@ def readiness_check(db: Session = Depends(get_db)):
                 name for name in required_migration_tables if not inspector.has_table(name)
             )
             if missing_migration_tables:
+                logger.warning(
+                    "Readiness migration-created tables missing: tables=%s",
+                    ",".join(missing_migration_tables),
+                )
                 raise HTTPException(
                     status_code=503,
                     detail={"message": "Migration-created continuity schema is incomplete",
@@ -1082,6 +1100,7 @@ def readiness_check(db: Session = Depends(get_db)):
         except HTTPException:
             raise
         except Exception as exc:
+            logger.warning("Readiness migration verification failed: exception_type=%s", type(exc).__name__)
             raise HTTPException(status_code=503, detail="Database migration state could not be verified") from exc
 
     return {
