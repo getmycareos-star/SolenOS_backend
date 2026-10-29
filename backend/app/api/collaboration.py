@@ -985,6 +985,27 @@ def _missing_requested_measurement_response(user_text: str, authorized_lines: li
             return f"No {label} is recorded in the available care record for the time you asked about."
     return None
 
+_MEDICATION_CHANGE_REQUEST_RE = re.compile(
+    r"\\b(?:should|can|may|could|would)\\s+(?:i|we|you)\\s+"
+    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip|take\\s+more|take\\s+less)\\b"
+    r".{0,80}\\b(?:dose|medication|medicine|pill|tablet|prescription)\\b"
+    r"|\\b(?:is\\s+it|would\\s+it\\s+be)\\s+(?:safe|okay|all\\s+right)\\s+to\\s+"
+    r"(?:double|increase|decrease|raise|lower|adjust|change|stop|start|skip)\\b"
+    r".{0,80}\\b(?:dose|medication|medicine|pill|tablet|prescription)\\b",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _medication_change_safety_response(user_text: str) -> str | None:
+    """Withhold medication-change advice requests from the generative model."""
+    if _MEDICATION_CHANGE_REQUEST_RE.search(user_text or ""):
+        return (
+            "I can't recommend doubling or changing a dose. Contact the prescribing "
+            "clinician or pharmacist before making any medication change."
+        )
+    return None
+
+
 def _contains_unsupported_trend_claim(reply: str, assessment: dict | None) -> bool:
     if not assessment or assessment.get("sufficient"):
         return False
@@ -2082,7 +2103,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
         )
-        if missing_measurement_reply:
+        medication_change_reply = _medication_change_safety_response(user_text)
+        if medication_change_reply:
+            # Do not rely on a small model to refuse a requested dose change.
+            reply = medication_change_reply
+        elif missing_measurement_reply:
             # The model may confidently invent a plausible vital sign. A requested
             # measurement absent from the retrieved authorized sources is withheld
             # deterministically, even if Qwen returns a fabricated numeric value.
@@ -2161,6 +2186,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         elif missing_measurement_reply:
             verdict = "blocked"
             safety_note = "A requested measurement was not found in the retrieved authorized record; no value was inferred."
+            ai_generated = False
+        elif medication_change_reply:
+            verdict = "blocked"
+            safety_note = "A medication dose-change request was withheld for qualified professional confirmation."
             ai_generated = False
         else:
             verdict = "passed"
