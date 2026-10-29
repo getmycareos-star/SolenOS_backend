@@ -700,3 +700,24 @@ def test_entire_window_must_be_explicitly_uncovered_for_uncovered_status():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_explicit_partial_coverage_is_not_reported_as_unknown():
+    db, person, caregiver = _db()
+    try:
+        end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        start = end - timedelta(days=14)
+        db.add(ObservationCoverage(
+            id="partial-only", person_id=person.id, subject_type="mobility",
+            window_start=start, window_end=end, coverage_status="partial",
+            source_evidence_ids=[], rationale="Caregiver observed only part of the interval.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+        result = assess_observation_coverage(db, person.id, "mobility", start, end)
+        assert result["coverage_status"] == "partial"
+        assert result["coverage_fraction"] == 0
+        assert "explicitly partial" in result["limitations"][0]
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
