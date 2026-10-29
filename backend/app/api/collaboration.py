@@ -1878,7 +1878,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
-        except HTTPException:
+        except HTTPException as exc:
+            logger.warning("Companion inference returned HTTP failure: status_code=%s", exc.status_code)
             raise
         except Exception as exc:
             logger.warning("Companion inference failed: exception_type=%s", type(exc).__name__)
