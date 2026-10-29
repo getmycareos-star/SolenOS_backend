@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
-from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -107,6 +107,36 @@ def update_question(
     if not result:
         raise HTTPException(status_code=404, detail="Open question not found")
     return result
+
+
+@router.get("/questions/{question_id}/answer-history")
+def list_question_answer_history(
+    question_id: str,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Read immutable answer versions for a question in the active care record."""
+    question = engine.db.query(OpenQuestionModel.id).filter(
+        OpenQuestionModel.id == question_id,
+        OpenQuestionModel.person_id == engine.person_id,
+    ).first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    rows = engine.db.query(OpenQuestionAnswerEventModel).filter(
+        OpenQuestionAnswerEventModel.question_id == question_id,
+        OpenQuestionAnswerEventModel.person_id == engine.person_id,
+    ).order_by(
+        OpenQuestionAnswerEventModel.created_at.asc(),
+        OpenQuestionAnswerEventModel.id.asc(),
+    ).all()
+    return [{
+        "id": row.id,
+        "question_id": row.question_id,
+        "person_id": row.person_id,
+        "answer": row.answer,
+        "answer_provenance": row.answer_provenance,
+        "answered_by_caregiver_id": row.answered_by_caregiver_id,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    } for row in rows]
 
 
 @router.post("/contradictions", response_model=Contradiction)
