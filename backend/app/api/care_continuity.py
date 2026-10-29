@@ -1275,6 +1275,32 @@ def get_observation_coverage_assessment(
     return result
 
 
+def _situation_source_fingerprint(context: dict[str, Any]) -> str:
+    """Fingerprint the bounded, person-scoped LCR source view without its read clock."""
+    sources = context.get("sources") or {}
+    stable_sources = {
+        str(name): {
+            "status": source.get("status"),
+            "has_more": bool(source.get("has_more")),
+            "limit": source.get("limit"),
+            "items": source.get("items") or [],
+        }
+        for name, source in sorted(sources.items())
+        if isinstance(source, dict)
+    }
+    material = {
+        "schema_status": context.get("schema_status"),
+        "missing_required_sources": sorted(context.get("missing_required_sources") or []),
+        "missing_optional_sources": sorted(context.get("missing_optional_sources") or []),
+        "sources": stable_sources,
+        "scope": "bounded_person_scoped_lcr_context_limit_50",
+    }
+    encoded = json.dumps(
+        material, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _build_situation_understanding_assessment(db: Session, person_id: str) -> dict[str, Any]:
     """Compose an explainable assessment from persisted LCR sources; never invent care facts."""
     context = build_lcr_context(db, person_id, limit_per_source=50)
@@ -1816,6 +1842,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     }
     return {
         "schema_version": "situation-understanding.v1",
+        "source_state_fingerprint": _situation_source_fingerprint(context),
         "person_id": str(person_id),
         "as_of": context.get("as_of"),
         "assessment_method": "deterministic_composition_of_persisted_lcr_sources",
@@ -1907,7 +1934,30 @@ def get_situation_understanding(request: Request, db: Session = Depends(get_db))
         assessment = json.loads(row["delta_json"])
     except (TypeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail="Stored situation assessment is invalid") from exc
-    return {"person_id": person_id, "status": "available", "assessment_id": row["id"], "created_at": row["created_at"], "assessment": assessment}
+    current_context = build_lcr_context(db, person_id, limit_per_source=50)
+    current_fingerprint = _situation_source_fingerprint(current_context)
+    stored_fingerprint = assessment.get("source_state_fingerprint") if isinstance(assessment, dict) else None
+    if not stored_fingerprint:
+        freshness_status = "legacy_snapshot_unfingerprinted"
+    elif stored_fingerprint == current_fingerprint:
+        freshness_status = "current_for_bounded_source_view"
+    else:
+        freshness_status = "source_changed_since_assessment"
+    return {
+        "person_id": person_id,
+        "status": "available",
+        "assessment_id": row["id"],
+        "created_at": row["created_at"],
+        "assessment": assessment,
+        "source_freshness": {
+            "status": freshness_status,
+            "reassessment_recommended": freshness_status != "current_for_bounded_source_view",
+            "source_of_truth": "current_person_scoped_lcr_context",
+            "scope": "bounded_per_source_limit_50",
+            "read_only": True,
+            "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete.",
+        },
+    }
 
 
 @router.get("/situation-understanding/history")
