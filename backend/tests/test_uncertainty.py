@@ -997,3 +997,62 @@ def test_conflict_matching_respects_context_and_explicit_time_intervals():
         assert first_id in same_context_overlapping_time.json()["matching_candidate_ids"]
     finally:
         teardown_db()
+
+
+def test_analyze_endpoint_does_not_accept_assumption_from_unverified_persisted_evidence():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="person-analysis", name="Analysis Test Person")
+        caregiver = Caregiver(
+            id="caregiver-analysis",
+            name="Analysis Test Caregiver",
+            email="analysis@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="evidence-analysis-unverified",
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="A care instruction was reported but not independently checked.",
+            uploaded_by_caregiver_id=caregiver.id,
+            source_type="caregiver_report",
+            evidence_status="unverified",
+        )
+        db.add_all([person, caregiver, evidence])
+        db.commit()
+        db.close()
+
+        client = authorized_client("person-analysis")
+        response = client.post(
+            "/api/v1/uncertainty/analyze",
+            json={
+                "person_id": "person-analysis",
+                "subject_type": "care_instruction",
+                "subject_id": "instruction-1",
+                "field": "current_instruction",
+                "claim": "The current care instruction is confirmed.",
+                "task": "recommendation",
+                "evidence_ids": ["evidence-analysis-unverified"],
+                "assumptions": [{
+                    "statement": "The report reflects the current instruction.",
+                    "status": "accepted",
+                    "supporting_evidence_ids": ["evidence-analysis-unverified"],
+                    "reviewed_by_caregiver_id": "caregiver-analysis",
+                    "resolution_rationale": "Reviewed against the supplied report.",
+                }],
+            },
+        )
+        assert response.status_code == 200, response.text
+        analysis = response.json()["analysis"]
+        assert analysis["assumptions"][0]["status"] == "unresolved"
+        assert analysis["assumptions"][0]["has_verified_supporting_evidence"] is False
+        assert "unresolved_assumptions" in analysis["classifications"]
+        assert analysis["sufficiency"] == "insufficient_pending_resolution"
+        assert analysis["conclusion_confidence"] is None
+    finally:
+        teardown_db()
