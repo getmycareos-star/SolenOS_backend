@@ -532,11 +532,12 @@ def _expanded_context_terms(text: str) -> set[str]:
 def _source_sql_relevance(columns: tuple, direct_terms: list[str], synonym_terms: list[str]):
     """Order SQL candidates by term relevance before a bounded candidate limit."""
     scores = []
-    for column in columns:
-        for term in direct_terms:
-            scores.append(case((column.ilike(f"%{term}%"), 3), else_=0))
-        for term in synonym_terms:
-            scores.append(case((column.ilike(f"%{term}%"), 1), else_=0))
+    for term, weight in [
+        *((term, 3) for term in direct_terms),
+        *((term, 1) for term in synonym_terms),
+    ]:
+        match_any_field = or_(*[column.ilike(f"%{term}%") for column in columns])
+        scores.append(case((match_any_field, weight), else_=0))
     return sum(scores, 0)
 
 
