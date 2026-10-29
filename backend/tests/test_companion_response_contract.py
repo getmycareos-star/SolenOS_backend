@@ -356,6 +356,35 @@ def test_companion_replays_same_turn_without_second_inference(monkeypatch):
         teardown()
 
 
+def test_companion_turn_id_cannot_replay_across_people(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "A source-grounded answer for the first care record."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token_a, person_a, _ = create_session(client)
+        token_b, person_b, _ = create_session(client)
+        turn_id = "5f2a70e6-faf3-4eab-9a11-5f1fbc8e4d44"
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_a}"},
+            json={"person_id": person_a, "text": "What was recorded?", "client_turn_id": turn_id},
+        )
+        assert first.status_code == 200, first.text
+        replay = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_b}"},
+            json={"person_id": person_b, "text": "What was recorded?", "client_turn_id": turn_id},
+        )
+        assert replay.status_code == 409
+        assert "A source-grounded answer" not in replay.text
+    finally:
+        teardown()
+
+
 def test_companion_rejects_turn_id_reuse_with_changed_text(monkeypatch):
     client = setup_client(monkeypatch)
 
