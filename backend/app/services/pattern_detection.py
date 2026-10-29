@@ -91,16 +91,14 @@ def detect_patterns(
     for event in source_events:
         evidence_signature = tuple(sorted(set(event.evidence_ids or [])))
         if evidence_signature:
-            # Shared provenance alone is not duplicate identity: one document can
-            # describe multiple distinct occurrences. Require matching occurrence
-            # time and normalized event descriptors as well before collapsing copies.
+            # The same source may document several occurrences. Collapse only
+            # copies anchored to the same evidence set and occurrence timestamp;
+            # narrative title differences introduced by importers must not inflate
+            # recurrence counts, while differently dated events remain distinct.
             identity = (
-                "evidence-backed-event",
+                "evidence-backed-occurrence",
                 evidence_signature,
                 _ensure_utc(event.occurred_at),
-                " ".join((event.title or "").casefold().split()),
-                " ".join((event.description or "").casefold().split()),
-                " ".join((event.location or "").casefold().split()),
             )
         else:
             # Without a shared source anchor, retain each event as a distinct
