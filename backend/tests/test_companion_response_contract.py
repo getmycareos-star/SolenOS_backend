@@ -216,6 +216,31 @@ def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     assert collaboration._context_record_ids(ranked, "event_id") == ["sleep-1"]
 
 
+def test_context_ranking_expands_common_caregiving_paraphrases():
+    clinic = (
+        'LCR appointment evidence: {"appointment_id":"clinic-older",'
+        '"title":"Neurology consultation","scheduled_at":"2026-07-12T10:00:00"}'
+    )
+    unrelated = (
+        'LCR appointment evidence: {"appointment_id":"meal-1",'
+        '"title":"Lunch planning","scheduled_at":"2026-07-13T10:00:00"}'
+    )
+    assert collaboration._rank_context_lines("Tell me about the clinic visit", [unrelated, clinic], 1) == [clinic]
+    sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Overnight waking"}'
+    assert collaboration._rank_context_lines("How has her rest been?", [sleep], 1) == [sleep]
+    medication = 'Caregiver-provided evidence: {"evidence_id":"med-1","source_text":"Pills recorded"}'
+    assert collaboration._rank_context_lines("Was the medication documented?", [medication], 1) == [medication]
+
+
+def test_short_standalone_question_does_not_inherit_previous_topic():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="One sleep note is recorded."),
+    ]
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+    assert "sleep" in collaboration._context_query_with_history("What about that?", prior).casefold()
+
+
 def test_context_ranking_preserves_input_order_when_query_has_no_relevant_terms():
     first = 'LCR event evidence: {"event_id":"newer","title":"Observation"}'
     second = 'LCR event evidence: {"event_id":"older","title":"Observation"}'
