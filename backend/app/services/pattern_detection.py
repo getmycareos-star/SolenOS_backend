@@ -116,6 +116,8 @@ def detect_patterns(
             if change.magnitude is not None
             and change.comparison_window_start is not None
             and change.comparison_window_end is not None
+            and change.baseline_coverage_status == "covered"
+            and change.current_coverage_status == "covered"
         ]
         if len(comparable_changes) >= 3:
             pattern = _build_trend_pattern(
@@ -314,6 +316,8 @@ def _build_trend_pattern(
         and change.comparison_window_start is not None
         and change.comparison_window_end is not None
         and change.change_direction in (ChangeDirection.INCREASING, ChangeDirection.DECREASING)
+        and change.baseline_coverage_status == "covered"
+        and change.current_coverage_status == "covered"
     ]
     if len(comparable) < 3:
         return None
@@ -393,6 +397,8 @@ def _build_instability_pattern(
         if change.comparison_window_start is not None
         and change.comparison_window_end is not None
         and change.change_direction in (ChangeDirection.INCREASING, ChangeDirection.DECREASING)
+        and change.baseline_coverage_status == "covered"
+        and change.current_coverage_status == "covered"
     ]
     if len(comparable) < 2:
         return None
