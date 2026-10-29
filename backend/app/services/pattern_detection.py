@@ -149,6 +149,24 @@ def detect_patterns(
                         f"{MAX_PATTERN_CHANGE_ASSESSMENTS} records; earlier assessments were not included.",
                     )
                 patterns.append(pattern)
+        if len(comparable_changes) >= 4:
+            acceleration = _build_acceleration_pattern(
+                db=db,
+                person_id=person_id,
+                subject_type=subject_type,
+                subject_id=group_subject_id,
+                changes=comparable_changes,
+                now=now,
+            )
+            if acceleration:
+                if changes_truncated:
+                    _append_limit_note(
+                        db,
+                        acceleration,
+                        "Change assessment history was bounded to the most recent "
+                        f"{MAX_PATTERN_CHANGE_ASSESSMENTS} records; earlier assessments were not included.",
+                    )
+                patterns.append(acceleration)
         if len(group_changes) >= 2:
             pattern = _build_instability_pattern(
                 db=db,
@@ -399,6 +417,93 @@ def _build_trend_pattern(
         confidence=None,
         evidence_count=len(event_ids),
         alternative_interpretations=alternatives,
+    )
+    return _persist_pattern(db, pattern)
+
+
+def _build_acceleration_pattern(
+    db: Session,
+    person_id: str,
+    subject_type: str,
+    subject_id: str,
+    changes: List[Change],
+    now: datetime,
+) -> Optional[Pattern]:
+    """Detect increasing change magnitude only from covered, source-linked windows.
+
+    This is a descriptive pattern, not a calibrated forecast. At least four
+    distinct assessments are required so acceleration is based on three
+    successive magnitude differences rather than a two-point change.
+    """
+    comparable = [
+        change for change in changes
+        if change.magnitude is not None
+        and change.comparison_window_start is not None
+        and change.comparison_window_end is not None
+        and change.change_direction in (ChangeDirection.INCREASING, ChangeDirection.DECREASING)
+        and change.baseline_coverage_status == "covered"
+        and change.current_coverage_status == "covered"
+    ]
+    ordered = sorted(
+        comparable,
+        key=lambda change: (_ensure_utc(change.comparison_window_end), change.id),
+    )
+    # Keep one assessment per comparison end to avoid duplicate analysis runs
+    # being counted as separate longitudinal observations.
+    unique_ordered = []
+    seen_ends = set()
+    for change in ordered:
+        end = _ensure_utc(change.comparison_window_end)
+        if end not in seen_ends:
+            seen_ends.add(end)
+            unique_ordered.append(change)
+    if len(unique_ordered) < 4:
+        return None
+    directions = {change.change_direction for change in unique_ordered}
+    if len(directions) != 1:
+        return None
+    magnitudes = [float(change.magnitude) for change in unique_ordered]
+    if not all(
+        magnitudes[index + 1] > magnitudes[index]
+        for index in range(len(magnitudes) - 1)
+    ):
+        return None
+    temporal_start = min(_ensure_utc(change.comparison_window_start) for change in unique_ordered)
+    temporal_end = max(_ensure_utc(change.comparison_window_end) for change in unique_ordered)
+    coverage = assess_observation_coverage(
+        db, person_id, subject_type, temporal_start, temporal_end
+    )
+    if coverage["coverage_status"] != "covered":
+        return None
+    event_ids = _validated_source_event_ids(
+        db=db,
+        person_id=person_id,
+        subject_type=subject_type,
+        candidate_ids=[
+            evidence_id
+            for change in unique_ordered
+            for evidence_id in (change.evidence_ids or [])
+        ],
+        reference_time=_ensure_utc(now),
+    )
+    if len(event_ids) < 4:
+        return None
+    pattern = Pattern(
+        person_id=person_id,
+        subject_type=subject_type,
+        subject_id=subject_id,
+        pattern_type=PatternType.ACCELERATION,
+        pattern_strength=PatternStrength.EMERGING,
+        event_ids=event_ids,
+        change_ids=[change.id for change in unique_ordered],
+        temporal_start=temporal_start,
+        temporal_end=temporal_end,
+        direction=next(iter(directions)),
+        confidence=None,
+        evidence_count=len(event_ids),
+        alternative_interpretations=[
+            "Recorded change magnitudes increased across successive covered windows; this is descriptive, not a calibrated forecast or evidence of cause."
+        ],
     )
     return _persist_pattern(db, pattern)
 
