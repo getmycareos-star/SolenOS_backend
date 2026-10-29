@@ -673,6 +673,21 @@ jobs:
           createdb -h localhost -U postgres solenos_legacy_populated
           createdb -h localhost -U postgres solenos_stamped_04
           createdb -h localhost -U postgres solenos_qwen_backfill
+          createdb -h localhost -U postgres solenos_freshness_existing
+
+      - name: Preserve existing freshness policy and assessment rows during schema reconciliation
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_freshness_existing
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_freshness_existing
+        working-directory: backend
+        run: |
+          python -m alembic upgrade 20261029_24_baseline_history
+          python scripts/postgres_freshness_existing_schema.py seed
+          python -m alembic upgrade head
+          python scripts/postgres_freshness_existing_schema.py verify
+          expected_head="$(python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; s=ScriptDirectory.from_config(Config("alembic.ini")); heads=s.get_heads(); assert len(heads)==1, heads; print(heads[0])')"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "$expected_head"
+
 
       - name: Upgrade a production-like database already stamped at revision 20261024_04
         env:
