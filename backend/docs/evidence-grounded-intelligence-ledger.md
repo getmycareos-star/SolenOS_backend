@@ -211,3 +211,26 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Frontend checks passed on the panel commit and LCR integration commit; frontend validation passed on the contract commit.
 - [ ] Earlier backend CI exposed two real issues: the migration graph test expected the previous head, and legacy migration setup pre-created the assessment table. The head assertion and migration were corrected; re-run and inspect current-main backend test plus PostgreSQL migration jobs before treating this subsystem as verified.
 - [ ] Claim lifecycle still lacks a complete cross-claim dependency graph, a target claim link for supersession, full conflict-scope resolution, and full end-to-end browser/API test evidence.
+
+
+## Latest main-only hardening pass — 2026-10-29
+
+This pass made targeted fixes after inspecting the actual repository tree and workflow definitions. These are implemented on `main`; no pull request was changed.
+
+- Corrected `backend/tests/test_migration_graph.py` to require the latest connected Alembic head, `20261029_11_change_coverage_provenance`, instead of the stale `20261029_09_obs` head. The test also asserts the coverage immutability and change-coverage provenance revisions are reachable from the graph.
+- Updated `.github/workflows/postgres-migration-validation.yml` to assert the same current head in both fresh-schema and legacy-backfill upgrade paths.
+- Corrected the frontend type-check blocker in `src/components/mvp-workspace/ChangeIntelligencePanel.tsx`: a duplicate block-scoped `detail` declaration prevented TypeScript validation before any evidence-specific checks could run.
+- Hardened `src/components/EvidenceReviewPanel.tsx` to reject an LCR-provided person scope that differs from the authenticated anonymous session scope. Added a regression assertion to `scripts/verify-evidence-grounding-contract.mts`.
+
+### Verification state for this pass
+
+- Backend migration-head correction commit: [449f427](https://github.com/getmycareos-star/SolenOS_backend/commit/449f4272074f72fb9a0db5b17c620c6a835337ea)
+- PostgreSQL workflow head correction commit: [07b3afd](https://github.com/getmycareos-star/SolenOS_backend/commit/07b3afd449ffabb9f1702f2602bda48f8e4ca078)
+- Frontend LCR scope guard commit: [a316c6a](https://github.com/getmycareos-star/SolenOS-landing/commit/a316c6aa4de090e80f6130d065d0de3976dae57e)
+- Frontend scope regression assertion commit: [d950003](https://github.com/getmycareos-star/SolenOS-landing/commit/d950003f2d97b6807f37afae5a01486a38a6841f)
+- Frontend TypeScript duplicate-declaration fix: [d3862b9](https://github.com/getmycareos-star/SolenOS-landing/commit/d3862b9e5f581892b66a69246e39920c8255378d)
+- The prior frontend run at commit `3a05118` failed at TypeScript checking because of the duplicate declaration above. The fix is committed, but its new workflow run has not yet completed.
+- At the time of this update, backend test/validation and PostgreSQL migration workflows are queued; no successful current-head result is claimed.
+- The source-integrity hash covers the stored UTF-8 source text only. It does not authenticate the original document, photo, audio, or binary file.
+- The 18 capability groups remain **PARTIAL or UNVERIFIED** until their individual gaps and end-to-end proof listed above are closed. This ledger intentionally does not claim complete implementation.
+
