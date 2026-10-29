@@ -367,6 +367,13 @@ def _build_trend_pattern(
     change_ids = [change.id for change in ordered]
     temporal_start = min(_ensure_utc(change.comparison_window_start) for change in ordered)
     temporal_end = max(_ensure_utc(change.comparison_window_end) for change in ordered)
+    # Persisted status fields are provenance snapshots, not substitutes for the
+    # coverage ledger. Re-check the entire trend span before classifying it.
+    coverage = assess_observation_coverage(
+        db, person_id, subject_type, temporal_start, temporal_end
+    )
+    if coverage["coverage_status"] != "covered":
+        return None
     overlapping_windows = any(
         _ensure_utc(ordered[index].comparison_window_end)
         > _ensure_utc(ordered[index + 1].comparison_window_start)
@@ -441,6 +448,11 @@ def _build_instability_pattern(
     change_ids = [change.id for change in ordered]
     temporal_start = min(_ensure_utc(change.comparison_window_start) for change in ordered)
     temporal_end = max(_ensure_utc(change.comparison_window_end) for change in ordered)
+    coverage = assess_observation_coverage(
+        db, person_id, subject_type, temporal_start, temporal_end
+    )
+    if coverage["coverage_status"] != "covered":
+        return None
     alternatives = [
         "Direction changes across source-linked assessments; this does not establish cause or clinical fluctuation."
     ]
