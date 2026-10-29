@@ -925,6 +925,22 @@ def main():
 
         stop_server(server)
         server = start_server()
+        status, companion_history_after_restart = request(
+            "GET", f"/api/v1/conversation/{companion_session_id}", token=token_a,
+        )
+        companion_messages = companion_history_after_restart.get("messages", [])
+        require(status == 200 and [message.get("role") for message in companion_messages] == ["user", "assistant"]
+                and companion_messages[0].get("text") == companion_payload["text"]
+                and companion_messages[1].get("text") == companion_first.get("reply"),
+                f"Companion turn did not persist in order across PostgreSQL/Uvicorn restart: {status}: {companion_history_after_restart}")
+        status, concurrent_history_after_restart = request(
+            "GET", f"/api/v1/conversation/{concurrent_companion_session_id}", token=token_a,
+        )
+        concurrent_messages = concurrent_history_after_restart.get("messages", [])
+        require(status == 200 and [message.get("role") for message in concurrent_messages] == ["user", "assistant"]
+                and concurrent_messages[0].get("text") == concurrent_companion_payload["text"]
+                and concurrent_messages[1].get("text") in concurrent_replies,
+                f"Concurrent Companion turn duplicated or lost order across restart: {status}: {concurrent_history_after_restart}")
         status, professional_after_restart = request(
             "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
         )
