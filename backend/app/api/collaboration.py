@@ -555,6 +555,71 @@ def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     return matching
 
 
+
+def _humanize_model_context_line(line: str) -> str:
+    """Render selected source records as bounded prose without exposing internal IDs or JSON schema."""
+    brace = (line or "").find("{")
+    if brace < 0:
+        return (line or "").strip()
+    try:
+        payload = json.loads(line[brace:])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return (line or "").strip()
+    if not isinstance(payload, dict):
+        return (line or "").strip()
+    record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+    label = str(payload.get("source_type") or "").replace("_", " ").strip()
+    if not label:
+        if "event_id" in record:
+            label = "Care event"
+        elif "assertion_id" in record:
+            label = "Care assertion"
+        elif "appointment_id" in record:
+            label = "Appointment record"
+        elif "evidence_id" in record:
+            label = "Evidence record"
+        else:
+            label = "Care record"
+    fields = (
+        ("title", "title"),
+        ("description", "description"),
+        ("summary", "summary"),
+        ("content", "content"),
+        ("field", "field"),
+        ("value", "recorded value"),
+        ("status", "status"),
+        ("event_type", "event type"),
+        ("occurred_at", "event date"),
+        ("reported_at", "reported date"),
+        ("recorded_at", "recorded date"),
+        ("appointment_date", "appointment date"),
+        ("scheduled_at", "scheduled time"),
+        ("date", "date"),
+        ("medication_name", "medication"),
+        ("instruction", "documented instruction"),
+        ("dose", "documented dose"),
+        ("outcome", "outcome"),
+        ("decision", "decision"),
+        ("result", "result"),
+        ("time_provenance", "time provenance"),
+    )
+    parts = []
+    for key, label_text in fields:
+        value = record.get(key)
+        if value is None or value == "" or value == [] or value == {}:
+            continue
+        if isinstance(value, (dict, list)):
+            value = json.dumps(value, ensure_ascii=False, default=str)
+        value_text = re.sub(
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+            "[internal identifier omitted]",
+            str(value),
+            flags=re.IGNORECASE,
+        )
+        parts.append(f"{label_text}: {value_text[:500]}")
+    return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
+
+
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
     current = (current_text or "").strip()
@@ -1893,10 +1958,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         bounded_context: list[str] = []
         context_chars = 0
         for line in model_context_lines:
-            if context_chars + len(line) > 2400:
+            rendered_line = _humanize_model_context_line(line)
+            if context_chars + len(rendered_line) > 2400:
                 continue
-            bounded_context.append(line)
-            context_chars += len(line)
+            bounded_context.append(rendered_line)
+            context_chars += len(rendered_line)
         model_messages.append({
             "role": "user",
             "content": (
