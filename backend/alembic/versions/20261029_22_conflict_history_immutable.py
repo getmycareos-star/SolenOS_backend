@@ -1,12 +1,12 @@
 """Enforce append-only conflict resolution history at the database boundary.
 
-Revision ID: 20261029_22_conflict_history_immutable
+Revision ID: 20261029_22_conflict_hist
 Revises: 20261029_21_loop_occ
 """
 from alembic import op
 from sqlalchemy import inspect, text
 
-revision = "20261029_22_conflict_history_immutable"
+revision = "20261029_22_conflict_hist"
 down_revision = "20261029_21_loop_occ"
 branch_labels = None
 depends_on = None
