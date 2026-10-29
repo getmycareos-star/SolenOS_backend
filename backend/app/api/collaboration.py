@@ -1848,35 +1848,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
-    assistant_row = ConversationMessage(
-        session_id=session.id, role="assistant", content=reply,
-        guard_verdict=verdict, safety_note=safety_note,
-        evidence_ids_json=json.dumps(evidence_ids),
-        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
-    )
-    try:
-        db.add(ConversationMessage(
-            session_id=session.id, role="user", content=user_text,
-            guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
-        ))
-        db.add(assistant_row)
-        db.commit()
-        db.refresh(assistant_row)
-    except Exception as exc:
-        db.rollback()
-        logger.exception("Companion conversation pair failed to persist")
-        raise HTTPException(
-            status_code=503,
-            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
-        ) from exc
-    history = (
-        db.query(ConversationMessage)
-        .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
-        .all()
-    )
-    return {
+    response_body = {
         "session_id": session.id,
         "person_id": person_id,
         "reply": reply,
@@ -1896,6 +1868,74 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
+    }
+    turn_time = datetime.now(timezone.utc)
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "response": response_body,
+    }
+    user_row = ConversationMessage(
+        session_id=session.id, role="user", content=user_text,
+        guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        source_record_refs_json="[]", created_at=turn_time,
+    )
+    assistant_row = ConversationMessage(
+        session_id=session.id, role="assistant", content=reply,
+        guard_verdict=verdict, safety_note=safety_note,
+        evidence_ids_json=json.dumps(evidence_ids),
+        source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=payload.client_turn_id,
+        response_metadata_json=(
+            json.dumps(response_metadata, ensure_ascii=False, separators=(",", ":"))
+            if payload.client_turn_id else None
+        ),
+        created_at=turn_time + timedelta(microseconds=1),
+    )
+    try:
+        db.add(user_row)
+        db.add(assistant_row)
+        db.commit()
+        db.refresh(assistant_row)
+    except IntegrityError as exc:
+        db.rollback()
+        # Concurrent duplicate submissions can both miss the preflight lookup.
+        # The unique index makes one transaction the winner; the loser replays
+        # that committed result rather than writing a second message pair.
+        if payload.client_turn_id:
+            prior_assistant_row = (
+                db.query(ConversationMessage)
+                .filter_by(client_turn_id=payload.client_turn_id, role="assistant")
+                .first()
+            )
+            if prior_assistant_row:
+                return _companion_replay_response(
+                    db,
+                    prior_assistant_row,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    request_sha256=request_sha256,
+                    supplied_session_id=payload.session_id,
+                )
+        logger.exception("Companion conversation pair violated a persistence constraint")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Companion conversation pair failed to persist")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    return {
+        **response_body,
         "messages": [{
             "role": row.role,
             "text": row.content,
