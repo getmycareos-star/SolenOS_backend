@@ -240,6 +240,17 @@ def analyze_and_persist_uncertainty(
     """
     if engine.person_id is None or str(request.person_id) != str(engine.person_id):
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    for candidate in (*request.assumptions, *request.alternatives):
+        if not isinstance(candidate, dict):
+            raise HTTPException(status_code=422, detail="Assumptions and alternatives must be structured objects")
+        candidate_status = str(candidate.get("status") or "").strip().lower()
+        reviewer_id = str(candidate.get("reviewed_by_caregiver_id") or "").strip()
+        if candidate_status in {"accepted", "rejected", "superseded"} and reviewer_id:
+            if engine.caregiver_id is None or reviewer_id != str(engine.caregiver_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Assumption and alternative lifecycle decisions must be attributed to the authenticated caregiver",
+                )
     if len(set(request.conflict_ids)) != len(request.conflict_ids):
         raise HTTPException(status_code=422, detail="Duplicate conflict IDs are not allowed")
     if len(set(request.evidence_ids)) != len(request.evidence_ids):
