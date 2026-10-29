@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from app.models.care import Caregiver, CareEvent, Person
 from app.models.change import Baseline, Change, Pattern
 from app.models.significance import AssessmentDimension, SignificanceAssessment
+from app.models.care_continuity import CareStateRevision
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -165,6 +166,9 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         ).delete(synchronize_session=False)
         for model in (Baseline, CareEvent, Caregiver):
             db.query(model).filter(model.person_id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
+        db.query(CareStateRevision).filter(
+            CareStateRevision.person_id.in_([person_a_id, person_b_id])
+        ).delete(synchronize_session=False)
         db.query(Person).filter(Person.id.in_([person_a_id, person_b_id])).delete(synchronize_session=False)
         db.commit()
         db.close()
