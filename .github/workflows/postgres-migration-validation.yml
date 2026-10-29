@@ -363,6 +363,66 @@ jobs:
           engine.dispose()
           PY
 
+      - name: Verify completeness append-only triggers reject direct SQL mutation
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.exc import DBAPIError
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+
+          def assert_append_only(table, suffix):
+              person_id = f"completeness-trigger-person-{suffix}"
+              caregiver_id = f"completeness-trigger-caregiver-{suffix}"
+              policy_id = f"completeness-trigger-policy-{suffix}"
+              assessment_id = f"completeness-trigger-assessment-{suffix}"
+              with engine.connect() as connection:
+                  transaction = connection.begin()
+                  try:
+                      connection.execute(text("INSERT INTO persons (id, name) VALUES (:id, 'Completeness trigger test')"), {"id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO caregivers (id, name, relationship, person_id, timezone)
+                          VALUES (:id, 'Completeness trigger caregiver', 'family', :person_id, 'UTC')
+                      """), {"id": caregiver_id, "person_id": person_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_completeness_policies
+                            (id, person_id, domain_key, purpose_key, policy_version, required_fields,
+                             rationale, created_by_caregiver_id)
+                          VALUES (:id, :person_id, 'care', 'handoff', 'v1', '["current_list"]',
+                                  'Direct SQL trigger test policy', :caregiver_id)
+                      """), {"id": policy_id, "person_id": person_id, "caregiver_id": caregiver_id})
+                      connection.execute(text("""
+                          INSERT INTO evidence_completeness_assessments
+                            (id, person_id, policy_id, policy_version, subject_type, subject_id,
+                             assessment_status, required_fields, satisfied_fields, missing_fields,
+                             field_evidence_json, evidence_ids, rationale, assessment_basis,
+                             semantic_sufficiency, assessed_by_caregiver_id)
+                          VALUES (:id, :person_id, :policy_id, 'v1', 'appointment', 'trigger-test',
+                                  'undetermined', '["current_list"]', '[]', '[]', '{}', '[]',
+                                  'Direct SQL trigger test assessment', 'linked_source_coverage_only',
+                                  'not_automatically_verified', :caregiver_id)
+                      """), {"id": assessment_id, "person_id": person_id, "policy_id": policy_id, "caregiver_id": caregiver_id})
+                      row_id = policy_id if table == "evidence_completeness_policies" else assessment_id
+                      try:
+                          connection.execute(text(f"UPDATE {table} SET rationale = 'tampered' WHERE id = :id"), {"id": row_id})
+                      except DBAPIError as exc:
+                          transaction.rollback()
+                          assert "append-only" in str(exc).lower(), f"unexpected trigger error for {table}: {exc}"
+                          print(f"PASS direct SQL mutation rejected for {table}")
+                          return
+                      transaction.rollback()
+                      raise AssertionError(f"Direct SQL mutation unexpectedly succeeded for {table}")
+                  finally:
+                      if transaction.is_active:
+                          transaction.rollback()
+
+          assert_append_only("evidence_completeness_policies", "policy")
+          assert_append_only("evidence_completeness_assessments", "assessment")
+          engine.dispose()
+          PY
+
       - name: Verify migration graph has exactly one head
         working-directory: backend
         run: |
