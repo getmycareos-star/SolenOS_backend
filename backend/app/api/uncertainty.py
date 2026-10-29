@@ -328,8 +328,10 @@ def analyze_and_persist_uncertainty(
                     # Only an explicit independence review can override the
                     # conservative text-only duplicate fallback.
                     if status in independent_statuses:
-                        independence_by_id[evidence_id] = "independent"
-                    elif evidence_id not in independence_by_id:
+                        independence_by_id.setdefault(evidence_id, "independent")
+                    else:
+                        # Any explicit shared-origin relationship takes
+                        # precedence over a separate independent link.
                         independence_by_id[evidence_id] = "shared_origin"
             left, right = relationship.source_evidence_id, relationship.related_evidence_id
             if (
