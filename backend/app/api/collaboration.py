@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect
+from sqlalchemy import inspect, or_
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -1645,6 +1645,63 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         retrieval_query = _context_query_with_history(user_text, prior_messages)
+
+        # Recent-only retrieval can hide an older but directly relevant observation
+        # behind a burst of unrelated daily notes. Supplement the recency window with
+        # a bounded, server-scoped lexical search before ranking the final context.
+        retrieval_stopwords = _CONTEXT_STOPWORDS | {
+            "we", "record", "records", "recorded", "care", "caregiver", "caregivers",
+            "person", "people", "observation", "observations", "note", "notes",
+            "current", "recent", "history", "information", "does", "did",
+        }
+        retrieval_terms = [
+            term for term in dict.fromkeys(
+                re.findall(r"[a-z0-9']{4,}", retrieval_query.casefold())
+            )
+            if term not in retrieval_stopwords
+        ][:6]
+        existing_event_ids = {str(event.id) for event in recent_events}
+        if retrieval_terms:
+            matching_events = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    or_(*[
+                        condition
+                        for term in retrieval_terms
+                        for condition in (
+                            CareEvent.title.ilike(f"%{term}%"),
+                            CareEvent.description.ilike(f"%{term}%"),
+                        )
+                    ]),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.recorded_at.desc())
+                .limit(20)
+                .all()
+            )
+            for event in matching_events:
+                event_id = str(event.id)
+                if event_id in existing_event_ids:
+                    continue
+                existing_event_ids.add(event_id)
+                recent_events.append(event)
+                event_line = (
+                    "LCR event evidence: "
+                    + json.dumps({
+                        "event_id": event_id,
+                        "event_type": event.event_type,
+                        "status": event.status,
+                        "title": event.title,
+                        "description": (event.description or "")[:700],
+                        "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                        "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                        "evidence_ids": event.evidence_ids or [],
+                        "time_provenance": event.time_provenance,
+                        "confidence": event.confidence,
+                    }, ensure_ascii=False)
+                )
+                event_context.append(event_line)
+                source_context.append(event_line)
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
