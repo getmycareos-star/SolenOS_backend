@@ -682,6 +682,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
             raise HTTPException(status_code=409, detail="A mandatory prerequisite must be verified closed; cancellation does not satisfy dependencies")
     if not payload.evidence:
         raise HTTPException(status_code=409, detail="Closure requires evidence")
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     if loop.loop_type in {"awaiting_response", "professional_input"} and not loop.response_evidence:
         raise HTTPException(status_code=409, detail="A response must be recorded before closure")
     if loop.loop_type == "professional_input" and not any(
