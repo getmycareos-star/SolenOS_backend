@@ -83,6 +83,12 @@ def analyze_uncertainty(
         raise ValueError("task must identify the assessment purpose")
 
     now = now or datetime.now(timezone.utc)
+    # Normalize caller-supplied clocks. Naive timestamps are interpreted as UTC,
+    # never as the machine's local timezone, so CI and production agree.
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
     # Retain the supplied records for provenance, but separately identify repeated
     # copies. Repetition is not independent corroboration and must never inflate
     # the assessment's epistemic status.
@@ -143,6 +149,13 @@ def analyze_uncertainty(
     unavailable_reasons = {
         "unavailable": "A required source is not available; absence from this assessment is not a negative finding.",
         "inaccessible": "A required source is inaccessible; absence from this assessment is not a negative finding.",
+        "permission_denied": "Source access was denied; no conclusion may be drawn from the inaccessible source.",
+        "authentication_failed": "Source authentication failed; retrieval is unverified and the source cannot be treated as reviewed.",
+        "not_configured": "The required source is not configured; its contents are unknown, not negative.",
+        "not_attempted": "The required source was not queried; its contents are unknown, not negative.",
+        "timeout": "Source retrieval timed out; the result is incomplete, not a negative finding.",
+        "rate_limited": "Source retrieval was rate-limited; the result is incomplete, not a negative finding.",
+        "error": "A source operation returned an error; the result is incomplete, not a negative finding.",
         "failed": "A required retrieval or processing operation failed; the result is incomplete, not a negative finding.",
         "partial": "Only part of the relevant source material was retrieved; conclusions are bounded to the retrieved subset.",
         "truncated": "Retrieved source material was truncated; conclusions cannot be treated as a complete review.",
@@ -219,16 +232,25 @@ def analyze_uncertainty(
     stale = []
     for item in items:
         observed_at = item.get("observed_at")
-        if isinstance(observed_at, str):
+        if isinstance(observed_at, str) and observed_at.strip():
             try:
-                parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+                parsed = datetime.fromisoformat(observed_at.strip().replace("Z", "+00:00"))
                 if parsed.tzinfo is None:
                     parsed = parsed.replace(tzinfo=timezone.utc)
-                age_days = (now - parsed.astimezone(timezone.utc)).total_seconds() / 86400
+                parsed = parsed.astimezone(timezone.utc)
+                age_days = (now - parsed).total_seconds() / 86400
+                if age_days < 0:
+                    classifications.append("temporal_uncertainty")
+                    limitations.append("An evidence timestamp is in the future relative to the assessment clock; temporal ordering needs verification.")
                 max_age = item.get("max_age_days")
-                if isinstance(max_age, (int, float)) and max_age >= 0 and age_days > max_age:
+                if (
+                    isinstance(max_age, (int, float))
+                    and not isinstance(max_age, bool)
+                    and max_age >= 0
+                    and age_days > max_age
+                ):
                     stale.append(item)
-            except ValueError:
+            except (ValueError, OverflowError):
                 classifications.append("temporal_uncertainty")
                 limitations.append("An evidence timestamp could not be parsed; its temporal validity is unknown.")
     if stale:
