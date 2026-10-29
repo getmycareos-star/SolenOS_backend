@@ -349,6 +349,8 @@ class UncertaintyEngine:
         if payload.get("resolution_status", "unresolved") != "unresolved":
             raise ValueError("A new conflict must start unresolved; status changes require a separate audited transition")
         payload["resolution_status"] = "unresolved"
+        payload["resolution_scope"] = None
+        payload["unresolved_remainder"] = None
         payload["resolved_by_caregiver_id"] = None
         payload["matching_candidate_ids"] = []
         start = payload.get("effective_from")
@@ -441,6 +443,8 @@ class UncertaintyEngine:
                 raise ValueError("A partial conflict resolution requires an explicit scope describing exactly what was resolved")
             if not unresolved_remainder:
                 raise ValueError("A partial conflict resolution must preserve the unresolved remainder explicitly")
+        elif resolution_scope or unresolved_remainder:
+            raise ValueError("Resolution scope and unresolved remainder may only be set for a partial conflict resolution")
         audit_event_required = (
             status_changed
             or resolution_scope is not None
