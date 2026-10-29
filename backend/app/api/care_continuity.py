@@ -3683,11 +3683,12 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
         raise HTTPException(status_code=404, detail="Freshness policy not found")
     now = datetime.now(timezone.utc)
     # Upload/ingestion time is not evidence of when the underlying care event occurred.
+    source_time_kind = "event_occurrence" if evidence.occurred_at else ("collection" if evidence.collected_at else None)
     source_time = evidence.occurred_at or evidence.collected_at
     age_days = None
     if source_time is None:
         status = "unknown_source_time"
-        rationale = "No event, collection, or upload timestamp is available. Freshness cannot be inferred."
+        rationale = "No event-occurrence or collection timestamp is available. Upload/ingestion time is not treated as event time, so freshness cannot be inferred."
     else:
         if source_time.tzinfo is None:
             source_time = source_time.replace(tzinfo=timezone.utc)
@@ -3715,6 +3716,7 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
         policy_version=policy.policy_version,
         freshness_status=status,
         source_time=source_time,
+        source_time_kind=source_time_kind,
         assessed_at=now,
         age_days=age_days,
         rationale=rationale,
@@ -3737,6 +3739,7 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
         "domain_key": policy.domain_key,
         "freshness_status": row.freshness_status,
         "source_time": row.source_time.isoformat() if row.source_time else None,
+        "source_time_kind": row.source_time_kind,
         "assessed_at": row.assessed_at.isoformat(),
         "age_days": row.age_days,
         "rationale": row.rationale,
@@ -3766,6 +3769,7 @@ def list_evidence_freshness_assessments(evidence_id: str, request: Request, db: 
             "policy_version": row.policy_version,
             "freshness_status": row.freshness_status,
             "source_time": row.source_time.isoformat() if row.source_time else None,
+            "source_time_kind": row.source_time_kind,
             "assessed_at": row.assessed_at.isoformat(),
             "age_days": row.age_days,
             "rationale": row.rationale,
