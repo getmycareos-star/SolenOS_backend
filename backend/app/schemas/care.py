@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime, date
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Literal
 
 
 class PersonBase(BaseModel):
@@ -44,6 +44,17 @@ class Caregiver(CaregiverBase):
 class EvidenceBase(BaseModel):
     person_id: str
     type: str
+    # Independent axes; omitted values remain unclassified rather than inferred.
+    evidence_kind: Optional[Literal[
+        "direct_observation", "caregiver_report", "professional_observation",
+        "person_self_report", "documented_record", "instrument_measurement",
+        "photo_video", "audio_transcript", "imported_third_party",
+        "historical_recollection", "derived_observation", "inference", "hypothesis",
+    ]] = None
+    epistemic_status: Optional[Literal[
+        "unverified", "uncertain", "unknown", "missing", "disputed",
+        "superseded", "withdrawn",
+    ]] = None
     source_text: str
     original_file_path: Optional[str] = None
     extra_metadata: Optional[dict[str, Any]] = None
