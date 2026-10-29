@@ -1051,7 +1051,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         for evidence_id in payload.evidence_ids:
             row = by_id[evidence_id]
             context_lines.append(
-                f"Caregiver-provided evidence [{row.id}] ({row.type}, status={row.evidence_status}): "
+                f"Authorized evidence [{row.id}] (type={row.type}, source_type={row.source_type}, "
+                f"time_provenance={row.time_provenance}, status={row.evidence_status}): "
                 f"{(row.source_text or '')[:1800]}"
             )
             source_evidence_ids.append(str(row.id))
