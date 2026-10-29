@@ -1659,3 +1659,77 @@ def test_safety_audit_history_rejects_cross_record_person_id():
         assert response.status_code == 404
     finally:
         teardown_db()
+
+
+
+def test_claim_assessment_impact_requires_review_when_unassessed():
+    """A claim without a persisted assessment must not be reported as current."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import CareAssertion
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="impact-person-1", name="Impact Person")
+        caregiver = Caregiver(
+            id="impact-caregiver-1",
+            name="Impact Caregiver",
+            email="impact-caregiver@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        claim = CareAssertion(
+            id="impact-claim-1",
+            person_id=person.id,
+            subject_type="sleep",
+            subject_id="sleep-1",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="Caregiver reported two awakenings",
+            source_label="caregiver report",
+            source_text="Caregiver reported two awakenings",
+            evidence_ids=[],
+            assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, claim])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        response = client.get(
+            "/api/v1/care-continuity/claims/impact-claim-1/assessment-impact"
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["claim_id"] == claim.id
+        assert body["status"] == "not_assessed"
+        assert body["review_required"] is True
+        assert "no_persisted_claim_assessment" in body["reasons"]
+        assert "clinical truth" in body["interpretation_limit"]
+
+        # The endpoint must not leak another care record's claim.
+        other = CareAssertion(
+            id="impact-claim-private",
+            person_id="impact-person-private",
+            subject_type="sleep",
+            subject_id="sleep-private",
+            field="night_waking",
+            assertion_kind="report",
+            asserted_value="Private report",
+            source_label="private source",
+            source_text="Private report",
+            evidence_ids=[],
+            assertion_status="reported",
+        )
+        db = TestingSessionLocal()
+        db.add(Person(id="impact-person-private", name="Private Person"))
+        db.add(other)
+        db.commit()
+        db.close()
+        denied = client.get(
+            "/api/v1/care-continuity/claims/impact-claim-private/assessment-impact"
+        )
+        assert denied.status_code == 404
+    finally:
+        teardown_db()
