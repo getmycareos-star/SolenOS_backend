@@ -101,6 +101,7 @@ jobs:
               "contradictions": {"event_id", "context_key", "effective_from", "effective_to", "matching_candidate_ids"},
               "evidence": {"person_id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_by_caregiver_id", "original_author", "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id", "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel", "original_source_reference", "parent_evidence_id", "source_text_sha256", "ingested_at"},
               "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
+              "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "created_at"},
           }
           for table, required in expected.items():
               assert inspector.has_table(table), f"missing table: {table}"
@@ -139,6 +140,7 @@ jobs:
               "appointment_workspace_records": "person_id",
               "appointment_workspace_revisions": "record_id",
               "caregiver_profiles": "session_caregiver_id",
+              "evidence_claim_assessments": "claim_id",
           }
           for table, column in fks.items():
               foreign_keys = inspector.get_foreign_keys(table)
@@ -173,6 +175,13 @@ jobs:
                   """).first()
                   assert trigger is not None, "evidence review immutability trigger missing"
               print("PASS evidence review append-only trigger")
+              claim_trigger = connection.exec_driver_sql("""
+                  SELECT 1 FROM pg_trigger
+                  WHERE tgname = 'trg_evidence_claim_assessments_immutable'
+                    AND NOT tgisinternal
+              """).first()
+              assert claim_trigger is not None, "claim assessment immutability trigger missing"
+              print("PASS claim assessment append-only trigger")
           pattern_indexes = inspector.get_indexes("patterns")
           active_pattern_index = next(
               (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
