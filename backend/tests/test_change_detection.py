@@ -199,8 +199,11 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         assert set(pattern.event_ids) == set(event_ids)
         assert pattern.evidence_count == 2
         assert pattern.confidence is None
-        assert pattern.rate_per_period is not None
-        assert "observation coverage is not measured" in pattern.alternative_interpretations[0].lower()
+        assert pattern.rate_per_period is None
+        assert any(
+            "observation coverage" in note.lower() and "withheld" in note.lower()
+            for note in (pattern.alternative_interpretations or [])
+        )
 
         repeated = detect_patterns(db, person.id, "fall", None, now)
         db.commit()
