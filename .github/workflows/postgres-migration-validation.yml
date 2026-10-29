@@ -815,3 +815,33 @@ jobs:
           else
             echo "Alembic version table rolled back with failed upgrade transaction; legacy data and schema checks passed."
           fi
+
+
+      - name: Rehearse Companion schema rollback and re-upgrade without data loss
+        working-directory: backend
+        run: |
+          python -m alembic downgrade 20261029_29_ev_rel_scope
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_29_ev_rel_scope"
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            DO \$\$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='conversation_messages'
+                  AND column_name='client_turn_id'
+              ) THEN RAISE EXCEPTION 'client_turn_id was dropped during rollback'; END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='conversation_messages'
+                  AND column_name='response_metadata_json'
+              ) THEN RAISE EXCEPTION 'response_metadata_json was dropped during rollback'; END IF;
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname='public' AND tablename='conversation_messages'
+                  AND indexname='uq_conversation_messages_client_turn_id'
+              ) THEN RAISE EXCEPTION 'Companion idempotency index was dropped during rollback'; END IF;
+            END
+            \$\$;
+          "
+          python -m alembic upgrade head
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "20261029_30_comp_turn_idem"
