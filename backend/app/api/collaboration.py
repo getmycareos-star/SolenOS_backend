@@ -1539,6 +1539,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
+        matching_evidence_rows = []
+        if retrieval_terms:
+            matching_evidence_rows = (
+                evidence_query.filter(or_(
+                    *[EvidenceModel.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.extra_metadata.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[EvidenceModel.type.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(EvidenceModel.uploaded_at.desc())
+                .limit(30)
+                .all()
+            )
         linked_rows = (
             evidence_query.filter(EvidenceModel.id.in_(linked_ids))
             .order_by(EvidenceModel.uploaded_at.desc())
