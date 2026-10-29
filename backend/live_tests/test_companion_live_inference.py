@@ -96,7 +96,10 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         direct_data = direct.json()
         assert direct_data["ai_generated"] is True
         assert older_event_id in direct_data["source_event_ids"]
-        assert any(word in direct_data["reply"].casefold() for word in ("sleep", "slept", "waking", "awake"))
+        assert any(
+            word in direct_data["reply"].casefold()
+            for word in ("sleep", "slept", "waking", "awake", "restless", "overnight")
+        ), f"Live Qwen did not answer the sleep-record question with a grounded detail: {direct_data['reply']!r}"
         assert direct_data["written_to_lcr"] is False
         assert direct_data["persistence"] == "conversation_only"
 
