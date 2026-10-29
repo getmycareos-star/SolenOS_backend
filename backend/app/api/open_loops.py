@@ -427,7 +427,26 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
         query = query.filter(OpenLoopRecord.loop_type == loop_type)
     if priority:
         query = query.filter(OpenLoopRecord.priority == priority)
-    rows = query.order_by(OpenLoopRecord.deadline_at.asc().nullslast(), OpenLoopRecord.updated_at.desc()).offset(offset).limit(limit).all()
+    now = datetime.now(timezone.utc)
+    if overdue is True:
+        query = query.filter(
+            OpenLoopRecord.deadline_at.is_not(None),
+            OpenLoopRecord.deadline_at <= now,
+            OpenLoopRecord.status.notin_(TERMINAL_STATES),
+        )
+    elif overdue is False:
+        query = query.filter(
+            or_(
+                OpenLoopRecord.deadline_at.is_(None),
+                OpenLoopRecord.deadline_at > now,
+                OpenLoopRecord.status.in_(TERMINAL_STATES),
+            )
+        )
+    total = query.count()
+    rows = query.order_by(
+        OpenLoopRecord.deadline_at.asc().nullslast(),
+        OpenLoopRecord.updated_at.desc(),
+    ).offset(offset).limit(limit).all()
     items = []
     for loop in rows:
         deps = db.query(OpenLoopDependency).filter(
@@ -441,10 +460,8 @@ def list_loops(request: Request, status: Optional[str] = None, loop_type: Option
             if prerequisite and prerequisite.status not in TERMINAL_STATES:
                 blockers.append({"id": prerequisite.id, "title": prerequisite.title, "status": prerequisite.status})
         loop._mandatory_blockers = blockers
-        item = _snapshot(loop)
-        if overdue is None or item["overdue"] == overdue:
-            items.append(item)
-    return {"items": items, "limit": limit, "offset": offset, "count": len(items)}
+        items.append(_snapshot(loop))
+    return {"items": items, "limit": limit, "offset": offset, "count": total}
 
 
 @router.get("/{loop_id}")
