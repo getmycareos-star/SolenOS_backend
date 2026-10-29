@@ -1466,6 +1466,87 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 event_context.append(line)
                 source_context.append(line)
 
+        # Approved assertions and appointments also get query-directed retrieval.
+        # Only caregiver-reviewed assertions are eligible; pending AI interpretations
+        # remain excluded from the evidence context.
+        if retrieval_terms:
+            matching_assertions = (
+                db.query(CareAssertion)
+                .filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.assertion_status == "caregiver_reviewed",
+                    or_(
+                        *[CareAssertion.field.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareAssertion.asserted_value.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareAssertion.source_label.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[CareAssertion.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(CareAssertion.recorded_at.desc())
+                .limit(12)
+                .all()
+            )
+            known_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
+            for assertion in matching_assertions:
+                assertion_id = str(assertion.id)
+                if assertion_id in known_assertion_ids:
+                    continue
+                known_assertion_ids.add(assertion_id)
+                line = "Caregiver-approved LCR assertion (query-matched historical record): " + json.dumps({
+                    "assertion_id": assertion_id,
+                    "field": assertion.field,
+                    "value": assertion.asserted_value,
+                    "assertion_kind": assertion.assertion_kind,
+                    "source_label": assertion.source_label,
+                    "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
+                    "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
+                    "source_text": (assertion.source_text or "")[:500],
+                    "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                    "status": assertion.assertion_status,
+                }, ensure_ascii=False)
+                assertion_context.append(line)
+                source_context.append(line)
+
+            matching_appointments = (
+                db.query(Appointment)
+                .filter(
+                    Appointment.person_id == person_id,
+                    or_(
+                        *[Appointment.title.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.location.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.provider.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.healthcare_org.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.preparation_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.travel_notes.ilike(f"%{term}%") for term in retrieval_terms],
+                        *[Appointment.status.ilike(f"%{term}%") for term in retrieval_terms],
+                    ),
+                )
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(12)
+                .all()
+            )
+            known_appointment_ids = set(_context_record_ids(appointment_context, "appointment_id"))
+            for appointment in matching_appointments:
+                appointment_id = str(appointment.id)
+                if appointment_id in known_appointment_ids:
+                    continue
+                known_appointment_ids.add(appointment_id)
+                line = "LCR appointment evidence (query-matched historical record): " + json.dumps({
+                    "appointment_id": appointment_id,
+                    "title": appointment.title,
+                    "status": appointment.status,
+                    "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
+                    "location": appointment.location,
+                    "provider": appointment.provider,
+                    "healthcare_org": appointment.healthcare_org,
+                    "preparation_notes": appointment.preparation_notes,
+                    "travel_notes": appointment.travel_notes,
+                    "time_provenance": appointment.time_provenance,
+                    "evidence_ids": [str(value) for value in (appointment.evidence_ids or [])],
+                }, ensure_ascii=False)
+                appointment_context.append(line)
+                source_context.append(line)
+
         # Query-matched evidence is retrieved independently of the newest-upload
         # window, so older standalone documents are not lost as the record grows.
         if retrieval_terms:
