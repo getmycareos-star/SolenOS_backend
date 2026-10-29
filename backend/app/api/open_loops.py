@@ -18,7 +18,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.database import Base, get_db, SessionLocal
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import Evidence
 
 router = APIRouter(prefix="/open-loops", tags=["open-loops"])
 
@@ -594,6 +593,11 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
     if loop.loop_type == "professional_input":
+        # Import lazily: database.py registers the Open Loop ORM during startup,
+        # while app.models.care imports database.Base. A module-level import here
+        # creates a care -> database -> open_loops -> care circular import.
+        from app.models.care import Evidence
+
         if not payload.evidence:
             raise HTTPException(status_code=422, detail="Professional input requires source evidence; caregiver text alone cannot establish it")
         evidence_ids = {
