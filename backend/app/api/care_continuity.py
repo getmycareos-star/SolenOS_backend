@@ -1467,11 +1467,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
         "capabilities": capabilities,
         "assessment_quality": assessment_quality,
         "current_care_reality": {
-            "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "caregiver_observations", "caregiver_contexts"}][:100],
+            "records": [item for item in all_items if item["source"] in {"facts", "events", "assertions", "evidence_observations", "caregiver_observations", "caregiver_contexts"}][:100],
             "notice": "Records are reported with their source status. A record or missing record is not, by itself, proof of clinical truth or absence.",
         },
         "longitudinal_context": {
-            "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions"}][:100],
+            "historical_records": [item for item in all_items if item["source"] in {"timeline", "decision_outcomes", "decisions", "evidence_observations"}][:100],
             "bounded": True,
         },
         "baseline_assessment": {
