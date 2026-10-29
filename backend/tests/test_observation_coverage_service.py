@@ -399,3 +399,57 @@ def test_pattern_reassessment_supersedes_metrics_when_coverage_changes():
     finally:
         db.close()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_conflicting_coverage_declaration_reduces_covered_fraction():
+    db, person, caregiver = _db()
+    try:
+        end = datetime(2026, 10, 29, tzinfo=timezone.utc)
+        start = end - timedelta(days=14)
+        db.add_all([
+            ObservationCoverage(
+                id="full-covered", person_id=person.id, subject_type="mobility",
+                window_start=start, window_end=end, coverage_status="covered",
+                source_evidence_ids=[], rationale="Coverage declared for the full interval.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+            ObservationCoverage(
+                id="conflicting-partial", person_id=person.id, subject_type="mobility",
+                window_start=start + timedelta(days=5), window_end=start + timedelta(days=9),
+                coverage_status="partial", source_evidence_ids=[],
+                rationale="A conflicting source says observation was partial.",
+                recorded_by_caregiver_id=caregiver.id,
+            ),
+        ])
+        db.commit()
+        result = assess_observation_coverage(db, person.id, "mobility", start, end)
+        assert result["coverage_status"] == "partial"
+        assert result["coverage_fraction"] < 1.0
+        assert result["coverage_fraction"] == pytest.approx(10 / 14)
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
+
+
+def test_rate_decrease_is_not_created_without_explicit_coverage():
+    from app.models.care import CareEvent
+    from app.services.change_detection import detect_event_changes
+
+    db, person, caregiver = _db()
+    try:
+        now = datetime.now(timezone.utc)
+        # Several older events and only one current event create a lower recorded
+        # rate, but without coverage records that is not evidence of a true decrease.
+        for i, days_ago in enumerate((120, 100, 80, 60, 7)):
+            db.add(CareEvent(
+                id=f"fall-no-coverage-{i}", person_id=person.id, event_type="fall",
+                status="recorded", occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded fall {i}", created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"source-no-coverage-{i}"],
+            ))
+        db.commit()
+        changes = detect_event_changes(db, person.id, "fall", None, now)
+        assert not any(row.change_type.value == "decrease" for row in changes)
+    finally:
+        db.close()
+        Base.metadata.drop_all(bind=engine)
