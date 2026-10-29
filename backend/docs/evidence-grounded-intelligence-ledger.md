@@ -24,7 +24,8 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Bind evidence creation to the server-issued bearer session and reject cross-record identities.
 - [x] Add an append-only ORM guard and database trigger preventing mutation of original evidence source text and its stored fingerprint; expose a person-scoped integrity endpoint that recomputes the exact UTF-8 text hash.
 - [ ] Verify migration upgrade against fresh and pre-existing PostgreSQL schemas, direct-SQL mutation rejection, and create/retrieve/hash/classification behavior on the exact current `main` commit in CI.
-- [ ] Complete provenance for device identity, import/transfer lineage, original binary/document hash, and explicit evidence links to every event, claim, observation, decision, outcome, and review type.
+- [x] Original uploaded-file bytes, SHA-256, size, filename, and MIME type are persisted in `evidence_uploads`; download verifies byte count and recomputed SHA-256 before returning content.
+- [ ] Complete device identity, import/transfer lineage, and explicit evidence links to every event, claim, observation, decision, outcome, and review type; the source-text hash and uploaded-binary hash remain distinct integrity domains.
 
 ### B. Evidence and knowledge classification — PARTIAL
 - [x] Existing source type, event/assertion kind, evidence status, and epistemic-state structures distinguish several source and knowledge types.
