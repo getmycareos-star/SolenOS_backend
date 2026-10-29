@@ -568,6 +568,30 @@ def test_state_revision_as_of_reconstructs_historical_state_and_isolates_people(
                 changed_by_caregiver_id=owner["caregiver"]["id"],
                 changed_at=datetime(2026, 10, 29, 10, 0, tzinfo=timezone.utc),
             ),
+            # A late-arriving report concerns an earlier event time but was not
+            # recorded until the next day. "Known at the time" reconstruction must
+            # not retroactively include it in the October 29 snapshot.
+            CareStateRevision(
+                id="history-revision-3-late-arrival",
+                person_id=owner["person"]["id"],
+                target_type="care_events",
+                target_id="history-event-1",
+                revision_number=3,
+                change_kind="updated",
+                before_state=json.dumps({"status": "reviewed", "description": "Source passage reviewed; cause remains unknown"}),
+                after_state=json.dumps({
+                    "status": "reviewed",
+                    "description": "Source passage reviewed; cause remains unknown",
+                    "late_arrival": {
+                        "event_time": "2026-10-20T08:00:00Z",
+                        "first_recorded_at": "2026-10-30T10:00:00Z",
+                        "interpretation": "Arrived later; not part of what was recorded on October 29.",
+                    },
+                }),
+                evidence_ids=["history-evidence-1", "history-evidence-2"],
+                changed_by_caregiver_id=owner["caregiver"]["id"],
+                changed_at=datetime(2026, 10, 30, 10, 0, tzinfo=timezone.utc),
+            ),
         ])
         db.commit()
     finally:
@@ -587,6 +611,15 @@ def test_state_revision_as_of_reconstructs_historical_state_and_isolates_people(
     assert "cause remains unknown" in later.json()["state"]["description"]
     assert later.json()["historical_state_source"] == "persisted_care_state_revision"
     assert "does not establish facts" in later.json()["interpretation_limit"]
+
+    late_arrival = test_client.get(
+        url, headers=owner_headers, params={"as_of": "2026-10-30T12:00:00Z"}
+    )
+    assert late_arrival.status_code == 200, late_arrival.text
+    assert late_arrival.json()["revision_number"] == 3
+    assert late_arrival.json()["state"]["late_arrival"]["event_time"] == "2026-10-20T08:00:00Z"
+    assert late_arrival.json()["state"]["late_arrival"]["first_recorded_at"] == "2026-10-30T10:00:00Z"
+    assert "not part of what was recorded on October 29" in late_arrival.json()["state"]["late_arrival"]["interpretation"]
 
     cross_person = test_client.get(url, headers=other_headers, params={"as_of": "2026-10-29T12:00:00Z"})
     assert cross_person.status_code == 404, cross_person.text
