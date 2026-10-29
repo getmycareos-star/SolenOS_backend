@@ -61,7 +61,14 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
             return event
 
         a1 = add_event(person_a_id, caregiver_a_id, f"pg-event-a1-{suffix}", 20, f"pg-source-a1-{suffix}")
+        # Adversarial duplicate: importer creates a second row for the same
+        # source anchor at the exact same occurrence time. It must not inflate
+        # recurrence or appear as a second canonical source event.
+        a1_duplicate = add_event(person_a_id, caregiver_a_id, f"pg-event-a1-duplicate-{suffix}", 20, f"pg-source-a1-{suffix}")
         a2 = add_event(person_a_id, caregiver_a_id, f"pg-event-a2-{suffix}", 10, f"pg-source-a2-{suffix}")
+        # Same evidence anchor at a different time is retained as a distinct
+        # occurrence, but remains one shared source (not independent corroboration).
+        a2_shared_source = add_event(person_a_id, caregiver_a_id, f"pg-event-a2-shared-{suffix}", 9, f"pg-source-a2-{suffix}")
         b1 = add_event(person_b_id, caregiver_b_id, f"pg-event-b1-{suffix}", 19, f"pg-source-b1-{suffix}")
         b2 = add_event(person_b_id, caregiver_b_id, f"pg-event-b2-{suffix}", 9, f"pg-source-b2-{suffix}")
         db.flush()
@@ -81,6 +88,14 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
         assert all(pattern.person_id == person_a_id for pattern in first_a)
         assert all(pattern.person_id == person_b_id for pattern in first_b)
         assert not ({pattern.id for pattern in first_a} & {pattern.id for pattern in first_b})
+        # The exact duplicate is excluded from canonical recurrence evidence.
+        assert all(a1_duplicate.id not in (pattern.event_ids or []) for pattern in first_a)
+        # Unknown coverage is not converted into an apparent frequency change.
+        assert all(pattern.pattern_type.value not in {"frequency_increase", "frequency_decrease"} for pattern in first_a)
+        # Shared evidence does not become a new independent source identifier.
+        for pattern in first_a:
+            if a2.id in (pattern.event_ids or []) and a2_shared_source.id in (pattern.event_ids or []):
+                assert f"pg-source-a2-{suffix}" not in set(pattern.event_ids or [])
 
         # A fresh SQLAlchemy session proves database persistence, not only identity-map state.
         db.close()
@@ -112,6 +127,13 @@ def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolat
             Pattern.person_id == person_a_id, Pattern.is_active.is_(True)
         ).all()
         assert all(a3.id not in (pattern.event_ids or []) for pattern in active_after_correction)
+        # Historical reconstruction: the old assessment remains inspectable,
+        # explicitly inactive, with the now-invalidated source lineage intact.
+        historical_with_corrected_source = db.query(Pattern).filter(
+            Pattern.person_id == person_a_id,
+            Pattern.is_active.is_(False),
+        ).all()
+        assert any(a3.id in (pattern.event_ids or []) for pattern in historical_with_corrected_source)
         assert db.query(Pattern).filter(Pattern.person_id == person_a_id).count() >= len(first_a_ids)
         assert all(pattern.person_id == person_b_id for pattern in db.query(Pattern).filter(
             Pattern.person_id == person_b_id
