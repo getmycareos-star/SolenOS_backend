@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer
 from sqlalchemy.sql import func
+import hashlib
 import uuid
 from app.core.database import Base
 from app.core.types import JSONList
@@ -42,6 +43,27 @@ class Evidence(Base):
     source_type = Column(String, nullable=True)
     source_span_start = Column(Integer, nullable=True)
     source_span_end = Column(Integer, nullable=True)
+    # Reporter/author/collector are separate from the uploader identity.
+    original_author = Column(Text, nullable=True)
+    reported_by_label = Column(Text, nullable=True)
+    reported_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    collected_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+    collected_at = Column(DateTime(timezone=True), nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=True)
+    occurred_at_timezone = Column(String, nullable=True)
+    origin_channel = Column(String(80), nullable=True)
+    original_source_reference = Column(Text, nullable=True)
+    parent_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="SET NULL"), nullable=True)
+    source_text_sha256 = Column(String(64), nullable=True)
+    ingested_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Evidence, "before_insert")
+def _hash_evidence_source_text(mapper, connection, target):
+    # Hash the exact stored text representation; this does not authenticate the
+    # upstream author or prove that an uploaded binary matches the text.
+    if target.source_text is not None:
+        target.source_text_sha256 = hashlib.sha256(target.source_text.encode("utf-8")).hexdigest()
 
 
 class CareEvent(Base):
