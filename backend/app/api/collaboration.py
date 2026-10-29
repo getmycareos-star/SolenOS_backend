@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import hashlib
 import math
 import os
@@ -35,6 +36,7 @@ from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.improvement_training_example import ImprovementTrainingExample
 
 router = APIRouter(tags=["community and companion"])
+logger = logging.getLogger(__name__)
 
 
 class SharedFileInput(BaseModel):
@@ -1769,20 +1771,28 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
-    db.add(ConversationMessage(
-        session_id=session.id, role="user", content=user_text,
-        guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-        source_record_refs_json="[]",
-    ))
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
     )
-    db.add(assistant_row)
-    db.commit()
-    db.refresh(assistant_row)
+    try:
+        db.add(ConversationMessage(
+            session_id=session.id, role="user", content=user_text,
+            guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+            source_record_refs_json="[]",
+        ))
+        db.add(assistant_row)
+        db.commit()
+        db.refresh(assistant_row)
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Companion conversation pair failed to persist")
+        raise HTTPException(
+            status_code=503,
+            detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
+        ) from exc
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
