@@ -653,3 +653,29 @@ def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monke
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+def test_companion_paraphrase_ranking_covers_appointments_and_medication_terms():
+    appointment = (
+        'LCR appointment evidence: {"appointment_id":"visit-older",'
+        '"title":"Neurology consultation"}'
+    )
+    unrelated = (
+        'LCR appointment evidence: {"appointment_id":"meal-1",'
+        '"title":"Lunch planning"}'
+    )
+    assert collaboration._rank_context_lines(
+        "Tell me about the clinic visit", [unrelated, appointment], 1
+    ) == [appointment]
+
+    medication = (
+        'LCR event evidence: {"event_id":"med-1",'
+        '"title":"Medication dose recorded"}'
+    )
+    unrelated_sleep = (
+        'LCR event evidence: {"event_id":"sleep-1",'
+        '"title":"Restless night"}'
+    )
+    assert collaboration._rank_context_lines(
+        "Was the pill recorded?", [unrelated_sleep, medication], 1
+    ) == [medication]
+
