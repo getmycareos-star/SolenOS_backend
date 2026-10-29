@@ -45,13 +45,19 @@ def main():
     barrier = threading.Barrier(2)
     qwen_calls = []
     qwen_lock = threading.Lock()
+    barrier_arrivals = 0
 
     def fake_qwen(base, model, messages, options=None):
+        nonlocal barrier_arrivals
         with qwen_lock:
             qwen_calls.append(messages)
-        # Ensure both concurrent requests pass the idempotency lookup and enter
-        # inference before either can commit the unique turn key.
-        barrier.wait(timeout=20)
+            wait_for_pair = barrier_arrivals < 2
+            if wait_for_pair:
+                barrier_arrivals += 1
+        # Only the first inference call from each concurrent request waits.
+        # Any grounding-revision calls must not wait at this barrier a second time.
+        if wait_for_pair:
+            barrier.wait(timeout=20)
         return "The saved record does not establish an answer to that question."
 
     original_url = collaboration._ollama_url
