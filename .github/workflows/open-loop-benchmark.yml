@@ -49,6 +49,7 @@ jobs:
       - name: Calculate measured benchmark score and enforce zero-failure gate
         if: always()
         run: |
+          python - <<'PY'
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
@@ -72,3 +73,4 @@ jobs:
           print(f"OPEN_LOOP_BENCHMARK_SKIPPED={skipped}")
           if not executed or failures or errors or skipped:
               raise SystemExit("Open Loop benchmark gate failed: zero executed, failing/error cases, or skipped cases.")
+          PY
