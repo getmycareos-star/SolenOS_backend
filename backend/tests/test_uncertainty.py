@@ -1613,7 +1613,7 @@ def test_safety_response_validation_rejects_unpersisted_evidence_ids():
 
         client = authorized_client(person.id)
         response = client.post(
-            "/api/v1/safety/validate-response",
+            "/api/v1/validate-response",
             params={
                 "candidate_response": "The record confirms the medication was changed.",
                 "claims": "The medication was changed.",
@@ -1648,7 +1648,7 @@ def test_safety_audit_history_rejects_cross_record_person_id():
         db.close()
 
         client = authorized_client(person.id)
-        response = client.get("/api/v1/safety/audit/safety-person-other")
+        response = client.get("/api/v1/audit/safety-person-other")
         assert response.status_code == 403
     finally:
         teardown_db()
