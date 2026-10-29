@@ -608,6 +608,9 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
         "decision": payload.text,
         "evidence": payload.evidence,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "verification_basis": "caregiver_attestation_with_persisted_source_link",
+        "semantic_grounding_status": "not_automatically_verified",
+        "interpretation_limit": "Persisted source linkage and caregiver review do not automatically establish semantic entailment or prove which account is true.",
     }
     loop.outcome_evidence = [*(loop.outcome_evidence or []), reconciliation]
     loop.outcome_status = "outcome_verified"
@@ -645,7 +648,15 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
     before = _snapshot(loop)
     loop.verification_rule = loop.verification_rule or payload.verification_rule
-    loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "verification_rule": loop.verification_rule, "recorded_at": datetime.now(timezone.utc).isoformat()}]
+    loop.outcome_evidence = [*(loop.outcome_evidence or []), {
+        "text": payload.text,
+        "evidence": payload.evidence,
+        "verification_rule": loop.verification_rule,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "verification_basis": "caregiver_attestation_with_persisted_source_link",
+        "semantic_grounding_status": "not_automatically_verified",
+        "interpretation_limit": "The API validates source-record existence and scope, not whether the source semantically proves the stated outcome or whether an action caused it.",
+    }]
     loop.outcome_status = "outcome_verified"
     _audit(db, loop, "outcome_verified", before, payload.evidence, payload.idempotency_key)
     db.commit()
