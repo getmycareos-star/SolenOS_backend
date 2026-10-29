@@ -545,6 +545,35 @@ class TestSafetyAPI:
         data = response.json()
         assert data["decision"] == "allow"
 
+    def test_evaluate_rejects_unpersisted_evidence_reference(self):
+        session = self.client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Evidence scope caregiver"})
+        assert session.status_code == 201, session.text
+        person_id = session.json()["person"]["id"]
+        headers = {"Authorization": f"Bearer {session.json()['access_token']}"}
+        response = self.client.post(
+            "/api/v1/evaluate",
+            headers=headers,
+            json={
+                "user_intent": "The medication was changed.",
+                "candidate_claims": ["The medication was changed."],
+                "evidence_references": [{
+                    "evidence_id": "invented-evidence-id",
+                    "source_text": "Invented source text claims medication changed.",
+                    "authority": "document",
+                    "quality": "high",
+                    "currentness": "current",
+                    "supports_claim": True,
+                    "reviewed_support": True,
+                    "confidence": 0.99,
+                }],
+                "risk_classification": "informational",
+                "proposed_action_level": "informational",
+                "person_id": person_id,
+            },
+        )
+        assert response.status_code == 404, response.text
+        assert "not found in this care record" in response.json()["detail"]
+
     def test_escalation_endpoint(self):
         from app.services.risk_escalation import EscalationEngine
         engine = EscalationEngine()
