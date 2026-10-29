@@ -10,7 +10,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent
@@ -20,9 +19,8 @@ import app.main as main_module
 
 
 engine = create_engine(
-    "sqlite:///:memory:",
+    "sqlite:////tmp/solenos-live-inference.db",
     connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
