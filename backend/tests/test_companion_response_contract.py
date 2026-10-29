@@ -263,6 +263,63 @@ def test_companion_context_ranking_expands_common_caregiving_paraphrases():
     assert {"rest", "sleep", "waking"}.issubset(sleep_terms)
 
 
+def test_companion_retrieves_matching_historical_event_beyond_recent_window(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "One older sleep observation is recorded; it does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 29, 12, 0)
+        db = TestingSessionLocal()
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Sleep observation from August",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="household",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated household event {index}",
+                description="A routine household activity was recorded.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        older_id = older.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        assert older_id in response.json()["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_companion_replays_same_turn_without_second_inference(monkeypatch):
     client = setup_client(monkeypatch)
     calls = []
