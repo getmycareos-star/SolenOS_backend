@@ -237,7 +237,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         }
     freshness_assessments = []
     freshness_by_evidence: dict[str, list[dict]] = {}
-    if referenced_evidence_ids:
+    freshness_schema_available = (
+        inspect(db.get_bind()).has_table("evidence_freshness_assessments")
+        and inspect(db.get_bind()).has_table("evidence_freshness_policies")
+    )
+    if referenced_evidence_ids and freshness_schema_available:
         freshness_rows = (
             db.query(EvidenceFreshnessAssessment, EvidenceFreshnessPolicy)
             .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
@@ -319,7 +323,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "evidence_lineage": evidence_lineage,
         "freshness_assessments": freshness_assessments,
         "freshness_assessment_scope": {
-            "status": "latest_per_policy_for_linked_evidence",
+            "status": (
+                "unavailable_schema" if not freshness_schema_available
+                else "latest_per_policy_for_linked_evidence" if referenced_evidence_ids
+                else "not_applicable_no_linked_evidence"
+            ),
             "bounded": True,
             "limit": 100,
             "history_complete": False,
@@ -329,7 +337,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             "care_facts": "available" if fact_rows is not None else "unavailable",
             "care_events": "available" if event_items else "no_records_returned",
             "appointments": "available" if appointment_items else "no_records_returned",
-            "evidence_freshness_assessments": "available" if freshness_assessments else ("no_records_returned" if referenced_evidence_ids else "not_applicable_no_linked_evidence"),
+            "evidence_freshness_assessments": ("unavailable_schema" if not freshness_schema_available else "available" if freshness_assessments else ("no_records_returned" if referenced_evidence_ids else "not_applicable_no_linked_evidence")),
             "medications_and_allergies": "unavailable",
             "documents": "unavailable",
             "community": "not_authorized",
