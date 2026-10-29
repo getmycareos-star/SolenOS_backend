@@ -2362,3 +2362,122 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=422, detail=f"Care-continuity record could not be saved ({type(exc).__name__}); check linked IDs and field types") from exc
+
+
+SOURCE_RELATIONSHIP_TYPES = {
+    "same_origin", "copied_from", "forwarded_from", "derived_from",
+    "corroborates", "contradicts", "duplicates", "related_to",
+}
+SOURCE_INDEPENDENCE_STATUSES = {"independent", "shared_origin", "unknown", "not_assessed"}
+LINEAGE_RELATIONSHIP_TYPES = {"copied_from", "forwarded_from", "derived_from", "same_origin"}
+
+
+@router.post("/evidence/{evidence_id}/relationships", status_code=201)
+def create_evidence_source_relationship(
+    evidence_id: str, payload: dict[str, Any], request: Request, db: Session = Depends(get_db)
+):
+    """Append source-lineage/corroboration metadata; never infer independence from wording."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    source = db.query(Evidence).filter(
+        Evidence.id == evidence_id, Evidence.person_id == person_id
+    ).first()
+    related_id = payload.get("related_evidence_id")
+    related = db.query(Evidence).filter(
+        Evidence.id == related_id, Evidence.person_id == person_id
+    ).first() if isinstance(related_id, str) else None
+    if source is None or related is None:
+        raise HTTPException(status_code=404, detail="Evidence item not found in this care record")
+    if source.id == related.id:
+        raise HTTPException(status_code=422, detail="Evidence cannot be related to itself")
+    relationship_type = payload.get("relationship_type")
+    independence = payload.get("source_independence_status")
+    rationale = payload.get("rationale")
+    origin_group_key = payload.get("origin_group_key")
+    if relationship_type not in SOURCE_RELATIONSHIP_TYPES:
+        raise HTTPException(status_code=422, detail="Unsupported source relationship type")
+    if independence not in SOURCE_INDEPENDENCE_STATUSES:
+        raise HTTPException(status_code=422, detail="An explicit source-independence state is required")
+    if not isinstance(rationale, str) or len(rationale.strip()) < 3:
+        raise HTTPException(status_code=422, detail="A rationale of at least 3 characters is required")
+    if origin_group_key is not None and (
+        not isinstance(origin_group_key, str) or not origin_group_key.strip() or len(origin_group_key) > 128
+    ):
+        raise HTTPException(status_code=422, detail="origin_group_key must be a non-empty string up to 128 characters")
+    if relationship_type in LINEAGE_RELATIONSHIP_TYPES:
+        if independence not in {"shared_origin", "unknown", "not_assessed"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Copied, forwarded, derived, and same-origin relationships cannot be labelled independent",
+            )
+        # Edges are dependent evidence -> origin evidence. Refuse a cycle in this lineage graph.
+        from app.models.care_continuity import EvidenceSourceRelationship
+        pending = [related.id]
+        visited = set()
+        while pending:
+            current = pending.pop()
+            if current == source.id:
+                raise HTTPException(status_code=409, detail="This relationship would create a source-lineage cycle")
+            if current in visited:
+                continue
+            visited.add(current)
+            origins = db.query(EvidenceSourceRelationship.related_evidence_id).filter(
+                EvidenceSourceRelationship.person_id == person_id,
+                EvidenceSourceRelationship.source_evidence_id == current,
+                EvidenceSourceRelationship.relationship_type.in_(LINEAGE_RELATIONSHIP_TYPES),
+            ).all()
+            pending.extend(row[0] for row in origins if row[0] not in visited)
+    from app.models.care_continuity import EvidenceSourceRelationship
+    row = EvidenceSourceRelationship(
+        person_id=person_id,
+        source_evidence_id=source.id,
+        related_evidence_id=related.id,
+        relationship_type=relationship_type,
+        source_independence_status=independence,
+        origin_group_key=origin_group_key.strip() if isinstance(origin_group_key, str) else None,
+        rationale=rationale.strip(),
+        reviewed_by_caregiver_id=caregiver_id,
+    )
+    try:
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This source relationship already exists") from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Evidence source relationship could not be persisted")
+        raise HTTPException(status_code=503, detail="Evidence source relationship could not be persisted") from exc
+    return {
+        "id": row.id, "person_id": row.person_id,
+        "source_evidence_id": row.source_evidence_id, "related_evidence_id": row.related_evidence_id,
+        "relationship_type": row.relationship_type,
+        "source_independence_status": row.source_independence_status,
+        "origin_group_key": row.origin_group_key, "rationale": row.rationale,
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id, "created_at": row.created_at,
+    }
+
+
+@router.get("/evidence/{evidence_id}/relationships")
+def list_evidence_source_relationships(evidence_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return only relationships for evidence visible within the authorized care record."""
+    person_id, _ = _scoped_identity(request, db)
+    evidence = db.query(Evidence.id).filter(
+        Evidence.id == evidence_id, Evidence.person_id == person_id
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Evidence item not found")
+    from app.models.care_continuity import EvidenceSourceRelationship
+    rows = db.query(EvidenceSourceRelationship).filter(
+        EvidenceSourceRelationship.person_id == person_id,
+        (EvidenceSourceRelationship.source_evidence_id == evidence_id)
+        | (EvidenceSourceRelationship.related_evidence_id == evidence_id),
+    ).order_by(EvidenceSourceRelationship.created_at.asc(), EvidenceSourceRelationship.id.asc()).all()
+    return [{
+        "id": row.id, "person_id": row.person_id,
+        "source_evidence_id": row.source_evidence_id, "related_evidence_id": row.related_evidence_id,
+        "relationship_type": row.relationship_type,
+        "source_independence_status": row.source_independence_status,
+        "origin_group_key": row.origin_group_key, "rationale": row.rationale,
+        "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id, "created_at": row.created_at,
+    } for row in rows]
