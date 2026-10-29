@@ -422,7 +422,8 @@ class UncertaintyEngine:
     def update_contradiction(
         self, contradiction_id: str, update: ContradictionUpdate
     ) -> Optional[ContradictionModel]:
-        db_contradiction = self._target_query(ContradictionModel, contradiction_id).first()
+        # Serialize competing conflict transitions on PostgreSQL so each immutable audit event records the actual preceding state. SQLite ignores FOR UPDATE, while PostgreSQL blocks concurrent writers until the latest row version is available.
+        db_contradiction = self._target_query(ContradictionModel, contradiction_id).with_for_update().first()
         if not db_contradiction:
             return None
 
