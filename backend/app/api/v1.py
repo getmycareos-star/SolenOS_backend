@@ -277,7 +277,12 @@ def list_caregivers(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/evidence", response_model=EvidenceSchema)
-def create_evidence(evidence: EvidenceCreate, db: Session = Depends(get_db)):
+def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = Depends(get_db)):
+    # Reference validation is not authentication: bind both client-supplied IDs
+    # to the server-issued bearer session before writing any evidence.
+    _require_session_scope(
+        request, db, evidence.person_id, evidence.uploaded_by_caregiver_id
+    )
     _require_person_and_linked_caregiver(
         db, evidence.person_id, evidence.uploaded_by_caregiver_id
     )
