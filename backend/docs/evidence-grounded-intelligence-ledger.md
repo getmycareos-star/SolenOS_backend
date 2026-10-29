@@ -12,7 +12,7 @@
 - **MISSING** — no adequate implementation was found during this audit.
 - **BLOCKED** — requires a real dependency, policy, source, or authorization decision that is not available.
 
-No group is marked fully complete in this ledger.
+No group is marked fully complete in this ledger. Source-lineage implementation is newly added on main, but remains unverified until CI and PostgreSQL migration execution pass.
 
 ## Capability groups A–R
 
@@ -51,7 +51,12 @@ No group is marked fully complete in this ledger.
 ### E. Corroboration and source independence — PARTIAL
 - [x] Evidence integrity endpoint detects identical normalized source text and explicitly warns against counting duplicates as independent corroboration.
 - [x] Evidence review captures an explicit independence-review criterion and preserves the reviewer/policy record.
-- [ ] Persist source-origin and derivative lineage, copied/forwarded report relationships, source independence assessment history, and claim/event/observation-level corroboration.
+- [x] Add person-scoped persisted source relationship records for same-origin, copied-from, forwarded-from, derived-from, corroborates, contradicts, duplicate-candidate, and related-to links.
+- [x] Record explicit independence states (independent/shared-origin/unknown/not-assessed), rationale, reviewer identity from the authorized session, optional origin group, and append-only timestamps.
+- [x] Reject cross-record relationships, self-links, duplicate links, false independent labels on lineage edges, and source-lineage cycles; list relationships from either endpoint.
+- [x] Add migration, unique constraints, PostgreSQL/SQLite append-only guards, API persistence/isolation tests, and migration-workflow checks.
+- [ ] Current-main CI and deployed PostgreSQL execution must pass before this capability is considered verified.
+- [ ] Add automated source-family clustering for copied/forwarded content and claim/event/observation-level corroboration assessments; human-declared lineage is not automatic source discovery.
 - [ ] Distinguish no corroboration from attempted-but-failed corroboration in a canonical state model.
 
 ### F. Conflict detection, comparison, and resolution — PARTIAL
@@ -127,6 +132,7 @@ No group is marked fully complete in this ledger.
 - [x] Existing backend tests cover evidence-review persistence, cross-record denial, append-only history, contradiction scope, and uncertainty behavior.
 - [x] PostgreSQL migration workflow validates a fresh schema, migration head, core table/column contracts, and several identity/persistence workflows.
 - [x] Added tests for evidence provenance fields, source-text hashing, and evidence-create authorization.
+- [x] Add source-lineage API tests for create/list persistence, cross-record denial, duplicate prevention, and cycle prevention.
 - [ ] Current-main test and PostgreSQL migration runs must pass before these additions are considered verified.
 - [ ] Add broader E2E/property/concurrency/failure tests for every state transition, ingestion retry, cross-person access, extraction path, claim dependency, source lineage, historical reconstruction, and production telemetry.
 
