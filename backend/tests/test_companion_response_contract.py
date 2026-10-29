@@ -10,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Evidence as EvidenceModel
+from app.models.care_continuity import CareAssertion
+from app.models.time_location import Appointment
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -488,6 +490,99 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         assert "First answer the caregiver’s actual question" in prompt
         assert "never treat chat history as proof" in prompt
         assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_companion_retrieves_older_matching_appointments_and_reviewed_assertions(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older neurology appointment and reviewed sleep assertion are recorded."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 27, 12, 0)
+        db = TestingSessionLocal()
+        older_appointment = Appointment(
+            person_id=person_id,
+            title="Neurology clinic appointment",
+            scheduled_at=now - timedelta(days=180),
+            location="Neurology clinic",
+            provider="Neurologist",
+            healthcare_org="City neurology service",
+            preparation_notes="Discuss restless sleep and waking overnight.",
+            travel_notes=None,
+            status="completed",
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(older_appointment)
+        for index in range(35):
+            db.add(Appointment(
+                person_id=person_id,
+                title=f"Unrelated routine visit {index}",
+                scheduled_at=now - timedelta(hours=index + 1),
+                location="Home",
+                provider="Family",
+                healthcare_org="",
+                preparation_notes="Unrelated routine planning.",
+                travel_notes=None,
+                status="completed",
+                created_by_caregiver_id=caregiver_id,
+            ))
+        older_assertion = CareAssertion(
+            person_id=person_id,
+            subject_type="person",
+            subject_id=person_id,
+            field="sleep_pattern",
+            asserted_value="Wakes several times overnight",
+            assertion_kind="reported_observation",
+            source_label="Neurology visit caregiver report",
+            source_text="At the neurology visit, caregiver reported waking several times overnight.",
+            assertion_status="caregiver_reviewed",
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(older_assertion)
+        for index in range(35):
+            db.add(CareAssertion(
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field=f"unrelated_field_{index}",
+                asserted_value=f"Unrelated reviewed detail {index}",
+                assertion_kind="reported_observation",
+                source_label="Routine household note",
+                source_text="Unrelated household routine.",
+                assertion_status="caregiver_reviewed",
+                created_by_caregiver_id=caregiver_id,
+            ))
+        db.commit()
+        appointment_id, assertion_id = older_appointment.id, older_assertion.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "What did the neurologist record about sleep?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert appointment_id in data["source_appointment_ids"]
+        assert assertion_id in data["source_assertion_ids"]
+        context = captured["messages"][-1]["content"]
+        assert appointment_id in context
+        assert assertion_id in context
+        assert "Neurology clinic appointment" in context
+        assert "Wakes several times overnight" in context
+        assert data["written_to_lcr"] is False
     finally:
         teardown()
 
