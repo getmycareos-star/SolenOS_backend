@@ -656,7 +656,7 @@ def test_observation_capture_validates_exact_source_span_and_person_scope(client
 
 
 def test_current_care_hides_superseded_observation_but_retains_history(client):
-    test_client, owner, _ = client
+    test_client, owner, other = client
     with engine.begin() as connection:
         connection.execute(text("""
             INSERT INTO evidence (
@@ -726,4 +726,11 @@ def test_current_care_hides_superseded_observation_but_retains_history(client):
     assert history_items["sleep-observation-v1"]["is_superseded"] is True
     assert history_items["sleep-observation-v2"]["is_superseded"] is False
     assert "Append-only" in history_body["history_policy"]
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    private_history = test_client.get(
+        "/api/v1/care-continuity/evidence/correction-source-evidence/observations",
+        headers=other_headers,
+    )
+    assert private_history.status_code == 404, private_history.text
 
