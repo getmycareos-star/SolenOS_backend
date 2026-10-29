@@ -260,3 +260,46 @@ def test_overdue_filter_is_applied_before_pagination_and_reports_total():
     assert [item["id"] for item in body["items"]] == [overdue_loop["id"]]
     assert body["items"][0]["overdue"] is True
 
+def test_dependent_unblocks_only_after_verified_prerequisite_closure():
+    client = TestClient(app)
+    _, headers = session(client, "Dependency recipient")
+    prerequisite = create_loop(client, headers, "pending_action", title="Complete prerequisite")
+    dependent = create_loop(client, headers, "pending_decision", title="Continue dependent work")
+
+    edge = client.post(
+        f"/api/v1/open-loops/{dependent['id']}/dependencies",
+        headers=headers,
+        json={"prerequisite_id": prerequisite["id"], "mandatory": True},
+    )
+    assert edge.status_code == 200, edge.text
+    assert edge.json()["blocked"] is True
+
+    reported = client.post(
+        f"/api/v1/open-loops/{prerequisite['id']}/outcomes",
+        headers=headers,
+        json={"text": "The prerequisite outcome was reported", "evidence": [{"kind": "caregiver_report"}]},
+    )
+    assert reported.status_code == 200, reported.text
+    verified = client.post(
+        f"/api/v1/open-loops/{prerequisite['id']}/verify-outcome",
+        headers=headers,
+        json={
+            "text": "The prerequisite outcome was checked",
+            "evidence": [{"kind": "supporting_record"}],
+            "verification_rule": "The recorded outcome is corroborated by the source record.",
+        },
+    )
+    assert verified.status_code == 200, verified.text
+    closed = client.post(
+        f"/api/v1/open-loops/{prerequisite['id']}/close",
+        headers=headers,
+        json={"text": "Prerequisite closure reviewed", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert closed.status_code == 200, closed.text
+
+    refreshed = client.get(f"/api/v1/open-loops/{dependent['id']}", headers=headers)
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["loop"]["status"] == "open"
+    history = refreshed.json()["history"]
+    assert any(item["event_type"] == "dependency_unblocked" for item in history)
+
