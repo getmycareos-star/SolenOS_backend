@@ -247,17 +247,20 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             else "no_evidence_linked"
         )
 
-    lineage_relationships = []
-    if inspect(db.get_bind()).has_table("evidence_source_relationships") and referenced_evidence_ids:
-        lineage_relationships = db.query(EvidenceSourceRelationship).filter(
-            EvidenceSourceRelationship.person_id == person_id,
-            (EvidenceSourceRelationship.source_evidence_id.in_(sorted(referenced_evidence_ids)))
-            | (EvidenceSourceRelationship.related_evidence_id.in_(sorted(referenced_evidence_ids))),
-        ).all()
-    from app.services.evidence_lineage import summarize_evidence_lineage
+    from app.services.evidence_lineage import load_evidence_lineage_scope, summarize_evidence_lineage
+    lineage_scope = load_evidence_lineage_scope(db, person_id, referenced_evidence_ids)
     evidence_lineage = summarize_evidence_lineage(
-        evidence_rows, lineage_relationships, evidence_sources.keys()
+        lineage_scope["evidence_rows"],
+        lineage_scope["relationships"],
+        referenced_evidence_ids,
     )
+    evidence_lineage["scope_truncated"] = bool(lineage_scope["truncated"])
+    evidence_lineage["lineage_nodes_examined"] = len(lineage_scope["evidence_rows"])
+    evidence_lineage["relationship_records_examined"] = len(lineage_scope["relationships"])
+    if lineage_scope["truncated"]:
+        evidence_lineage["interpretation_limit"] += (
+            " Provenance retrieval reached a safety bound; unreturned lineage is unknown, not absent."
+        )
 
     return {
         "person_scope_verified": True,
