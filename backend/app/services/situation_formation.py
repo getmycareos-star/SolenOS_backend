@@ -274,7 +274,10 @@ def _derive_alternatives(db: Session, person_id: str, changes: List[Change],
     for p in patterns:
         interpretations.append({
             "interpretation": f"Pattern {p.pattern_type.value} for {p.subject_type} may reflect recording cadence, not pathophysiology.",
-            "confidence": 0.35,
+            # Pattern strength is not a calibrated probability. Keep confidence
+            # unknown until this inference is validated against outcome-labelled data.
+            "confidence": None,
+            "confidence_status": "not_calibrated",
             "supporting_evidence": f"Pattern strength {p.pattern_strength.value}; {p.evidence_count} evidence items.",
         })
     return interpretations
@@ -431,7 +434,9 @@ def _form_frequency_situation(
         alternative_interpretations=[
             {
                 "interpretation": f"Increase may be documentation-driven for {pattern.subject_type}",
-                "confidence": 0.3,
+                # This is a competing hypothesis without a validated probability.
+                "confidence": None,
+                "confidence_status": "not_calibrated",
                 "supporting_evidence": "No documentation-density comparison; sparse baseline.",
             }
         ],
