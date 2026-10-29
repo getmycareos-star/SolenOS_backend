@@ -1195,6 +1195,76 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     ):
         context_lines.append("No authoritative reminder delivery receipt or notification state is available to this request.")
 
+    if payload.workflow == "evidence_provenance":
+        # Source attribution is a bounded deterministic classification task.
+        # Do not ask a small language model to invent or upgrade a source label.
+        claim_text = payload.text.strip()
+        caregiver_observation = re.search(
+            r"\\bcaregiver\\s+(?:observed|reported|noticed|said|states|stated)\\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_absent = re.search(
+            r"\\bno\\b.{0,60}\\bprofessional\\b.{0,40}\\b"
+            r"(?:assessment|report|note|information)\\b.{0,40}\\b"
+            r"(?:supplied|provided|available|recorded|included)\\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_present = bool(re.search(
+            r"\\b(?:professional|clinician|doctor|nurse)\\s+"
+            r"(?:assessment|report|note)\\b",
+            claim_text,
+            re.IGNORECASE,
+        )) and not professional_absent
+        recorded_source_labels = []
+        for line in context_lines:
+            match = re.search(
+                r"Caregiver-provided evidence \\[([^\\]]+)\\] \\(([^,]+), status=([^)]+)\\)",
+                line,
+            )
+            if match:
+                recorded_source_labels.append(
+                    f"evidence {match.group(1)}: type={match.group(2)}, status={match.group(3)}"
+                )
+        if caregiver_observation:
+            source_label = "caregiver-reported observation"
+            source_explanation = "The supplied text explicitly says the caregiver observed the claim."
+        else:
+            source_label = "not established from the supplied text"
+            source_explanation = "The supplied text does not explicitly establish who or what source originated the claim."
+        if recorded_source_labels:
+            source_explanation += (
+                " Authorized evidence metadata (preserved as recorded, not independently verified): "
+                + "; ".join(recorded_source_labels[:5]) + "."
+            )
+        if professional_absent:
+            professional_label = "No professional assessment is supplied in the provided text."
+        elif professional_present:
+            professional_label = "A professional assessment is referenced in the provided text; its content and authority are not independently verified here."
+        else:
+            professional_label = "Professional-assessment status is not established by the provided text."
+        reply = (
+            f"Source label: {source_label}. {source_explanation} "
+            f"{professional_label} This identifies provenance only; it does not verify the underlying observation."
+        )
+        return {
+            "workflow": payload.workflow,
+            "reply": reply,
+            "ai_generated": False,
+            "authority": "solenos_care_record_and_caregiver",
+            "review_required": True,
+            "written_to_lcr": False,
+            "persistence": "read_only_assistance",
+            "source_event_ids": source_event_ids,
+            "source_evidence_ids": source_evidence_ids,
+            "source_appointment_ids": source_appointment_ids,
+            "source_handoff_ids": source_handoff_ids,
+            "source_notification_ids": source_notification_ids,
+            "source_freshness_assessment_ids": source_freshness_assessment_ids,
+            "provider_status": "not_required_deterministic",
+        }
+
     guidance = {
         "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",
         "add_record": "Help structure a proposed care-record entry or correction from supplied words. Identify missing date, source or detail as unknown; never claim anything was saved.",
