@@ -140,14 +140,15 @@ No group is marked fully complete in this ledger. Source-lineage implementation 
 - [x] Add a caregiver-facing claim assessment panel in the LCR with all ten explicit statuses, source-link relationship controls, exact-passage input, rationale, and persisted assessment history.
 - [x] Current-care UI already exposes evidence-integrity inspection, duplicate candidates, interpretation limits, and review coverage.
 - [x] Frontend verification asserts the LCR connection and guards against reintroducing arbitrary confidence thresholds.
-- [ ] Complete source/claim detail navigation, exact passage display, provenance identities/times, conflicts and partial resolution, correction/retraction history, clarification workflow, and accessible error/retry/rollback states across all surfaces.
+- [x] Add a caregiver-facing conflict-resolution panel with scoped partial resolution, selected evidence references, and append-only transition history; failures are not displayed as successful saves.
+- [ ] Complete broader source/claim detail navigation, full provenance identities/times across all surfaces, correction/retraction UI, clarification workflow, and accessible error/retry/rollback states across every consuming workflow.
 
 ### R. Testing, verification, and operations — UNVERIFIED
 - [x] Existing backend tests cover evidence-review persistence, cross-record denial, append-only history, contradiction scope, and uncertainty behavior.
 - [x] PostgreSQL migration workflow validates a fresh schema, migration head, core table/column contracts, and several identity/persistence workflows.
 - [x] Added tests for evidence provenance fields, source-text hashing, and evidence-create authorization.
 - [x] Add source-lineage API tests for create/list persistence, cross-record denial, duplicate prevention, and cycle prevention.
-- [ ] Current-main test and PostgreSQL migration runs must pass before these additions are considered verified.
+- [ ] Current-main test and PostgreSQL migration runs must pass before these latest additions are considered verified.
 - [x] Add tests for source relationship persistence/isolation/cycle rejection/duplicate rejection and exact-source-span observation persistence, classification boundaries, invalid source passages, and cross-record denial.
 - [ ] Current-main backend tests and PostgreSQL migration validation must pass before these additions are considered verified; broader E2E/property/concurrency/failure tests remain incomplete.
 
