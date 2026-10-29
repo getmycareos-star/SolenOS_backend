@@ -160,12 +160,31 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
         )
         db.add(other_caregiver)
         db.flush()
+        origin_evidence = Evidence(
+            id="handoff-origin-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Original clinic note",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic-note/hand-off-test",
+        )
+        db.add(origin_evidence)
+        db.flush()
         own_evidence = Evidence(
             id="own-evidence",
             person_id=person_id,
             type="document",
             source_text="Current caregiver's source text",
             uploaded_by_caregiver_id=caregiver_id,
+            parent_evidence_id="handoff-origin-evidence",
+        )
+        sibling_copy = Evidence(
+            id="handoff-sibling-copy",
+            person_id=person_id,
+            type="forwarded_message",
+            source_text="Forwarded clinic note",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic-note/hand-off-test",
         )
         other_evidence = Evidence(
             id="other-evidence",
@@ -174,7 +193,7 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
             source_text="Private source text from another caregiver",
             uploaded_by_caregiver_id=other_caregiver.id,
         )
-        db.add_all([own_evidence, other_evidence])
+        db.add_all([own_evidence, sibling_copy, other_evidence])
         db.flush()
         db.add_all([
             Action(
@@ -246,6 +265,13 @@ def test_draft_includes_person_scoped_events_appointments_and_only_actions_from_
     assert body["source_statuses"]["appointments"]["status"] == "available"
     assert body["source_statuses"]["care_events"]["status"] == "available"
     assert body["source_statuses"]["actions"]["status"] == "available"
+    lineage = body["evidence_lineage"]
+    assert any(
+        group["source_independence_status"] == "shared_origin"
+        and "own-evidence" in group["evidence_ids"]
+        for group in lineage["groups"]
+    ), lineage
+    assert lineage["status"] == "assessed"
 
 
 def test_current_lcr_fact_outside_time_window_is_retained_with_separate_effective_and_recorded_times(client):
