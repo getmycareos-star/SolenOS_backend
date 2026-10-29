@@ -233,14 +233,42 @@ def _create_change(
         .all()
     )
     evidence_signature = set(evidence_ids)
+
+    def same_assessment_provenance(candidate: Change) -> bool:
+        # Coverage is part of the assessment, not merely explanatory metadata.
+        # A later coverage record can change whether the same event counts support
+        # a comparable rate. Do not return a stale assessment just because its
+        # event IDs and raw count have not changed.
+        comparisons = (
+            ("baseline_coverage_status", comparison.get("baseline_coverage_status")),
+            ("current_coverage_status", comparison.get("current_coverage_status")),
+            ("baseline_coverage_fraction", comparison.get("baseline_coverage_fraction")),
+            ("current_coverage_fraction", comparison.get("current_coverage_fraction")),
+            ("comparison_window_start", comparison.get("current_window_start")),
+            ("comparison_window_end", comparison.get("current_window_end")),
+        )
+        for field, expected in comparisons:
+            actual = getattr(candidate, field, None)
+            if isinstance(actual, float) and isinstance(expected, (float, int)):
+                if abs(actual - float(expected)) > 1e-9:
+                    return False
+            elif actual != expected:
+                return False
+        return candidate.baseline_id == baseline_id
+
     for candidate in existing:
         if (
             candidate.current_count == current_count
             and set(candidate.evidence_ids or []) == evidence_signature
+            and same_assessment_provenance(candidate)
         ):
-            # Identical evidence and measurement must remain idempotent.
+            # Identical evidence, measurements, and assessment provenance remain idempotent.
             return candidate
-        if not evidence_signature and candidate.created_at is not None:
+        if (
+            not evidence_signature
+            and candidate.created_at is not None
+            and same_assessment_provenance(candidate)
+        ):
             created_at = _ensure_utc(candidate.created_at)
             if created_at is not None and (now - created_at).days < 1:
                 return candidate
