@@ -217,6 +217,9 @@ class UncertaintyAnalysisRequest(BaseModel):
     claim: str = Field(..., min_length=1, max_length=12000)
     task: str = Field(..., min_length=1, max_length=80)
     evidence_ids: List[str] = Field(default_factory=list)
+    # Explicit baseline IDs let change assessment distinguish a comparison
+    # baseline from a current observation; ordering alone is not a baseline.
+    baseline_evidence_ids: List[str] = Field(default_factory=list)
     required_fields: List[str] = Field(default_factory=list)
     conflict_ids: List[str] = Field(default_factory=list)
 
