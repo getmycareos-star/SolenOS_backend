@@ -1616,9 +1616,11 @@ def test_safety_response_validation_rejects_unpersisted_evidence_ids():
             "/api/v1/validate-response",
             params={
                 "candidate_response": "The record confirms the medication was changed.",
-                "claims": "The medication was changed.",
-                "evidence_ids": "not-a-persisted-evidence-id",
                 "risk_class": "informational",
+            },
+            json={
+                "claims": ["The medication was changed."],
+                "evidence_ids": ["not-a-persisted-evidence-id"],
             },
         )
         assert response.status_code == 404, response.text
