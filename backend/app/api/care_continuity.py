@@ -807,6 +807,8 @@ def current_care_projection(
             "evidence_ids": evidence_ids[:50],
             "claim_refs": claim_refs[:20],
             "claim_count": len(claim_refs),
+            "supersedes_observation_id": row.get("supersedes_observation_id") if source_name == "evidence_observations" else None,
+            "correction_rationale": row.get("correction_rationale") if source_name == "evidence_observations" else None,
             "source_span_start": row.get("source_span_start") if source_name == "evidence_observations" else None,
             "source_span_end": row.get("source_span_end") if source_name == "evidence_observations" else None,
             "source_passage": row.get("source_passage") if source_name == "evidence_observations" else None,
@@ -848,8 +850,17 @@ def current_care_projection(
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
         add("facts", row, "Recorded information", 7)
-    for row in (sources.get("evidence_observations") or {}).get("items", []):
-        add("evidence_observations", row, "Structured evidence observation", 7)
+    observation_rows = (sources.get("evidence_observations") or {}).get("items", [])
+    superseded_observation_ids = {
+        str(row.get("supersedes_observation_id"))
+        for row in observation_rows
+        if row.get("supersedes_observation_id")
+    }
+    for row in observation_rows:
+        # Current-care view shows the latest non-superseded version. Historical
+        # versions remain in the immutable assessment trajectory and source endpoint.
+        if str(row.get("id") or "") not in superseded_observation_ids:
+            add("evidence_observations", row, "Structured evidence observation", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
@@ -1153,6 +1164,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             ),
         }
         if source == "evidence_observations":
+            summary_item["supersedes_observation_id"] = item.get("supersedes_observation_id")
+            summary_item["correction_rationale"] = item.get("correction_rationale")
             summary_item["subject_label"] = item.get("subject_label")
             summary_item["attribute"] = item.get("attribute")
             summary_item["observed_value"] = item.get("normalized_value") or item.get("value_text")
@@ -1326,6 +1339,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "temporal_basis": temporal_basis,
             "evidence_ids": (item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list) else [str(item["evidence_id"])] if item["source"] == "evidence_observations" and item.get("evidence_id") else []),
             "source_span": {"start": item.get("source_span_start"), "end": item.get("source_span_end")} if item["source"] == "evidence_observations" else None,
+            "supersedes_observation_id": item.get("supersedes_observation_id") if item["source"] == "evidence_observations" else None,
+            "correction_rationale": item.get("correction_rationale") if item["source"] == "evidence_observations" else None,
             "subject_label": item.get("subject_label") if item["source"] == "evidence_observations" else None,
             "attribute": item.get("attribute") if item["source"] == "evidence_observations" else None,
             "observed_value": (item.get("normalized_value") or item.get("value_text")) if item["source"] == "evidence_observations" else None,
