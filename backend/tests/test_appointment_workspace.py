@@ -834,3 +834,14 @@ def test_current_care_hides_superseded_observation_but_retains_history(client):
     )
     assert private_history.status_code == 404, private_history.text
 
+
+
+def test_appointment_evidence_reference_parser_preserves_only_explicit_ids():
+    from app.api.appointment_workspace import _evidence_ids_from_row
+
+    assert _evidence_ids_from_row({"evidence_ids": '["evidence-a", "evidence-b"]'}) == [
+        "evidence-a", "evidence-b"
+    ]
+    assert _evidence_ids_from_row({"source_evidence_id": "evidence-c"}) == ["evidence-c"]
+    assert _evidence_ids_from_row({"evidence_ids": "not-json"}) == ["not-json"]
+    assert _evidence_ids_from_row({"evidence_ids": None, "source_evidence_id": None}) == []
