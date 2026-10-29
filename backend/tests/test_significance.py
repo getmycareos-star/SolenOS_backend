@@ -565,9 +565,9 @@ def test_observation_preserved_verbatim_from_inference():
         app.dependency_overrides[get_db] = override_get_db
         db, person, caregiver = _seed_person()
         raw = "Dad seemed much more confused today."
-        now = datetime.now(timezone.utc)
         _add_event(db, person, caregiver, "confusion", raw, days_ago=0,
                    evidence_text=raw)
+        now = datetime.now(timezone.utc)
         ev = db.query(Evidence).filter(Evidence.person_id == person.id).first()
         assert ev.source_text == raw  # original wording preserved
         from app.services.change_detection import detect_event_changes
