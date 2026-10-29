@@ -499,6 +499,8 @@ _CONTEXT_STOPWORDS = {
     "tell", "please", "help", "me", "mum", "mom", "dad", "her", "him", "their",
     "they", "she", "his", "its", "our",  "but", "all", "any", "some",
     "into", "onto", "then", "than", "there", "here", "been", "being", "just",
+    # Generic record vocabulary causes false retrieval hits (e.g. every status="recorded").
+    "record", "records", "recorded", "event", "events", "history", "care", "note", "notes",
 }
 
 
