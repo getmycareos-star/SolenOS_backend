@@ -325,7 +325,10 @@ def _reassess(db, loop):
         loop.priority = "low" if loop.status in TERMINAL_STATES else "normal"
     loop.priority_reasons = reasons
     loop.updated_at = now
-    loop.version += 1
+    # SQLAlchemy column defaults are applied at INSERT/flush time, so a new
+    # transient ORM object can still have version=None during its first pass.
+    # Initialize the first persisted version deterministically.
+    loop.version = (loop.version or 0) + 1
     return reasons
 
 
