@@ -235,3 +235,26 @@ class UncertaintyAnalysisResponse(BaseModel):
     subject_id: str
     field: str
     analysis: Dict[str, Any]
+
+
+class ClaimDependencyCreate(BaseModel):
+    """Append-only directed relationship between two source-attributed claims."""
+    person_id: str
+    claim_id: str = Field(..., min_length=1, max_length=128)
+    depends_on_claim_id: str = Field(..., min_length=1, max_length=128)
+    dependency_type: str = Field(..., min_length=1, max_length=32)
+    rationale: str = Field(..., min_length=1, max_length=4000)
+
+
+class ClaimDependency(BaseModel):
+    id: str
+    person_id: str
+    claim_id: str
+    depends_on_claim_id: str
+    dependency_type: str
+    rationale: str
+    created_by_caregiver_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
