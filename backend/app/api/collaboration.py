@@ -1434,7 +1434,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         # Search query-matched historical events independently of the recent-event
         # window, so a relevant older event does not disappear as the record grows.
-        event_query_terms = sorted(_expanded_context_terms(user_text))[:12]
+        event_direct_terms = sorted(_base_context_terms(user_text))
+        event_query_terms = (event_direct_terms + sorted(_expanded_context_terms(user_text) - set(event_direct_terms)))[:12]
         historical_events = []
         if event_query_terms:
             historical_events = (
@@ -1544,7 +1545,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             EvidenceModel.person_id == person_id,
             EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
         )
-        evidence_query_terms = sorted(_expanded_context_terms(user_text))[:12]
+        evidence_direct_terms = sorted(_base_context_terms(user_text))
+        evidence_query_terms = (evidence_direct_terms + sorted(_expanded_context_terms(user_text) - set(evidence_direct_terms)))[:12]
         matching_evidence_rows = []
         if evidence_query_terms:
             matching_evidence_rows = (
