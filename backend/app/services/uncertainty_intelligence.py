@@ -156,7 +156,7 @@ def analyze_uncertainty(
         item for item in items
         if _text(item.get("quality")).lower() in {"poor", "low", "unreadable", "partial", "unreliable"}
         or item.get("readable") is False
-        or item.get("extraction_status") in {"failed", "partial", "unreadable"}
+        or _text(item.get("extraction_status")).lower() in {"failed", "partial", "unreadable"}
     ]
     if quality_limited:
         classifications.append("low_quality_evidence")
@@ -170,7 +170,7 @@ def analyze_uncertainty(
         limitations.append("At least one evidence item lacks source-type attribution.")
     missing_time = [
         item for item in items
-        if item.get("temporal_scope") in {"current", "historical", "time_sensitive"}
+        if _text(item.get("temporal_scope")).lower() in {"current", "historical", "time_sensitive"}
         and not _text(item.get("observed_at"))
         and not _text(item.get("effective_at"))
     ]
