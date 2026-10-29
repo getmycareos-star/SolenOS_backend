@@ -12,6 +12,7 @@ import logging
 import uuid
 import hashlib
 import re
+from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, or_, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
@@ -42,6 +43,56 @@ REVIEW_TYPES = {
     "freshness": {"current", "stale", "historical", "undetermined"},
     "completeness": {"complete", "partial", "missing", "undetermined"},
 }
+
+NEAR_DUPLICATE_ALGORITHM_VERSION = "normalized-text-sequencematcher-v1"
+NEAR_DUPLICATE_MIN_CHARS = 80
+NEAR_DUPLICATE_RATIO = 0.92
+NEAR_DUPLICATE_MAX_RECORDS = 200
+
+
+def _near_duplicate_candidates(evidence_rows: list[Any]) -> dict[str, Any]:
+    """Return conservative text-similarity candidates; never infer shared origin or corroboration."""
+    if len(evidence_rows) > NEAR_DUPLICATE_MAX_RECORDS:
+        return {
+            "status": "not_run_record_limit",
+            "algorithm_version": NEAR_DUPLICATE_ALGORITHM_VERSION,
+            "candidate_groups": [],
+            "records_considered": 0,
+            "records_available": len(evidence_rows),
+            "interpretation_limit": "Near-duplicate comparison was not run because the linked evidence set exceeds the bounded comparison limit; no conclusion about duplication or independence follows.",
+        }
+
+    normalized: dict[str, str] = {}
+    for row in evidence_rows:
+        source = getattr(row, "source_text", None)
+        if not isinstance(source, str):
+            continue
+        text_value = re.sub(r"\\s+", " ", source).strip().casefold()
+        if len(text_value) >= NEAR_DUPLICATE_MIN_CHARS:
+            normalized[str(row.id)] = text_value
+
+    candidates: list[dict[str, Any]] = []
+    ids = sorted(normalized)
+    for index, left_id in enumerate(ids):
+        for right_id in ids[index + 1:]:
+            left, right = normalized[left_id], normalized[right_id]
+            # Similarity is a candidate-generation heuristic only, not a probability,
+            # source-independence assessment, or verification decision.
+            if SequenceMatcher(None, left, right, autojunk=False).ratio() >= NEAR_DUPLICATE_RATIO:
+                candidates.append({
+                    "evidence_ids": [left_id, right_id],
+                    "candidate_basis": "normalized_text_similarity",
+                    "interpretation": "Text-similarity candidate only; inspect source lineage before deciding whether these records are duplicates or independent.",
+                })
+    return {
+        "status": "completed",
+        "algorithm_version": NEAR_DUPLICATE_ALGORITHM_VERSION,
+        "candidate_groups": candidates,
+        "records_considered": len(normalized),
+        "records_available": len(evidence_rows),
+        "interpretation_limit": "Text similarity does not establish copying, common origin, factual agreement, or source independence. The threshold is a candidate-generation rule, not a calibrated confidence score.",
+    }
+
 
 REVIEW_POLICY_VERSION = "evidence-review-v1"
 REVIEW_CRITERIA = {
@@ -2388,6 +2439,7 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
         {"fingerprint": fingerprint, "evidence_ids": ids, "interpretation": "Same normalized source text; do not count these records as independent corroboration without source review."}
         for fingerprint, ids in groups.items() if len(ids) > 1
     ]
+    near_duplicate_analysis = _near_duplicate_candidates(list(evidence_by_id.values()))
     reviewed_independent_fingerprints = {
         fingerprint for fingerprint, results in fingerprint_reviews.items()
         if "independent_source_linked" in results
@@ -2406,8 +2458,9 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
         "linked_evidence_count": len(records),
         "distinct_nonempty_content_count": len(groups),
         "duplicate_content_candidates": duplicate_content_groups,
+        "near_duplicate_analysis": near_duplicate_analysis,
         "independent_corroboration_status": corroboration_status,
-        "interpretation_limit": "Different text does not prove independent origin. Identical normalized text is a duplicate-content candidate, not proof of copying. Reviewed source-independence labels are human review claims, not proof that the underlying claim is true.",
+        "interpretation_limit": "Different text does not prove independent origin. Identical normalized text is a duplicate-content candidate, not proof of copying. Near-duplicate candidates are heuristic text comparisons, not proof of copying. Reviewed source-independence labels are human review claims, not proof that the underlying claim is true.",
         "evidence": records,
     }
 
