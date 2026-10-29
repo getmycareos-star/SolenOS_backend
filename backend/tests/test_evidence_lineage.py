@@ -71,3 +71,23 @@ def test_lineage_summary_exposes_explicit_origin_and_limits():
     assert result["groups"][0]["evidence_ids"] == ["a", "b"]
     assert result["groups"][0]["origin_group_keys"] == ["forwarded-note-9"]
     assert "does not prove" in result["interpretation_limit"]
+
+
+def test_lineage_summary_keeps_reviewed_independent_sources_separate_from_shared_origin():
+    from app.services.evidence_lineage import summarize_evidence_lineage
+
+    evidence = [
+        SimpleNamespace(id="independent-a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="independent-b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    link = SimpleNamespace(
+        source_evidence_id="independent-a",
+        related_evidence_id="independent-b",
+        source_independence_status="independent",
+        origin_group_key=None,
+    )
+    result = summarize_evidence_lineage(evidence, [link], ["independent-a", "independent-b"])
+    assert len(result["groups"]) == 1
+    assert result["groups"][0]["source_independence_status"] == "independent"
+    assert result["groups"][0]["basis"] == "explicit_independence_review"
+    assert "does not prove" in result["groups"][0]["interpretation_limit"]
