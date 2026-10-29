@@ -57,11 +57,18 @@ def detect_event_changes(
     # An event can be newly observed in the records without being a new
     # occurrence in real life. Call it an emergence only if the full baseline
     # interval was explicitly observed and no matching event was recorded there.
-    if (
-        baseline.event_count == 0
-        and current_count > 0
-        and comparison.get("baseline_coverage_status") == "covered"
-    ):
+    if baseline.event_count == 0 and current_count > 0:
+        # Preserve the newly recorded event as a reviewable candidate even when
+        # historical coverage is unknown. The candidate must describe the first
+        # appearance in available records, not assert that the event began now.
+        baseline_state = (
+            "No comparable prior events were recorded in the explicitly covered baseline window"
+            if comparison.get("baseline_coverage_status") == "covered"
+            else (
+                "No comparable prior events were returned; baseline observation coverage is "
+                f"{comparison.get('baseline_coverage_status', 'unknown')}, so absence cannot be inferred"
+            )
+        )
         change = _create_change(
             db=db,
             person_id=person_id,
@@ -69,7 +76,7 @@ def detect_event_changes(
             subject_id=subject_id or "",
             change_type=ChangeType.EMERGENCE,
             change_direction=ChangeDirection.INCREASING,
-            previous_state="No comparable prior events were recorded in the baseline window",
+            previous_state=baseline_state,
             current_state=f"{current_count} event(s) recorded in the current observation window",
             previous_count=0,
             current_count=current_count,
@@ -155,9 +162,17 @@ def detect_event_changes(
     if not changes and current_count >= 2:
         recent_events = counts["recent_events"]
         if len(recent_events) >= 2:
-            first_event = min(recent_events, key=lambda e: e.occurred_at)
-            last_event = max(recent_events, key=lambda e: e.occurred_at)
-            span_days = (last_event.occurred_at - first_event.occurred_at).days
+            first_event = min(
+                recent_events,
+                key=lambda event: _ensure_utc(event.occurred_at) or datetime.max.replace(tzinfo=timezone.utc),
+            )
+            last_event = max(
+                recent_events,
+                key=lambda event: _ensure_utc(event.occurred_at) or datetime.min.replace(tzinfo=timezone.utc),
+            )
+            first_at = _ensure_utc(first_event.occurred_at)
+            last_at = _ensure_utc(last_event.occurred_at)
+            span_days = (last_at - first_at).days if first_at and last_at else 10**9
             if span_days <= 42:
                 change = _create_change(
                     db=db,
@@ -199,9 +214,11 @@ def _create_change(
 ) -> Change:
     if change_type == ChangeType.EMERGENCE:
         explanation = (
-            f"{subject_type} was first observed in the available records. "
+            f"{subject_type} was first observed in the available records; this is not a claim about onset. "
             f"{current_state}. {previous_state}. "
-            "This does not establish that the event was absent before the baseline window."
+            f"Baseline observation coverage: {comparison.get('baseline_coverage_status', 'unknown')}; "
+            "a missing prior record does not establish that the event was absent before the current window. "
+            "Interpretation of event significance remains separate from the evidence for a longitudinal rate change."
         )
     else:
         explanation = (
