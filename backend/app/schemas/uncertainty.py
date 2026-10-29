@@ -113,6 +113,8 @@ class ContradictionBase(BaseModel):
     matching_candidate_ids: Optional[List[str]] = None
     resolution_status: str = "unresolved"
     resolution_notes: Optional[str] = None
+    resolution_scope: Optional[str] = None
+    unresolved_remainder: Optional[str] = None
     resolved_by_caregiver_id: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
 
@@ -125,6 +127,7 @@ class ContradictionUpdate(BaseModel):
     resolution_status: Optional[str] = None
     resolution_notes: Optional[str] = None
     resolution_scope: Optional[str] = Field(None, min_length=1, max_length=4000)
+    unresolved_remainder: Optional[str] = Field(None, min_length=1, max_length=4000)
     resolved_by_caregiver_id: Optional[str] = None
     evidence_ids: Optional[List[str]] = None
 
