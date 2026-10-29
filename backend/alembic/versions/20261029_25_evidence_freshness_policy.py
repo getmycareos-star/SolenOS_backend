@@ -6,7 +6,7 @@ Revises: 20261029_24_baseline_history
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20261029_25_evidence_freshness_policy"
+revision = "20261029_25_freshness"
 down_revision = "20261029_24_baseline_history"
 branch_labels = None
 depends_on = None
