@@ -956,6 +956,17 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         )
         assert missing_rationale.status_code == 422
 
+        missing_partial_remainder = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_notes": "Attempted partial resolution without describing what remains unresolved.",
+                "resolution_scope": "Resolve only the date.",
+                "evidence_ids": ["resolution-evidence"],
+            },
+        )
+        assert missing_partial_remainder.status_code == 422, missing_partial_remainder.text
+
         missing_resolution_evidence = client.patch(
             f"/api/v1/uncertainty/contradictions/{conflict_id}",
             json={
