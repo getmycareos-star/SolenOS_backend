@@ -339,11 +339,15 @@ def analyze_and_persist_uncertainty(
                         # precedence over a separate independent link.
                         independence_by_id[evidence_id] = "shared_origin"
             left, right = relationship.source_evidence_id, relationship.related_evidence_id
-            if (
-                left and right
-                and status not in independent_statuses
-            ):
+            if left and right and status not in independent_statuses:
                 lineage_union(left, right)
+                origin_group_key = str(relationship.origin_group_key or "").strip()
+                if origin_group_key:
+                    # The explicit persisted origin group may link derived
+                    # records through a source not included in this request.
+                    origin_node = "__origin_group__:" + origin_group_key
+                    lineage_union(left, origin_node)
+                    lineage_union(right, origin_node)
 
     lineage_groups = {}
     for evidence_id in requested_evidence_ids:
