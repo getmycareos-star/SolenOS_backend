@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from statistics import mean, median, pstdev
+from collections import Counter
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from app.models.change import Change, Pattern
@@ -327,8 +329,31 @@ def _build_recurrence_pattern(
         if interval_std_dev is not None and interval_mean and interval_mean > 0
         else None
     )
+    # Local-time distribution is computed only when every source event carries
+    # a valid IANA timezone. UTC clock time is not a substitute for local routine
+    # time, and a distribution alone does not establish a causal association.
+    local_time_distribution = None
+    local_time_distribution_status = "withheld_timezone_missing_or_invalid"
+    try:
+        local_datetimes = [
+            _ensure_utc(event.occurred_at).astimezone(ZoneInfo(event.occurred_at_timezone))
+            for event in ordered_events
+            if event.occurred_at_timezone
+        ]
+        if len(local_datetimes) == len(ordered_events) and local_datetimes:
+            local_time_distribution = {
+                "hour_of_day_counts": dict(sorted(Counter(value.hour for value in local_datetimes).items())),
+                "day_of_week_counts": dict(sorted(Counter(value.weekday() for value in local_datetimes).items())),
+                "timezone_ids": sorted({event.occurred_at_timezone for event in ordered_events}),
+            }
+            local_time_distribution_status = "descriptive_only_no_causal_association"
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        local_time_distribution = None
+        local_time_distribution_status = "withheld_timezone_missing_or_invalid"
     pattern_metrics = {
         "metric_version": "inter-event-intervals-v1",
+        "local_time_distribution": local_time_distribution,
+        "local_time_distribution_status": local_time_distribution_status,
         "distinct_observation_times": len(distinct_times),
         "distinct_event_records": len(ordered_events),
         "span_days": round(span_days, 6),
