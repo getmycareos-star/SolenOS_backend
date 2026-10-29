@@ -617,6 +617,9 @@ def test_acceleration_pattern_requires_increasing_deltas_and_full_coverage():
                 magnitude=magnitude,
                 baseline_coverage_status="covered",
                 current_coverage_status="covered",
+                confirmation_status="detected",
+                is_active=(index == 3),
+                superseded_by_change_id=(f"acceleration-change-{index + 1}" if index < 3 else None),
                 explanation="Source-linked magnitude assessment",
                 created_at=event_time,
             ))
@@ -640,6 +643,9 @@ def test_acceleration_pattern_requires_increasing_deltas_and_full_coverage():
         assert len(acceleration) == 1
         assert acceleration[0].evidence_count == 4
         assert acceleration[0].confidence is None
+        assert any(item.pattern_type == PatternType.TREND for item in patterns), (
+            "Longitudinal patterns must use valid superseded assessments as history."
+        )
         assert "not a calibrated forecast" in " ".join(acceleration[0].alternative_interpretations or [])
     finally:
         teardown_db()

@@ -32,10 +32,14 @@ def detect_patterns(
     """Detect recurrence from persisted source events, not repeated assessment rows."""
     now = _ensure_utc(datetime.now(timezone.utc) if reference_time is None else reference_time)
     window_start = now - timedelta(days=90)
+    # Superseded assessments are historical observations, not disposable rows.
+    # Include them in longitudinal analysis while excluding explicitly rejected
+    # or inconclusive assessments from pattern evidence.
     changes_query = db.query(Change).filter(
         Change.person_id == person_id,
         Change.subject_type == subject_type,
-        Change.is_active.is_(True),
+        (Change.confirmation_status.is_(None))
+        | (Change.confirmation_status.notin_(("rejected", "inconclusive"))),
     )
     if subject_id:
         changes_query = changes_query.filter(Change.subject_id == subject_id)
@@ -381,6 +385,21 @@ def _build_trend_pattern(
     )
     if len(event_ids) < 3:
         return None
+    valid_event_ids = set(event_ids)
+    ordered = [
+        change for change in ordered
+        if valid_event_ids.intersection(change.evidence_ids or [])
+    ]
+    if len(ordered) < 3:
+        return None
+    event_ids = sorted({
+        evidence_id
+        for change in ordered
+        for evidence_id in (change.evidence_ids or [])
+        if evidence_id in valid_event_ids
+    })
+    if len(event_ids) < 3:
+        return None
 
     change_ids = [change.id for change in ordered]
     temporal_start = min(_ensure_utc(change.comparison_window_start) for change in ordered)
@@ -494,6 +513,21 @@ def _build_acceleration_pattern(
     )
     if len(event_ids) < 4:
         return None
+    valid_event_ids = set(event_ids)
+    unique_ordered = [
+        change for change in unique_ordered
+        if valid_event_ids.intersection(change.evidence_ids or [])
+    ]
+    if len(unique_ordered) < 4:
+        return None
+    event_ids = sorted({
+        evidence_id
+        for change in unique_ordered
+        for evidence_id in (change.evidence_ids or [])
+        if evidence_id in valid_event_ids
+    })
+    if len(event_ids) < 4:
+        return None
     pattern = Pattern(
         person_id=person_id,
         subject_type=subject_type,
@@ -554,6 +588,21 @@ def _build_instability_pattern(
         ],
         reference_time=_ensure_utc(now),
     )
+    if len(event_ids) < 2:
+        return None
+    valid_event_ids = set(event_ids)
+    ordered = [
+        change for change in ordered
+        if valid_event_ids.intersection(change.evidence_ids or [])
+    ]
+    if len(ordered) < 2:
+        return None
+    event_ids = sorted({
+        evidence_id
+        for change in ordered
+        for evidence_id in (change.evidence_ids or [])
+        if evidence_id in valid_event_ids
+    })
     if len(event_ids) < 2:
         return None
     change_ids = [change.id for change in ordered]
