@@ -675,7 +675,7 @@ jobs:
           createdb -h localhost -U postgres solenos_qwen_backfill
           createdb -h localhost -U postgres solenos_freshness_existing
 
-      - name: Preserve existing freshness policy and assessment rows during schema reconciliation
+      - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_freshness_existing
           PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_freshness_existing
