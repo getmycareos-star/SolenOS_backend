@@ -555,7 +555,11 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
                 score += 2
         scored.append((score, index, line))
     scored.sort(key=lambda item: (-item[0], item[1]))
-    return [line for _, _, line in scored[:limit]]
+    # When any record matches the question, zero-overlap records are noise,
+    # not a reason to fill the context window with unrelated recent history.
+    relevant = [item for item in scored if item[0] > 0]
+    selected = relevant if relevant else scored
+    return [line for _, _, line in selected[:limit]]
 
 
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
@@ -1718,6 +1722,44 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *matched_evidence_lines[:4],
             *ranked_evidence_lines,
         ]))[:4]
+
+        # Apply one global relevance and character budget across record types.
+        # Per-category limits alone let irrelevant appointments/assertions crowd
+        # a small local model's 1K context window. Keep selected IDs aligned with
+        # exactly the records sent to inference.
+        candidate_context = [
+            *event_context, *assertion_context, *appointment_context,
+            *evidence_context, *shared_lcr_lines,
+        ]
+        ranked_candidates = _rank_context_lines(
+            retrieval_query, candidate_context, max(1, len(candidate_context))
+        )
+        selected_context = []
+        selected_chars = 0
+        for line in ranked_candidates:
+            if len(selected_context) >= 8:
+                break
+            line_chars = len(line)
+            if selected_chars + line_chars > 3000:
+                continue
+            selected_context.append(line)
+            selected_chars += line_chars
+        selected_set = set(selected_context)
+        event_context = [line for line in event_context if line in selected_set]
+        assertion_context = [line for line in assertion_context if line in selected_set]
+        appointment_context = [line for line in appointment_context if line in selected_set]
+        evidence_context = [line for line in evidence_context if line in selected_set]
+        shared_lcr_lines = [line for line in shared_lcr_lines if line in selected_set]
+        selected_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
+        freshness_context = [
+            line for line in freshness_context
+            if (
+                _context_record_ids([line], "evidence_id")
+                and _context_record_ids([line], "evidence_id")[0] in selected_evidence_ids
+            )
+        ]
+        source_freshness_assessment_ids = _context_record_ids(freshness_context, "assessment_id")
+        source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
         source_event_ids = _context_record_ids(event_context, "event_id")
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
