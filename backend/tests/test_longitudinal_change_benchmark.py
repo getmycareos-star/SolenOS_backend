@@ -164,16 +164,24 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
             "expected": 2, "observed": counts["current_window_count"], "pass": observed,
         })
 
-        # Case 7: one recent event with no explicit historical observation
-        # coverage is first observed, but must not be called an emergence.
+        # Case 7: an event with unknown historical coverage must remain visible,
+        # but the stored assessment must explicitly state that prior absence is
+        # not established. The caregiver-facing label should say "first observed".
         person, caregiver = _case_identity(db, "uncovered-emergence")
         _record_event(db, person, caregiver, "uncov-emergence-1", 5)
         db.flush()
         changes = detect_event_changes(db, person.id, "fall", None, REFERENCE_TIME)
-        observed = any(change.change_type.value == "emergence" for change in changes)
+        first_observed = next((change for change in changes if change.change_type.value == "emergence"), None)
+        observed = bool(
+            first_observed
+            and first_observed.baseline_coverage_status == "unknown"
+            and "first observed in the available records" in (first_observed.explanation or "").lower()
+            and "does not establish" in (first_observed.explanation or "").lower()
+            and "absence cannot be inferred" in (first_observed.previous_state or "").lower()
+        )
         outcomes.append({
-            "case": "unknown_baseline_coverage_blocks_emergence_claim",
-            "expected": False, "observed": observed, "pass": observed is False,
+            "case": "unknown_coverage_first_observed_is_explicitly_qualified",
+            "expected": True, "observed": observed, "pass": observed is True,
         })
 
         # Case 8: the same zero-event baseline supports emergence only when the
