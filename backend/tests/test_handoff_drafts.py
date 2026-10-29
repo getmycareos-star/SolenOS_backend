@@ -413,7 +413,9 @@ def test_professional_handoff_includes_freshness_policy_and_assessment_provenanc
     refs = {item["source_id"]: item for item in body["source_references"]}
     assert "handoff-freshness-assessment" in refs
     assert "handoff-freshness-policy" in refs
-    assert refs["handoff-freshness-assessment"]["record_status"] == "needs_review"
-    assert refs["handoff-freshness-policy"]["record_status"] == "v1"
+    assert refs["handoff-freshness-assessment"]["details"]["freshness_status"] == "needs_review"
+    assert refs["handoff-freshness-assessment"]["details"]["policy_version"] == "v1"
+    assert refs["handoff-freshness-policy"]["details"]["domain_key"] == "document_history"
+    assert refs["handoff-freshness-policy"]["details"]["policy_version"] == "v1"
     assert body["source_statuses"]["evidence_freshness_assessments"]["status"] == "available"
     assert body["source_statuses"]["evidence_freshness_policies"]["status"] == "available"
