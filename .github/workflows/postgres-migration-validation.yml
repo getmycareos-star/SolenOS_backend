@@ -172,6 +172,15 @@ jobs:
                   """).first()
                   assert trigger is not None, "evidence review immutability trigger missing"
               print("PASS evidence review append-only trigger")
+          pattern_indexes = inspector.get_indexes("patterns")
+          active_pattern_index = next(
+              (item for item in pattern_indexes if item.get("name") == "uq_patterns_one_active_per_subject"),
+              None,
+          )
+          assert active_pattern_index and active_pattern_index.get("unique"), "active pattern uniqueness index missing"
+          assert active_pattern_index.get("dialect_options", {}).get("postgresql_where") or active_pattern_index.get("dialect_options", {}).get("sqlite_where"), "active pattern uniqueness index must be partial"
+          print("PASS unique active longitudinal pattern per subject")
+
 
           for table, columns in (
               ("care_record_sections", {"care_record_id", "section_key"}),
