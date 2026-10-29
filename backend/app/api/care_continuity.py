@@ -767,10 +767,10 @@ def current_care_projection(
         if source_name == "assertions" and status in {"retracted", "superseded"}:
             return
 
-        title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "follow_up_kind", "target_type",
+        title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "attribute", "subject_label", "follow_up_kind", "target_type",
                         "observation_category", "decision_text", "description", "event_type")
         description_fields = ("description", "question", "notes", "fact_value", "asserted_value",
-                              "perspective_text", "observed_value", "decision_text", "summary", "resolution", "decision_notes")
+                              "perspective_text", "observed_value", "normalized_value", "value_text", "source_passage", "ambiguity_note", "decision_text", "summary", "resolution", "decision_notes")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
         occurred_at = row.get("occurred_at") or row.get("observed_at") or row.get("effective_at") or row.get("decided_at")
@@ -778,8 +778,10 @@ def current_care_projection(
         evidence_ids = row.get("evidence_ids")
         if not isinstance(evidence_ids, list):
             evidence_ids = row.get("source_ids") if isinstance(row.get("source_ids"), list) else []
-        source_label = row.get("source_label") or row.get("author_label")
-        origin_type = row.get("source_type") or "not_recorded"
+        if source_name == "evidence_observations" and row.get("evidence_id"):
+            evidence_ids = [str(row["evidence_id"])]
+        source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
+        origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
             try:
@@ -805,6 +807,12 @@ def current_care_projection(
             "evidence_ids": evidence_ids[:50],
             "claim_refs": claim_refs[:20],
             "claim_count": len(claim_refs),
+            "source_span_start": row.get("source_span_start") if source_name == "evidence_observations" else None,
+            "source_span_end": row.get("source_span_end") if source_name == "evidence_observations" else None,
+            "negated": row.get("negated") if source_name == "evidence_observations" else None,
+            "hedge_marker": row.get("hedge_marker") if source_name == "evidence_observations" else None,
+            "ambiguity_note": row.get("ambiguity_note") if source_name == "evidence_observations" else None,
+            "extraction_method": row.get("extraction_method") if source_name == "evidence_observations" else None,
         })
         seen.add((source_name, source_id))
 
@@ -839,6 +847,8 @@ def current_care_projection(
         add("caregiver_observations", row, "Caregiver observation", 6)
     for row in (sources.get("facts") or {}).get("items", []):
         add("facts", row, "Recorded information", 7)
+    for row in (sources.get("evidence_observations") or {}).get("items", []):
+        add("evidence_observations", row, "Structured evidence observation", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
