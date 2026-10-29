@@ -304,6 +304,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/capture/analyses/")
             or path.startswith("/api/v1/daily-care/intelligence")
             or path.startswith("/api/v1/appointment-workspaces")
+            or path.startswith("/api/v1/open-loops")
             or path.startswith("/api/v1/uncertainty")
         ):
             # These operations use the bearer session as their record scope.
