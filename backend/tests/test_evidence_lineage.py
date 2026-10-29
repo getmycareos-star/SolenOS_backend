@@ -199,3 +199,72 @@ def test_exact_content_duplicates_are_candidates_not_proof_of_shared_origin():
     assert candidates[0]["common_origin_established"] is False
     assert candidates[0]["independent_corroboration_established"] is False
     assert candidates[0]["review_required"] is True
+
+
+def test_explicit_transfer_source_and_reference_establish_shared_lineage():
+    rows = [
+        SimpleNamespace(
+            id="transfer-a", parent_evidence_id=None, original_source_reference=None,
+            transfer_source="family-messaging", transfer_reference="message:884",
+        ),
+        SimpleNamespace(
+            id="transfer-b", parent_evidence_id=None, original_source_reference=None,
+            transfer_source=" FAMILY-MESSAGING ", transfer_reference=" MESSAGE:884 ",
+        ),
+        SimpleNamespace(
+            id="transfer-c", parent_evidence_id=None, original_source_reference=None,
+            transfer_source="family-messaging", transfer_reference="message:885",
+        ),
+    ]
+    lineage, independence = build_evidence_lineage(rows, [], ["transfer-a", "transfer-b", "transfer-c"])
+    assert lineage["transfer-a"] == lineage["transfer-b"]
+    assert independence["transfer-a"] == independence["transfer-b"] == "shared_origin"
+    assert "transfer-c" not in lineage
+    assert "transfer-c" not in independence
+
+
+def test_lineage_scope_discovers_same_person_transfer_family_without_cross_person_leakage():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.core.database import Base
+    from app.models.care import Caregiver, Evidence, Person
+    from app.services.evidence_lineage import load_evidence_lineage_scope
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as db:
+            db.add_all([
+                Person(id="transfer-person-a", name="Person A"),
+                Person(id="transfer-person-b", name="Person B"),
+            ])
+            db.flush()
+            db.add_all([
+                Caregiver(id="transfer-caregiver-a", name="Caregiver A", relationship="family", person_id="transfer-person-a"),
+                Caregiver(id="transfer-caregiver-b", name="Caregiver B", relationship="family", person_id="transfer-person-b"),
+            ])
+            db.flush()
+            db.add_all([
+                Evidence(
+                    id="transfer-seed", person_id="transfer-person-a", type="message",
+                    source_text="Forwarded account", uploaded_by_caregiver_id="transfer-caregiver-a",
+                    transfer_source="family-messaging", transfer_reference="message:884",
+                ),
+                Evidence(
+                    id="transfer-sibling", person_id="transfer-person-a", type="message",
+                    source_text="Same forwarded account", uploaded_by_caregiver_id="transfer-caregiver-a",
+                    transfer_source=" FAMILY-MESSAGING ", transfer_reference=" MESSAGE:884 ",
+                ),
+                Evidence(
+                    id="transfer-private", person_id="transfer-person-b", type="message",
+                    source_text="Other person's private account", uploaded_by_caregiver_id="transfer-caregiver-b",
+                    transfer_source="family-messaging", transfer_reference="message:884",
+                ),
+            ])
+            db.flush()
+            scope = load_evidence_lineage_scope(db, "transfer-person-a", ["transfer-seed"])
+            ids = {row.id for row in scope["evidence_rows"]}
+            assert {"transfer-seed", "transfer-sibling"} <= ids
+            assert "transfer-private" not in ids
+    finally:
+        engine.dispose()
