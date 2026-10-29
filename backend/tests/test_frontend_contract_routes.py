@@ -1466,3 +1466,11 @@ def test_uncertainty_analysis_rejects_cross_person_scope_and_duplicate_evidence(
         assert linked_questions, "Uncertainty clarification question was not durably linked to its assessment."
     finally:
         teardown()
+
+
+def test_record_reference_guard_does_not_treat_plain_language_as_identifier():
+    from app.api.collaboration import _contains_unsupported_record_reference
+
+    plain_language = "No handoff details were supplied; share the notes to organize."
+    assert not _contains_unsupported_record_reference(plain_language, "No matching recorded context was found.")
+    assert _contains_unsupported_record_reference("The source is evidence-abc123.", "")
