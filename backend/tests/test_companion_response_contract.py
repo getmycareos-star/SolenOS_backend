@@ -60,10 +60,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
     def fake_qwen(base, model, messages, options=None):
         captured["messages"] = messages
         captured["options"] = options
-        return (
-            "The record contains one sleep observation from last night. "
-            "That is not enough information to establish a trend."
-        )
+        return "Poor sleep was reported last night; one report cannot establish a trend."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -98,7 +95,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
         assert {"record_type": "care_event", "record_id": event_id} in data["source_record_refs"]
-        assert "The record contains one sleep observation" in data["reply"]
+        assert data["reply"] == "Poor sleep was reported last night; one report cannot establish a trend."
 
         system_prompt = captured["messages"][0]["content"]
         user_payload = captured["messages"][-1]["content"]
@@ -443,10 +440,14 @@ def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeyp
     try:
         token, person_id, _ = create_session(client)
 
-        def fail_commit(_session):
-            raise RuntimeError("simulated database commit failure")
+        original_commit = Session.commit
 
-        monkeypatch.setattr(Session, "commit", fail_commit)
+        def fail_conversation_pair_commit(db_session):
+            if any(isinstance(row, ConversationMessage) for row in db_session.new):
+                raise RuntimeError("simulated database commit failure")
+            return original_commit(db_session)
+
+        monkeypatch.setattr(Session, "commit", fail_conversation_pair_commit)
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
