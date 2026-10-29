@@ -58,6 +58,11 @@ class Change(Base):
     persistence_days = Column(Integer, nullable=True)
     is_persistent = Column(Boolean, nullable=True)
     confidence = Column(Float, nullable=True, default=None)
+    # Explicit coverage provenance is persisted independently of explanatory prose.
+    baseline_coverage_status = Column(String(16), nullable=True)
+    current_coverage_status = Column(String(16), nullable=True)
+    baseline_coverage_fraction = Column(Float, nullable=True)
+    current_coverage_fraction = Column(Float, nullable=True)
     evidence_ids = Column(JSONList, nullable=False)
     explanation = Column(Text, nullable=True)
     time_provenance = Column(String, nullable=True)
