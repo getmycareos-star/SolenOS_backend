@@ -283,7 +283,7 @@ def test_documentation_density_spike_not_treated_as_real_event():
         teardown_db()
 
 
-def test_gradual_decline_detected_via_trend():
+def test_gradual_decline_detected_via_trend_requires_persisted_evidence_and_comparable_windows():
     setup_db()
     try:
         from app.core.database import get_db
@@ -291,30 +291,76 @@ def test_gradual_decline_detected_via_trend():
         db, person, caregiver = _seed_person()
         now = datetime.now(timezone.utc)
         from app.core.change_enums import ChangeType, ChangeDirection
-        # Six monthly increasing-difficulty fall observations, each a single event,
-        # with monotonically increasing magnitude so a TREND pattern can be built.
+        # Six monthly source events and matching assessments; each assessment has
+        # its own timestamped comparison window and a direct evidence link.
         magnitudes = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-        for i, m in enumerate(magnitudes):
-            change = Change(
-                person_id=person.id, subject_type="fall", subject_id="",
-                change_type=ChangeType.INCREASE, change_direction=ChangeDirection.INCREASING,
-                previous_state=str(m - 1), current_state=str(m),
-                previous_count=int(m - 1), current_count=int(m),
-                baseline_id=None, comparison_window_start=now - timedelta(days=30),
-                comparison_window_end=now, confidence=0.8, evidence_ids=[],
-                magnitude=m,
-                explanation=f"difficulty increased to {m}",
-                created_at=now - timedelta(days=(len(magnitudes) - i) * 30),
+        for i, magnitude in enumerate(magnitudes):
+            event_time = now - timedelta(days=(len(magnitudes) - i) * 30)
+            event = _add_event(
+                db,
+                person,
+                caregiver,
+                "fall",
+                f"Fall occurrence {i + 1}",
+                days_ago=(len(magnitudes) - i) * 30,
             )
-            db.add(change)
+            db.add(
+                Change(
+                    person_id=person.id,
+                    subject_type="fall",
+                    subject_id="",
+                    change_type=ChangeType.INCREASE,
+                    change_direction=ChangeDirection.INCREASING,
+                    previous_state=str(magnitude - 1),
+                    current_state=str(magnitude),
+                    previous_count=int(magnitude - 1),
+                    current_count=int(magnitude),
+                    baseline_id=None,
+                    comparison_window_start=event_time - timedelta(days=30),
+                    comparison_window_end=event_time,
+                    confidence=None,
+                    evidence_ids=[event.id],
+                    magnitude=magnitude,
+                    explanation=f"Recorded change magnitude {magnitude}",
+                    created_at=event_time,
+                )
+            )
         db.commit()
         from app.services.pattern_detection import detect_patterns
         patterns = detect_patterns(db, person.id, "fall", None, now)
-        types = [p.pattern_type.value for p in patterns]
+        db.commit()
+        types = [pattern.pattern_type.value for pattern in patterns]
         assert "trend" in types
-        trend = [p for p in patterns if p.pattern_type.value == "trend"][0]
+        trend = [pattern for pattern in patterns if pattern.pattern_type.value == "trend"][0]
         assert trend.direction.value == "increasing"
-        assert all(p.confidence is None for p in patterns), "uncalibrated pattern confidence must remain unknown"
+        assert trend.evidence_count >= 3
+        assert all(pattern.confidence is None for pattern in patterns), "uncalibrated pattern confidence must remain unknown"
+
+        # Without evidence links, a sequence of magnitude values is not enough
+        # to create a longitudinal trend.
+        unsupported = Change(
+            person_id=person.id,
+            subject_type="unsupported",
+            subject_id="",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state="1",
+            current_state="2",
+            previous_count=1,
+            current_count=2,
+            baseline_id=None,
+            comparison_window_start=now - timedelta(days=30),
+            comparison_window_end=now,
+            confidence=None,
+            evidence_ids=[],
+            magnitude=1.0,
+            explanation="No source evidence",
+        )
+        db.add(unsupported)
+        db.commit()
+        no_pattern = detect_patterns(db, person.id, "unsupported", None, now)
+        db.commit()
+        assert all(pattern.pattern_type.value != "trend" for pattern in no_pattern)
         db.close()
     finally:
         teardown_db()
