@@ -1429,16 +1429,38 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Daily Care Qwen assertions enter Companion only after explicit caregiver
         # approval. Pending proposals and model-only interpretations are excluded.
-        approved_assertions = (
-            db.query(CareAssertion)
-            .filter(
-                CareAssertion.person_id == person_id,
-                CareAssertion.assertion_status == "caregiver_reviewed",
-            )
-            .order_by(CareAssertion.recorded_at.desc())
+        approved_assertion_query = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_status == "caregiver_reviewed",
+        )
+        recent_assertions = (
+            approved_assertion_query.order_by(CareAssertion.recorded_at.desc())
             .limit(30)
             .all()
         )
+        matching_assertions = []
+        if retrieval_terms:
+            matching_assertions = (
+                approved_assertion_query.filter(or_(
+                    *[CareAssertion.field.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.asserted_value.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_label.ilike(f"%{term}%") for term in retrieval_terms],
+                    *[CareAssertion.source_text.ilike(f"%{term}%") for term in retrieval_terms],
+                ))
+                .order_by(CareAssertion.recorded_at.desc())
+                .limit(30)
+                .all()
+            )
+        approved_assertions = []
+        seen_assertion_ids = set()
+        # Keep older query-matched, caregiver-reviewed assertions even when the
+        # newest-30 assertion window no longer contains them.
+        for assertion in [*matching_assertions[:12], *recent_assertions]:
+            if str(assertion.id) not in seen_assertion_ids:
+                seen_assertion_ids.add(str(assertion.id))
+                approved_assertions.append(assertion)
+            if len(approved_assertions) >= 30:
+                break
         assertion_context: list[str] = []
         for assertion in approved_assertions:
             source_assertion_ids.append(str(assertion.id))
