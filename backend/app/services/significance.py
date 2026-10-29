@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 
 from sqlalchemy.orm import Session
 
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver
 from app.models.change import Baseline, Change
 from app.models.significance import SignificanceAssessment
 from app.models.uncertainty import Contradiction
