@@ -22,7 +22,8 @@ No group is marked fully complete in this ledger.
 - [x] Add collection time, event time, original timezone, origin channel, source reference, parent evidence link, ingestion time, and SHA-256 of the exact stored UTF-8 source text.
 - [x] Add separately typed `evidence_kind` and `epistemic_status` fields; unsupported classifications are rejected, and omitted values remain unclassified rather than inferred.
 - [x] Bind evidence creation to the server-issued bearer session and reject cross-record identities.
-- [ ] Verify the new migrations and create/retrieve/hash/classification behavior on current `main` in CI.
+- [x] Add an append-only ORM guard and database trigger preventing mutation of original evidence source text and its stored fingerprint; expose a person-scoped integrity endpoint that recomputes the exact UTF-8 text hash.
+- [ ] Verify migration upgrade against fresh and pre-existing PostgreSQL schemas, direct-SQL mutation rejection, and create/retrieve/hash/classification behavior on the exact current `main` commit in CI.
 - [ ] Complete provenance for device identity, import/transfer lineage, original binary/document hash, and explicit evidence links to every event, claim, observation, decision, outcome, and review type.
 
 ### B. Evidence and knowledge classification — PARTIAL
@@ -42,8 +43,10 @@ No group is marked fully complete in this ledger.
 ### D. Claim-level evidence grounding — PARTIAL
 - [x] Existing care facts, care assertions, evidence links, source spans, and persisted assertion statuses provide claim-related primitives.
 - [x] Evidence integrity endpoint returns linked evidence and duplicate-content candidates.
-- [ ] Implement one canonical versioned claim assessment lifecycle with the required statuses: supported, partially supported, contradicted, unverified, uncertain, conflicting, missing evidence, stale, superseded, and withdrawn.
-- [ ] Add first-class support/contradiction/neutral relationships, exact source passages, claim dependency graph, correction/withdrawal audit, and re-review triggers.
+- [x] Add an append-only, versioned claim assessment API for all ten explicit statuses; each assessment records the reviewer from the server-authorized session, rationale, policy version, linked evidence relationships, and superseded assessment ID.
+- [x] Validate source passages as exact substrings of linked evidence and require explicit supporting/contradicting relationships for supported, partially supported, contradicted, and conflicting statuses.
+- [ ] Add a full dependency graph across derived claims, cross-claim supersession target, re-review triggers, and a complete correction/withdrawal workflow; current assessment history is versioned per source-attributed care assertion.
+- [ ] Current-main backend tests and PostgreSQL migration validation must pass before this capability is marked verified.
 
 ### E. Corroboration and source independence — PARTIAL
 - [x] Evidence integrity endpoint detects identical normalized source text and explicitly warns against counting duplicates as independent corroboration.
@@ -104,7 +107,8 @@ No group is marked fully complete in this ledger.
 - [x] Evidence creation now requires a server-issued bearer session matching person and uploader caregiver.
 - [x] Reporter/collector caregiver references and parent evidence are validated against the same care record.
 - [x] Evidence reviews and conflict-resolution history are append-only in ORM; evidence review has PostgreSQL immutability enforcement.
-- [ ] Audit every evidence/claim/conflict/gap/question endpoint for scope authorization, every foreign ID, transactional rollback, idempotency, secure media handling, retention/deletion, backup/restore, and production failure behavior.
+- [x] Claim-assessment writes derive person and reviewer identity from the server-validated bearer session, validate every linked evidence ID against that same person, and preserve assessment history with ORM/database append-only guards.
+- [ ] Audit every remaining evidence/claim/conflict/gap/question endpoint for scope authorization, every foreign ID, transactional rollback, idempotency, secure media handling, retention/deletion, backup/restore, and production failure behavior.
 - [ ] Verify immutable source handling against all writers, direct SQL, and deployed PostgreSQL behavior.
 
 ### P. Grounded AI reasoning and explanations — PARTIAL
@@ -113,7 +117,8 @@ No group is marked fully complete in this ledger.
 - [ ] Ensure citation integrity, no fabricated quotations, dependency-aware invalidation, and safe abstention across companion, summaries, appointments, LCR, and handoffs.
 
 ### Q. Frontend evidence workflows — PARTIAL
-- [x] The persisted EvidenceReviewPanel is now connected to the current-care understanding component.
+- [x] The persisted EvidenceReviewPanel is connected to current-care understanding and displays the backend-computed source-text hash status (match/mismatch/unavailable), exact hash scope, and explicit limitation that the hash does not authenticate the original binary.
+- [x] Add a caregiver-facing claim assessment panel in the LCR with all ten explicit statuses, source-link relationship controls, exact-passage input, rationale, and persisted assessment history.
 - [x] Current-care UI already exposes evidence-integrity inspection, duplicate candidates, interpretation limits, and review coverage.
 - [x] Frontend verification asserts the LCR connection and guards against reintroducing arbitrary confidence thresholds.
 - [ ] Complete source/claim detail navigation, exact passage display, provenance identities/times, conflicts and partial resolution, correction/retraction history, clarification workflow, and accessible error/retry/rollback states across all surfaces.
@@ -180,3 +185,13 @@ No group is marked fully complete in this ledger.
 - [x] Frontend UI commit: [show persisted trajectory and open loops](https://github.com/getmycareos-star/SolenOS-landing/commit/a3a9eccfa9e31837d4eae69d230d9ea3c706c9f2).
 - [x] Frontend freshness commit: [reassess persisted evidence on workspace entry](https://github.com/getmycareos-star/SolenOS-landing/commit/69d13cac9e54a8614b99234d254be7acff1c27d5).
 - [ ] Passing CI for the exact latest backend and frontend commits is required before marking these additions verified.
+
+
+### V. Claim-level evidence assessment and source-text immutability — PARTIAL pending exact-current-main CI
+- [x] Backend migration: [versioned evidence claim assessments](https://github.com/getmycareos-star/SolenOS_backend/commit/046bdd446873493f237b6304c3dad9bbcf1025cf).
+- [x] Backend API: [scoped claim assessment lifecycle](https://github.com/getmycareos-star/SolenOS_backend/commit/58fbe80cf06b4bbaad7d08d1425c386548afa15d).
+- [x] Backend tests: [source passage, assessment versioning, and person isolation](https://github.com/getmycareos-star/SolenOS_backend/commit/8c4bf774f6c35ab8290575569df67aa8bd1109b6).
+- [x] Frontend: [claim assessment panel](https://github.com/getmycareos-star/SolenOS-landing/commit/a97c9036d0eb223366bb0e0ce7b48cd69a4ae934), [LCR integration](https://github.com/getmycareos-star/SolenOS-landing/commit/a593937cdcc31275004474fbfd1a91a35d18d138), and [regression contract](https://github.com/getmycareos-star/SolenOS-landing/commit/70bfae5b19b70ac1afffa2f100e6bbebf22a867e).
+- [x] Frontend checks passed on the panel commit and LCR integration commit; frontend validation passed on the contract commit.
+- [ ] Earlier backend CI exposed two real issues: the migration graph test expected the previous head, and legacy migration setup pre-created the assessment table. The head assertion and migration were corrected; re-run and inspect current-main backend test plus PostgreSQL migration jobs before treating this subsystem as verified.
+- [ ] Claim lifecycle still lacks a complete cross-claim dependency graph, a target claim link for supersession, full conflict-scope resolution, and full end-to-end browser/API test evidence.
