@@ -10,6 +10,8 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
+from app.models.care import CareEvent, Evidence
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -273,6 +275,59 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
              "value": "DO NOT LEAK THIS", "status": "reported",
              "created": "2026-10-26 08:00:00", "updated": "2026-10-26 08:00:00"},
         ])
+    db = TestSessionLocal()
+    try:
+        caregiver_id = session["caregiver"]["id"]
+        source_time = datetime.now(timezone.utc) - timedelta(days=45)
+        evidence = Evidence(
+            id="appointment-freshness-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Dated source evidence linked to an appointment preparation event.",
+            uploaded_by_caregiver_id=caregiver_id,
+            occurred_at=source_time,
+            collected_at=source_time,
+        )
+        policy = EvidenceFreshnessPolicy(
+            id="appointment-freshness-policy",
+            person_id=person_id,
+            domain_key="document_history",
+            policy_version="v1",
+            max_age_days=30,
+            historical_after_days=180,
+            rationale="Explicit review boundary for appointment preparation.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        assessment = EvidenceFreshnessAssessment(
+            id="appointment-freshness-assessment",
+            person_id=person_id,
+            evidence_id=evidence.id,
+            policy_id=policy.id,
+            policy_version="v1",
+            freshness_status="needs_review",
+            source_time=source_time,
+            source_time_kind="event_occurrence",
+            assessed_at=datetime.now(timezone.utc),
+            age_days=45,
+            rationale="The explicit review boundary has elapsed; re-confirm before relying on currentness.",
+            assessed_by_caregiver_id=caregiver_id,
+        )
+        event = CareEvent(
+            id="appointment-freshness-event",
+            person_id=person_id,
+            event_type="care_observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            title="Dated source event",
+            description="Source event linked to the dated document.",
+            evidence_ids=[evidence.id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([evidence, policy, assessment, event])
+        db.commit()
+    finally:
+        db.close()
+
     response = test_client.get(
         "/api/v1/appointment-workspaces/preparation-brief?window_days=90",
         headers={"Authorization": f"Bearer {token}"},
@@ -285,6 +340,11 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     assert "DO NOT LEAK THIS" not in response.text
     assert body["source_coverage"]["community"] == "not_authorized"
     assert body["source_coverage"]["medications_and_allergies"] == "unavailable"
+    assert body["source_coverage"]["evidence_freshness_assessments"] == "available"
+    assert any(item["assessment_id"] == "appointment-freshness-assessment" for item in body["freshness_assessments"])
+    event_item = next(item for item in body["events"] if item["source_id"] == "appointment-freshness-event")
+    assert event_item["freshness_assessments"][0]["freshness_status"] == "needs_review"
+    assert event_item["freshness_assessments"][0]["interpretation_limit"].startswith("This is a policy application")
     assert "DO NOT LEAK THIS" not in response.text
 
 
