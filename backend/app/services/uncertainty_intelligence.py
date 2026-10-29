@@ -99,26 +99,47 @@ def analyze_uncertainty(
     duplicate_groups: list[dict[str, Any]] = []
     seen_evidence_ids: dict[str, int] = {}
     seen_source_text: dict[str, int] = {}
+    seen_lineage: dict[str, int] = {}
     for index, item in enumerate(raw_items):
         evidence_id = _text(item.get("id"))
         source_text = " ".join(_text(item.get("text")).casefold().split())
+        # Explicit independence metadata wins over text-only matching. Two
+        # independent witnesses can use identical wording; conversely, two
+        # derived records can share a lineage even when their excerpts differ.
+        independence = _text(item.get("source_independence_status")).lower()
+        lineage_key = next((
+            _text(item.get(key)) for key in ("source_lineage_id", "origin_id", "source_id")
+            if _text(item.get(key))
+        ), "")
         duplicate_of = None
+        duplicate_reason = None
         if evidence_id and evidence_id in seen_evidence_ids:
             duplicate_of = seen_evidence_ids[evidence_id]
-        elif source_text and source_text in seen_source_text:
+            duplicate_reason = "same_evidence_id"
+        elif lineage_key and lineage_key in seen_lineage:
+            duplicate_of = seen_lineage[lineage_key]
+            duplicate_reason = "shared_source_lineage"
+        elif (
+            source_text
+            and source_text in seen_source_text
+            and independence not in {"independent", "independent_source", "independently_observed"}
+        ):
             duplicate_of = seen_source_text[source_text]
+            duplicate_reason = "identical_normalized_source_text"
         if duplicate_of is not None:
             duplicate_groups.append({
                 "record_index": index,
                 "duplicate_of_index": duplicate_of,
-                "reason": "same_evidence_id" if evidence_id and evidence_id in seen_evidence_ids else "identical_normalized_source_text",
+                "reason": duplicate_reason,
                 "independent_corroboration": False,
             })
         else:
             if evidence_id:
                 seen_evidence_ids[evidence_id] = index
-            if source_text:
+            if source_text and source_text not in seen_source_text:
                 seen_source_text[source_text] = index
+            if lineage_key:
+                seen_lineage[lineage_key] = index
     independent_items = [
         item for index, item in enumerate(raw_items)
         if not any(group["record_index"] == index for group in duplicate_groups)
