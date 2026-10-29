@@ -270,6 +270,8 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
             OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
         ).first()
         if replay:
+            if replay.source_fingerprint != fingerprint:
+                raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
             return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
     if payload.source_id:
         replay = db.query(OpenLoopOccurrence).join(
@@ -350,6 +352,8 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         replay = replay_query.first()
         if replay is None:
             raise HTTPException(status_code=409, detail="Open Loop creation conflicted with a concurrent write")
+        if payload.idempotency_key and replay.source_fingerprint != fingerprint:
+            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
         existing = _get_scoped(db, person_id, caregiver_id, replay.loop_id)
         return {**_snapshot(existing), "recurrence_detected": True, "occurrence_id": replay.id}
     db.refresh(loop)
