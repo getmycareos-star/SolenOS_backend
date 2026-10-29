@@ -52,6 +52,61 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_idempotent_retry_replays_reply_and_source_provenance(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {"calls": 0}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["calls"] += 1
+        return "The record notes poor sleep in one observation. It does not establish a worsening trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            title="Sleep observation",
+            description="Caregiver reported poor sleep.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = str(event.id)
+        db.close()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        turn_id = "turn-retry-00000001"
+        payload = {
+            "person_id": person_id,
+            "text": "What did we record about sleep?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert event_id in first_data["source_event_ids"]
+        assert first_data["written_to_lcr"] is False
+
+        retry_payload = {**payload, "session_id": first_data["session_id"]}
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=retry_payload)
+        assert retry.status_code == 200, retry.text
+        retry_data = retry.json()
+        assert retry_data["idempotent_replay"] is True
+        assert retry_data["reply"] == first_data["reply"]
+        assert retry_data["source_event_ids"] == first_data["source_event_ids"]
+        assert event_id in retry_data["source_event_ids"]
+        assert captured["calls"] == 1
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
@@ -200,6 +255,64 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
         teardown()
 
 
+def test_companion_retrieves_matching_historical_event_beyond_recent_40(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older care record mentions poor sleep. The record does not establish a worsening trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        from datetime import datetime, timedelta
+        db = TestingSessionLocal()
+        now = datetime(2026, 10, 29, 12, 0)
+        for index in range(45):
+            db.add(CareEvent(
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=now - timedelta(hours=index),
+                title=f"Meal observation {index}",
+                description=f"Caregiver recorded meal details {index}.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        older = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=150),
+            title="Overnight waking and poor rest",
+            description="Caregiver reported waking several times overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        db.commit()
+        older_id = str(older.id)
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What did we record about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
 def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     recent_irrelevant = (
         'LCR event evidence: {"event_id":"meal-2","title":"Lunch observation",'
@@ -214,6 +327,31 @@ def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     )
     assert ranked == [older_relevant]
     assert collaboration._context_record_ids(ranked, "event_id") == ["sleep-1"]
+
+
+def test_context_ranking_expands_common_caregiving_paraphrases():
+    clinic = (
+        'LCR appointment evidence: {"appointment_id":"clinic-older",'
+        '"title":"Neurology consultation","scheduled_at":"2026-07-12T10:00:00"}'
+    )
+    unrelated = (
+        'LCR appointment evidence: {"appointment_id":"meal-1",'
+        '"title":"Lunch planning","scheduled_at":"2026-07-13T10:00:00"}'
+    )
+    assert collaboration._rank_context_lines("Tell me about the clinic visit", [unrelated, clinic], 1) == [clinic]
+    sleep = 'LCR event evidence: {"event_id":"sleep-1","title":"Overnight waking"}'
+    assert collaboration._rank_context_lines("How has her rest been?", [sleep], 1) == [sleep]
+    medication = 'Caregiver-provided evidence: {"evidence_id":"med-1","source_text":"Pills recorded"}'
+    assert collaboration._rank_context_lines("Was the medication documented?", [medication], 1) == [medication]
+
+
+def test_short_standalone_question_does_not_inherit_previous_topic():
+    prior = [
+        SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?"),
+        SimpleNamespace(role="assistant", content="One sleep note is recorded."),
+    ]
+    assert collaboration._context_query_with_history("What blood pressure?", prior) == "What blood pressure?"
+    assert "sleep" in collaboration._context_query_with_history("What about that?", prior).casefold()
 
 
 def test_context_ranking_preserves_input_order_when_query_has_no_relevant_terms():

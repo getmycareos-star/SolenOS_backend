@@ -43,6 +43,9 @@ class ConversationSession(Base):
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
+    __table_args__ = (
+        UniqueConstraint("client_turn_id", "role", name="uq_conversation_message_client_turn_role"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)
@@ -50,6 +53,8 @@ class ConversationMessage(Base):
     guard_verdict = Column(String, nullable=True)
     safety_note = Column(Text, nullable=True)
     evidence_ids_json = Column(Text, nullable=False, default="[]")
+    client_turn_id = Column(String(128), nullable=True, index=True)
+    response_metadata_json = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
