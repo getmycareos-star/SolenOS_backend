@@ -154,6 +154,33 @@ def test_unverified_support_cannot_accept_an_assumption():
     assert result["sufficiency"] == "insufficient_pending_resolution"
 
 
+def test_unknown_contradicting_evidence_reference_blocks_candidate_acceptance():
+    result = analyze_uncertainty(
+        claim="The appointment was confirmed.",
+        task="recommendation",
+        evidence=[{
+            "id": "appointment-confirmation",
+            "text": "A caregiver reports an appointment confirmation.",
+            "source_type": "caregiver_report",
+            "verified": True,
+        }],
+        alternatives=[{
+            "hypothesis": "The appointment may still be unconfirmed.",
+            "status": "accepted",
+            "supporting_evidence_ids": ["appointment-confirmation"],
+            "contradicting_evidence_ids": ["not-retrieved-record"],
+            "reviewed_by_caregiver_id": "test-caregiver-reviewer",
+            "resolution_rationale": "The available record was reviewed.",
+        }],
+    )
+    alternative = result["alternatives"][0]
+    assert alternative["status"] == "unresolved"
+    assert alternative["evidence_references_valid"] is False
+    assert alternative["invalid_evidence_ids"] == ["not-retrieved-record"]
+    assert "invalid_candidate_evidence_reference" in result["classifications"]
+    assert result["sufficiency"] == "insufficient_pending_resolution"
+
+
 def test_generic_evidence_reference_is_not_a_supporting_evidence_decision():
     result = analyze_uncertainty(
         claim="The care instruction is confirmed.",
