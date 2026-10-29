@@ -1122,12 +1122,29 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             claim_text,
             re.IGNORECASE,
         ) and not professional_absent
+        recorded_source_labels = []
+        for line in context_lines:
+            match = re.search(
+                r"Authorized evidence \[([^\]]+)\] \(type=([^,]+), source_type=([^,]+), "
+                r"time_provenance=([^,]+), status=([^\)]+)\)",
+                line,
+            )
+            if match:
+                recorded_source_labels.append(
+                    f"evidence {match.group(1)}: type={match.group(2)}, "
+                    f"source_type={match.group(3)}, time_provenance={match.group(4)}, status={match.group(5)}"
+                )
         if caregiver_observation:
             source_label = "caregiver-reported observation"
             source_explanation = "The supplied text explicitly says the caregiver observed the claim."
         else:
             source_label = "not established from the supplied text"
             source_explanation = "The supplied text does not explicitly establish who or what source originated the claim."
+        if recorded_source_labels:
+            source_explanation += (
+                " Authorized evidence metadata (preserved as recorded, not independently verified): "
+                + "; ".join(recorded_source_labels[:5]) + "."
+            )
         if professional_absent:
             professional_label = "No professional assessment is supplied in the provided text."
         elif professional_present:
