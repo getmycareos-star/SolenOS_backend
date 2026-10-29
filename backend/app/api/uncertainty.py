@@ -301,12 +301,17 @@ def analyze_and_persist_uncertainty(
     lineage_parent = {evidence_id: evidence_id for evidence_id in requested_evidence_ids}
     independence_by_id = {}
     def lineage_find(evidence_id):
+        lineage_parent.setdefault(evidence_id, evidence_id)
         parent = lineage_parent[evidence_id]
         if parent != evidence_id:
             lineage_parent[evidence_id] = lineage_find(parent)
         return lineage_parent[evidence_id]
 
     def lineage_union(left, right):
+        # Include external source nodes in the graph: two selected records may
+        # share a parent that is not itself among the evidence IDs in the request.
+        lineage_parent.setdefault(left, left)
+        lineage_parent.setdefault(right, right)
         left_root, right_root = lineage_find(left), lineage_find(right)
         if left_root != right_root:
             # Deterministic root selection makes generated lineage IDs stable.
@@ -335,7 +340,7 @@ def analyze_and_persist_uncertainty(
                         independence_by_id[evidence_id] = "shared_origin"
             left, right = relationship.source_evidence_id, relationship.related_evidence_id
             if (
-                left in selected_ids and right in selected_ids
+                left and right
                 and status not in independent_statuses
             ):
                 lineage_union(left, right)
