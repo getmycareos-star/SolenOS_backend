@@ -92,7 +92,10 @@ def update_question(
     update: OpenQuestionUpdate,
     engine: UncertaintyEngine = Depends(get_engine),
 ):
-    result = engine.update_open_question(question_id, update)
+    try:
+        result = engine.update_open_question(question_id, update)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not result:
         raise HTTPException(status_code=404, detail="Open question not found")
     return result
