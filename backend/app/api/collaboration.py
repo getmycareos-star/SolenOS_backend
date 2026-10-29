@@ -1370,8 +1370,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .all()
         )
         retrieval_query = _context_query_with_history(user_text, prior_messages)
-        direct_terms = sorted(_base_context_terms(retrieval_query))[:8]
-        synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(direct_terms))[:16]
+        # Keep current-message terms first in their original order. History terms
+        # supplement only when a follow-up explicitly references prior dialogue.
+        direct_terms = list(dict.fromkeys(
+            token for token in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
+            if token not in _CONTEXT_STOPWORDS
+        ))[:8]
+        synonym_terms = sorted(
+            _expanded_context_terms(retrieval_query) - set(direct_terms)
+        )[:16]
         retrieval_terms = list(dict.fromkeys([*direct_terms, *synonym_terms]))
 
         # Retrieve recent events plus independently query-matched historical
