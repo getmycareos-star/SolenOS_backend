@@ -310,6 +310,8 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
                 id VARCHAR(36) PRIMARY KEY,
                 person_id VARCHAR(255) NOT NULL,
                 question TEXT NOT NULL,
+                subject_type VARCHAR(255) NOT NULL,
+                subject_id VARCHAR(255) NOT NULL,
                 status VARCHAR(40) NOT NULL,
                 priority INTEGER,
                 evidence_ids TEXT,
@@ -323,14 +325,15 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
         """))
         connection.execute(text("""
             INSERT INTO open_questions
-                (id, person_id, subject_type, question, status, priority, asked_at, created_by_caregiver_id)
+                (id, person_id, subject_type, subject_id, question, status, priority, asked_at, created_by_caregiver_id)
             VALUES
-                ('open-question-1', :person_id, 'appointment', 'Confirm whether the appointment date is Monday or Tuesday',
+                ('open-question-1', :person_id, 'appointment', 'appointment-date',
+                 'Confirm whether the appointment date is Monday or Tuesday',
                  'open', 1, CURRENT_TIMESTAMP, :caregiver_id),
-                ('open-question-closed', :person_id, 'appointment', 'Question already answered', 'answered',
-                 2, CURRENT_TIMESTAMP, :caregiver_id),
-                ('open-question-other-person', :other_person_id, 'appointment', 'Private question for another person',
-                 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
+                ('open-question-closed', :person_id, 'appointment', 'appointment-date-closed',
+                 'Question already answered', 'answered', 2, CURRENT_TIMESTAMP, :caregiver_id),
+                ('open-question-other-person', :other_person_id, 'appointment', 'private-appointment',
+                 'Private question for another person', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
         """), {
             "person_id": owner["person"]["id"],
             "other_person_id": other["person"]["id"],
