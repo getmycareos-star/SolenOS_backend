@@ -118,3 +118,65 @@ def test_source_reference_on_unselected_ancestor_connects_selected_derivative():
     )
     assert lineage["derivative"] == lineage["other-copy"]
     assert independence["derivative"] == independence["other-copy"] == "shared_origin"
+
+def test_lineage_scope_follows_unselected_ancestor_source_reference_and_stays_person_scoped():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+    from app.core.database import Base
+    from app.models.care import Caregiver, Evidence, Person
+    from app.models.care_continuity import EvidenceSourceRelationship
+    from app.services.evidence_lineage import load_evidence_lineage_scope, summarize_evidence_lineage
+
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as db:
+            db.add_all([
+                Person(id="lineage-person-a", name="Person A"),
+                Person(id="lineage-person-b", name="Person B"),
+            ])
+            db.flush()
+            db.add_all([
+                Caregiver(id="lineage-caregiver-a", name="Caregiver A", relationship="family",
+                          person_id="lineage-person-a"),
+                Caregiver(id="lineage-caregiver-b", name="Caregiver B", relationship="family",
+                          person_id="lineage-person-b"),
+            ])
+            db.flush()
+            db.add_all([
+                Evidence(id="old-source", person_id="lineage-person-a", type="document",
+                         source_text="Original care document", uploaded_by_caregiver_id="lineage-caregiver-a",
+                         original_source_reference="  clinic / report / 9  "),
+                Evidence(id="selected-derivative", person_id="lineage-person-a", type="summary",
+                         source_text="Summary copied from source", uploaded_by_caregiver_id="lineage-caregiver-a",
+                         parent_evidence_id="old-source"),
+                Evidence(id="sibling-copy", person_id="lineage-person-a", type="forwarded_message",
+                         source_text="Forwarded report", uploaded_by_caregiver_id="lineage-caregiver-a",
+                         original_source_reference="clinic / report / 9"),
+                Evidence(id="private-copy", person_id="lineage-person-b", type="document",
+                         source_text="Private unrelated record", uploaded_by_caregiver_id="lineage-caregiver-b",
+                         original_source_reference="clinic / report / 9"),
+            ])
+            db.flush()
+            db.add(EvidenceSourceRelationship(
+                id="lineage-link", person_id="lineage-person-a",
+                source_evidence_id="selected-derivative", related_evidence_id="sibling-copy",
+                relationship_type="forwarded_from", source_independence_status="shared_origin",
+                origin_group_key="clinic-report-9", rationale="Explicit source lineage",
+                reviewed_by_caregiver_id="lineage-caregiver-a",
+            ))
+            db.commit()
+
+            scope = load_evidence_lineage_scope(db, "lineage-person-a", ["selected-derivative"])
+            ids = {row.id for row in scope["evidence_rows"]}
+            assert {"old-source", "selected-derivative", "sibling-copy"} <= ids
+            assert "private-copy" not in ids
+            summary = summarize_evidence_lineage(
+                scope["evidence_rows"], scope["relationships"], ["selected-derivative", "sibling-copy"]
+            )
+            shared = [group for group in summary["groups"] if group["source_independence_status"] == "shared_origin"]
+            assert shared
+            assert any(set(group["evidence_ids"]) == {"selected-derivative", "sibling-copy"} for group in shared)
+            assert scope["truncated"] is False
+    finally:
+        engine.dispose()
