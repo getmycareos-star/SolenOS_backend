@@ -766,3 +766,78 @@ def test_companion_follow_up_retrieves_same_older_record_end_to_end(monkeypatch)
         teardown()
 
 
+
+
+def test_companion_session_and_idempotency_key_cannot_cross_person(monkeypatch):
+    import uuid
+
+    client = setup_client(monkeypatch)
+
+    def fake_qwen(base, model, messages, options=None):
+        return "The note records waking several times overnight. It does not establish a longer-term trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token_a, person_a, caregiver_a = create_session(client)
+        token_b, person_b, caregiver_b = create_session(client)
+        db = TestingSessionLocal()
+        event = CareEvent(
+            person_id=person_a, event_type="observation", status="recorded",
+            occurred_at=datetime.now(timezone.utc) - timedelta(days=3),
+            title="Sleep observation",
+            description="Caregiver reported waking several times overnight and restless sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_a,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.commit()
+        event_id = event.id
+        db.close()
+
+        turn_id = str(uuid.uuid4())
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_a}"},
+            json={"person_id": person_a, "text": "What did we record about sleep?", "client_turn_id": turn_id},
+        )
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        assert event_id in first_data["source_event_ids"]
+        assert first_data["written_to_lcr"] is False
+
+        foreign_history = client.get(
+            f"/api/v1/conversation/{first_data['session_id']}",
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+        assert foreign_history.status_code in (403, 404)
+        assert "waking several times" not in foreign_history.text.casefold()
+
+        foreign_post = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_b}"},
+            json={
+                "person_id": person_a, "session_id": first_data["session_id"],
+                "text": "What did we record about sleep?",
+            },
+        )
+        assert foreign_post.status_code in (403, 404)
+        assert "waking several times" not in foreign_post.text.casefold()
+
+        foreign_key_reuse = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token_b}"},
+            json={"person_id": person_b, "text": "Hello", "client_turn_id": turn_id},
+        )
+        assert foreign_key_reuse.status_code == 409
+        assert "waking several times" not in foreign_key_reuse.text.casefold()
+
+        db = TestingSessionLocal()
+        try:
+            saved_a = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
+            assert [row.role for row in saved_a] == ["user", "assistant"]
+            assert db.query(ConversationMessage).count() == 2
+        finally:
+            db.close()
+    finally:
+        teardown()
