@@ -89,7 +89,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "uncertainty_assessments",
         "required": False,
         "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "confidence",
-                   "known_value", "gap_reason", "evidence_ids", "temporal_precision",
+                   "known_value", "gap_reason", "context", "evidence_ids", "temporal_precision",
                    "assessed_at", "assessed_by_caregiver_id", "superseded_by_assessment_id", "is_active"],
         "order": ["assessed_at"],
     },
