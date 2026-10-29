@@ -1741,7 +1741,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if len(selected_context) >= 6:
                 break
             line_chars = len(line)
-            if selected_chars + line_chars > 1400:
+            if selected_chars + line_chars > 2200:
                 continue
             selected_context.append(line)
             selected_chars += line_chars
@@ -1814,7 +1814,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ]
         system_prompt = (
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
-            "in plain natural language. Use only relevant authorized care-record context. Distinguish recorded facts, "
+            "in plain natural language. Do not use canned replies or fixed response maps. Use only relevant authorized care-record context. Distinguish recorded facts, "
             "caregiver reports, interpretation, uncertainty and conflicts. Conversation history helps resolve references "
             "but is not care evidence; assistant statements are not facts. Never invent events, dates, symptoms, diagnoses, "
             "medication status, outcomes, appointments, actions, owners, deadlines or trends. If the record does not answer, "
@@ -1831,7 +1831,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # A standalone new topic must not inherit the previous answer as context.
         if retrieval_query.strip() != user_text.strip():
             model_messages.extend(
-                {"role": row.role, "content": (row.content or "")[:300]}
+                {"role": row.role, "content": (row.content or "")[:180]}
                 for row in reversed(prior_messages[:2])
                 if row.role in {"user", "assistant"}
             )
@@ -1841,7 +1841,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         model_context_lines = list(selected_context)
         context_chars = sum(len(line) for line in model_context_lines)
         for line in [*freshness_context[:1], *([] if _is_casual_greeting(user_text) else [lineage_context_line])]:
-            if context_chars + len(line) <= 1800:
+            if context_chars + len(line) <= 2400:
                 model_context_lines.append(line)
                 context_chars += len(line)
         model_messages.append({
