@@ -307,9 +307,47 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
         ).first()
         if parent is None:
             raise HTTPException(status_code=422, detail="Parent evidence must exist in the same care record")
-    db_evidence = EvidenceModel(**evidence.model_dump())
+    evidence_payload = evidence.model_dump()
+    ingestion_key = evidence_payload.get("ingestion_key")
+    request_fingerprint = None
+    if ingestion_key:
+        canonical_request = evidence.model_dump(mode="json", exclude={"ingestion_key"})
+        request_fingerprint = hashlib.sha256(
+            json.dumps(canonical_request, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        existing = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == evidence.person_id,
+            EvidenceModel.ingestion_key == ingestion_key,
+        ).first()
+        if existing is not None:
+            if existing.ingestion_request_sha256 == request_fingerprint:
+                return existing
+            raise HTTPException(
+                status_code=409,
+                detail="This ingestion key was already used for a different evidence payload",
+            )
+    evidence_payload["ingestion_request_sha256"] = request_fingerprint
+    db_evidence = EvidenceModel(**evidence_payload)
     db.add(db_evidence)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        # A concurrent request may have won the unique-key race. Resolve it as
+        # a replay only when the persisted canonical payload fingerprint matches.
+        db.rollback()
+        if ingestion_key:
+            existing = db.query(EvidenceModel).filter(
+                EvidenceModel.person_id == evidence.person_id,
+                EvidenceModel.ingestion_key == ingestion_key,
+            ).first()
+            if existing is not None and existing.ingestion_request_sha256 == request_fingerprint:
+                return existing
+            if existing is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This ingestion key was already used for a different evidence payload",
+                ) from exc
+        raise
     db.refresh(db_evidence)
     _log_and_learn(
         db,
