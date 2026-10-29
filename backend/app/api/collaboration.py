@@ -68,6 +68,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[uuid.UUID] = None
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -1316,11 +1317,32 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     user_text = payload.text.strip()
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
+    client_turn_id = str(payload.client_turn_id) if payload.client_turn_id else None
+    request_fingerprint = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+
+    existing_turn = None
+    if client_turn_id:
+        # Resolve retries even when the first response was lost before the client
+        # received the newly-created session_id. Scope lookup to this caregiver.
+        existing_turn = (
+            db.query(ConversationMessage)
+            .join(ConversationSession, ConversationSession.id == ConversationMessage.session_id)
+            .filter(
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
+                ConversationSession.status == "active",
+                ConversationMessage.role == "user",
+                ConversationMessage.client_turn_id == client_turn_id,
+            )
+            .first()
+        )
+        if existing_turn and existing_turn.request_fingerprint != request_fingerprint:
+            raise HTTPException(status_code=409, detail="This turn ID was already used with different message text")
 
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
@@ -1328,6 +1350,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ).first()
         if not session:
             raise HTTPException(status_code=404, detail="Active conversation not found for this care record")
+        if existing_turn and existing_turn.session_id != session.id:
+            raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+    elif existing_turn:
+        session = db.query(ConversationSession).filter_by(
+            id=existing_turn.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
+        ).first()
+        if not session:
+            raise HTTPException(status_code=409, detail="The original conversation is no longer active")
     else:
         session = ConversationSession(person_id=person_id, caregiver_id=caregiver_id, title=user_text[:80])
         db.add(session)
@@ -1336,6 +1366,38 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
         db.commit()
+
+    if existing_turn:
+        assistant_row = (
+            db.query(ConversationMessage)
+            .filter(
+                ConversationMessage.session_id == session.id,
+                ConversationMessage.role == "assistant",
+                ConversationMessage.created_at >= existing_turn.created_at,
+            )
+            .order_by(ConversationMessage.created_at.asc())
+            .first()
+        )
+        if not assistant_row or not assistant_row.response_metadata_json:
+            raise HTTPException(status_code=503, detail="The original turn is not fully committed; retry later with the same turn ID")
+        try:
+            replay = json.loads(assistant_row.response_metadata_json)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=503, detail="The original turn response could not be recovered; retry later with the same turn ID")
+        history = (
+            db.query(ConversationMessage)
+            .filter_by(session_id=session.id)
+            .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+            .all()
+        )
+        replay["messages"] = [{
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        } for row in history]
+        return replay
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
@@ -1867,17 +1929,40 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    response_metadata = {
+        "session_id": session.id,
+        "person_id": person_id,
+        "reply": reply,
+        "guard_verdict": verdict,
+        "safety_note": safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
     )
     try:
         db.add(ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
-            source_record_refs_json="[]",
+            source_record_refs_json="[]", client_turn_id=client_turn_id,
+            request_fingerprint=request_fingerprint if client_turn_id else None,
         ))
         db.add(assistant_row)
         db.commit()
