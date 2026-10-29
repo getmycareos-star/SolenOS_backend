@@ -151,6 +151,44 @@ def test_longitudinal_change_benchmark_reports_measured_case_score():
         observed = counts["current_window_count"] == 1
         outcomes.append({"case": "duplicate_source_not_double_counted", "expected": 1, "observed": counts["current_window_count"], "pass": observed})
 
+        # Case 6: same source file can document separate dated occurrences.
+        # Reusing the source ID must not erase a genuinely distinct event.
+        person, caregiver = _case_identity(db, "shared-source-distinct-occurrences")
+        _record_event(db, person, caregiver, "shared-src-event-1", 20, ["care-log-1"])
+        _record_event(db, person, caregiver, "shared-src-event-2", 5, ["care-log-1"])
+        db.flush()
+        counts = get_longitudinal_event_counts(db, person.id, "fall", None, REFERENCE_TIME)
+        observed = counts["current_window_count"] == 2
+        outcomes.append({
+            "case": "same_source_distinct_dates_remain_distinct_occurrences",
+            "expected": 2, "observed": counts["current_window_count"], "pass": observed,
+        })
+
+        # Case 7: one recent event with no explicit historical observation
+        # coverage is first observed, but must not be called an emergence.
+        person, caregiver = _case_identity(db, "uncovered-emergence")
+        _record_event(db, person, caregiver, "uncov-emergence-1", 5)
+        db.flush()
+        changes = detect_event_changes(db, person.id, "fall", None, REFERENCE_TIME)
+        observed = any(change.change_type.value == "emergence" for change in changes)
+        outcomes.append({
+            "case": "unknown_baseline_coverage_blocks_emergence_claim",
+            "expected": False, "observed": observed, "pass": observed is False,
+        })
+
+        # Case 8: the same zero-event baseline supports emergence only when the
+        # entire baseline interval was explicitly observed.
+        person, caregiver = _case_identity(db, "covered-emergence")
+        _record_event(db, person, caregiver, "cov-emergence-1", 5)
+        _add_full_coverage(db, person, caregiver, REFERENCE_TIME - timedelta(days=180))
+        db.flush()
+        changes = detect_event_changes(db, person.id, "fall", None, REFERENCE_TIME)
+        observed = any(change.change_type.value == "emergence" for change in changes)
+        outcomes.append({
+            "case": "covered_zero_event_baseline_supports_emergence",
+            "expected": True, "observed": observed, "pass": observed is True,
+        })
+
         score = sum(1 for outcome in outcomes if outcome["pass"]) / len(outcomes)
         report = {
             "benchmark": "longitudinal-change-safeguards-v1",
