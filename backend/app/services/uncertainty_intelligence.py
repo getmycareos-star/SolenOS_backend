@@ -136,9 +136,17 @@ def analyze_uncertainty(
             has_supporting_evidence = bool(
                 evidence_fields["supporting_evidence_ids"] or evidence_fields["evidence_ids"]
             )
+            reviewer_id = _text(candidate.get("reviewed_by_caregiver_id"))
+            rationale = _text(candidate.get("resolution_rationale"))
+            # A caller-provided status alone is not an audited lifecycle event.
+            # Terminal decisions need an authenticated reviewer (checked by the
+            # API), rationale, valid evidence references, and supporting evidence.
             if invalid_refs:
                 status = "unresolved"
-            if status == "accepted" and (not has_supporting_evidence or invalid_refs):
+            if status in {"accepted", "rejected", "superseded"} and (
+                not reviewer_id or not rationale or invalid_refs
+                or (status == "accepted" and not has_supporting_evidence)
+            ):
                 status = "unresolved"
             normalized.append({
                 "statement" if kind == "assumptions" else "hypothesis": description,
@@ -146,7 +154,8 @@ def analyze_uncertainty(
                 **evidence_fields,
                 "evidence_references_valid": not invalid_refs,
                 "invalid_evidence_ids": list(dict.fromkeys(invalid_refs)),
-                "resolution_rationale": _text(candidate.get("resolution_rationale")) or None,
+                "reviewed_by_caregiver_id": reviewer_id or None,
+                "resolution_rationale": rationale or None,
             })
         return normalized
 
