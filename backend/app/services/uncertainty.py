@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import re
 import uuid
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -205,6 +206,30 @@ class UncertaintyEngine:
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
         payload["question"] = question_text
+        # Suppress only an exact normalized duplicate that is still open for the
+        # same person, subject, and claim. Similar wording is not treated as
+        # equivalent, and answered/declined questions do not block a new review.
+        question_key = re.sub(r"[\W_]+", " ", question_text.casefold()).strip()
+        existing_open = (
+            self.db.query(OpenQuestionModel)
+            .filter(
+                OpenQuestionModel.person_id == scoped_person_id,
+                OpenQuestionModel.subject_type == payload["subject_type"],
+                OpenQuestionModel.subject_id == payload["subject_id"],
+                OpenQuestionModel.claim_id == claim_id,
+                OpenQuestionModel.status == "open",
+            )
+            .order_by(OpenQuestionModel.asked_at.desc(), OpenQuestionModel.id.asc())
+            .limit(200)
+            .all()
+        )
+        if any(
+            re.sub(r"[\W_]+", " ", (row.question or "").casefold()).strip() == question_key
+            for row in existing_open
+        ):
+            raise ValueError(
+                "An equivalent open clarification question already exists for this claim and subject; review its status and answer history before asking again."
+            )
         db_question = OpenQuestionModel(**payload)
         try:
             self.db.add(db_question)
@@ -324,6 +349,8 @@ class UncertaintyEngine:
         if payload.get("resolution_status", "unresolved") != "unresolved":
             raise ValueError("A new conflict must start unresolved; status changes require a separate audited transition")
         payload["resolution_status"] = "unresolved"
+        payload["resolution_scope"] = None
+        payload["unresolved_remainder"] = None
         payload["resolved_by_caregiver_id"] = None
         payload["matching_candidate_ids"] = []
         start = payload.get("effective_from")
@@ -401,6 +428,7 @@ class UncertaintyEngine:
 
         update_data = self._scoped_payload(update.model_dump(exclude_unset=True))
         resolution_scope = (update_data.pop("resolution_scope", None) or "").strip() or None
+        unresolved_remainder = (update_data.pop("unresolved_remainder", None) or "").strip() or None
         requested_status = update_data.get("resolution_status", db_contradiction.resolution_status)
         status_changed = requested_status != db_contradiction.resolution_status
         resolution_statuses = {"resolved", "partially_resolved", "qualified", "superseded", "reopened", "unresolved"}
@@ -413,9 +441,14 @@ class UncertaintyEngine:
         if requested_status == "partially_resolved":
             if not resolution_scope:
                 raise ValueError("A partial conflict resolution requires an explicit scope describing exactly what was resolved")
+            if not unresolved_remainder:
+                raise ValueError("A partial conflict resolution must preserve the unresolved remainder explicitly")
+        elif resolution_scope or unresolved_remainder:
+            raise ValueError("Resolution scope and unresolved remainder may only be set for a partial conflict resolution")
         audit_event_required = (
             status_changed
             or resolution_scope is not None
+            or unresolved_remainder is not None
             or ("resolution_notes" in update_data and update_data.get("resolution_notes") != db_contradiction.resolution_notes)
             or ("evidence_ids" in update_data and evidence_ids != (db_contradiction.evidence_ids or []))
         )
@@ -444,9 +477,19 @@ class UncertaintyEngine:
                     new_status=requested_status,
                     rationale=rationale,
                     resolution_scope=resolution_scope,
+                    unresolved_remainder=unresolved_remainder,
                     evidence_ids=list(evidence_ids),
                 )
                 self.db.add(event)
+
+            if status_changed:
+                db_contradiction.resolution_scope = resolution_scope if requested_status == "partially_resolved" else None
+                db_contradiction.unresolved_remainder = unresolved_remainder if requested_status == "partially_resolved" else None
+            elif resolution_scope is not None or unresolved_remainder is not None:
+                if resolution_scope is not None:
+                    db_contradiction.resolution_scope = resolution_scope
+                if unresolved_remainder is not None:
+                    db_contradiction.unresolved_remainder = unresolved_remainder
 
             for field, value in update_data.items():
                 if field == "resolved_by_caregiver_id":

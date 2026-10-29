@@ -291,6 +291,7 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
 @router.post("", status_code=201)
 def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     deadline = _utc(payload.deadline_at)
     if deadline and not payload.deadline_source:
         raise HTTPException(status_code=422, detail="A deadline requires an explicit source")
@@ -481,6 +482,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
     evidence = changes.pop("evidence", [])
+    _validate_source_evidence_references(db, person_id, evidence)
     key = changes.pop("idempotency_key", None)
     reason = changes.pop("reason", None)
     requested_status = changes.pop("status", None)
@@ -606,6 +608,9 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
         "decision": payload.text,
         "evidence": payload.evidence,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "verification_basis": "caregiver_attestation_with_persisted_source_link",
+        "semantic_grounding_status": "not_automatically_verified",
+        "interpretation_limit": "Persisted source linkage and caregiver review do not automatically establish semantic entailment or prove which account is true.",
     }
     loop.outcome_evidence = [*(loop.outcome_evidence or []), reconciliation]
     loop.outcome_status = "outcome_verified"
@@ -643,7 +648,15 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
     before = _snapshot(loop)
     loop.verification_rule = loop.verification_rule or payload.verification_rule
-    loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "verification_rule": loop.verification_rule, "recorded_at": datetime.now(timezone.utc).isoformat()}]
+    loop.outcome_evidence = [*(loop.outcome_evidence or []), {
+        "text": payload.text,
+        "evidence": payload.evidence,
+        "verification_rule": loop.verification_rule,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "verification_basis": "caregiver_attestation_with_persisted_source_link",
+        "semantic_grounding_status": "not_automatically_verified",
+        "interpretation_limit": "The API validates source-record existence and scope, not whether the source semantically proves the stated outcome or whether an action caused it.",
+    }]
     loop.outcome_status = "outcome_verified"
     _audit(db, loop, "outcome_verified", before, payload.evidence, payload.idempotency_key)
     db.commit()
@@ -669,6 +682,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
             raise HTTPException(status_code=409, detail="A mandatory prerequisite must be verified closed; cancellation does not satisfy dependencies")
     if not payload.evidence:
         raise HTTPException(status_code=409, detail="Closure requires evidence")
+    _validate_source_evidence_references(db, person_id, payload.evidence)
     if loop.loop_type in {"awaiting_response", "professional_input"} and not loop.response_evidence:
         raise HTTPException(status_code=409, detail="A response must be recorded before closure")
     if loop.loop_type == "professional_input" and not any(

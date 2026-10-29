@@ -956,6 +956,17 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         )
         assert missing_rationale.status_code == 422
 
+        missing_partial_remainder = client.patch(
+            f"/api/v1/uncertainty/contradictions/{conflict_id}",
+            json={
+                "resolution_status": "partially_resolved",
+                "resolution_notes": "Attempted partial resolution without describing what remains unresolved.",
+                "resolution_scope": "Resolve only the date.",
+                "evidence_ids": ["resolution-evidence"],
+            },
+        )
+        assert missing_partial_remainder.status_code == 422, missing_partial_remainder.text
+
         missing_resolution_evidence = client.patch(
             f"/api/v1/uncertainty/contradictions/{conflict_id}",
             json={
@@ -980,12 +991,15 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
             json={
                 "resolution_status": "partially_resolved",
                 "resolution_notes": "The date detail is established, but the medication status remains disputed.",
-                "resolution_scope": "Resolve only the reported date; leave medication status unresolved.",
+                "resolution_scope": "Resolve only the reported date.",
+                "unresolved_remainder": "Medication status remains disputed; no medication state is established.",
                 "evidence_ids": ["resolution-evidence"],
             },
         )
         assert partial.status_code == 200, partial.text
         assert partial.json()["resolution_status"] == "partially_resolved"
+        assert partial.json()["resolution_scope"] == "Resolve only the reported date."
+        assert partial.json()["unresolved_remainder"] == "Medication status remains disputed; no medication state is established."
 
         resolved = client.patch(
             f"/api/v1/uncertainty/contradictions/{conflict_id}",
@@ -1005,7 +1019,8 @@ def test_conflict_resolution_requires_rationale_and_preserves_reopen_history():
         assert history.status_code == 200, history.text
         events = history.json()
         assert [event["new_status"] for event in events] == ["partially_resolved", "resolved", "reopened"]
-        assert events[0]["resolution_scope"] == "Resolve only the reported date; leave medication status unresolved."
+        assert events[0]["resolution_scope"] == "Resolve only the reported date."
+        assert events[0]["unresolved_remainder"] == "Medication status remains disputed; no medication state is established."
         assert all(event["rationale"] for event in events)
         assert all(event["person_id"] == "resolution-person" for event in events)
 
@@ -2029,7 +2044,7 @@ def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_a
             if superseded_by:
                 payload["superseded_by_claim_id"] = superseded_by
             response = client.post(endpoint, json=payload)
-            assert response.status_code == 200, f"{status}: {response.status_code} {response.text}"
+            assert response.status_code == 201, f"{status}: {response.status_code} {response.text}"
             created_versions.append(response.json())
         assert [row["status"] for row in created_versions] == [item[0] for item in statuses]
         assert [row["claim_version"] for row in created_versions] == list(range(1, 11))
@@ -2065,6 +2080,66 @@ def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_a
             }],
         })
         assert missing_quote.status_code == 422, missing_quote.text
+    finally:
+        teardown_db()
+        Base.metadata.drop_all(bind=engine)
+
+
+def test_duplicate_open_clarification_question_is_suppressed_but_answered_question_can_be_reasked():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        db = TestingSessionLocal()
+        person = Person(id="question-dedupe-person", name="Question Dedupe Person")
+        caregiver = Caregiver(
+            id="question-dedupe-caregiver",
+            name="Question Dedupe Caregiver",
+            email="question-dedupe@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        payload = {
+            "person_id": person.id,
+            "question": "Was the appointment attended?",
+            "subject_type": "appointment",
+            "subject_id": "appointment-1",
+            "status": "open",
+            "priority": "informational",
+            "necessity": "not_assessed",
+            "evidence_ids": [],
+            "context": [{"purpose": "clarify an unestablished event"}],
+        }
+        created = client.post("/api/v1/uncertainty/questions", json=payload)
+        assert created.status_code == 200, created.text
+        question_id = created.json()["id"]
+
+        duplicate = client.post(
+            "/api/v1/uncertainty/questions",
+            json={**payload, "question": " WAS THE appointment attended? "},
+        )
+        assert duplicate.status_code == 422, duplicate.text
+        assert "equivalent open clarification question already exists" in duplicate.text
+
+        answered = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "status": "answered",
+                "answer": "The caregiver reports that it was attended.",
+                "answer_provenance": "Answered by the reporting caregiver during follow-up.",
+            },
+        )
+        assert answered.status_code == 200, answered.text
+        assert answered.json()["status"] == "answered"
+
+        repeated_after_answer = client.post("/api/v1/uncertainty/questions", json=payload)
+        assert repeated_after_answer.status_code == 200, repeated_after_answer.text
+        assert repeated_after_answer.json()["id"] != question_id
     finally:
         teardown_db()
         Base.metadata.drop_all(bind=engine)

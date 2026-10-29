@@ -402,3 +402,19 @@ This slice does **not** close the full evidence capability map. Groups A–J and
 - [x] Derive reviewer attribution from the authenticated caregiver instead of trusting a caller-supplied reviewer label.
 - [x] Add an integration regression test for authenticated creation, cross-person read/update denial, foreign evidence rejection, forged person scope, and missing bearer credentials.
 - [ ] Verification pending: run the new regression test and full backend validation on the exact latest main SHA. This hardens the escalation endpoints only; it does not establish that every safety-related endpoint is authorization-complete.
+
+## Direct-main claim-grounding verification increment — 2026-10-29
+
+- [x] Add API-level coverage for all ten explicit claim statuses: supported, partially supported, contradicted, unverified, uncertain, conflicting, missing evidence, stale, superseded, and withdrawn.
+- [x] Verify claim assessments are versioned and historical versions remain retrievable rather than overwritten.
+- [x] Verify substantive support/contradiction relationships require source passages that are exact substrings of persisted same-person evidence; paraphrases and missing passages are rejected.
+- [x] Verify supported/contradicted/conflicting statuses require their explicit matching relationship types and conflicting status records both supporting and contradicting relationships.
+- [ ] Verification pending: run the new API regression test and full backend suite on the exact latest main SHA. This is test coverage committed to main, not a claim that semantic entailment or every claim lifecycle is complete.
+
+## Direct-main clarification workflow increment — 2026-10-29
+
+- [x] Suppress only exact normalized duplicate questions that remain open for the same authorized person, subject, and claim.
+- [x] Do not use broad semantic similarity as proof that two questions are equivalent.
+- [x] Permit a new question after the previous question has been answered; suppression is not permanent and does not erase answer history.
+- [x] Add an API regression test for duplicate suppression and re-asking after an attributed answer.
+- [ ] Verification pending on the exact latest main SHA. This is narrow duplicate suppression, not a completed automatic evidence-sufficiency or stale-answer engine.

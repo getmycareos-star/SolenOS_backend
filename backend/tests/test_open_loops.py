@@ -180,6 +180,10 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     )
     assert verified.status_code == 200, verified.text
     assert verified.json()["outcome_status"] == "outcome_verified"
+    verification_record = verified.json()["outcome_evidence"][-1]
+    assert verification_record["verification_basis"] == "caregiver_attestation_with_persisted_source_link"
+    assert verification_record["semantic_grounding_status"] == "not_automatically_verified"
+    assert "do not automatically establish semantic entailment" in verification_record["interpretation_limit"]
 
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
@@ -189,6 +193,41 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     assert closure.status_code == 200, closure.text
     assert closure.json()["verification"] == "verified"
     assert closure.json()["loop"]["status"] == "closed"
+
+
+def test_open_loop_create_and_update_reject_cross_person_source_ids():
+    client = TestClient(app)
+    _, headers_a = session(client, "Evidence scope A")
+    _, headers_b = session(client, "Evidence scope B")
+    other_loop = create_loop(client, headers_b, "pending_action")
+    foreign_source_id = create_source_evidence(other_loop, "Source belongs to another care record")
+
+    created = client.post(
+        "/api/v1/open-loops",
+        headers=headers_a,
+        json={
+            "loop_type": "pending_decision",
+            "title": "Decision with a foreign source",
+            "description": "The source must belong to this care record.",
+            "evidence": [{"evidence_id": foreign_source_id, "kind": "source_record"}],
+        },
+    )
+    assert created.status_code == 404, created.text
+
+    own_loop = create_loop(client, headers_a, "pending_decision")
+    updated = client.patch(
+        f"/api/v1/open-loops/{own_loop['id']}",
+        headers=headers_a,
+        json={"evidence": [{"evidence_id": foreign_source_id, "kind": "source_record"}]},
+    )
+    assert updated.status_code == 404, updated.text
+
+    closed = client.post(
+        f"/api/v1/open-loops/{own_loop['id']}/close",
+        headers=headers_a,
+        json={"text": "Attempt closure with a foreign source", "evidence": [{"evidence_id": foreign_source_id}]},
+    )
+    assert closed.status_code == 404, closed.text
 
 
 def test_professional_input_requires_source_evidence():
@@ -439,6 +478,9 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
         },
     )
     assert reconciled.status_code == 200, reconciled.text
+    reconciliation_record = reconciled.json()["outcome_evidence"][-1]
+    assert reconciliation_record["semantic_grounding_status"] == "not_automatically_verified"
+    assert "do not automatically establish semantic entailment" in reconciliation_record["interpretation_limit"]
 
     closed = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
