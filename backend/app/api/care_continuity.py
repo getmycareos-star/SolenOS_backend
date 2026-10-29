@@ -29,7 +29,7 @@ from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
