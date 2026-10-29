@@ -60,6 +60,12 @@ def setup_records():
         uploaded_by_caregiver_id="freshness-caregiver-a",
     ))
     db.commit()
+    # Clear the ORM upload timestamp as well: an upload time is a valid
+    # freshness reference and must not be mistaken for absent source time.
+    db.query(Evidence).filter(Evidence.id == "freshness-evidence-no-time").update(
+        {Evidence.uploaded_at: None}, synchronize_session=False,
+    )
+    db.commit()
     for _, caregiver in people:
         token = f"freshness-token-{caregiver.person_id}"
         db.add(AnonymousSession(
