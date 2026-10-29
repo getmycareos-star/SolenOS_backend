@@ -140,7 +140,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert "current_message" in calls[0][-1]["content"]
+        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
     finally:
         teardown()
 
@@ -245,7 +245,7 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         )
         assert response.status_code == 200, response.text
         prompt = captured["messages"][0]["content"]
-        assert "First answer the caregiver’s actual question" in prompt
+        assert "Answer the caregiver's current question directly" in prompt
         assert "never treat chat history as proof" in prompt
         assert response.json()["written_to_lcr"] is False
     finally:
