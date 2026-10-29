@@ -1633,3 +1633,48 @@ def test_observation_coverage_api_persists_and_enforces_person_scope():
         assert unauthenticated.status_code == 401, unauthenticated.text
     finally:
         teardown_db()
+
+
+def test_pattern_detection_does_not_mix_events_from_different_situations():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-pattern-scope", name="Pattern scope test")
+        caregiver = Caregiver(
+            id="caregiver-pattern-scope",
+            name="Pattern scope caregiver",
+            email="pattern-scope@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        situation_a_ids = {"scope-a-1", "scope-a-2"}
+        situation_b_ids = {"scope-b-1", "scope-b-2"}
+        for event_id, situation_id, days_ago in (
+            ("scope-a-1", "situation-a", 20),
+            ("scope-a-2", "situation-a", 5),
+            ("scope-b-1", "situation-b", 18),
+            ("scope-b-2", "situation-b", 3),
+        ):
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person.id,
+                event_type="mobility_change",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Recorded mobility event {event_id}",
+                created_by_caregiver_id=caregiver.id,
+                situation_id=situation_id,
+                evidence_ids=[],
+            ))
+        db.commit()
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mobility_change", "situation-a", now)
+        assert patterns, "Two distinct, source-persisted events should allow recurrence assessment"
+        assert all(set(pattern.event_ids).issubset(situation_a_ids) for pattern in patterns)
+        assert all(not set(pattern.event_ids).intersection(situation_b_ids) for pattern in patterns)
+        db.close()
+    finally:
+        teardown_db()
