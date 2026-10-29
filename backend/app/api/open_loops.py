@@ -216,6 +216,8 @@ def _scope(request: Request, db: Session) -> tuple[str, str]:
 
 def _snapshot(loop):
     now = datetime.now(timezone.utc)
+    def iso(value):
+        return value.isoformat() if value is not None else None
     deadline = _utc(loop.deadline_at) if loop.deadline_at and loop.deadline_at.tzinfo else loop.deadline_at
     deps = getattr(loop, "_mandatory_blockers", [])
     return {
@@ -227,17 +229,17 @@ def _snapshot(loop):
         "evidence": loop.evidence or [], "uncertainty": loop.uncertainty,
         "missing_information": loop.missing_information or [], "options": loop.options or [],
         "request_text": loop.request_text, "recipient_label": loop.recipient_label,
-        "requested_at": loop.requested_at, "last_contact_at": loop.last_contact_at,
+        "requested_at": iso(loop.requested_at), "last_contact_at": iso(loop.last_contact_at),
         "response_evidence": loop.response_evidence or [], "action_evidence": loop.action_evidence or [],
         "outcome_evidence": loop.outcome_evidence or [], "verification_rule": loop.verification_rule,
-        "deadline_at": deadline, "deadline_source": loop.deadline_source,
+        "deadline_at": iso(deadline), "deadline_source": loop.deadline_source,
         "deadline_timezone": loop.deadline_timezone, "overdue": bool(deadline and deadline <= now and loop.status not in TERMINAL_STATES),
         "priority": loop.priority, "priority_reasons": loop.priority_reasons or [],
-        "deferred_reason": loop.deferred_reason, "review_at": loop.review_at,
+        "deferred_reason": loop.deferred_reason, "review_at": iso(loop.review_at),
         "closure_evidence": loop.closure_evidence or [], "closure_result": loop.closure_result,
-        "closure_actor": loop.closure_actor, "closed_at": loop.closed_at,
+        "closure_actor": loop.closure_actor, "closed_at": iso(loop.closed_at),
         "cancellation_reason": loop.cancellation_reason, "recurrence_of_id": loop.recurrence_of_id,
-        "blocking_prerequisites": deps, "created_at": loop.created_at, "updated_at": loop.updated_at,
+        "blocking_prerequisites": deps, "created_at": iso(loop.created_at), "updated_at": iso(loop.updated_at),
         "version": loop.version,
     }
 
