@@ -219,8 +219,10 @@ def test_explicit_transfer_source_and_reference_establish_shared_lineage():
     lineage, independence = build_evidence_lineage(rows, [], ["transfer-a", "transfer-b", "transfer-c"])
     assert lineage["transfer-a"] == lineage["transfer-b"]
     assert independence["transfer-a"] == independence["transfer-b"] == "shared_origin"
-    assert "transfer-c" not in lineage
-    assert "transfer-c" not in independence
+    # A lone explicit transfer reference still points to an external source
+    # family, but must not be grouped with the unrelated message:885 family.
+    assert lineage["transfer-c"] != lineage["transfer-a"]
+    assert independence["transfer-c"] == "shared_origin"
 
 
 def test_lineage_scope_discovers_same_person_transfer_family_without_cross_person_leakage():
@@ -261,7 +263,7 @@ def test_lineage_scope_discovers_same_person_transfer_family_without_cross_perso
                     transfer_source="family-messaging", transfer_reference="message:884",
                 ),
             ])
-            db.flush()
+            db.commit()
             scope = load_evidence_lineage_scope(db, "transfer-person-a", ["transfer-seed"])
             ids = {row.id for row in scope["evidence_rows"]}
             assert {"transfer-seed", "transfer-sibling"} <= ids
