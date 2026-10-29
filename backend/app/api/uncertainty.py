@@ -79,7 +79,10 @@ def update_gap(
 
 @router.post("/questions", response_model=OpenQuestion)
 def create_question(question: OpenQuestionCreate, engine: UncertaintyEngine = Depends(get_engine)):
-    return engine.create_open_question(question)
+    try:
+        return engine.create_open_question(question)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/questions/{person_id}", response_model=List[OpenQuestion])
