@@ -1868,7 +1868,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 base,
                 model,
                 model_messages,
-                {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
+                {"temperature": 0.25, "num_predict": 32 if greeting_only else 96},
             )
         except HTTPException as exc:
             # The gateway's public detail is intentionally generic. Log only
