@@ -1235,14 +1235,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .filter(
                 ConversationMessage.client_turn_id == client_turn_id,
                 ConversationMessage.role == "assistant",
-                ConversationSession.person_id == person_id,
-                ConversationSession.caregiver_id == caregiver_id,
-                ConversationSession.status == "active",
             )
             .first()
         )
         if existing_pair:
             saved_assistant, saved_session = existing_pair
+            if (
+                saved_session.person_id != person_id
+                or saved_session.caregiver_id != caregiver_id
+                or saved_session.status != "active"
+            ):
+                raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
             if payload.session_id and payload.session_id != saved_session.id:
                 raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
             try:
