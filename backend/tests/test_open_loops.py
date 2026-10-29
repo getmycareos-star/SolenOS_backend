@@ -188,3 +188,29 @@ def test_invalid_loop_type_is_rejected():
         json={"loop_type": "invented", "title": "No", "description": "Invalid type"},
     )
     assert response.status_code == 422, response.text
+
+
+def test_recurring_identical_issue_preserves_separate_occurrences():
+    client = TestClient(app)
+    _, headers = session(client, "Care recipient")
+    first = create_loop(client, headers, "unresolved_concern")
+    second = client.post(
+        "/api/v1/open-loops",
+        headers=headers,
+        json={
+            "loop_type": "unresolved_concern",
+            "title": "Follow up on the reported change",
+            "description": "Caregiver reported a change; cause remains unknown.",
+            "evidence": [{"kind": "caregiver_report", "text": "Second report"}],
+        },
+    )
+    assert second.status_code == 201, second.text
+    body = second.json()
+    assert body["id"] == first["id"]
+    assert body["recurrence_detected"] is True
+    occurrences = client.get(
+        f"/api/v1/open-loops/{first['id']}/occurrences", headers=headers
+    )
+    assert occurrences.status_code == 200, occurrences.text
+    assert len(occurrences.json()) == 2
+
