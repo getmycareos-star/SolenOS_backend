@@ -1348,6 +1348,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    request_sha256 = _companion_request_sha256(person_id, caregiver_id, user_text)
+    if payload.client_turn_id:
+        prior_assistant_row = (
+            db.query(ConversationMessage)
+            .filter_by(client_turn_id=payload.client_turn_id, role="assistant")
+            .first()
+        )
+        if prior_assistant_row:
+            return _companion_replay_response(
+                db,
+                prior_assistant_row,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                request_sha256=request_sha256,
+                supplied_session_id=payload.session_id,
+            )
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
