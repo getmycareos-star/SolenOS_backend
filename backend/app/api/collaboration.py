@@ -1599,13 +1599,47 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         source_context.extend(assertion_context)
 
-        appointments = (
-            db.query(Appointment)
-            .filter(Appointment.person_id == person_id)
+        appointment_query = db.query(Appointment).filter(Appointment.person_id == person_id)
+        now_utc = datetime.now(timezone.utc)
+        upcoming_appointments = (
+            appointment_query.filter(Appointment.scheduled_at >= now_utc)
             .order_by(Appointment.scheduled_at.asc())
-            .limit(30)
+            .limit(12)
             .all()
         )
+        past_appointments = (
+            appointment_query.filter(Appointment.scheduled_at < now_utc)
+            .order_by(Appointment.scheduled_at.desc())
+            .limit(12)
+            .all()
+        )
+        appointment_search_terms = list(dict.fromkeys(
+            [*sorted(direct_event_terms), *sorted(synonym_event_terms)]
+        ))[:8]
+        matching_appointments = []
+        if appointment_search_terms:
+            appointment_filters = [
+                column.ilike(f"%{term}%")
+                for term in appointment_search_terms
+                for column in (
+                    Appointment.title, Appointment.status, Appointment.provider,
+                    Appointment.healthcare_org,
+                )
+                if column is not None
+            ]
+            matching_appointments = (
+                appointment_query.filter(or_(*appointment_filters))
+                .order_by(Appointment.scheduled_at.desc())
+                .limit(20)
+                .all()
+            )
+        appointments = []
+        seen_appointment_ids = set()
+        for appointment in [*upcoming_appointments, *matching_appointments, *past_appointments]:
+            appointment_id = str(appointment.id)
+            if appointment_id not in seen_appointment_ids:
+                seen_appointment_ids.add(appointment_id)
+                appointments.append(appointment)
         for appointment in appointments:
             source_appointment_ids.append(str(appointment.id))
             appointment_context.append(
