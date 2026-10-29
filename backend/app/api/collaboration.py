@@ -1672,22 +1672,51 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # Persist only after a valid model response or the safety guard response exists.
     # This is conversation history, not LCR evidence. A failed inference leaves no
     # new message pair and the uncommitted new session is rolled back by the request.
+    turn_created_at = datetime.now(timezone.utc)
     db.add(ConversationMessage(
         session_id=session.id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
+        created_at=turn_created_at,
     ))
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+        "written_to_lcr": False,
+    }
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False),
+        created_at=turn_created_at + timedelta(microseconds=1),
     )
     db.add(assistant_row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if client_turn_id:
+            # A concurrent request may have committed the same key first.
+            # Return a retryable response; the next same-key request will replay
+            # the durable turn instead of invoking inference again.
+            raise HTTPException(
+                status_code=503,
+                detail="This turn may already have been committed. Retry the same message with the same turn ID.",
+                headers={"Retry-After": "1"},
+            ) from exc
+        raise
     db.refresh(assistant_row)
     history = (
         db.query(ConversationMessage)
         .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
         .all()
     )
     return {
