@@ -352,6 +352,13 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert body["assessment"]["person_id"] == owner["person"]["id"]
     assert body["assessment"]["assessment_method"] == "deterministic_composition_of_persisted_lcr_sources"
     assert body["assessment"]["confidence_assessment"]["overall"] == "not_calibrated"
+    quality = body["assessment"]["assessment_quality"]
+    assert quality["numeric_confidence"].startswith("not_provided")
+    assert quality["status"] == "limitations_present"
+    dimensions = {item["dimension"]: item for item in quality["dimensions"]}
+    assert dimensions["individual_baseline"]["status"] == "not_established"
+    assert "individual_baseline_not_established" in quality["blocking_limitations"]
+    assert "No-records is not evidence of absence" in quality["interpretation_policy"]
     assert len(body["assessment"]["capabilities"]) == 22
     loops = body["assessment"]["open_loops"]
     assert loops["source_of_truth"] == "persisted_lcr_records"
