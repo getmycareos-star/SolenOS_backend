@@ -60,7 +60,7 @@ def test_companion_idempotent_retry_replays_original_response_and_provenance(mon
 
     def fake_qwen(base, model, messages, options=None):
         calls["count"] += 1
-        return "The record contains one sleep observation. It does not establish a trend."
+        return "The available record does not establish a sleep trend."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -110,8 +110,8 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         captured["messages"] = messages
         captured["options"] = options
         return (
-            "The record contains one sleep observation from last night. "
-            "That is not enough information to establish a trend."
+            "The saved note says the person slept poorly last night. "
+            "It does not establish a trend."
         )
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -147,7 +147,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
         assert {"record_type": "care_event", "record_id": event_id} in data["source_record_refs"]
-        assert "The record contains one sleep observation" in data["reply"]
+        assert "slept poorly last night" in data["reply"]
 
         system_prompt = captured["messages"][0]["content"]
         user_payload = captured["messages"][-1]["content"]
@@ -334,7 +334,7 @@ def test_companion_retrieves_matching_historical_event_outside_recent_event_wind
 
     def fake_qwen(base, model, messages, options=None):
         captured["messages"] = messages
-        return "The older note records waking several times overnight. It does not establish a trend."
+        return "The saved note mentions waking several times overnight. It does not establish a trend."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -363,7 +363,7 @@ def test_companion_retrieves_matching_historical_event_outside_recent_event_wind
                 status="recorded",
                 occurred_at=now - timedelta(hours=index + 1),
                 title=f"Unrelated routine event {index}",
-                description="A routine event unrelated to sleep.",
+                description="A routine household task with no additional detail.",
                 evidence_ids=[],
                 time_provenance="caregiver_reported",
                 confidence=None,
@@ -577,10 +577,16 @@ def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeyp
     try:
         token, person_id, _ = create_session(client)
 
-        def fail_commit(_session):
-            raise RuntimeError("simulated database commit failure")
+        original_commit = Session.commit
+        calls = {"count": 0}
 
-        monkeypatch.setattr(Session, "commit", fail_commit)
+        def fail_message_pair_commit(_session):
+            calls["count"] += 1
+            if calls["count"] >= 2:
+                raise RuntimeError("simulated database commit failure")
+            return original_commit(_session)
+
+        monkeypatch.setattr(Session, "commit", fail_message_pair_commit)
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
