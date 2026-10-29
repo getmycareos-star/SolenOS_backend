@@ -577,3 +577,69 @@ def test_observation_preserved_verbatim_from_inference():
         db.close()
     finally:
         teardown_db()
+
+
+def test_acceleration_pattern_requires_increasing_deltas_and_full_coverage():
+    setup_db()
+    try:
+        db, person, caregiver = _seed_person()
+        now = datetime.now(timezone.utc)
+        from app.core.change_enums import ChangeType, ChangeDirection, PatternType
+        magnitudes = [1.0, 2.0, 4.0, 8.0]
+        for index, magnitude in enumerate(magnitudes):
+            event_time = now - timedelta(days=(4 - index) * 20)
+            event = CareEvent(
+                id=f"acceleration-source-{index}",
+                person_id=person.id,
+                event_type="mobility",
+                status="recorded",
+                occurred_at=event_time,
+                title=f"Mobility observation {index}",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add(event)
+            db.flush()
+            db.add(Change(
+                id=f"acceleration-change-{index}",
+                person_id=person.id,
+                subject_type="mobility",
+                subject_id="",
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state=str(magnitude / 2),
+                current_state=str(magnitude),
+                previous_count=index,
+                current_count=index + 1,
+                comparison_window_start=event_time - timedelta(days=10),
+                comparison_window_end=event_time,
+                confidence=None,
+                evidence_ids=[event.id],
+                magnitude=magnitude,
+                baseline_coverage_status="covered",
+                current_coverage_status="covered",
+                explanation="Source-linked magnitude assessment",
+                created_at=event_time,
+            ))
+        db.add(ObservationCoverage(
+            id="acceleration-full-coverage",
+            person_id=person.id,
+            subject_type="mobility",
+            window_start=now - timedelta(days=100),
+            window_end=now,
+            coverage_status="covered",
+            source_evidence_ids=[],
+            rationale="The care domain was explicitly observed across the complete comparison span.",
+            recorded_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mobility", None, now)
+        db.commit()
+        acceleration = [item for item in patterns if item.pattern_type == PatternType.ACCELERATION]
+        assert len(acceleration) == 1
+        assert acceleration[0].evidence_count == 4
+        assert acceleration[0].confidence is None
+        assert "not a calibrated forecast" in " ".join(acceleration[0].alternative_interpretations or [])
+    finally:
+        teardown_db()
