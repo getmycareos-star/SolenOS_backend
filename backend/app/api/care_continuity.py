@@ -23,13 +23,13 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
-from app.models.care import Evidence, Caregiver
+from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from pydantic import ValidationError
-from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment
+from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceClaimDependency, CareAssertion, CareStateRevision, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, EvidenceObservation
 from app.schemas.care_continuity import EvidenceClaimAssessmentCreate, EvidenceClaimAssessmentResponse
 
 logger = logging.getLogger(__name__)
@@ -3284,6 +3284,31 @@ def create_evidence_source_relationship(
     independence = payload.get("source_independence_status")
     rationale = payload.get("rationale")
     origin_group_key = payload.get("origin_group_key")
+    scope_type = payload.get("scope_type", "evidence_pair")
+    raw_scope_id = payload.get("scope_id")
+    allowed_scope_types = {"evidence_pair", "claim", "observation", "event"}
+    if not isinstance(scope_type, str) or scope_type not in allowed_scope_types:
+        raise HTTPException(status_code=422, detail="scope_type must be evidence_pair, claim, observation, or event")
+    if scope_type == "evidence_pair":
+        if raw_scope_id not in (None, ""):
+            raise HTTPException(status_code=422, detail="scope_id must be empty for evidence_pair relationships")
+        scope_id = ""
+    else:
+        if not isinstance(raw_scope_id, str) or not raw_scope_id.strip():
+            raise HTTPException(status_code=422, detail="scope_id is required for claim, observation, and event relationships")
+        scope_id = raw_scope_id.strip()
+        scope_models = {
+            "claim": CareAssertion,
+            "observation": EvidenceObservation,
+            "event": CareEvent,
+        }
+        scope_model = scope_models[scope_type]
+        scope_record = db.query(scope_model.id).filter(
+            scope_model.id == scope_id,
+            scope_model.person_id == person_id,
+        ).first()
+        if scope_record is None:
+            raise HTTPException(status_code=404, detail="Scope record not found in this care record")
     if not isinstance(relationship_type, str) or relationship_type not in SOURCE_RELATIONSHIP_TYPES:
         raise HTTPException(status_code=422, detail="Unsupported source relationship type")
     if not isinstance(independence, str) or independence not in SOURCE_INDEPENDENCE_STATUSES:
@@ -3323,6 +3348,8 @@ def create_evidence_source_relationship(
         source_evidence_id=source.id,
         related_evidence_id=related.id,
         relationship_type=relationship_type,
+        scope_type=scope_type,
+        scope_id=scope_id,
         source_independence_status=independence,
         origin_group_key=origin_group_key.strip() if isinstance(origin_group_key, str) else None,
         rationale=rationale.strip(),
@@ -3343,6 +3370,8 @@ def create_evidence_source_relationship(
         "id": row.id, "person_id": row.person_id,
         "source_evidence_id": row.source_evidence_id, "related_evidence_id": row.related_evidence_id,
         "relationship_type": row.relationship_type,
+        "scope_type": row.scope_type,
+        "scope_id": row.scope_id,
         "source_independence_status": row.source_independence_status,
         "origin_group_key": row.origin_group_key, "rationale": row.rationale,
         "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id, "created_at": row.created_at,
@@ -3368,6 +3397,8 @@ def list_evidence_source_relationships(evidence_id: str, request: Request, db: S
         "id": row.id, "person_id": row.person_id,
         "source_evidence_id": row.source_evidence_id, "related_evidence_id": row.related_evidence_id,
         "relationship_type": row.relationship_type,
+            "scope_type": row.scope_type,
+            "scope_id": row.scope_id,
         "source_independence_status": row.source_independence_status,
         "origin_group_key": row.origin_group_key, "rationale": row.rationale,
         "reviewed_by_caregiver_id": row.reviewed_by_caregiver_id, "created_at": row.created_at,
