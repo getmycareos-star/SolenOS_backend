@@ -99,6 +99,7 @@ def test_baseline_selection_uses_longest_stable_window():
         assert baseline.documentation_bias_flag is True
         assert baseline.coverage_status == "unknown"
         assert baseline.analysis_version == "longitudinal-baseline-v2"
+        assert baseline.history_completeness == "complete"
         db.close()
     finally:
         teardown_db()
@@ -1905,6 +1906,7 @@ def test_truncated_longitudinal_history_never_claims_a_stable_baseline(monkeypat
         assert baseline.frequency_per_period is None
         assert baseline.documentation_bias_flag is True
         assert "bounded to the most recent 2" in baseline.state_value
+        assert baseline.history_completeness == "truncated"
         db.close()
     finally:
         teardown_db()
