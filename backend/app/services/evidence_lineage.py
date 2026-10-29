@@ -217,6 +217,12 @@ def load_evidence_lineage_scope(
                     next_ids.add(linked_id)
         frontier = next_ids
 
+    # If the depth budget ends while explicit IDs remain unresolved, report the
+    # scope as truncated rather than interpreting unvisited lineage as absent.
+    if frontier - set(evidence_by_id):
+        has_more = True
+        truncated = True
+
     # Include edges between discovered nodes, while preserving the hard query cap.
     discovered = sorted(evidence_by_id)
     if discovered and len(relationships_by_id) < max_relationships:
