@@ -79,21 +79,10 @@ def _evidence_status_from_events(db: Session, events: List[CareEvent], person_id
     if _reports_conflict(events):
         return EvidenceStatus.CONTRADICTORY
 
-    clinician_like = any(
-        (eid in evidence_ids) and _text_has_clinician_authority(db, eid)
-        for eid in evidence_ids
-    )
-    if clinician_like:
-        return EvidenceStatus.CONFIRMED
+    # Source prose cannot establish professional identity or authority. This
+    # schema has no verified professional credential binding for the evidence
+    # author, so no evidence is promoted to CONFIRMED by text matching.
     return EvidenceStatus.REPORTED
-
-
-def _text_has_clinician_authority(db: Session, evidence_id: str) -> bool:
-    ev = db.query(Evidence).filter(Evidence.id == evidence_id).first()
-    if not ev or not ev.source_text:
-        return False
-    low = (ev.source_text or "").lower()
-    return any(m in low for m in ("clinician", "physician", "nurse", "md", "rn ", "rn,", "doctor"))
 
 
 _CONFLICT_POSITIVE_WORDS = ("normal", "fine", "healthy", "well", "okay", "ok",
