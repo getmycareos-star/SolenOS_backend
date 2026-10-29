@@ -914,3 +914,148 @@ def _build_clustering_pattern(
         alternative_interpretations=alternatives,
     )
     return _persist_pattern(db, pattern)
+
+
+def detect_cross_domain_patterns(
+    db: Session,
+    person_id: str,
+    reference_time: Optional[datetime] = None,
+    cluster_days: int = 7,
+) -> List[Pattern]:
+    """Persist co-occurring recorded events across domains without inferring causation."""
+    now = _ensure_utc(reference_time or _utc_now())
+    window_start = now - timedelta(days=90)
+    queried = (
+        db.query(CareEvent)
+        .filter(
+            CareEvent.person_id == person_id,
+            CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
+            CareEvent.occurred_at >= window_start,
+            CareEvent.occurred_at <= now,
+        )
+        .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+        .limit(MAX_PATTERN_SOURCE_EVENTS + 1)
+        .all()
+    )
+    truncated = len(queried) > MAX_PATTERN_SOURCE_EVENTS
+    events = queried[:MAX_PATTERN_SOURCE_EVENTS]
+    events.sort(key=lambda event: (_ensure_utc(event.occurred_at), event.id))
+
+    # Deduplicate only records tied to the same source evidence and occurrence
+    # timestamp. Similar descriptions alone do not establish duplicate identity.
+    canonical = []
+    seen = set()
+    for event in events:
+        signature = tuple(sorted(set(event.evidence_ids or [])))
+        identity = (
+            ("source", signature, _ensure_utc(event.occurred_at))
+            if signature else ("event", event.id)
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        canonical.append(event)
+
+    best_cluster = []
+    left = 0
+    for right, event in enumerate(canonical):
+        event_time = _ensure_utc(event.occurred_at)
+        while left <= right and (
+            event_time - _ensure_utc(canonical[left].occurred_at)
+        ).total_seconds() > cluster_days * 86400:
+            left += 1
+        candidate = canonical[left:right + 1]
+        domains = {item.event_type for item in candidate if item.event_type}
+        if len(domains) >= 2 and len(candidate) >= 3:
+            if (
+                len(candidate) > len(best_cluster)
+                or (
+                    len(candidate) == len(best_cluster)
+                    and candidate[-1].occurred_at > best_cluster[-1].occurred_at
+                )
+            ):
+                best_cluster = candidate
+
+    current_pattern = None
+    if best_cluster:
+        event_ids = sorted({event.id for event in best_cluster})
+        domain_counts = dict(sorted(Counter(event.event_type for event in best_cluster).items()))
+        linked_changes = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person_id,
+                Change.is_active.is_(True),
+            )
+            .order_by(Change.created_at.asc(), Change.id.asc())
+            .all()
+        )
+        linked_change_ids = sorted({
+            change.id for change in linked_changes
+            if set(change.evidence_ids or []).intersection(event_ids)
+        })
+        cluster_start = min(_ensure_utc(event.occurred_at) for event in best_cluster)
+        cluster_end = max(_ensure_utc(event.occurred_at) for event in best_cluster)
+        current_pattern = _persist_pattern(db, Pattern(
+            person_id=person_id,
+            subject_type="cross_domain",
+            subject_id="",
+            pattern_type=PatternType.CONVERGENCE,
+            pattern_strength=PatternStrength.EMERGING,
+            event_ids=event_ids,
+            change_ids=linked_change_ids,
+            temporal_start=cluster_start,
+            temporal_end=cluster_end,
+            frequency=None,
+            rate_per_period=None,
+            direction=ChangeDirection.UNKNOWN,
+            confidence=None,
+            evidence_count=len(event_ids),
+            alternative_interpretations=[
+                "Distinct recorded events from multiple care domains occurred within the configured time window. This is co-occurrence only; it does not establish a shared cause, clinical relationship, or forecast."
+            ],
+            pattern_metrics={
+                "metric_version": "cross-domain-co-occurrence-v1",
+                "window_days": cluster_days,
+                "analysis_window_start": window_start.isoformat(),
+                "analysis_window_end": now.isoformat(),
+                "cluster_start": cluster_start.isoformat(),
+                "cluster_end": cluster_end.isoformat(),
+                "event_count": len(event_ids),
+                "domain_counts": domain_counts,
+                "distinct_domain_count": len(domain_counts),
+                "source_history_truncated": truncated,
+                "normalized_rate_available": False,
+            },
+        ))
+
+    # A bounded read cannot prove that a prior cluster is unsupported. Only
+    # retire prior cross-domain assessments after a complete scan.
+    if not truncated:
+        stale = (
+            db.query(Pattern)
+            .filter(
+                Pattern.person_id == person_id,
+                Pattern.subject_type == "cross_domain",
+                Pattern.subject_id == "",
+                Pattern.pattern_type == PatternType.CONVERGENCE,
+                Pattern.is_active.is_(True),
+            )
+            .order_by(Pattern.created_at.asc(), Pattern.id.asc())
+            .all()
+        )
+        for pattern in stale:
+            if current_pattern is not None and pattern.id == current_pattern.id:
+                continue
+            pattern.is_active = False
+            note = (
+                "The latest complete source-event scan no longer supports this recorded co-occurrence window. "
+                "This does not prove that any real-world event stopped or that the domains are unrelated."
+            )
+            alternatives = list(pattern.alternative_interpretations or [])
+            if note not in alternatives:
+                alternatives.append(note)
+            pattern.alternative_interpretations = alternatives
+        if stale:
+            db.flush()
+
+    return [current_pattern] if current_pattern is not None else []
