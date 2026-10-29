@@ -1,5 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment
+from app.api.care_continuity import _near_duplicate_candidates
 
 engine = create_engine(
     "sqlite:///:memory:",
@@ -589,3 +591,38 @@ def test_structured_observation_requires_exact_source_span_and_preserves_epistem
     corrected_history_row = next(item for item in history if item["id"] == corrected.json()["id"])
     assert corrected_history_row["supersedes_observation_id"] == row["id"]
     assert client_b.get("/api/v1/care-continuity/evidence/review-observation-evidence/observations").status_code == 404
+
+
+def test_near_duplicate_candidates_are_bounded_and_never_claim_common_origin():
+    source = (
+        "Caregiver recorded that the person woke three times overnight and needed "
+        "reassurance before returning to sleep. The note describes the same evening "
+        "routine and says daytime tiredness was reported the following morning."
+    )
+    near = source.replace("three times", "3 times")
+    result = _near_duplicate_candidates([
+        SimpleNamespace(id="source-a", source_text=source),
+        SimpleNamespace(id="source-b", source_text=near),
+        SimpleNamespace(id="short", source_text="same short note"),
+    ])
+    assert result["status"] == "completed"
+    assert result["algorithm_version"] == "normalized-text-sequencematcher-v1"
+    assert result["candidate_groups"]
+    assert result["candidate_groups"][0]["evidence_ids"] == ["source-a", "source-b"]
+    assert "does not establish" in result["interpretation_limit"]
+    assert "independent" in result["candidate_groups"][0]["interpretation"]
+    assert all("confidence" not in candidate for candidate in result["candidate_groups"])
+
+
+def test_near_duplicate_candidates_fail_closed_when_comparison_limit_is_exceeded():
+    from app.api.care_continuity import NEAR_DUPLICATE_MAX_RECORDS
+
+    rows = [
+        SimpleNamespace(id=f"evidence-{index}", source_text="A sufficiently long source note " * 5)
+        for index in range(NEAR_DUPLICATE_MAX_RECORDS + 1)
+    ]
+    result = _near_duplicate_candidates(rows)
+    assert result["status"] == "not_run_record_limit"
+    assert result["candidate_groups"] == []
+    assert result["records_available"] == NEAR_DUPLICATE_MAX_RECORDS + 1
+    assert "no conclusion" in result["interpretation_limit"]
