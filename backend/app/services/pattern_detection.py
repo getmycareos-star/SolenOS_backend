@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 from app.models.change import Change, Pattern
 from app.models.care import CareEvent
@@ -79,34 +79,43 @@ def detect_patterns(
         if pattern:
             patterns.append(pattern)
 
-    comparable_changes = [
-        change for change in changes
-        if change.magnitude is not None
-        and change.comparison_window_start is not None
-        and change.comparison_window_end is not None
-    ]
-    if len(comparable_changes) >= 3:
-        pattern = _build_trend_pattern(
-            db=db,
-            person_id=person_id,
-            subject_type=subject_type,
-            subject_id=subject_id or "",
-            changes=comparable_changes,
-            now=now,
-        )
-        if pattern:
-            patterns.append(pattern)
-    if len(changes) >= 2:
-        pattern = _build_instability_pattern(
-            db=db,
-            person_id=person_id,
-            subject_type=subject_type,
-            subject_id=subject_id or "",
-            changes=changes,
-            now=now,
-        )
-        if pattern:
-            patterns.append(pattern)
+    # Never combine assessments for different subjects into one trend or
+    # instability sequence. When the caller does not scope a subject, reconcile
+    # each persisted subject independently.
+    change_groups: Dict[str, List[Change]] = {}
+    for change in changes:
+        group_subject_id = change.subject_id or ""
+        change_groups.setdefault(group_subject_id, []).append(change)
+
+    for group_subject_id, group_changes in change_groups.items():
+        comparable_changes = [
+            change for change in group_changes
+            if change.magnitude is not None
+            and change.comparison_window_start is not None
+            and change.comparison_window_end is not None
+        ]
+        if len(comparable_changes) >= 3:
+            pattern = _build_trend_pattern(
+                db=db,
+                person_id=person_id,
+                subject_type=subject_type,
+                subject_id=group_subject_id,
+                changes=comparable_changes,
+                now=now,
+            )
+            if pattern:
+                patterns.append(pattern)
+        if len(group_changes) >= 2:
+            pattern = _build_instability_pattern(
+                db=db,
+                person_id=person_id,
+                subject_type=subject_type,
+                subject_id=group_subject_id,
+                changes=group_changes,
+                now=now,
+            )
+            if pattern:
+                patterns.append(pattern)
     return patterns
 
 
