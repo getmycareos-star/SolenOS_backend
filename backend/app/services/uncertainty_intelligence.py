@@ -484,6 +484,27 @@ def analyze_uncertainty(
             "reason": "Causal wording requires evidence beyond sequence or correlation.",
             "priority": "high" if task == "high_consequence_assessment" else "medium",
         })
+    if unresolved_assumptions:
+        questions.append({
+            "target_field": None,
+            "question": "Which assumptions can be verified, rejected, or kept explicitly unresolved?",
+            "reason": "An assumption must not silently become an established fact.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if unresolved_alternatives:
+        questions.append({
+            "target_field": None,
+            "question": "What evidence would distinguish the unresolved alternative explanations?",
+            "reason": "The engine cannot select an alternative without discriminating evidence.",
+            "priority": "high" if task in {"high_consequence_assessment", "recommendation"} else "medium",
+        })
+    if invalid_candidate_refs:
+        questions.append({
+            "target_field": None,
+            "question": "Can each assumption or alternative be linked to evidence retrieved for this care record?",
+            "reason": "One or more candidate evidence references were not present in the supplied evidence set.",
+            "priority": "high",
+        })
 
     evidence_refs = [
         {"id": item.get("id"), "source_type": item.get("source_type"),
