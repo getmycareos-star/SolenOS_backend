@@ -359,6 +359,10 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
     assert dimensions["individual_baseline"]["status"] == "not_established"
     assert "individual_baseline_not_established" in quality["blocking_limitations"]
     assert "No-records is not evidence of absence" in quality["interpretation_policy"]
+    freshness = body["assessment"]["freshness_assessment"]
+    assert freshness["policy"].startswith("Report recency metadata")
+    assert freshness["sources"]["facts"]["staleness_assessment"] == "not_assessed_without_domain_specific_threshold"
+    assert "not that the information remains current" in freshness["sources"]["facts"]["interpretation_limit"]
     assert len(body["assessment"]["capabilities"]) == 22
     loops = body["assessment"]["open_loops"]
     assert loops["source_of_truth"] == "persisted_lcr_records"
