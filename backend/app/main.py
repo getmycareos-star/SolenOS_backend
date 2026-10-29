@@ -30,7 +30,7 @@ from app.models.appointment_workspace import AppointmentWorkspaceRecord, Appoint
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
-from app.api.open_loops import router as open_loops_router
+from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
@@ -106,6 +106,21 @@ app = FastAPI(title=settings.app_name, version="0.1.0")
 @app.on_event("startup")
 async def start_qwen_background_worker():
     app.state.qwen_worker_task = asyncio.create_task(qwen_worker_loop())
+
+@app.on_event("startup")
+async def start_open_loop_maintenance_worker():
+    app.state.open_loop_maintenance_task = asyncio.create_task(open_loop_maintenance_loop())
+
+
+@app.on_event("shutdown")
+async def stop_open_loop_maintenance_worker():
+    task = getattr(app.state, "open_loop_maintenance_task", None)
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 @app.on_event("shutdown")
