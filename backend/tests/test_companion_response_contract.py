@@ -110,6 +110,52 @@ def test_companion_retrieves_matching_event_older_than_recent_window(monkeypatch
         teardown()
 
 
+def test_companion_idempotent_retry_replays_committed_turn_without_second_inference(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The available record does not establish that. Which care note should we review?"
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        import uuid
+        turn_id = str(uuid.uuid4())
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {
+            "person_id": person_id,
+            "text": "What does the record establish about this concern?",
+            "client_turn_id": turn_id,
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=body)
+        assert retry.status_code == 200, retry.text
+        replay_data = retry.json()
+        assert replay_data["idempotent_replay"] is True
+        assert replay_data["session_id"] == first_data["session_id"]
+        assert replay_data["reply"] == first_data["reply"]
+        assert replay_data["source_event_ids"] == first_data["source_event_ids"]
+        assert replay_data["written_to_lcr"] is False
+        assert len(calls) == 1
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).filter_by(session_id=first_data["session_id"]).all()
+            assert [row.role for row in sorted(rows, key=lambda row: row.created_at)] == ["user", "assistant"]
+            assistant = next(row for row in rows if row.role == "assistant")
+            assert assistant.client_turn_id == turn_id
+            import json
+            assert json.loads(assistant.response_metadata_json)["written_to_lcr"] is False
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
 def test_companion_generates_from_authorized_lcr_context_without_writing_care_events(monkeypatch):
     client = setup_client(monkeypatch)
     captured = {}
