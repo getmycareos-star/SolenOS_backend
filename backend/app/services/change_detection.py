@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from math import isfinite
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.care import CareEvent
 from app.models.change import Baseline, Change
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.services.observation_coverage import assess_observation_coverage
 from app.services.baseline import (
     build_baseline,
@@ -568,3 +569,202 @@ def detect_assertion_changes(
         results.append(change)
     return results
 
+
+
+def detect_numeric_observation_changes(
+    db: Session,
+    person_id: str,
+    reference_time: Optional[datetime] = None,
+    max_observations: int = 2000,
+) -> List[Change]:
+    """Compare adjacent, explicitly numeric, same-unit source observations.
+
+    Only observed/reported instrument or direct/professional measurements with a
+    finite normalized numeric value, known units, and no negation/hedge/ambiguity
+    are compared. The result records a numeric difference, not clinical direction,
+    significance, cause, or diagnosis.
+    """
+    now = _ensure_utc(reference_time) or datetime.now(timezone.utc)
+    queried = (
+        db.query(EvidenceObservation)
+        .filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.observed_at.is_not(None),
+            EvidenceObservation.normalized_value.is_not(None),
+            EvidenceObservation.units.is_not(None),
+            EvidenceObservation.units != "",
+            EvidenceObservation.observation_kind.in_(
+                ("instrument_measurement", "direct_observation", "professional_observation")
+            ),
+            EvidenceObservation.epistemic_status.in_(("observed", "reported")),
+            EvidenceObservation.negated.is_not(True),
+            EvidenceObservation.hedge_marker.is_(None),
+            EvidenceObservation.ambiguity_note.is_(None),
+            EvidenceObservation.observed_at <= now,
+        )
+        .order_by(EvidenceObservation.observed_at.desc(), EvidenceObservation.id.asc())
+        .limit(max_observations + 1)
+        .all()
+    )
+    truncated = len(queried) > max_observations
+    observations = queried[:max_observations]
+    # Corrections supersede prior observation versions. Comparing both versions
+    # would double-count the same source claim as two independent measurements.
+    superseded_ids = {
+        row[0] for row in db.query(EvidenceObservation.supersedes_observation_id)
+        .filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.supersedes_observation_id.is_not(None),
+        )
+        .all()
+    }
+    grouped: Dict[tuple[str, str, str, str, str], list[tuple[EvidenceObservation, Decimal]]] = {}
+    for observation in observations:
+        if observation.id in superseded_ids:
+            continue
+        try:
+            value = Decimal(str(observation.normalized_value).strip())
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if not value.is_finite():
+            continue
+        observed_at = _ensure_utc(observation.observed_at)
+        if observed_at is None:
+            continue
+        key = (
+            observation.subject_label.strip(),
+            observation.attribute.strip(),
+            observation.units.strip(),
+            observation.observation_kind,
+            observation.epistemic_status,
+        )
+        grouped.setdefault(key, []).append((observation, value))
+
+    results: List[Change] = []
+    for key, entries in grouped.items():
+        subject_label, attribute, units, _kind, _status = key
+        entries.sort(key=lambda pair: (_ensure_utc(pair[0].observed_at), pair[0].id))
+        if len(entries) < 2:
+            continue
+        previous, current = entries[-2], entries[-1]
+        prior_row, prior_value = previous
+        current_row, current_value = current
+        if _ensure_utc(prior_row.observed_at) == _ensure_utc(current_row.observed_at):
+            # Simultaneous values are not ordered measurements. A conflict or
+            # duplicate review is required instead of inventing a transition.
+            continue
+
+        subject_key = hashlib.sha256(
+            "\\x1f".join((subject_label, attribute, units, _kind, _status)).encode("utf-8")
+        ).hexdigest()
+        subject_type = "numeric_measurement"
+        existing = (
+            db.query(Change)
+            .filter(
+                Change.person_id == person_id,
+                Change.subject_type == subject_type,
+                Change.subject_id == subject_key,
+                Change.change_type == ChangeType.TRANSITION,
+                Change.is_active.is_(True),
+            )
+            .order_by(Change.created_at.desc(), Change.id.asc())
+            .all()
+        )
+        evidence_ids = [prior_row.id, current_row.id]
+        if prior_value == current_value:
+            # Do not report a current numeric difference when the latest two
+            # comparable measurements match. Preserve the earlier transition.
+            for old in existing:
+                old.is_active = False
+                old.superseded_by_change_id = None
+                old.explanation = (
+                    (old.explanation or "")
+                    + " Latest adjacent comparable measurements now match; this prior transition is retained as history and is not a current numeric-difference claim."
+                )
+            if existing:
+                db.flush()
+            continue
+
+        if any(
+            set(old.evidence_ids or []) == set(evidence_ids)
+            and old.previous_state == f"{prior_value} {units}"
+            and old.current_state == f"{current_value} {units}"
+            for old in existing
+        ):
+            results.append(next(
+                old for old in existing
+                if set(old.evidence_ids or []) == set(evidence_ids)
+                and old.previous_state == f"{prior_value} {units}"
+                and old.current_state == f"{current_value} {units}"
+            ))
+            continue
+
+        absolute_delta = current_value - prior_value
+        relative_percent = (
+            float((absolute_delta / prior_value) * Decimal("100"))
+            if prior_value != 0 else None
+        )
+        explanation = (
+            f"The numeric observation for '{subject_label}' attribute '{attribute}' changed "
+            f"from {prior_value} {units} at {_ensure_utc(prior_row.observed_at).isoformat()} "
+            f"to {current_value} {units} at {_ensure_utc(current_row.observed_at).isoformat()}. "
+            f"Absolute difference: {absolute_delta} {units}. "
+        )
+        if relative_percent is None:
+            explanation += (
+                "Relative change is undefined because the prior value was zero. "
+            )
+        else:
+            explanation += f"Relative numeric change: {relative_percent:.4f}%. "
+        explanation += (
+            "The values use matching units and observation kind/status. This is a "
+            "descriptive measurement difference only; direction of care impact, "
+            "clinical significance, causation, and urgency are not inferred."
+        )
+        change = Change(
+            person_id=person_id,
+            subject_type=subject_type,
+            subject_id=subject_key,
+            change_type=ChangeType.TRANSITION,
+            change_direction=ChangeDirection.UNKNOWN,
+            previous_state=f"{prior_value} {units}",
+            current_state=f"{current_value} {units}",
+            magnitude=relative_percent if relative_percent is not None and isfinite(relative_percent) else None,
+            previous_count=None,
+            current_count=None,
+            baseline_id=None,
+            comparison_window_start=_ensure_utc(prior_row.observed_at),
+            comparison_window_end=_ensure_utc(current_row.observed_at),
+            persistence_days=None,
+            is_persistent=None,
+            confidence=None,
+            baseline_coverage_status="not_applicable",
+            current_coverage_status="not_applicable",
+            evidence_ids=evidence_ids,
+            explanation=explanation,
+            time_provenance="observed_at_from_source_bound_numeric_observations",
+            significance_verdict=SignificanceVerdict.INSUFFICIENT_EVIDENCE,
+            attention_candidate=False,
+            follow_up_candidate=False,
+            confirmation_status="detected",
+            is_active=True,
+        )
+        db.add(change)
+        db.flush()
+        for old in existing:
+            old.is_active = False
+            old.superseded_by_change_id = change.id
+        if existing:
+            db.flush()
+        results.append(change)
+
+    # If the bounded read is truncated, the most recent pair can still support a
+    # direct adjacent-value comparison, but no longer-term trend is inferred.
+    if truncated:
+        for result in results:
+            if "observation history was bounded" not in (result.explanation or "").lower():
+                result.explanation = (
+                    (result.explanation or "")
+                    + f" Observation history was bounded to {max_observations} records; no longer-term trend is inferred."
+                )
+    return results
