@@ -711,6 +711,7 @@ def main():
             "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
         )
         require(status == 200, f"Open Loop read after Uvicorn restart expected 200, got {status}: {open_loop_after_restart}")
+        # Four distinct actions should survive restart: stable retry, concurrent retry, and two independent appends.
         persisted_loop = open_loop_after_restart.get("loop", {})
         require(persisted_loop.get("id") == open_loop_id
                 and persisted_loop.get("status") == "open"
