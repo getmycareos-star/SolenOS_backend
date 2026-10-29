@@ -951,8 +951,8 @@ def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fal
         import app.api.collaboration as collaboration
 
         replies = iter([
-            "Saba, saba. I can help organize the recorded handoff information and identify what remains unknown.",
-            "I can organize the recorded handoff details and flag missing information without inventing a handoff.",
+            "Saba, saba. I can help organize this.",
+            "No handoff details were supplied; share the notes to organize.",
         ])
         calls = []
         def qwen_chat(messages, **kwargs):
@@ -968,7 +968,7 @@ def test_qwen_assist_uses_local_model_to_repair_unclear_draft_without_canned_fal
         )
         assert response.status_code == 200, response.text
         assert len(calls) == 2
-        assert response.json()["reply"] == "I can organize the recorded handoff details and flag missing information without inventing a handoff."
+        assert response.json()["reply"] == "No handoff details were supplied; share the notes to organize."
         assert response.json()["ai_generated"] is True
         assert response.json()["written_to_lcr"] is False
         db = TestingSessionLocal()
