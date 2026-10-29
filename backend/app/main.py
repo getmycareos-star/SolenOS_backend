@@ -26,11 +26,11 @@ from app.api.capture_review import router as capture_review_router
 from app.api.daily_care_intelligence import router as daily_care_intelligence_router
 from app.api.handoff_drafts import router as handoff_drafts_router
 from app.api.appointment_workspace import router as appointment_workspace_router
-from app.api.open_loops import router as open_loops_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
+from app.api.open_loops import router as open_loops_router
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
