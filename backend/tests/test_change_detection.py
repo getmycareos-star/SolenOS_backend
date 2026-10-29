@@ -335,6 +335,18 @@ def test_duplicate_events_not_counted_as_multiple_falls():
             evidence_ids=["evidence-1", "evidence-2"],
         )
         db.add(event)
+        db.flush()
+        # A second persisted row linked to exactly the same source evidence is
+        # duplicate documentation, not an independent occurrence.
+        db.add(CareEvent(
+            person_id=person.id,
+            event_type="fall",
+            status="recorded",
+            occurred_at=event_time,
+            title="Fall duplicate record",
+            created_by_caregiver_id=caregiver.id,
+            evidence_ids=["evidence-1", "evidence-2"],
+        ))
         db.commit()
         from app.services.baseline import get_longitudinal_event_counts
         counts = get_longitudinal_event_counts(db, person.id, "fall", None, now)
