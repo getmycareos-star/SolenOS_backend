@@ -240,7 +240,7 @@ def test_identical_source_lineage_is_not_counted_twice_in_longitudinal_history()
     with TestingSessionLocal() as db:
         person, caregiver = make_person(db, "duplicate")
         add_event(db, person, caregiver, "meal", 2, "Ate a few bites", ["source-meal-1"])
-        add_event(db, person, caregiver, "meal", 1, "Copied summary of same meal", ["source-meal-1"])
+        add_event(db, person, caregiver, "meal", 2, "Copied summary of same meal", ["source-meal-1"])
         counts = get_longitudinal_event_counts(db, person.id, "meal", None, NOW)
         assert counts["current_window_count"] == 1
         assert len(counts["recent_events"]) == 1
