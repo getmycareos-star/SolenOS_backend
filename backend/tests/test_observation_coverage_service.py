@@ -53,9 +53,9 @@ def test_partial_coverage_does_not_claim_full_observation():
         db.commit()
         result = assess_observation_coverage(db, person.id, "mobility", start, end)
         assert result["coverage_status"] == "partial"
-        # A qualitative "partial" declaration does not quantify what fraction
-        # of the interval was observed; do not invent a numeric zero.
-        assert result["coverage_fraction"] is None.5
+        # Only the first half has explicit complete coverage; the uncovered
+        # remainder is unknown rather than a measured zero-event interval.
+        assert result["coverage_fraction"] == 0.5
         assert "event absence cannot be inferred" in result["limitations"][0]
     finally:
         db.close()
@@ -106,6 +106,7 @@ def test_coverage_records_are_isolated_by_person():
 
 def test_decrease_requires_complete_coverage_for_both_comparison_windows():
     from app.models.care import CareEvent
+    from app.models.change import Change
     from app.services.baseline import build_baseline
     from app.services.change_detection import detect_event_changes
 
