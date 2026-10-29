@@ -376,3 +376,56 @@ def _enforce_evidence_observation_append_only(session, flush_context, instances)
         raise ValueError("Evidence observations are append-only; create a corrected observation instead")
     if any(isinstance(obj, cls) for obj in session.deleted):
         raise ValueError("Evidence observations are append-only and cannot be deleted")
+
+
+class EvidenceFreshnessPolicy(Base):
+    """Append-only, caregiver-defined freshness policy for one care domain.
+
+    No global age threshold is supplied. A policy must explicitly state the
+    domain and at least one review boundary before it can be used.
+    """
+    __tablename__ = "evidence_freshness_policies"
+    __table_args__ = (
+        UniqueConstraint("person_id", "domain_key", "policy_version", name="uq_evidence_freshness_policy_version"),
+        Index("ix_evidence_freshness_policies_person_domain", "person_id", "domain_key"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain_key = Column(String(80), nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    max_age_days = Column(Integer, nullable=True)
+    historical_after_days = Column(Integer, nullable=True)
+    rationale = Column(Text, nullable=False)
+    created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class EvidenceFreshnessAssessment(Base):
+    """Append-only result of applying an explicit policy to one evidence item."""
+    __tablename__ = "evidence_freshness_assessments"
+    __table_args__ = (
+        Index("ix_evidence_freshness_assessments_person_evidence", "person_id", "evidence_id", "assessed_at"),
+        Index("ix_evidence_freshness_assessments_policy", "policy_id"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
+    policy_id = Column(String, ForeignKey("evidence_freshness_policies.id", ondelete="RESTRICT"), nullable=False)
+    policy_version = Column(String(64), nullable=False)
+    freshness_status = Column(String(32), nullable=False)
+    source_time = Column(DateTime(timezone=True), nullable=True)
+    assessed_at = Column(DateTime(timezone=True), nullable=False)
+    age_days = Column(Integer, nullable=True)
+    rationale = Column(Text, nullable=False)
+    assessed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def _enforce_evidence_freshness_append_only(session, flush_context, instances):
+    immutable = (EvidenceFreshnessPolicy, EvidenceFreshnessAssessment)
+    if any(isinstance(obj, immutable) for obj in session.dirty):
+        raise ValueError("Evidence freshness policies and assessments are append-only")
+    if any(isinstance(obj, immutable) for obj in session.deleted):
+        raise ValueError("Evidence freshness policies and assessments cannot be deleted")
