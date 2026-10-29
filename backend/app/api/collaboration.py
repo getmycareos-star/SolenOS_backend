@@ -1401,12 +1401,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
         shared_lcr_lines: list[str] = []
+        evidence_lineage_context: dict[str, Any] = {
+            "status": "not_assessed",
+            "groups": [],
+            "interpretation_limit": "No lineage assessment was supplied; this does not establish source independence.",
+        }
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
             shared_lcr_context = build_lcr_context(
                 db, person_id, limit_per_source=20, query=retrieval_query
             )
+            evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
                 if source_name in {"living_record", "events", "evidence", "assertions", "appointments"}:
                     continue
@@ -1442,8 +1448,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
         source_evidence_ids = _context_record_ids(evidence_context, "evidence_id")
+        lineage_context_line = (
+            "Evidence source lineage metadata (explicit provenance only; not proof of truth or independence): "
+            + json.dumps(evidence_lineage_context, ensure_ascii=False, default=str)
+        )
         source_context = [
-            *event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines
+            *event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines,
+            *([] if _is_casual_greeting(user_text) else [lineage_context_line]),
         ]
         context_payload = {
             "care_recipient_name": person.name,
@@ -1454,6 +1465,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "caregiver_provided_evidence": evidence_context,
             "shared_lcr_context": shared_lcr_lines,
             "lcr_context_coverage": lcr_context_coverage,
+            "evidence_lineage": evidence_lineage_context,
             "conversation_is_not_care_evidence": True,
             "missing_information_rule": "If the authorized record does not contain the answer, say it is not recorded or ask a focused question.",
         }
