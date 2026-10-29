@@ -179,6 +179,28 @@ class UncertaintyEngine:
                 raise ValueError("A linked claim must belong to the same care record.")
             if claim.subject_type != payload["subject_type"] or claim.subject_id != payload["subject_id"]:
                 raise ValueError("A clarification question must use the linked claim's subject scope.")
+        allowed_answerer_roles = {
+            "person_receiving_care", "reporting_caregiver", "other_caregiver",
+            "professional", "not_known",
+        }
+        answerer_role = payload.get("intended_answerer_role")
+        if answerer_role is not None and answerer_role not in allowed_answerer_roles:
+            raise ValueError("Unsupported intended answerer role.")
+        answerer_label = payload.get("intended_answerer_label")
+        if answerer_label is not None:
+            answerer_label = answerer_label.strip()
+            payload["intended_answerer_label"] = answerer_label or None
+        if answerer_role == "not_known" and answerer_label:
+            raise ValueError("Do not attach a named answerer label when the intended answerer is explicitly unknown.")
+        necessity = payload.get("necessity", "not_assessed")
+        if necessity not in {"necessary", "optional", "not_assessed"}:
+            raise ValueError("Necessity must be necessary, optional, or not_assessed.")
+        necessity_rationale = payload.get("necessity_rationale")
+        if necessity_rationale is not None:
+            necessity_rationale = necessity_rationale.strip()
+            payload["necessity_rationale"] = necessity_rationale or None
+        if necessity in {"necessary", "optional"} and not necessity_rationale:
+            raise ValueError("A necessity assessment requires a recorded rationale.")
         question_text = (payload.get("question") or "").strip()
         if not question_text:
             raise ValueError("A clarification question must contain non-empty text.")
