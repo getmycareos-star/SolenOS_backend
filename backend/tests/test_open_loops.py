@@ -303,3 +303,33 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
     history = refreshed.json()["history"]
     assert any(item["event_type"] == "dependency_unblocked" for item in history)
 
+def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
+    client = TestClient(app)
+    _, headers = session(client, "Contradiction recipient")
+    loop = create_loop(client, headers, "contradiction", title="Two conflicting reports")
+
+    premature = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={"text": "Reviewed", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert premature.status_code == 409, premature.text
+
+    reconciled = client.post(
+        f"/api/v1/open-loops/{loop['id']}/reconcile",
+        headers=headers,
+        json={
+            "text": "The two reports refer to different dates; neither is discarded.",
+            "evidence": [{"kind": "source_comparison"}],
+        },
+    )
+    assert reconciled.status_code == 200, reconciled.text
+
+    closed = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={"text": "The record was reviewed against the reconciliation.", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["loop"]["status"] == "closed"
+
