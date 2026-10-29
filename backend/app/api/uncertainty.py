@@ -442,7 +442,11 @@ def analyze_and_persist_uncertainty(
     # Resolve the full bounded, same-person provenance closure. Parent-only
     # walking misses shared original-source references and reviewed relationships
     # that connect selected records through unselected ancestors or siblings.
-    from app.services.evidence_lineage import build_evidence_lineage, load_evidence_lineage_scope
+    from app.services.evidence_lineage import (
+        build_evidence_lineage,
+        find_exact_content_duplicate_candidates,
+        load_evidence_lineage_scope,
+    )
 
     lineage_scope = load_evidence_lineage_scope(
         engine.db, request.person_id, requested_evidence_ids,
@@ -486,6 +490,23 @@ def analyze_and_persist_uncertainty(
             "it does not establish claim truth or prove independent witnessing."
         ),
     }
+    exact_duplicate_candidates = find_exact_content_duplicate_candidates(
+        lineage_scope["evidence_rows"], requested_evidence_ids
+    )
+    analysis["exact_content_duplicate_candidates"] = exact_duplicate_candidates
+    if exact_duplicate_candidates and not lineage_scope["truncated"]:
+        # Matching hashes prove identical stored text, not a shared author or
+        # common origin. Until a human reviews source independence, do not let
+        # these copies inflate a numeric corroboration count.
+        analysis["independent_evidence_record_count"] = None
+        analysis["independent_evidence_count_status"] = "requires_source_independence_review"
+        analysis["review_required"] = True
+        analysis["classifications"] = sorted(
+            set(analysis.get("classifications", [])) | {"exact_content_duplicate_candidate_review"}
+        )
+        analysis.setdefault("limitations", []).append(
+            "Identical stored source text was found. Common origin and independent witnessing remain unestablished; review source relationships before counting corroboration."
+        )
     if lineage_scope["truncated"]:
         analysis["classifications"] = sorted(set(analysis.get("classifications", [])) | {"source_lineage_scope_truncated"})
         analysis.setdefault("limitations", []).append(
