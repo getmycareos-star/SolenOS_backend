@@ -72,27 +72,32 @@ def upgrade() -> None:
     # Backfill a deterministic hash for every existing text source. This hash
     # covers the stored UTF-8 text only; it is not a claim about source authenticity
     # or about the bytes of an original uploaded file.
-    evidence = sa.table(
-        "evidence",
-        sa.column("id", sa.String()),
-        sa.column("source_text", sa.Text()),
-        sa.column("source_text_sha256", sa.String(64)),
-    )
-    rows = bind.execute(
-        select(evidence.c.id, evidence.c.source_text).where(
-            evidence.c.source_text_sha256.is_(None)
+    # Some supported legacy schemas contain an evidence table with a different
+    # pre-canonical shape. Do not assume source_text exists there; the canonical
+    # schema's data is backfilled, while legacy reconciliation remains explicit.
+    current_columns = {column["name"] for column in inspect(bind).get_columns("evidence")}
+    if {"id", "source_text", "source_text_sha256"}.issubset(current_columns):
+        evidence = sa.table(
+            "evidence",
+            sa.column("id", sa.String()),
+            sa.column("source_text", sa.Text()),
+            sa.column("source_text_sha256", sa.String(64)),
         )
-    ).mappings()
-    for row in rows:
-        source_text = row["source_text"]
-        if source_text is None:
-            continue
-        digest = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-        bind.execute(
-            update(evidence)
-            .where(evidence.c.id == row["id"])
-            .values(source_text_sha256=digest)
-        )
+        rows = bind.execute(
+            select(evidence.c.id, evidence.c.source_text).where(
+                evidence.c.source_text_sha256.is_(None)
+            )
+        ).mappings()
+        for row in rows:
+            source_text = row["source_text"]
+            if source_text is None:
+                continue
+            digest = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+            bind.execute(
+                update(evidence)
+                .where(evidence.c.id == row["id"])
+                .values(source_text_sha256=digest)
+            )
 
 
 def downgrade() -> None:
