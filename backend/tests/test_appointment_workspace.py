@@ -312,15 +312,24 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
                 question TEXT NOT NULL,
                 subject_type VARCHAR(255) NOT NULL,
                 subject_id VARCHAR(255) NOT NULL,
+                claim_id VARCHAR(255),
+                intended_answerer_role VARCHAR(40),
+                intended_answerer_label TEXT,
+                necessity VARCHAR(20) NOT NULL DEFAULT 'not_assessed',
+                necessity_rationale TEXT,
                 status VARCHAR(40) NOT NULL,
                 priority INTEGER,
                 evidence_ids TEXT,
+                context TEXT,
                 asked_at DATETIME,
                 answered_at DATETIME,
                 answer TEXT,
+                answer_provenance TEXT,
+                answered_by_caregiver_id VARCHAR(255),
                 closed_at DATETIME,
                 closed_reason TEXT,
-                created_by_caregiver_id VARCHAR(255)
+                created_by_caregiver_id VARCHAR(255),
+                updated_at DATETIME
             )
         """))
         connection.execute(text("""
