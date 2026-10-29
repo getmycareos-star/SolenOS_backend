@@ -147,3 +147,51 @@ def test_evidence_review_history_cannot_be_updated_or_deleted(review_records):
         db.commit()
     db.rollback()
     db.close()
+
+
+
+def test_source_assertion_preserves_reported_status_evidence_and_event_time(review_records):
+    client_a, _ = review_records
+    response = client_a.post("/api/v1/care-continuity/assertions", json={
+        "person_id": "review-person-b",
+        "subject_type": "appointment",
+        "subject_id": "appointment-42",
+        "field": "attendance",
+        "assertion_kind": "time_bound_observation",
+        "asserted_value": "Caregiver reported attendance",
+        "source_label": "Caregiver report",
+        "source_text": "The caregiver said the appointment was attended.",
+        "evidence_ids": ["review-evidence-a"],
+        "observed_at": "2026-10-28T09:30:00Z",
+        "review_after_days": 14,
+        "assertion_status": "confirmed",
+    })
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["person_id"] == "review-person-a"
+    assert created["assertion_status"] == "reported"
+    assert created["evidence_ids"] == ["review-evidence-a"]
+    assert created["observed_at"].startswith("2026-10-28T09:30:00")
+
+    retrieved = client_a.get("/api/v1/care-continuity/assertions?limit=100")
+    assert retrieved.status_code == 200, retrieved.text
+    persisted = [item for item in retrieved.json() if item["id"] == created["id"]]
+    assert len(persisted) == 1
+    assert persisted[0]["asserted_value"] == "Caregiver reported attendance"
+    assert persisted[0]["evidence_ids"] == ["review-evidence-a"]
+
+
+def test_time_bound_assertion_requires_actual_event_time(review_records):
+    client_a, _ = review_records
+    response = client_a.post("/api/v1/care-continuity/assertions", json={
+        "subject_type": "daily_care",
+        "subject_id": "meal-1",
+        "field": "appetite",
+        "assertion_kind": "time_bound_observation",
+        "asserted_value": "Reduced appetite",
+        "source_label": "Caregiver report",
+        "evidence_ids": [],
+        "review_after_days": 7,
+    })
+    assert response.status_code == 422
+    assert "actual event time" in response.json()["detail"]
