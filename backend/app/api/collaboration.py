@@ -1000,7 +1000,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # only the record context needed to perform its explicit task.
     event_workflows = {
         "add_record", "living_care_record", "care_history_search", "care_situation_change",
-        "delta_engine", "evidence_provenance", "uncertainty_contradictions",
+        "delta_engine", "uncertainty_contradictions",
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
         "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support", "document_validity_renewal",
@@ -1097,6 +1097,58 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         line.startswith("Recorded notification [") for line in context_lines
     ):
         context_lines.append("No authoritative reminder delivery receipt or notification state is available to this request.")
+
+    # Source-labeling is deterministic when the supplied text itself identifies
+    # provenance. Do not spend a model call or let a small model invent a source
+    # category. Unknown stays unknown; no LCR mutation occurs.
+    if payload.workflow == "evidence_provenance":
+        claim_text = payload.text.strip()
+        caregiver_observation = re.search(
+            r"\bcaregiver\s+(?:observed|reported|noticed|said|states|stated)\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_absent = re.search(
+            r"\bno\b.{0,60}\bprofessional\b.{0,40}\b"
+            r"(?:assessment|report|note|information)\b.{0,40}\b"
+            r"(?:supplied|provided|available|recorded|included)\b",
+            claim_text,
+            re.IGNORECASE,
+        )
+        professional_present = re.search(
+            r"\b(?:professional|clinician|doctor|nurse)\s+"
+            r"(?:assessment|report|note)\b",
+            claim_text,
+            re.IGNORECASE,
+        ) and not professional_absent
+        if caregiver_observation:
+            source_label = "caregiver-reported observation"
+            source_explanation = "The supplied text explicitly says the caregiver observed the claim."
+        else:
+            source_label = "not established from the supplied text"
+            source_explanation = "The supplied text does not explicitly establish who or what source originated the claim."
+        if professional_absent:
+            professional_label = "No professional assessment is supplied in the provided text."
+        elif professional_present:
+            professional_label = "A professional assessment is referenced in the provided text; its content and authority are not independently verified here."
+        else:
+            professional_label = "Professional-assessment status is not established by the provided text."
+        reply = (
+            f"Source label: {source_label}. {source_explanation} "
+            f"{professional_label} This identifies provenance only; it does not verify the underlying observation."
+        )
+        return {
+            "workflow": payload.workflow,
+            "reply": reply,
+            "ai_generated": False,
+            "authority": "solenos_care_record_and_caregiver",
+            "review_required": True,
+            "written_to_lcr": False,
+            "persistence": "read_only_assistance",
+            "source_event_ids": [],
+            "source_evidence_ids": source_evidence_ids,
+            "provider_status": "not_required_deterministic",
+        }
 
     guidance = {
         "daily_capture": "Organize only what the caregiver reports today. Separate reported facts, uncertainty and questions. Do not infer diagnosis, cause or unreported measurements.",
