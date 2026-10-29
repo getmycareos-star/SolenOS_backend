@@ -98,6 +98,12 @@ def _validate_summary_source_record_ids(db: Session, person_id: str, source_ids:
                 status_code=422,
                 detail="Every summary source ID must resolve to an existing record in the authenticated care record",
             )
+        ambiguous = [source_id for source_id, tables in resolved.items() if len(tables) > 1]
+        if ambiguous:
+            raise HTTPException(
+                status_code=422,
+                detail="Every summary source ID must resolve unambiguously to one persisted record in the authenticated care record",
+            )
         return resolved
     except HTTPException:
         raise
