@@ -436,47 +436,22 @@ def analyze_and_persist_uncertainty(
     else:
         evidence_rows = []
 
-    # Bring persisted source lineage and every reachable ancestor into the
-    # analysis. All lookups remain scoped to this person. A bounded walk prevents
-    # corrupt cycles or unexpectedly deep chains from turning into unbounded work.
-    from app.models.care_continuity import EvidenceSourceRelationship
-    from app.services.evidence_lineage import build_evidence_lineage
+    if len(requested_evidence_ids) > 250:
+        raise HTTPException(status_code=422, detail="An uncertainty analysis may reference at most 250 evidence records; split the review into bounded assessments.")
 
-    lineage_rows_by_id = {str(row.id): row for row in evidence_rows}
-    frontier = {
-        str(row.parent_evidence_id)
-        for row in evidence_rows
-        if getattr(row, "parent_evidence_id", None)
-        and str(row.parent_evidence_id) not in lineage_rows_by_id
-    }
-    for _depth in range(20):
-        if not frontier:
-            break
-        ancestor_rows = engine.db.query(Evidence).filter(
-            Evidence.person_id == request.person_id,
-            Evidence.id.in_(frontier),
-        ).all()
-        next_frontier: set[str] = set()
-        for ancestor in ancestor_rows:
-            ancestor_id = str(ancestor.id)
-            if ancestor_id in lineage_rows_by_id:
-                continue
-            lineage_rows_by_id[ancestor_id] = ancestor
-            parent_id = str(getattr(ancestor, "parent_evidence_id", None) or "").strip()
-            if parent_id and parent_id not in lineage_rows_by_id:
-                next_frontier.add(parent_id)
-        frontier = next_frontier
+    # Resolve the full bounded, same-person provenance closure. Parent-only
+    # walking misses shared original-source references and reviewed relationships
+    # that connect selected records through unselected ancestors or siblings.
+    from app.services.evidence_lineage import build_evidence_lineage, load_evidence_lineage_scope
 
-    lineage_ids = sorted(lineage_rows_by_id)
-    relationships = []
-    if lineage_ids:
-        relationships = engine.db.query(EvidenceSourceRelationship).filter(
-            EvidenceSourceRelationship.person_id == request.person_id,
-            (EvidenceSourceRelationship.source_evidence_id.in_(lineage_ids))
-            | (EvidenceSourceRelationship.related_evidence_id.in_(lineage_ids)),
-        ).all()
+    lineage_scope = load_evidence_lineage_scope(
+        engine.db, request.person_id, requested_evidence_ids,
+        max_depth=12, max_nodes=250, max_relationships=450,
+    )
     lineage_by_id, independence_by_id = build_evidence_lineage(
-        lineage_rows_by_id.values(), relationships, requested_evidence_ids
+        lineage_scope["evidence_rows"],
+        lineage_scope["relationships"],
+        requested_evidence_ids,
     )
 
     try:
@@ -501,6 +476,24 @@ def analyze_and_persist_uncertainty(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    analysis["source_lineage_scope"] = {
+        "status": "truncated" if lineage_scope["truncated"] else "bounded_closure_loaded",
+        "evidence_nodes_examined": len(lineage_scope["evidence_rows"]),
+        "relationship_records_examined": len(lineage_scope["relationships"]),
+        "interpretation_limit": (
+            "Lineage follows persisted same-person parent/source references and reviewed relationships; "
+            "it does not establish claim truth or prove independent witnessing."
+        ),
+    }
+    if lineage_scope["truncated"]:
+        analysis["classifications"] = sorted(set(analysis.get("classifications", [])) | {"source_lineage_scope_truncated"})
+        analysis.setdefault("limitations", []).append(
+            "The source-lineage traversal reached its safety bound. Independent corroboration cannot be established from this incomplete lineage scope."
+        )
+        analysis["review_required"] = True
+        analysis["independent_evidence_record_count"] = None
+        analysis["independent_evidence_count_status"] = "unavailable_due_to_truncated_lineage"
 
     from app.schemas.uncertainty import UncertaintyAssessmentCreate
     from app.core.uncertainty_enums import EpistemicState, GapReason
