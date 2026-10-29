@@ -289,7 +289,7 @@ def test_corroboration_state_requires_explicit_claim_or_detail_relationship():
     rows = [SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
             SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None)]
     link = SimpleNamespace(source_evidence_id="a", related_evidence_id="b",
-        source_independence_status="independent", relationship_type="corroborates_detail", origin_group_key=None)
+        source_independence_status="independent", relationship_type="corroborates", origin_group_key=None)
     result = assess_corroboration(rows, [link], ["a", "b"])
     assert result["status"] == "independent_corroboration_reviewed_for_specific_claim_or_detail"
     assert result["independent_corroboration_established"] is True
