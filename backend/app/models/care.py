@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, event, event
+from sqlalchemy import Column, String, DateTime, Date, Boolean, Text, ForeignKey, Float, Integer, event, inspect as sa_inspect
 from sqlalchemy.sql import func
 import hashlib
 import uuid
@@ -66,6 +66,20 @@ def _hash_evidence_source_text(mapper, connection, target):
     # upstream author or prove that an uploaded binary matches the text.
     if target.source_text is not None:
         target.source_text_sha256 = hashlib.sha256(target.source_text.encode("utf-8")).hexdigest()
+
+
+@event.listens_for(Evidence, "before_update")
+def _prevent_evidence_source_mutation(mapper, connection, target):
+    """The original source is append-only; corrections require a new record."""
+    state = sa_inspect(target)
+    if (
+        state.attrs.source_text.history.has_changes()
+        or state.attrs.source_text_sha256.history.has_changes()
+    ):
+        raise ValueError(
+            "Original evidence source text and fingerprint are immutable; "
+            "record a correction or derived evidence instead."
+        )
 
 
 class CareEvent(Base):
