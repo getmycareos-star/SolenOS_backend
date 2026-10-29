@@ -514,7 +514,7 @@ def update_situations_endpoint(
 # Coverage is recorded independently of event occurrence. It describes observation,
 # not whether an event did or did not happen.
 
-def _coverage_record_out(row: ObservationCoverage) -> dict:
+def _coverage_record_out(row) -> dict:
     """Serialize UTC-normalized coverage timestamps safely across DB dialects."""
     def utc(value):
         if value is None:
