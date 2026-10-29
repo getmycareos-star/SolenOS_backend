@@ -122,6 +122,9 @@ jobs:
               for item in question_claim_fks
           ), "open_questions.claim_id must reference care_assertions"
           evidence_uniques = inspector.get_unique_constraints("evidence")
+          evidence_uniques += [
+              item for item in inspector.get_indexes("evidence") if item.get("unique")
+          ]
           assert any(
               item.get("name") == "uq_evidence_person_ingestion_key"
               and item.get("column_names") == ["person_id", "ingestion_key"]
