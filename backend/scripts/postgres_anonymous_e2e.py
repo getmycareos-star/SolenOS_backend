@@ -387,6 +387,12 @@ def main():
         )
         require(status == 201 and open_loop_retry.get("id") == open_loop_id,
                 f"Open Loop idempotent create retry created a duplicate or failed: {status}: {open_loop_retry}")
+        changed_retry_payload = {**open_loop_payload, "title": "Different title with the same idempotency key"}
+        status, changed_retry = request(
+            "POST", "/api/v1/open-loops", token=token_a, body=changed_retry_payload,
+        )
+        require(status == 409,
+                f"Reusing a create idempotency key with a different core payload must return 409: {status}: {changed_retry}")
         # Race two identical create requests. A unique database constraint plus
         # retry recovery must converge on one durable loop instead of returning 500.
         from concurrent.futures import ThreadPoolExecutor
