@@ -1451,3 +1451,42 @@ def test_zero_baseline_rate_is_explained_without_infinite_percentage():
         db.close()
     finally:
         teardown_db()
+
+
+def test_pattern_detection_finds_short_window_cluster_from_distinct_events():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-cluster", name="Cluster Test Person")
+        caregiver = Caregiver(
+            id="caregiver-cluster",
+            name="Cluster Test Caregiver",
+            email="cluster@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index, days_ago in enumerate((50, 5, 4, 3), start=1):
+            db.add(CareEvent(
+                person_id=person.id,
+                event_type="fall",
+                status="recorded",
+                occurred_at=now - timedelta(days=days_ago),
+                title=f"Source fall event {index}",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"evidence-cluster-{index}"],
+            ))
+        db.commit()
+
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "fall", None, now)
+        clusters = [item for item in patterns if item.pattern_type.value == "clustering"]
+        assert len(clusters) == 1
+        assert len(clusters[0].event_ids) == 3
+        assert clusters[0].confidence is None
+        assert "does not establish a cause" in " ".join(clusters[0].alternative_interpretations or [])
+    finally:
+        db.close()
+        teardown_db()
