@@ -60,7 +60,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         captured["messages"] = messages
         captured["options"] = options
         return (
-            "The record contains one sleep observation from last night. "
+            "The record contains one sleep observation. "
             "That is not enough information to establish a trend."
         )
 
