@@ -1689,3 +1689,126 @@ def test_pattern_detection_does_not_mix_source_events_across_subjects():
         db.close()
     finally:
         teardown_db()
+
+
+def test_observation_coverage_api_persists_and_assesses_across_requests():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="coverage-api-person", name="Coverage API person")
+        caregiver = Caregiver(
+            id="coverage-api-caregiver",
+            name="Coverage API caregiver",
+            email="coverage-api@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        token = issue_scoped_session(db, person, caregiver)
+        db.close()
+
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(days=14)
+        end = now - timedelta(minutes=1)
+        client = TestClient(app)
+        created = client.post(
+            "/api/v1/change/coverage",
+            json={
+                "person_id": person.id,
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": end.isoformat(),
+                "coverage_status": "covered",
+                "source_evidence_ids": [],
+                "rationale": "Caregiver explicitly observed mobility throughout this interval.",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert created.status_code == 201, created.text
+        saved = created.json()
+        assert saved["person_id"] == person.id
+        assert saved["recorded_by_caregiver_id"] == caregiver.id
+
+        assessed = client.get(
+            f"/api/v1/change/coverage/{person.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": start.isoformat(),
+                "window_end": end.isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert assessed.status_code == 200, assessed.text
+        body = assessed.json()
+        assert body["coverage_status"] == "covered"
+        assert body["coverage_fraction"] == 1.0
+        assert any(record["id"] == saved["id"] for record in body["records"])
+    finally:
+        teardown_db()
+
+
+def test_observation_coverage_api_enforces_bearer_person_scope():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person_a = Person(id="coverage-scope-person-a", name="Person A")
+        caregiver_a = Caregiver(
+            id="coverage-scope-caregiver-a",
+            name="Caregiver A",
+            email="coverage-scope-a@example.com",
+            relationship="Family",
+            person_id=person_a.id,
+        )
+        person_b = Person(id="coverage-scope-person-b", name="Person B")
+        caregiver_b = Caregiver(
+            id="coverage-scope-caregiver-b",
+            name="Caregiver B",
+            email="coverage-scope-b@example.com",
+            relationship="Family",
+            person_id=person_b.id,
+        )
+        db.add_all([person_a, caregiver_a, person_b, caregiver_b])
+        db.commit()
+        token_a = issue_scoped_session(db, person_a, caregiver_a)
+        db.close()
+
+        now = datetime.now(timezone.utc)
+        client = TestClient(app)
+        unauthorized = client.get(
+            f"/api/v1/change/coverage/{person_a.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": (now - timedelta(days=2)).isoformat(),
+                "window_end": (now - timedelta(days=1)).isoformat(),
+            },
+        )
+        assert unauthorized.status_code == 401
+
+        cross_person_read = client.get(
+            f"/api/v1/change/coverage/{person_b.id}",
+            params={
+                "subject_type": "mobility",
+                "window_start": (now - timedelta(days=2)).isoformat(),
+                "window_end": (now - timedelta(days=1)).isoformat(),
+            },
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert cross_person_read.status_code == 403
+
+        cross_person_write = client.post(
+            "/api/v1/change/coverage",
+            json={
+                "person_id": person_b.id,
+                "subject_type": "mobility",
+                "window_start": (now - timedelta(days=2)).isoformat(),
+                "window_end": (now - timedelta(days=1)).isoformat(),
+                "coverage_status": "covered",
+                "source_evidence_ids": [],
+                "rationale": "This write must be rejected for a different care record.",
+            },
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert cross_person_write.status_code == 403
+    finally:
+        teardown_db()
