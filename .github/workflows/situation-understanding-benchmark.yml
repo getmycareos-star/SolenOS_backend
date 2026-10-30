@@ -113,6 +113,7 @@ jobs:
           --health-retries 12
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
+    DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
