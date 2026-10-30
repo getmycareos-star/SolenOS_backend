@@ -118,8 +118,12 @@ def _signals_share_source(
     left_source_field: str,
     right_source_field: str,
 ) -> bool:
-    # subject_type/subject_id are descriptive domain fields, not globally
-    # unique identities. They must never be used as a substitute for lineage.
+    # subject_type is only a domain boundary, never an identity. A shared
+    # source can link signals within one domain but cannot merge two domains.
+    left_domain = str(getattr(left, "subject_type", "") or "").strip().casefold()
+    right_domain = str(getattr(right, "subject_type", "") or "").strip().casefold()
+    if not left_domain or left_domain != right_domain:
+        return False
     return bool(
         _signal_source_ids(left, left_source_field)
         & _signal_source_ids(right, right_source_field)
