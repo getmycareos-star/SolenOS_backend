@@ -333,6 +333,13 @@ def main():
         duplicate_upload_body = next(body for body in upload_bodies if body["duplicate_detected"])
         require(duplicate_upload_body.get("duplicate_of_evidence_id") == original_upload_id,
                 f"Duplicate must point to the single canonical original: {upload_bodies}")
+        foreign_download_status, foreign_download_body = request(
+            "GET", f"/api/v1/upload/{original_upload_id}", token=token_b
+        )
+        require(
+            foreign_download_status == 403,
+            f"Binary evidence download must enforce care-record isolation: {foreign_download_status}: {foreign_download_body}",
+        )
 
 
         # Professional-input evidence must resolve to a real source row in the
