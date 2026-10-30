@@ -1,36 +1,22 @@
-name: Situation-understanding benchmark
+name: Messy-care benchmark gate
 
 on:
+  # This is a primary engineering gate: run for every PR to main, not only
+  # when a hand-maintained list of paths happens to match.
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
-    paths:
-      - "backend/app/services/uncertainty_intelligence.py"
-      - "backend/app/services/baseline.py"
-      - "backend/app/services/change_detection.py"
-      - "backend/app/services/pattern_detection.py"
-      - "backend/app/api/change.py"
-      - "backend/tests/test_situation_understanding_benchmark.py"
-      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
-      - ".github/workflows/situation-understanding-benchmark.yml"
-  pull_request:
-    paths:
-      - "backend/app/services/uncertainty_intelligence.py"
-      - "backend/app/services/baseline.py"
-      - "backend/app/services/change_detection.py"
-      - "backend/app/services/pattern_detection.py"
-      - "backend/app/api/change.py"
-      - "backend/tests/test_situation_understanding_benchmark.py"
-      - "backend/tests/test_longitudinal_messy_care_benchmark.py"
-      - ".github/workflows/situation-understanding-benchmark.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  benchmark:
+  messy-care-contract:
+    name: Messy-care adversarial contract benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -45,26 +31,32 @@ jobs:
       - name: Install backend and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
 
-      - name: Run situation-understanding benchmark
+      - name: Run adversarial messy-care contract suite
         id: benchmark
         continue-on-error: true
-        run: python -m pytest backend/tests/test_situation_understanding_benchmark.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/situation-understanding-benchmark.xml
+        run: |
+          python -m pytest \
+            backend/tests/test_situation_understanding_benchmark.py \
+            backend/tests/test_longitudinal_messy_care_benchmark.py \
+            backend/tests/test_longitudinal_change_benchmark.py \
+            backend/tests/test_open_loop_messy_scenarios.py \
+            backend/tests/test_situation_temporal_provenance.py \
+            backend/tests/test_evidence_lineage.py \
+            backend/tests/test_evidence_review_persistence.py \
+            backend/tests/test_care_continuity_link_validation.py \
+            backend/tests/test_uncertainty_benchmark.py \
+            -q -s --junitxml=/tmp/messy-care-contract.xml
 
-      - name: Publish measured benchmark score and enforce gate
+      - name: Enforce complete benchmark execution
         if: always()
         run: |
           python - <<'PY'
           import os
           import xml.etree.ElementTree as ET
 
-          report = "/tmp/situation-understanding-benchmark.xml"
+          report = "/tmp/messy-care-contract.xml"
           if not os.path.exists(report):
-              print("SITUATION_BENCHMARK_SCORE=0.00")
-              print("SITUATION_BENCHMARK_PASSED=0")
-              print("SITUATION_BENCHMARK_EXECUTED=0")
-              print("SITUATION_BENCHMARK_FAILED=0")
-              print("SITUATION_BENCHMARK_ERRORS=1")
-              raise SystemExit("Benchmark report missing; no score can be claimed.")
+              raise SystemExit("Messy-care benchmark report missing; no pass can be claimed.")
           root = ET.parse(report).getroot()
           suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
           tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
@@ -73,22 +65,33 @@ jobs:
           skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
           executed = tests - skipped
           passed = executed - failures - errors
-          score = round(100 * passed / executed, 2) if executed else 0.0
-          print(f"SITUATION_BENCHMARK_SCORE={score:.2f}")
-          print(f"SITUATION_BENCHMARK_PASSED={passed}")
-          print(f"SITUATION_BENCHMARK_EXECUTED={executed}")
-          print(f"SITUATION_BENCHMARK_FAILED={failures}")
-          print(f"SITUATION_BENCHMARK_ERRORS={errors}")
-          print(f"SITUATION_BENCHMARK_SKIPPED={skipped}")
+          print(f"MESSY_CARE_CASES_DECLARED={tests}")
+          print(f"MESSY_CARE_CASES_EXECUTED={executed}")
+          print(f"MESSY_CARE_CASES_PASSED={passed}")
+          print(f"MESSY_CARE_CASES_FAILED={failures}")
+          print(f"MESSY_CARE_CASES_ERRORED={errors}")
+          print(f"MESSY_CARE_CASES_SKIPPED={skipped}")
           if not executed or failures or errors or skipped:
-              raise SystemExit("Situation benchmark gate failed: zero executed, failures/errors, or skipped cases.")
+              raise SystemExit(
+                  "Messy-care gate failed: require nonzero execution and zero failures, "
+                  "errors, or skips."
+              )
           PY
           test "${{ steps.benchmark.outcome }}" = "success"
 
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: messy-care-contract-junit
+          path: /tmp/messy-care-contract.xml
+          if-no-files-found: error
+          retention-days: 30
 
   postgres-longitudinal-integration:
+    name: PostgreSQL longitudinal persistence benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17
@@ -108,35 +111,54 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: backend/pyproject.toml
+
       - name: Install backend and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
+
       - name: Run longitudinal messy-care benchmark against PostgreSQL
-        run: python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml
-      - name: Enforce PostgreSQL integration gate
+        id: postgres_benchmark
+        continue-on-error: true
+        run: |
+          python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py \
+            -q -s --junitxml=/tmp/postgres-longitudinal.xml
+
+      - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
           python - <<'PY'
           import os
           import xml.etree.ElementTree as ET
-          path = "/tmp/postgres-longitudinal.xml"
-          if not os.path.exists(path):
-              raise SystemExit("PostgreSQL integration report missing; no pass can be claimed.")
-          root = ET.parse(path).getroot()
+
+          report = "/tmp/postgres-longitudinal.xml"
+          if not os.path.exists(report):
+              raise SystemExit("PostgreSQL benchmark report missing; no pass can be claimed.")
+          root = ET.parse(report).getroot()
           suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
           tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
           failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
           errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
           skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
-          print(f"POSTGRES_LONGITUDINAL_TESTS={tests}")
-          print(f"POSTGRES_LONGITUDINAL_FAILURES={failures}")
-          print(f"POSTGRES_LONGITUDINAL_ERRORS={errors}")
-          print(f"POSTGRES_LONGITUDINAL_SKIPPED={skipped}")
+          print(f"POSTGRES_MESSY_CARE_CASES_DECLARED={tests}")
+          print(f"POSTGRES_MESSY_CARE_CASES_FAILED={failures}")
+          print(f"POSTGRES_MESSY_CARE_CASES_ERRORED={errors}")
+          print(f"POSTGRES_MESSY_CARE_CASES_SKIPPED={skipped}")
           if not tests or failures or errors or skipped:
-              raise SystemExit("PostgreSQL longitudinal integration gate failed.")
+              raise SystemExit("PostgreSQL messy-care benchmark gate failed.")
           PY
+          test "${{ steps.postgres_benchmark.outcome }}" = "success"
+
+      - name: Upload PostgreSQL benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: messy-care-postgres-junit
+          path: /tmp/postgres-longitudinal.xml
+          if-no-files-found: error
+          retention-days: 30
