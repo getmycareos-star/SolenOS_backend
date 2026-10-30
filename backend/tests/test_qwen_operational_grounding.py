@@ -137,10 +137,10 @@ def test_rejects_unsupported_medication_action_even_if_reply_also_mentions_missi
 
 
 def test_medication_day_retrieval_filter_excludes_unrelated_care_domains():
-    compiled = str(_medication_day_event_filter().compile(dialect=postgresql.dialect()))
+    statement = _medication_day_event_filter().compile(dialect=postgresql.dialect())
+    compiled = str(statement)
+    patterns = set(statement.params.values())
     assert "care_events.event_type ILIKE" in compiled
     assert "care_events.title ILIKE" in compiled
     assert "care_events.description ILIKE" in compiled
-    assert "%medication%" in compiled
-    assert "%prescription%" in compiled
-    assert "%dose%" in compiled
+    assert {"%medication%", "%prescription%", "%dose%"} <= patterns
