@@ -45,6 +45,9 @@ jobs:
             backend/tests/test_evidence_review_persistence.py \
             backend/tests/test_care_continuity_link_validation.py \
             backend/tests/test_uncertainty_benchmark.py \
+            backend/tests/test_open_loop_benchmark.py \
+            backend/tests/test_identity_security.py \
+            backend/tests/test_contradiction_provenance.py \
             -q -s --junitxml=/tmp/messy-care-contract.xml
 
       - name: Enforce complete benchmark execution
@@ -71,9 +74,13 @@ jobs:
           print(f"MESSY_CARE_CASES_FAILED={failures}")
           print(f"MESSY_CARE_CASES_ERRORED={errors}")
           print(f"MESSY_CARE_CASES_SKIPPED={skipped}")
+          if executed < 100:
+              raise SystemExit(
+                  f"Messy-care corpus is undersized: require at least 100 executed cases, got {executed}."
+              )
           if not executed or failures or errors or skipped:
               raise SystemExit(
-                  "Messy-care gate failed: require nonzero execution and zero failures, "
+                  "Messy-care gate failed: require at least 100 executed cases and zero failures, "
                   "errors, or skips."
               )
           PY
