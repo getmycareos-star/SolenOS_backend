@@ -137,6 +137,7 @@ def list_question_answer_history(
         "person_id": row.person_id,
         "answer": row.answer,
         "answer_provenance": row.answer_provenance,
+        "evidence_ids": list(row.evidence_ids or []),
         "answered_by_caregiver_id": row.answered_by_caregiver_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     } for row in rows]
