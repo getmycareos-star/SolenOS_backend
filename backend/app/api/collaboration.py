@@ -2295,6 +2295,53 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
+        if invalid_reply and not greeting_only:
+            # A first draft can fail a deterministic grounding/safety guard even
+            # when the underlying model can produce a compliant answer. Ask the
+            # same model to revise against the unchanged source/context, then run
+            # every guard again. Never relax a guard or persist an invalid draft.
+            for revision_attempt in range(2):
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")[:1200]},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response did not meet the care-grounding rules. Revise it. "
+                            "Use the current caregiver message and supplied authorized care context only. "
+                            "Treat recent conversation as conversational context, not saved Living Care Record evidence. "
+                            "Do not invent symptoms, causes, diagnoses, medications, appointments, or system actions. "
+                            "Keep the care recipient distinct from relatives who provide help or reports. "
+                            "For a follow-up, preserve the prior care recipient and topic. "
+                            "If a detail is unknown, say it is not recorded and ask one targeted question or give one concrete safe next step. "
+                            "Return only a concise caregiver-facing answer."
+                        ),
+                    },
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": 384},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply)
+                    or _contains_unrequested_saba(reply, validation_source)
+                    or _contains_unsupported_care_claim(reply, validation_source)
+                    or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                    or _contains_unsupported_record_reference(reply, validation_source)
+                )
+                if not invalid_reply:
+                    break
         if invalid_reply:
             raise HTTPException(
                 status_code=503,
