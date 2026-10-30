@@ -99,6 +99,42 @@ def list_document_intelligence(
     return {"items": results, "count": len(results), "identity_scope": "server_session_person_and_caregiver"}
 
 
+@router.get("/intelligence")
+def list_document_intelligence(
+    request: Request,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    """List only this caregiver's persisted document analyses for library review."""
+    person_id, caregiver_id = _identity(request, db)
+    bounded_limit = max(1, min(int(limit), 100))
+    rows = (
+        db.query(CaptureAnalysis)
+        .filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.caregiver_id == caregiver_id,
+        )
+        .order_by(CaptureAnalysis.created_at.desc())
+        .limit(bounded_limit)
+        .all()
+    )
+    results = []
+    for analysis in rows:
+        candidates = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+        if candidates.get("kind") != "document_intelligence_v1":
+            continue
+        evidence = db.query(Evidence).filter(
+            Evidence.id == analysis.source_evidence_id,
+            Evidence.person_id == person_id,
+            Evidence.uploaded_by_caregiver_id == caregiver_id,
+            Evidence.type == "document",
+        ).first()
+        if evidence is None:
+            continue
+        results.append(_analysis_response(analysis))
+    return {"items": results, "count": len(results), "limit": bounded_limit}
+
+
 @router.post("/{evidence_id}/intelligence", status_code=201)
 def analyze_saved_document(
     evidence_id: str,
