@@ -37,7 +37,10 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Situation as SituationModel
-from app.models.care_continuity import EvidenceObservation as EvidenceObservationModel
+from app.models.care_continuity import (
+    EvidenceObservation as EvidenceObservationModel,
+    CareRecordRelationship,
+)
 from app.models.uncertainty import (
     OpenQuestion as OpenQuestionModel,
     Contradiction as ContradictionModel,
@@ -621,6 +624,35 @@ def get_situation(
         .order_by(InformationGapModel.created_at.asc(), InformationGapModel.id.asc())
         .all()
     )
+    persisted_situation_ids = {item.id for item in persisted_situations}
+    relationship_rows = (
+        db.query(CareRecordRelationship)
+        .filter(
+            CareRecordRelationship.person_id == person_id,
+            CareRecordRelationship.source_type == "situation",
+            CareRecordRelationship.target_type == "situation",
+        )
+        .order_by(CareRecordRelationship.created_at.asc(), CareRecordRelationship.id.asc())
+        .all()
+    )
+    related_situations_by_id = {}
+    for relationship in relationship_rows:
+        source_id = relationship.source_id
+        target_id = relationship.target_id
+        if (
+            source_id == target_id
+            or source_id not in persisted_situation_ids
+            or target_id not in persisted_situation_ids
+        ):
+            continue
+        link = {
+            "relationship_id": relationship.id,
+            "relationship_type": relationship.relationship_type,
+            "rationale": relationship.provenance,
+        }
+        related_situations_by_id.setdefault(source_id, []).append({"id": target_id, **link})
+        related_situations_by_id.setdefault(target_id, []).append({"id": source_id, **link})
+
     evidence_by_id = {row["id"]: row for row in observations}
     source_statement_rows = []
     if evidence_by_id:
@@ -717,6 +749,7 @@ def get_situation(
             "riskLevel": "LOW",
             "documents": [],
             "openQuestions": linked_questions,
+            "relatedSituations": related_situations_by_id.get(saved_situation.id, []),
             "sourceStatements": linked_source_statements,
             "conflicts": linked_conflicts,
             "informationGaps": linked_gaps,
@@ -772,6 +805,7 @@ def get_situation(
             "riskLevel": "LOW",
             "documents": [],
             "openQuestions": [],
+            "relatedSituations": [],
             "sourceStatements": group_source_statements,
             "conflicts": [],
             "informationGaps": [],
@@ -867,6 +901,7 @@ def get_situation(
             "situation_type": item.get("situation_type"),
             "attention_candidate": item.get("attention_candidate", False),
             "follow_up_candidate": item.get("follow_up_candidate", False),
+            "related_situation_ids": [link["id"] for link in item.get("relatedSituations", [])],
         } for item in situation_ui_rows],
         "ui_situations": situation_ui_rows,
         "care_situation_groups": care_situation_groups,
