@@ -981,8 +981,10 @@ def readiness_check(db: Session = Depends(get_db)):
         required_tables = set(Base.metadata.tables.keys())
         missing_tables = required_tables - existing_tables
     except SQLAlchemyError as exc:
+        logger.error("Readiness failed: database query exception type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database is not ready") from exc
     except Exception as exc:
+        logger.error("Readiness failed: initial schema inspection exception type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
 
     if missing_tables:
@@ -992,6 +994,7 @@ def readiness_check(db: Session = Depends(get_db)):
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
+        logger.error("Readiness failed: ORM schema verification exception type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
         logger.error("Readiness failed: ORM schema differences: %s", differences)
