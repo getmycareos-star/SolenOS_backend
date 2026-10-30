@@ -149,16 +149,19 @@ def _form_change_situation(
         ]
         temporal_start = min(comparison_starts or assessment_times or [now])
         temporal_end = max(comparison_ends or assessment_times or [now])
-    increasing = [c for c in changes if c.change_direction == ChangeDirection.INCREASING]
-    decreasing = [c for c in changes if c.change_direction == ChangeDirection.DECREASING]
-    if len(increasing) > len(decreasing):
-        situation_type = (
-            SituationType.FUNCTIONAL_INSTABILITY
-            if any(s == "fall" for s in signal_types)
-            else SituationType.UNKNOWN
-        )
-    else:
+    directions = {c.change_direction for c in changes}
+    has_increasing = ChangeDirection.INCREASING in directions
+    has_decreasing = ChangeDirection.DECREASING in directions
+    if ChangeDirection.FLUCTUATING in directions or (has_increasing and has_decreasing):
+        # Mixed directional evidence is fluctuation, never a stable-state claim.
+        situation_type = SituationType.FLUCTUATING_STATE
+    elif directions == {ChangeDirection.STABLE}:
         situation_type = SituationType.STABLE_STATE
+    elif has_increasing and "fall" in signal_types:
+        situation_type = SituationType.FUNCTIONAL_INSTABILITY
+    else:
+        # A directional count change alone does not establish decline or recovery.
+        situation_type = SituationType.UNKNOWN
     relevant_patterns = [p for p in patterns if p.subject_type in signal_types]
     primary = _primary_significance(db, changes[0])
     attention = any((_primary_significance(db, c) or _bool_none(c.attention_candidate)) for c in changes)

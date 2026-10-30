@@ -374,6 +374,93 @@ def test_situation_temporal_bounds_use_source_event_time_not_assessment_time():
         teardown_db()
 
 
+
+def test_situation_type_preserves_mixed_and_unknown_directions():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-situation-directions", name="Situation Direction Person")
+        caregiver = Caregiver(
+            id="caregiver-situation-directions",
+            name="Situation Direction Caregiver",
+            email="situation-directions@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+
+        from app.core.change_enums import (
+            ChangeDirection,
+            ChangeType,
+            SituationType,
+        )
+        from app.services.situation_formation import _form_change_situation
+
+        now = datetime.now(timezone.utc)
+
+        def make_change(subject_type, direction, change_type):
+            change = Change(
+                person_id=person.id,
+                subject_type=subject_type,
+                subject_id="",
+                change_type=change_type,
+                change_direction=direction,
+                previous_state="Previous observations",
+                current_state="Current observations",
+                evidence_ids=[],
+                explanation="Synthetic direction-classification fixture.",
+                attention_candidate=True,
+                follow_up_candidate=True,
+                created_at=now,
+            )
+            db.add(change)
+            db.flush()
+            return change
+
+        cases = [
+            (
+                "fall",
+                [make_change("fall", ChangeDirection.INCREASING, ChangeType.INCREASE)],
+                SituationType.FUNCTIONAL_INSTABILITY,
+            ),
+            (
+                "decreasing_without_recovery_proof",
+                [make_change("mobility", ChangeDirection.DECREASING, ChangeType.DECREASE)],
+                SituationType.UNKNOWN,
+            ),
+            (
+                "mixed_directions",
+                [
+                    make_change("nutrition", ChangeDirection.INCREASING, ChangeType.INCREASE),
+                    make_change("nutrition", ChangeDirection.DECREASING, ChangeType.DECREASE),
+                ],
+                SituationType.FLUCTUATING_STATE,
+            ),
+            (
+                "explicit_stabilization",
+                [make_change("sleep", ChangeDirection.STABLE, ChangeType.STABILIZATION)],
+                SituationType.STABLE_STATE,
+            ),
+        ]
+
+        for subject, changes, expected in cases:
+            situation = _form_change_situation(
+                db=db,
+                person_id=person.id,
+                changes=changes,
+                patterns=[],
+                now=now,
+            )
+            assert situation is not None
+            assert situation.situation_type == expected, (
+                f"{subject}: expected {expected.value}, got {situation.situation_type.value}"
+            )
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_situation_formation_from_changes():
     setup_db()
     try:
