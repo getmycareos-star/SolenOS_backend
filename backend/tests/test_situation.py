@@ -11,7 +11,7 @@ import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
-from app.models.care_continuity import EvidenceObservation
+from app.models.care_continuity import EvidenceObservation, CareAssertion
 from app.models.change import Situation
 from app.models.uncertainty import OpenQuestion, Contradiction
 from app.core.change_enums import SituationType, SituationState
@@ -341,13 +341,25 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             db.add_all([
                 first_situation,
                 second_situation,
+                CareAssertion(
+                    id="mobility-claim-for-question",
+                    person_id=person_id,
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    field="walking_stability",
+                    asserted_value="Unsteady near the kitchen.",
+                    source_label="Daughter",
+                    evidence_ids=[first_evidence_id],
+                    assertion_status="reported",
+                ),
                 OpenQuestion(
                     id="open-mobility-question",
                     person_id=person_id,
                     question="Has the unsteadiness also happened indoors?",
                     subject_type="mobility",
-                    subject_id="persisted-mobility-thread",
-                    evidence_ids=[first_evidence_id],
+                    subject_id=person_id,
+                    claim_id="mobility-claim-for-question",
+                    evidence_ids=[],
                     status="open",
                 ),
                 OpenQuestion(
