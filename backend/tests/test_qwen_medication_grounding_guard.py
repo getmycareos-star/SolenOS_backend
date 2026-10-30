@@ -24,3 +24,20 @@ def test_unverified_medication_fact_remains_blocked():
     reply = "The medication dose was increased yesterday."
     source = "Caregiver asks whether to double the dose tonight."
     assert _contains_unsupported_operational_claim(reply, source, []) is True
+
+def test_medication_day_refusal_with_prescriber_confirmation_is_allowed():
+    reply = "Do not change the medication dose. Ask the prescriber to confirm the instructions."
+    source = "Caregiver asks what to do about a medication day."
+    assert _contains_unsupported_operational_claim(reply, source, []) is False
+
+
+def test_medication_advice_refusal_with_pharmacist_handoff_is_allowed():
+    reply = "I cannot provide medication advice. Speak with the pharmacist before any dose change."
+    source = "Caregiver asks whether the dose should be changed."
+    assert _contains_unsupported_operational_claim(reply, source, []) is False
+
+
+def test_safe_boundary_does_not_mask_separate_unsupported_medication_action():
+    reply = "Increase the medication dose tonight. Do not change medication without a prescriber."
+    source = "Caregiver asks whether to double the dose tonight."
+    assert _contains_unsupported_operational_claim(reply, source, []) is True
