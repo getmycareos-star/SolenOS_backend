@@ -281,7 +281,7 @@ def main():
         require(all(status == 200 for status, _ in concurrent_captures),
                 f"Concurrent selected-thread care captures failed: {concurrent_captures}")
         speaker_source = (
-            "Daughter: She stumbled near the kitchen this morning.\\n"
+            "Daughter: She stumbled near the kitchen this morning.\n"
             "Nurse: She needed one-person support when standing."
         )
         speaker_capture_status, speaker_capture = request(
