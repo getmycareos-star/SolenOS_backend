@@ -192,9 +192,10 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert [item["speaker_label"] for item in source_statements] == ["Daughter", "Nurse", "Daughter"]
         assert all(item["reporter_caregiver_id"] == caregiver_id for item in source_statements)
         assert all(item["speaker_attribution_status"] == "explicit" for item in source_statements[:3])
-        assert source_statements[0]["occurred_at"] is not None
-        assert source_statements[1]["occurred_at"] is None
         original_after_correction = next(item for item in source_statements if item["id"] == original_statement["id"])
+        nurse_statement = next(item for item in source_statements if item["speaker_label"] == "Nurse")
+        assert original_after_correction["occurred_at"] is not None
+        assert nurse_statement["occurred_at"] is None
         correction_after_hydration = next(item for item in source_statements if item["id"] == correction_id)
         assert original_after_correction["superseded_by_observation_ids"] == [correction_id]
         assert correction_after_hydration["supersedes_observation_id"] == original_statement["id"]
