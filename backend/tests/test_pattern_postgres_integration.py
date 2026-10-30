@@ -317,6 +317,7 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
     assertion_a = f"reconstruct-assertion-a-{suffix}"
     assertion_b = f"reconstruct-assertion-b-{suffix}"
     correction_id = f"reconstruct-correction-{suffix}"
+    correction_id_b = f"reconstruct-correction-b-{suffix}"
     conflict_id = f"reconstruct-conflict-{suffix}"
     question_a = f"reconstruct-question-a-{suffix}"
     question_b = f"reconstruct-question-b-{suffix}"
@@ -423,6 +424,14 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
                 original_text="The dose was administered.",
                 corrected_text="The daughter later corrected the report: she did not witness administration.",
             ),
+            Correction(
+                id=correction_id_b,
+                person_id=person_a,
+                target_type="care_assertion",
+                target_id=assertion_a,
+                original_text="The daughter later corrected the report: she did not witness administration.",
+                corrected_text="The daughter cannot confirm whether administration occurred.",
+            ),
             Contradiction(
                 id=conflict_id,
                 person_id=person_a,
@@ -487,7 +496,10 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
             CareAssertion.person_id == person_a,
             CareAssertion.subject_id == "evening-dose",
         ).order_by(CareAssertion.id).all()
-        correction = db.query(Correction).filter(Correction.id == correction_id).one()
+        corrections = db.query(Correction).filter(
+            Correction.person_id == person_a,
+            Correction.target_id == assertion_a,
+        ).order_by(Correction.id).all()
         conflict = db.query(Contradiction).filter(Contradiction.id == conflict_id).one()
         answers = db.query(OpenQuestionAnswerEvent).filter(
             OpenQuestionAnswerEvent.question_id == question_a,
@@ -512,8 +524,12 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
         assert evidence.original_author == "Daughter"
         assert len(assertions) == 2
         assert {row.asserted_value for row in assertions} == {"administered", "not_administered"}
-        assert correction.original_text == "The dose was administered."
-        assert "did not witness administration" in correction.corrected_text
+        assert len(corrections) == 2
+        correction_by_id = {row.id: row for row in corrections}
+        assert correction_by_id[correction_id].original_text == "The dose was administered."
+        assert "did not witness administration" in correction_by_id[correction_id].corrected_text
+        assert correction_by_id[correction_id_b].original_text == correction_by_id[correction_id].corrected_text
+        assert "cannot confirm" in correction_by_id[correction_id_b].corrected_text
         assert conflict.resolution_status == "unresolved"
         assert set(conflict.source_assertion_ids) == {assertion_a, assertion_b}
         assert [row.answer_version for row in answers] == [1, 2]
