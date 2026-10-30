@@ -2425,6 +2425,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "messages": [{
+            "id": row.id,
             "role": row.role,
             "text": row.content,
             "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -2585,6 +2586,7 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
     return {"session_id": session.id, "person_id": person_id, "messages": [{
+        "id": row.id,
         "role": row.role,
         "text": row.content,
         "created_at": row.created_at.isoformat() if row.created_at else None,
