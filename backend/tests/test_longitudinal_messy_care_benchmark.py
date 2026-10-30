@@ -27,7 +27,7 @@ from app.services.change_detection import detect_event_changes
 from app.services.pattern_detection import detect_patterns
 from app.core.change_enums import ChangeType, ChangeDirection, PatternType
 
-NOW = datetime(2026, 10, 29, 12, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc)
 _benchmark_database_url = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL", "sqlite:///:memory:")
 _engine_options = {}
 if _benchmark_database_url.startswith("sqlite"):
