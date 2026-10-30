@@ -1,7 +1,10 @@
 name: Messy-care benchmark gate
 
 on:
-  # Main-only delivery gate: no feature-branch or pull-request implementation path.
+  # Primary engineering acceptance gate: evaluate every proposed change to main
+  # before merge, and re-run after changes land on main.
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
