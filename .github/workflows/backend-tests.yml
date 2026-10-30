@@ -728,6 +728,7 @@ jobs:
     env:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       OLLAMA_MODEL: ${{ matrix.model }}
+      OLLAMA_THINK: "false"
       OLLAMA_TIMEOUT_SECONDS: "180"
       OLLAMA_NUM_CTX: "4096"
       OLLAMA_NUM_PREDICT: "256"
