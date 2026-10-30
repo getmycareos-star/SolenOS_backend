@@ -6,7 +6,7 @@ set -Eeuo pipefail
 # prevent FastAPI from serving authentication, care records, and readiness.
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
 export OLLAMA_SIDECAR_ENABLED="${OLLAMA_SIDECAR_ENABLED:-true}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:2b}"
 export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
@@ -41,9 +41,12 @@ done
 if [[ "$OLLAMA_READY" == "1" ]]; then
   (
     if ! ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+      echo "Pulling configured local Qwen model: $OLLAMA_MODEL"
       ollama pull "$OLLAMA_MODEL" || echo "Optional model pull failed; core APIs remain available." >&2
+    else
+      echo "Configured local Qwen model is already present: $OLLAMA_MODEL"
     fi
-  ) >/tmp/qwen-model-pull.log 2>&1 &
+  ) &
 fi
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &
