@@ -1720,7 +1720,7 @@ def test_safety_response_validation_rejects_unpersisted_evidence_ids():
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         response = client.post(
             "/api/v1/validate-response",
             params={
@@ -1758,7 +1758,7 @@ def test_safety_audit_history_rejects_cross_record_person_id():
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         response = client.get("/api/v1/safety/audit/safety-person-other")
         assert response.status_code == 404
     finally:
@@ -1800,7 +1800,7 @@ def test_claim_assessment_impact_requires_review_when_unassessed():
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         response = client.get(
             "/api/v1/care-continuity/claims/impact-claim-1/assessment-impact"
         )
@@ -1967,8 +1967,8 @@ def test_safety_escalation_workflows_are_authenticated_and_person_scoped():
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
-        other_client = authorized_client("historical-question-other")
+        client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
         params = {
             "person_id": person.id,
             "affected_person_id": person.id,
@@ -2083,7 +2083,7 @@ def test_claim_assessment_all_statuses_require_explicit_evidence_relationships_a
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         endpoint = f"/api/v1/care-continuity/claims/{claim.id}/assessments"
         statuses = [
             ("supported", [{"evidence_id": "claim-status-evidence-a", "relationship": "supports", "source_passage": "Three awakenings were reported overnight."}], None),
@@ -2170,7 +2170,7 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         payload = {
             "person_id": person.id,
             "question": "Was the appointment attended?",
@@ -2267,7 +2267,7 @@ def test_conflict_partial_resolution_reopen_and_history_preserve_unresolved_rema
         db.commit()
         db.close()
 
-        client = authorized_client("historical-question-person")
+        client = authorized_client(person.id)
         created = client.post(
             "/api/v1/uncertainty/contradictions",
             json={
@@ -2408,20 +2408,20 @@ def test_companion_conversation_is_private_to_its_authenticated_caregiver():
         client = TestClient(app)
         owner = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-a"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-a']}"},
         )
         assert owner.status_code == 200, owner.text
         assert owner.json()["messages"][0]["text"] == "Private caregiver context."
 
         same_record_other_caregiver = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-b"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-b']}"},
         )
         assert same_record_other_caregiver.status_code == 404
 
         different_person = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-other-caregiver"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-other-caregiver']}"},
         )
         assert different_person.status_code == 404
     finally:
