@@ -280,12 +280,34 @@ def main():
             ))
         require(all(status == 200 for status, _ in concurrent_captures),
                 f"Concurrent selected-thread care captures failed: {concurrent_captures}")
+        speaker_source = (
+            "Daughter: She stumbled near the kitchen this morning.\\n"
+            "Nurse: She needed one-person support when standing."
+        )
+        speaker_capture_status, speaker_capture = request(
+            "POST",
+            "/api/situation",
+            body={
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "target_situation_id": mobility_thread_id,
+                "raw_input": speaker_source,
+            },
+            token=token_a,
+        )
+        require(
+            speaker_capture_status == 200
+            and speaker_capture.get("situation_id") == mobility_thread_id,
+            f"Multi-speaker source capture did not persist to selected thread: {speaker_capture_status}: {speaker_capture}",
+        )
         concurrent_capture_event_ids = {
             appetite_result.get("care_event_id"),
+            speaker_capture.get("care_event_id"),
             *(body.get("care_event_id") for _, body in concurrent_captures),
         }
         concurrent_capture_evidence_ids = {
             appetite_result.get("evidence_id"),
+            speaker_capture.get("evidence_id"),
             *(body.get("evidence_id") for _, body in concurrent_captures),
         }
         require(
@@ -307,7 +329,8 @@ def main():
             appetite_evidence_ids = set(appetite_thread.signal_ids or [])
             require(
                 mobility_evidence_ids == {
-                    body.get("evidence_id") for _, body in concurrent_captures
+                    speaker_capture.get("evidence_id"),
+                    *(body.get("evidence_id") for _, body in concurrent_captures),
                 },
                 f"Concurrent updates were lost or misrouted in mobility thread: {mobility_evidence_ids}",
             )
@@ -326,8 +349,28 @@ def main():
         )
         require(
             set(grouped_threads[mobility_thread_id].get("linked_evidence_ids", []))
-            == {body.get("evidence_id") for _, body in concurrent_captures},
-            "Hydrated mobility thread did not retain both concurrent evidence links",
+            == {
+                speaker_capture.get("evidence_id"),
+                *(body.get("evidence_id") for _, body in concurrent_captures),
+            },
+            "Hydrated mobility thread did not retain every concurrent and multi-speaker evidence link",
+        )
+        source_statements = grouped_threads[mobility_thread_id].get("sourceStatements", [])
+        require(
+            [statement.get("speaker_label") for statement in source_statements] == ["Daughter", "Nurse"],
+            f"Hydration must preserve both explicit speakers in original order: {source_statements}",
+        )
+        require(
+            all(statement.get("reporter_caregiver_id") == caregiver_a for statement in source_statements),
+            "Authenticated reporter must remain distinct from each source speaker",
+        )
+        require(
+            all(
+                speaker_source[statement["source_span_start"]:statement["source_span_end"]]
+                == statement["source_passage"]
+                for statement in source_statements
+            ),
+            "Every speaker statement must retain exact original source offsets",
         )
         require(
             grouped_threads[appetite_thread_id].get("linked_evidence_ids", [])
