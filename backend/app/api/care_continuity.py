@@ -11,6 +11,7 @@ import json
 import logging
 import uuid
 import hashlib
+import hmac
 import re
 from difflib import SequenceMatcher
 
@@ -24,6 +25,7 @@ from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.models.care import Evidence, Caregiver, CareEvent
+from app.models.collaboration import EvidenceUpload
 from app.models.change import Situation as SituationModel
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
@@ -256,10 +258,77 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
     )
     if stored_hash is None:
         integrity_status = "unavailable"
-    elif computed_hash is None or not __import__("hmac").compare_digest(stored_hash, computed_hash):
+    elif computed_hash is None or not hmac.compare_digest(stored_hash, computed_hash):
         integrity_status = "mismatch"
     else:
         integrity_status = "match"
+
+    binary_upload = db.query(EvidenceUpload).filter(
+        EvidenceUpload.evidence_id == evidence.id
+    ).first()
+    binary_applicable = evidence.type in {"document", "medication_photo", "care_photo"}
+    binary_status = "not_applicable"
+    binary_stored_hash = None
+    binary_computed_hash = None
+    if binary_applicable:
+        if binary_upload is None:
+            binary_status = "missing"
+        else:
+            binary_content = bytes(binary_upload.content)
+            binary_stored_hash = binary_upload.sha256
+            binary_computed_hash = hashlib.sha256(binary_content).hexdigest()
+            binary_status = (
+                "match"
+                if len(binary_content) == binary_upload.size_bytes
+                and hmac.compare_digest(binary_stored_hash, binary_computed_hash)
+                else "mismatch"
+            )
+
+    text_duplicate_ids = []
+    if stored_hash and integrity_status == "match":
+        text_duplicate_ids = [
+            row[0] for row in db.query(Evidence.id).filter(
+                Evidence.person_id == person_id,
+                Evidence.id != evidence.id,
+                Evidence.source_text_sha256 == stored_hash,
+            ).order_by(Evidence.uploaded_at.asc(), Evidence.id.asc()).all()
+        ]
+
+    binary_duplicate_ids = []
+    if binary_upload is not None and binary_status == "match":
+        binary_duplicate_ids = [
+            row[0] for row in (
+                db.query(EvidenceUpload.evidence_id)
+                .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+                .filter(
+                    Evidence.person_id == person_id,
+                    EvidenceUpload.evidence_id != evidence.id,
+                    EvidenceUpload.sha256 == binary_upload.sha256,
+                )
+                .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
+                .all()
+            )
+        ]
+
+    latest_freshness = (
+        db.query(EvidenceFreshnessAssessment)
+        .filter(
+            EvidenceFreshnessAssessment.person_id == person_id,
+            EvidenceFreshnessAssessment.evidence_id == evidence.id,
+        )
+        .order_by(EvidenceFreshnessAssessment.assessed_at.desc(), EvidenceFreshnessAssessment.id.desc())
+        .first()
+    )
+    latest_completeness = (
+        db.query(EvidenceCompletenessAssessment)
+        .filter(
+            EvidenceCompletenessAssessment.person_id == person_id,
+            EvidenceCompletenessAssessment.subject_type == "evidence",
+            EvidenceCompletenessAssessment.subject_id == evidence.id,
+        )
+        .order_by(EvidenceCompletenessAssessment.assessed_at.desc(), EvidenceCompletenessAssessment.id.desc())
+        .first()
+    )
 
     def iso(value):
         return value.isoformat() if value is not None else None
@@ -271,7 +340,21 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         "stored_source_text_sha256": stored_hash,
         "recomputed_source_text_sha256": computed_hash,
         "hash_scope": "exact UTF-8 encoding of the currently stored source_text field",
+        "original_binary_status": binary_status,
+        "original_binary_available": binary_upload is not None if binary_applicable else None,
+        "original_binary_stored_sha256": binary_stored_hash,
+        "original_binary_recomputed_sha256": binary_computed_hash,
+        "binary_hash_scope": "SHA-256 of original uploaded bytes plus stored byte-length comparison",
         "original_file_authenticity_verified": False,
+        "exact_source_text_duplicate_candidate_ids": text_duplicate_ids,
+        "exact_binary_duplicate_candidate_ids": binary_duplicate_ids,
+        "duplicate_candidate_status": (
+            "candidate_found" if text_duplicate_ids or binary_duplicate_ids else "no_exact_fingerprint_candidate_found"
+        ),
+        "freshness_status": latest_freshness.freshness_status if latest_freshness else "not_assessed",
+        "freshness_assessment_id": latest_freshness.id if latest_freshness else None,
+        "completeness_status": latest_completeness.assessment_status if latest_completeness else "not_assessed",
+        "completeness_assessment_id": latest_completeness.id if latest_completeness else None,
         "uploaded_by_caregiver_id": evidence.uploaded_by_caregiver_id,
         "original_author": evidence.original_author,
         "reported_by_label": evidence.reported_by_label,
