@@ -22,9 +22,8 @@
 4. Corrections are logged and acknowledged.
 5. No silent updates or deletions.
 
-
 ## Master Values enforcement
 Read `docs/SOLENOS_MASTER_VALUES.md` before implementation. Its V01–V40 and acceptance gates are binding. Documentation does not establish compliance: enforce the applicable values in production code, data contracts, server-side authorization, persistence behavior and executable tests. Report gaps as gaps. In particular, do not silently fall back to in-memory storage after a database failure, do not trust client-supplied IDs for authorization, and do not claim persistence or deployment without direct evidence.
 
-
-
+## Messy-care engineering gate
+Read `docs/MESSY_CARE_BENCHMARK_GATE.md` before changing care-history ingestion, reconciliation, evidence, temporal reconstruction, retrieval, summaries, Companion grounding, or Open Loop behavior. The messy-care benchmark is the primary acceptance gate. A capability is not complete without end-to-end ingest → reconcile → PostgreSQL persist → retrieve → explain evidence on independently labelled adversarial histories, including authorization and uncertainty checks. Unit tests, mocked boundaries, plausible model output, or documentation alone do not satisfy this gate. The benchmark workflow must run and pass on the exact final PR commit; zero skipped cases are permitted. Synthetic benchmark success must never be described as clinical validation or real-world performance.
