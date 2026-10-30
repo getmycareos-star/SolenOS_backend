@@ -9,7 +9,11 @@ from app.core.database import Base
 from app.core.change_enums import ChangeDirection, ChangeType, SituationState, SituationType
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Change, Situation
-from app.services.situation_formation import _form_change_situation, update_situations
+from app.services.situation_formation import (
+    _form_change_situation,
+    _group_related_signals,
+    update_situations,
+)
 
 
 def make_db():
@@ -200,3 +204,47 @@ def test_legacy_change_signal_ids_resolve_care_event_time_and_continue_event_nam
         assert actual_end == new_observed
     finally:
         db.close()
+
+
+def test_thread_grouping_never_uses_same_subject_label_as_identity():
+    from types import SimpleNamespace
+
+    walking_a = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-a"])
+    walking_b = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-b"])
+    transfers = SimpleNamespace(subject_type="mobility", subject_id="transfers", evidence_ids=["ev-c"])
+    nutrition = SimpleNamespace(subject_type="nutrition", subject_id="walking", evidence_ids=["ev-a"])
+
+    groups = _group_related_signals([walking_a, walking_b, transfers, nutrition], "evidence_ids")
+    assert len(groups) == 4
+
+
+def test_thread_grouping_uses_only_explicit_shared_source_ids():
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-1"])
+    same_subject_source = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-1"])
+    other_subject_same_source = SimpleNamespace(subject_type="sleep", subject_id="overnight", event_ids=["event-1"])
+    other_domain_same_source = SimpleNamespace(subject_type="mobility", subject_id="walking", event_ids=["event-1"])
+    nearby_but_unrelated = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-2"])
+
+    groups = _group_related_signals(
+        [first, same_subject_source, other_subject_same_source, other_domain_same_source, nearby_but_unrelated],
+        "event_ids",
+    )
+    assert len(groups) == 4
+    assert any(len(group) == 2 and first in group and same_subject_source in group for group in groups)
+    assert any(group == [other_subject_same_source] for group in groups)
+    assert any(group == [other_domain_same_source] for group in groups)
+    assert any(group == [nearby_but_unrelated] for group in groups)
+
+
+def test_thread_grouping_does_not_merge_through_transitive_label_similarity():
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["a"])
+    bridge = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["a", "b"])
+    unrelated = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["c"])
+    groups = _group_related_signals([first, bridge, unrelated], "evidence_ids")
+    assert len(groups) == 2
+    assert any(len(group) == 2 and first in group and bridge in group for group in groups)
+    assert any(group == [unrelated] for group in groups)
