@@ -276,6 +276,32 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             },
         )
         assert related_link.status_code == 201, related_link.text
+        duplicate_related_link = client.post(
+            "/api/v1/care-continuity/relationships",
+            headers=headers,
+            json={
+                "source_type": "situation",
+                "source_id": "persisted-appetite-thread",
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": "persisted-mobility-thread",
+                "provenance": "Caregiver repeated the same related concern link in reverse order.",
+            },
+        )
+        assert duplicate_related_link.status_code == 409, duplicate_related_link.text
+        causal_link = client.post(
+            "/api/v1/care-continuity/relationships",
+            headers=headers,
+            json={
+                "source_type": "situation",
+                "source_id": "persisted-mobility-thread",
+                "relationship_type": "causes",
+                "target_type": "situation",
+                "target_id": "persisted-appetite-thread",
+                "provenance": "No causal evidence is available for this test.",
+            },
+        )
+        assert causal_link.status_code == 422, causal_link.text
 
         # Explicitly resume the mobility thread with a new observation. The
         # appetite thread must remain separate and retain its own evidence.
