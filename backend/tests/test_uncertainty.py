@@ -11,6 +11,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
+from app.models.collaboration import ConversationSession, ConversationMessage
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -2348,3 +2349,81 @@ def test_conflict_partial_resolution_reopen_and_history_preserve_unresolved_rema
     finally:
         teardown_db()
 
+
+
+
+def test_companion_conversation_is_private_to_its_authenticated_caregiver():
+    """Care-record membership does not grant access to another caregiver's private Companion thread."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="companion-private-person", name="Shared Care Record")
+        caregiver_a = Caregiver(
+            id="companion-private-a", name="Caregiver A",
+            email="companion-private-a@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        caregiver_b = Caregiver(
+            id="companion-private-b", name="Caregiver B",
+            email="companion-private-b@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="companion-private-other", name="Other Care Record")
+        other_caregiver = Caregiver(
+            id="companion-private-other-caregiver", name="Other Caregiver",
+            email="companion-private-other@example.com", relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver_a, caregiver_b, other_person, other_caregiver])
+        db.flush()
+
+        session = ConversationSession(
+            id="private-companion-session", person_id=person.id,
+            caregiver_id=caregiver_a.id, title="Private caregiver conversation",
+            status="active",
+        )
+        db.add(session)
+        db.flush()
+        db.add(ConversationMessage(
+            id="private-companion-message", session_id=session.id,
+            role="user", content="Private caregiver context.",
+            evidence_ids_json="[]", source_record_refs_json="[]",
+        ))
+
+        tokens = {}
+        for caregiver in (caregiver_a, caregiver_b, other_caregiver):
+            token = f"private-conversation-token-{caregiver.id}"
+            tokens[caregiver.id] = token
+            db.add(AnonymousSession(
+                person_id=caregiver.person_id,
+                caregiver_id=caregiver.id,
+                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            ))
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        owner = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[caregiver_a.id]}"},
+        )
+        assert owner.status_code == 200, owner.text
+        assert owner.json()["messages"][0]["text"] == "Private caregiver context."
+
+        same_record_other_caregiver = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[caregiver_b.id]}"},
+        )
+        assert same_record_other_caregiver.status_code == 404
+
+        different_person = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[other_caregiver.id]}"},
+        )
+        assert different_person.status_code == 404
+    finally:
+        teardown_db()
