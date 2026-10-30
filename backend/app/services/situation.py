@@ -22,7 +22,7 @@ def _explicit_speaker_statements(source_text: str) -> list[dict]:
         r"(?m)^(?:(?P<header_time>\[\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?\])\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}|\[(?P<bracket_label>[^\]\r\n]{1,40})\]):[ \t]*"
     )
     matches = list(header.finditer(source_text))
-    if len(matches) < 2:
+    if not matches:
         return []
     statements = []
     for index, match in enumerate(matches):
