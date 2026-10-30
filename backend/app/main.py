@@ -648,7 +648,7 @@ def get_situation(
         link = {
             "relationship_id": relationship.id,
             "relationship_type": relationship.relationship_type,
-            "rationale": relationship.provenance,
+            "provenance": relationship.provenance,
         }
         related_situations_by_id.setdefault(source_id, []).append({"id": target_id, **link})
         related_situations_by_id.setdefault(target_id, []).append({"id": source_id, **link})
