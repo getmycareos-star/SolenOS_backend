@@ -50,13 +50,30 @@ def override_get_db():
 
 @pytest.fixture(autouse=True)
 def isolated_database():
-    Base.metadata.create_all(bind=engine)
+    is_postgres = engine.dialect.name == "postgresql"
+    if is_postgres:
+        # Preserve the migration-owned schema and alembic_version. This is a
+        # disposable CI database; clear rows without dropping PostgreSQL tables.
+        from sqlalchemy import inspect, text
+        table_names = [
+            name for name in inspect(engine).get_table_names()
+            if name != "alembic_version"
+        ]
+        if table_names:
+            quoted = ", ".join(
+                f'"{name.replace(chr(34), chr(34) * 2)}"' for name in table_names
+            )
+            with engine.begin() as connection:
+                connection.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+    else:
+        Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestingSessionLocal
     yield
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
-    Base.metadata.drop_all(bind=engine)
+    if not is_postgres:
+        Base.metadata.drop_all(bind=engine)
 
 
 def make_person(db, suffix="a"):
