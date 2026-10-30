@@ -384,19 +384,10 @@ def main():
                 f"Contradiction caregiver attestation must remain reported: {status}: {contradiction_verified}")
         # A contradiction cannot be closed by reconciliation or attestation alone.
         # Require a separately persisted pair-level independent-source relationship.
-        status, contradiction_relationship = request(
-            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/relationships",
-            token=token_a,
-            body={
-                "related_evidence_id": workflow_second_source_id,
-                "relationship_type": "corroborates",
-                "source_independence_status": "independent",
-                "scope_type": "evidence_pair",
-                "rationale": "CI fixture explicitly records separate source origins for contradiction review.",
-            },
-        )
-        require(status == 201 and contradiction_relationship.get("id"),
-                f"Contradiction independent-source relationship creation failed: {status}: {contradiction_relationship}")
+        # Reuse the same persisted pair-level relationship created and verified
+        # in the preceding end-to-end workflow; relationship uniqueness is enforced.
+        require(workflow_relationship.get("id"),
+                "The independently assessed source pair must persist before contradiction corroboration")
         status, contradiction_corroborated = request(
             "POST", f"/api/v1/open-loops/{contradiction_id}/corroborate-outcome", token=token_a,
             body={
