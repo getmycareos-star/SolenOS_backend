@@ -25,7 +25,7 @@ def upgrade() -> None:
     if "relationship_version" not in columns:
         op.add_column(
             TABLE,
-            sa.Column("relationship_version", sa.Integer(), nullable=True),
+            sa.Column("relationship_version", sa.Integer(), nullable=False, server_default=sa.text("1")),
         )
 
     metadata = sa.MetaData()
@@ -61,27 +61,22 @@ def upgrade() -> None:
             row["target_id"],
         )
         versions[pair] = versions.get(pair, 0) + 1
-        if row["relationship_version"] is None or int(row["relationship_version"]) < 1:
-            bind.execute(
-                update(relationships)
-                .where(relationships.c.id == row["id"])
-                .values(relationship_version=versions[pair])
-            )
-        else:
-            versions[pair] = max(versions[pair], int(row["relationship_version"]))
+        # Re-number the complete historical sequence. A legacy/default value
+        # of 1 on every row is not evidence of a valid version history.
+        bind.execute(
+            update(relationships)
+            .where(relationships.c.id == row["id"])
+            .values(relationship_version=versions[pair])
+        )
 
-    # Keep inserts safe for any older writer; the API explicitly supplies the
-    # next version under a per-pair PostgreSQL advisory transaction lock.
-    op.alter_column(
-        TABLE,
-        "relationship_version",
-        existing_type=sa.Integer(),
-        nullable=False,
-        server_default=sa.text("1"),
-    )
+    # Enforce the pair/version invariant at the database boundary.
     refreshed = inspect(bind)
-    indexes = {item.get("name") for item in refreshed.get_indexes(TABLE)}
-    if "ix_care_record_relationships_pair_version" not in indexes:
+    indexes = {item.get("name"): item for item in refreshed.get_indexes(TABLE)}
+    existing_index = indexes.get("ix_care_record_relationships_pair_version")
+    if existing_index and not existing_index.get("unique"):
+        op.drop_index("ix_care_record_relationships_pair_version", table_name=TABLE)
+        existing_index = None
+    if existing_index is None:
         op.create_index(
             "ix_care_record_relationships_pair_version",
             TABLE,
@@ -91,7 +86,6 @@ def upgrade() -> None:
             ],
             unique=True,
         )
-
 
 def downgrade() -> None:
     bind = op.get_bind()
