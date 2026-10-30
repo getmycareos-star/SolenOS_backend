@@ -358,6 +358,10 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         "original_binary_recomputed_sha256": binary_computed_hash,
         "binary_hash_scope": "SHA-256 of original uploaded bytes plus stored byte-length comparison",
         "original_file_authenticity_verified": False,
+        "external_source_reference": evidence.original_source_reference,
+        "external_source_reference_access_status": (
+            "not_checked" if evidence.original_source_reference else "not_provided"
+        ),
         "exact_source_text_duplicate_candidate_ids": text_duplicate_ids,
         "exact_binary_duplicate_candidate_ids": binary_duplicate_ids,
         "duplicate_candidate_status": (
