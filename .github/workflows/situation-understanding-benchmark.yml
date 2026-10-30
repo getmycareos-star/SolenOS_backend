@@ -140,57 +140,22 @@ jobs:
 
       - name: Verify PostgreSQL data survives server restart
         if: steps.postgres_benchmark.outcome == 'success'
+        env:
+          PSQL_URL: postgresql://solenos_benchmark:solenos_benchmark_ci@127.0.0.1:5432/solenos_benchmark
         run: |
-          python - <<'PY'
-          import os
-          import subprocess
-          import time
-          import psycopg2
-
-          dsn = os.environ["DATABASE_URL"].replace("postgresql+psycopg2://", "postgresql://", 1)
-          probe_id = os.environ["GITHUB_SHA"]
-          with psycopg2.connect(dsn) as connection:
-              with connection.cursor() as cursor:
-                  cursor.execute("""
-                      CREATE TABLE IF NOT EXISTS messy_care_restart_probe (
-                          probe_id text PRIMARY KEY,
-                          verified_at timestamptz NOT NULL DEFAULT now()
-                      )
-                  """)
-                  cursor.execute("""
-                      INSERT INTO messy_care_restart_probe (probe_id)
-                      VALUES (%s)
-                      ON CONFLICT (probe_id) DO UPDATE SET verified_at = now()
-                  """, (probe_id,))
-
-          containers = subprocess.check_output(
-              ["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"],
-              text=True,
-          ).strip().splitlines()
-          if not containers:
-              raise SystemExit("PostgreSQL service container was not found.")
-          subprocess.run(["docker", "restart", containers[0]], check=True)
-
-          last_error = None
-          for _ in range(30):
-              try:
-                  with psycopg2.connect(dsn, connect_timeout=2) as connection:
-                      with connection.cursor() as cursor:
-                          cursor.execute(
-                              "SELECT probe_id FROM messy_care_restart_probe WHERE probe_id = %s",
-                              (probe_id,),
-                          )
-                          row = cursor.fetchone()
-                          if row and row[0] == probe_id:
-                              print("POSTGRES_RESTART_PERSISTENCE=PASS")
-                              break
-              except Exception as error:
-                  last_error = error
-                  time.sleep(2)
-          else:
-              raise SystemExit(f"PostgreSQL restart persistence failed: {last_error}")
-          PY
-
+          set -euo pipefail
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS messy_care_restart_probe (probe_id text PRIMARY KEY, verified_at timestamptz NOT NULL DEFAULT now());"
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO messy_care_restart_probe (probe_id) VALUES ('${{ github.sha }}') ON CONFLICT (probe_id) DO UPDATE SET verified_at = now();"
+          container_id="$(docker ps -q --filter 'ancestor=postgres:17' | head -n 1)"
+          test -n "$container_id"
+          docker restart "$container_id"
+          for attempt in $(seq 1 30); do
+            if pg_isready -h 127.0.0.1 -p 5432 -U solenos_benchmark -d solenos_benchmark && psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "SELECT 1" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "SELECT probe_id, verified_at FROM messy_care_restart_probe WHERE probe_id = '${{ github.sha }}';" | grep -F '${{ github.sha }}'
       - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
