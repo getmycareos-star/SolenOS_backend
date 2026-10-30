@@ -31,6 +31,7 @@ def _ensure_nullable_fk_column(
     column: str,
     column_type,
     referred_table: str,
+    constraint_name: str,
     referred_column: str = "id",
 ) -> None:
     bind = op.get_bind()
@@ -39,7 +40,6 @@ def _ensure_nullable_fk_column(
         raise RuntimeError(f"Required evidence table is missing: {table}")
 
     columns = {item["name"] for item in inspector.get_columns(table)}
-    constraint_name = f"fk_{table}_{column}_{referred_table}"
     if column not in columns:
         op.add_column(
             table,
@@ -82,12 +82,14 @@ def upgrade() -> None:
         "superseded_by_claim_id",
         sa.String(),
         "care_assertions",
+        "fk_evidence_claim_assessments_superseded_claim",
     )
     _ensure_nullable_fk_column(
         "evidence_observations",
         "supersedes_observation_id",
         sa.String(),
         "evidence_observations",
+        "fk_evidence_observations_supersedes_observation",
     )
 
     bind = op.get_bind()
