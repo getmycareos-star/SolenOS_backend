@@ -10,7 +10,8 @@ A capability is **not complete** because a route exists, a unit test passes, a m
 
 The GitHub Actions workflow `.github/workflows/situation-understanding-benchmark.yml` runs on pushes to `main` and manual dispatch. Implementation and benchmark changes are committed directly to `main`; this workstream does not use pull requests. It executes:
 
-- 10,000 deterministic adversarial uncertainty scenarios (10 families × 1,000 independently labelled variants), with per-case safety assertions and a corpus SHA-256.
+- 10,000 deterministic adversarial uncertainty-classification cases (20 failure families × 500 variants), with per-case safety assertions and a corpus SHA-256.
+- 10,000 PostgreSQL-backed longitudinal event cases across 1,000 isolated synthetic histories (20 scenario families × 50 histories), with reporter attribution, five care domains, event/recorded-time separation, source anchors, person isolation, and fresh-session reconstruction asserted for every persisted record.
 - Adversarial situation-understanding and uncertainty contracts.
 - Longitudinal event and change-detection cases.
 - Open Loop messy-care workflow cases.
@@ -71,7 +72,7 @@ For non-critical structured fields, report per-dimension precision/recall and ex
 
 ## Evidence required before marking complete
 
-The PR must include:
+The benchmark evidence must include:
 
 - The exact benchmark commit SHA and workflow run URL.
 - The test corpus version/hash and independently authored expected labels.
@@ -85,4 +86,4 @@ No production caregiver data may be copied into a benchmark corpus. Real-world e
 
 ## Current status
 
-The main-only gate now executes a 10,000-case deterministic uncertainty contract corpus alongside the existing adversarial contracts and PostgreSQL longitudinal suite. The 10,000 cases exercise uncertainty classification, contradictions, inaccessible sources, duplicate lineage, unverified reports, missing attribution/time, stale or unreadable evidence, causal overreach, and invalid evidence references. This is a substantial synthetic contract expansion, but it is not 10,000 independent end-to-end database histories. The complete ingest → reconcile → persist → retrieve → explain benchmark still requires broader PostgreSQL-backed scenario generation, attribution/correction/thread reconstruction, restart and identity-transition coverage, and per-case traceability evidence. Until those end-to-end requirements exist and pass, a 9.5/10 capability rating remains **unearned**.
+The main-only gate executes 10,000 uncertainty-classification cases and a separate 10,000-record PostgreSQL workload across 1,000 person-scoped synthetic histories. The PostgreSQL workload asserts per-record reporter attribution, five care domains, source anchors, event/recorded-time separation, person isolation, and fresh-session reconstruction. Existing PostgreSQL contracts add contradiction transitions, correction lineage, unresolved-question history, temporal provenance, concurrent writes, and cross-person denial. These are synthetic engineering tests, not clinical validation. The 10,000-record workload writes ORM records directly rather than exercising 10,000 complete HTTP ingestion transactions; it does not establish clinical accuracy, production-scale latency, or real-family reliability. A 9.5/10 capability rating remains **unearned** until the full ingest → reconcile → persist → retrieve → explain path is verified for adversarial histories, with each material claim traceable to source evidence and uncertainty.
