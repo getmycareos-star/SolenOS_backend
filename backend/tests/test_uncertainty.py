@@ -335,6 +335,18 @@ def test_open_question_lifecycle():
         assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
         assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
         assert first_history.json()[0]["evidence_ids"] == [first_evidence_id]
+        repeated_answer = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "status": "answered",
+                "answer": "The caregiver reports that the appointment was attended.",
+                "answer_provenance": "Caregiver report recorded during the current session.",
+                "evidence_ids": [first_evidence_id],
+            },
+        )
+        assert repeated_answer.status_code == 200, repeated_answer.text
+        repeated_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert len(repeated_history.json()) == 1, "identical answer retries must not append duplicate answer events"
 
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
