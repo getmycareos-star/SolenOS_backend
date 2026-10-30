@@ -741,6 +741,14 @@ def get_situation(
         if canonical_id in existing_ui_ids:
             continue
         latest = group_events[-1]
+        group_evidence_ids = sorted({
+            evidence_id for event in group_events for evidence_id in (event.evidence_ids or [])
+        })
+        group_source_statements = [
+            statement
+            for evidence_id in group_evidence_ids
+            for statement in source_statements_by_evidence.get(evidence_id, [])
+        ]
         situation_ui_rows.append({
             "id": canonical_id,
             "persisted_thread": False,
@@ -749,15 +757,16 @@ def get_situation(
             "riskLevel": "LOW",
             "documents": [],
             "openQuestions": [],
+            "sourceStatements": group_source_statements,
+            "conflicts": [],
+            "informationGaps": [],
             "nextActions": [],
             "risks": [],
             "responsibilities": [],
             "contextSummary": latest.description or "",
             "updatedAt": latest.occurred_at.isoformat() if latest.occurred_at else "",
             "linked_event_ids": [event.id for event in group_events],
-            "linked_evidence_ids": sorted({
-                evidence_id for event in group_events for evidence_id in (event.evidence_ids or [])
-            }),
+            "linked_evidence_ids": group_evidence_ids,
         })
 
     active_situation = None
