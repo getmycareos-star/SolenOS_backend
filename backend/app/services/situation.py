@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 from typing import List, Optional
 import json
+import re
 from sqlalchemy.orm import Session
 from app.models.care import Caregiver, Person, Evidence, CareEvent
+from app.models.care_continuity import EvidenceObservation
 from app.schemas.situation import SituationInput, SituationResponse, SituationEvent, SituationDocument
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
@@ -10,6 +12,36 @@ from app.services.situation_formation import detect_situations
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _explicit_speaker_statements(source_text: str) -> list[dict]:
+    """Extract only source-labelled statements with exact offsets; never infer speakers."""
+    header = re.compile(
+        r"(?m)^(?:\\[[^\\]\\r\\n]+\\]\\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}):[ \\t]*"
+    )
+    matches = list(header.finditer(source_text))
+    if len(matches) < 2:
+        return []
+    statements = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(source_text)
+        while start < end and source_text[start].isspace():
+            start += 1
+        while end > start and source_text[end - 1].isspace():
+            end -= 1
+        passage = source_text[start:end]
+        if not passage:
+            continue
+        if len(passage) > 8000:
+            raise ValueError("A speaker-labelled statement exceeds the supported 8,000-character observation limit")
+        statements.append({
+            "speaker_label": match.group("label").strip(),
+            "source_passage": passage,
+            "source_span_start": start,
+            "source_span_end": end,
+        })
+    return statements
 
 
 def process_situation_input(db: Session, payload: SituationInput) -> SituationResponse:
@@ -86,7 +118,32 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         return evidence
 
     if payload.raw_input and payload.raw_input.strip():
-        create_evidence(payload.raw_input.strip())
+        source_text = payload.raw_input.strip()
+        source_evidence = create_evidence(source_text)
+        # Preserve every explicitly labelled speaker statement as a separate
+        # source-span-bound observation. The authenticated caregiver remains
+        # the reporter; the text header remains the speaker label. Never map a
+        # free-text label to a verified professional/caregiver identity.
+        for statement in _explicit_speaker_statements(source_text):
+            db.add(EvidenceObservation(
+                person_id=payload.person_id,
+                evidence_id=source_evidence.id,
+                observation_kind="imported_information",
+                epistemic_status="reported",
+                subject_label=(person.name or "care recipient")[:160],
+                attribute="reported_statement",
+                value_text=statement["source_passage"],
+                context="Statement extracted from an explicitly speaker-labelled source thread. Speaker label is source text, not verified identity.",
+                reported_at=_utc_now(),
+                observer_label=statement["speaker_label"],
+                observer_caregiver_id=None,
+                source_passage=statement["source_passage"],
+                source_span_start=statement["source_span_start"],
+                source_span_end=statement["source_span_end"],
+                extraction_method="explicit_speaker_header_parser",
+                extraction_version="speaker-header-v1",
+                created_by_caregiver_id=payload.caregiver_id,
+            ))
 
     if payload.documents:
         for doc in payload.documents:
