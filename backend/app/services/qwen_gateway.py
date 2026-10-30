@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 def get_ollama_config() -> tuple[str, str, float]:
     base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen3.5:2b").strip()
     try:
         timeout = max(5.0, min(float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180")), 180.0))
     except (TypeError, ValueError):
@@ -71,16 +71,15 @@ def qwen_chat(
     options: dict | None = None,
 ) -> str:
     base, model, configured_timeout = get_ollama_config()
-    # Keep inference memory bounded for Railway deployments. The 1.5B model's
-    # default context window can allocate a large KV cache and destabilize the
-    # same container that hosts FastAPI. Every workflow uses the shared gateway,
-    # so the limit applies consistently without changing model authority.
+    # Keep inference memory bounded for Railway deployments. The model context window is bounded to protect the FastAPI process sharing
+    # this container. Every workflow uses the shared gateway, so the limit applies
+    # consistently without changing model authority.
     try:
-        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "1024")), 8192))
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
     except (TypeError, ValueError):
         num_ctx = 1024
     try:
-        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
+        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "256")), 1024))
     except (TypeError, ValueError):
         num_predict = 96
     # Railway production is CPU-only; Ollama otherwise detected 48 threads in a
