@@ -34,4 +34,6 @@ This is the primary engineering gate for changes that ingest, reconcile, persist
 - Any privacy breach, lost contradiction/correction, incorrect attribution, false as-of reconstruction, unsupported completion, or fabricated evidence reference is a hard failure.
 - A missing test for a required invariant is a coverage gap, not a pass.
 
+The benchmark report must identify the exact tested commit SHA and workflow run; evidence from another head cannot satisfy this gate.
+
 Synthetic fixtures are not production caregiver data. Passing this gate does not establish field reliability with real families; that requires separately governed, consented, de-identified validation.
