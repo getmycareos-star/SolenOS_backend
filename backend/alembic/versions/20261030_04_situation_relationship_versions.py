@@ -56,9 +56,8 @@ def upgrade() -> None:
         pair = (
             row["person_id"],
             row["source_type"],
-            row["source_id"],
             row["target_type"],
-            row["target_id"],
+            *sorted((row["source_id"], row["target_id"])),
         )
         versions[pair] = versions.get(pair, 0) + 1
         # Re-number the complete historical sequence. A legacy/default value
