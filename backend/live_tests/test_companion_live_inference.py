@@ -390,6 +390,7 @@ def test_live_qwen_compares_recorded_care_changes_without_inventing_a_cause(monk
         assert changed_id in data["source_event_ids"]
         assert any(term in answer for term in ("breakfast", "lunch", "meal", "eating", "intake"))
         assert any(term in answer for term in ("unknown", "not recorded", "not known", "unclear", "cannot tell", "can't tell"))
+        assert any(term in answer for term in ("follow up", "follow-up", "watch", "monitor", "check", "ask", "attention"))
         assert data["written_to_lcr"] is False
         assert data["persistence"] == "conversation_only"
         assert not any(unsupported in answer for unsupported in (
