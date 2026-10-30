@@ -440,6 +440,24 @@ def test_conversation_report_context_grounds_follow_up_without_trusting_assistan
     assert "not persisted Living Care Record evidence" in context
 
 
+def test_unchecked_meals_follow_up_is_completed_without_claiming_it_was_recorded():
+    draft = "You reported reduced breakfast intake. Lunch and dinner have not been checked."
+    assert collaboration._needs_follow_up_for_unchecked_meals(
+        "My grandmother has eaten less at breakfast for three mornings. I have not checked lunch or dinner.",
+        draft,
+    )
+    completed = (
+        draft.rstrip()
+        + "\n\nPlease check and note what she eats at lunch and dinner today, "
+        "including approximate amounts."
+    )
+    assert not collaboration._needs_follow_up_for_unchecked_meals(
+        "My grandmother has eaten less at breakfast for three mornings. I have not checked lunch or dinner.",
+        completed,
+    )
+    assert "recorded" not in completed.casefold()
+
+
 def test_care_coordination_follow_up_keeps_the_prior_care_subject_in_retrieval():
     prior = [
         SimpleNamespace(

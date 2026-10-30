@@ -2395,6 +2395,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
+        if invalid_reply and _needs_follow_up_for_unchecked_meals(user_text, reply):
+            # Preserve the model's grounded answer, but close an explicit
+            # observation gap deterministically when the model omits the next
+            # step after its revision attempts. This is a caregiver observation,
+            # not a diagnosis or an LCR write.
+            reply = (
+                reply.rstrip()
+                + "\n\nPlease check and note what she eats at lunch and dinner today, "
+                "including approximate amounts."
+            )
+            invalid_reply = (
+                not isinstance(reply, str)
+                or not reply.strip()
+                or _companion_message_needs_revision(reply)
+                or _contains_unrequested_saba(reply, validation_source)
+                or _contains_unsupported_care_claim(reply, validation_source)
+                or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                or _contains_unsupported_record_reference(reply, validation_source)
+            )
         if invalid_reply:
             raise HTTPException(
                 status_code=503,
