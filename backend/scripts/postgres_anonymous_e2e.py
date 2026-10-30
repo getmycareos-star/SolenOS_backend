@@ -82,8 +82,11 @@ def download_binary(evidence_id: str, token: str):
         headers={"Authorization": f"Bearer {token}"},
         method="GET",
     )
-    with urllib.request.urlopen(req, timeout=10) as response:
-        return response.status, response.read()
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
 
 
 def start_server():
@@ -1112,13 +1115,17 @@ def main():
                 f"Open Loop isolation failed after restart, got {status}: {cross_person_loop_after_restart}")
 
         download_status, downloaded_blob = download_binary(original_upload_id, token_a)
-        require(download_status == 200 and downloaded_blob == duplicate_blob,
-                "Original binary evidence must remain byte-identical and accessible after application restart")
+        require(
+            download_status == 200 and downloaded_blob == duplicate_blob,
+            f"Original binary evidence must remain byte-identical and accessible after application restart: status={download_status}, body={downloaded_blob!r}",
+        )
         duplicate_status, downloaded_duplicate = download_binary(
             duplicate_upload_body["evidence_id"], token_a
         )
-        require(duplicate_status == 200 and downloaded_duplicate == duplicate_blob,
-                "Duplicate binary evidence must remain separately persisted and accessible after restart")
+        require(
+            duplicate_status == 200 and downloaded_duplicate == duplicate_blob,
+            f"Duplicate binary evidence must remain separately persisted and accessible after restart: status={duplicate_status}, body={downloaded_duplicate!r}",
+        )
 
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
