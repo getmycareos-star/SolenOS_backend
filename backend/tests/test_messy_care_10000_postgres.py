@@ -155,6 +155,10 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         occurred_at -= timedelta(days=365)
                     if family == "late_arriving_evidence":
                         occurred_at = reference - timedelta(days=10, hours=event_index)
+                    if family == "stale_observation":
+                        occurred_at = reference - timedelta(days=500)
+                    if family == "delayed_recording":
+                        occurred_at = reference - timedelta(days=30, hours=event_index)
                     if family == "time_zone_boundary":
                         occurred_at = (reference - timedelta(days=1)).astimezone(
                             timezone(timedelta(hours=-8))
@@ -207,6 +211,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         reported_at=(
                             reference - timedelta(days=2)
                             if family == "late_arriving_evidence"
+                            else reference - timedelta(days=1)
+                            if family == "delayed_recording"
                             else reference + timedelta(minutes=case_id)
                         ),
                         evidence_status=(
@@ -412,11 +418,15 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     assert claim.assertion_status == "planned"
                 if wanted["family"] == "stale_observation":
                     assert evidence.evidence_status == "stale"
+                    assert _utc(evidence.occurred_at) < reference - timedelta(days=365)
                 if wanted["family"] == "partial_document":
                     assert evidence.evidence_status == "partial"
                     assert "context unavailable" in evidence.source_text
-                if wanted["family"] == "late_arriving_evidence":
+                if wanted["family"] in {"late_arriving_evidence", "delayed_recording"}:
                     assert _utc(evidence.reported_at) > _utc(evidence.occurred_at)
+                if wanted["family"] == "incomplete_history":
+                    assert evidence.reported_by_caregiver_id is None
+                    assert evidence.uploaded_by_caregiver_id is not None
                 if wanted["family"] == "time_zone_boundary":
                     assert evidence.occurred_at_timezone == "America/Los_Angeles"
                 assert f"case:{wanted['case_id']:05d}" in (row.tags or [])
@@ -469,6 +479,10 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert len(rows) == CASES_PER_HISTORY, f"{person_id}: wrong event count"
                 assert {row.event_type for row in rows} == set(DOMAINS)
                 assert len({row.created_by_caregiver_id for row in rows}) == 2
+                if "repeated_occurrence" in (rows[0].tags or []):
+                    counts_by_domain = Counter(row.event_type for row in rows)
+                    assert set(counts_by_domain) == set(DOMAINS)
+                    assert all(count == 2 for count in counts_by_domain.values())
                 if "caregiver_transition" in (rows[0].tags or []):
                     ordered_rows = sorted(rows, key=lambda item: item.id)
                     first_half = {item.created_by_caregiver_id for item in ordered_rows[:5]}
