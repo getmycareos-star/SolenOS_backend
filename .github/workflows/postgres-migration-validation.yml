@@ -109,7 +109,7 @@ jobs:
               "evidence": {"person_id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_by_caregiver_id", "original_author", "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id", "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel", "original_source_reference", "parent_evidence_id", "source_text_sha256", "ingested_at", "reported_at", "collection_method", "origin_device_ref", "transfer_source", "transfer_reference", "ingestion_key", "ingestion_request_sha256"},
               "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
               "evidence_claim_dependencies": {"id", "person_id", "claim_id", "depends_on_claim_id", "dependency_type", "rationale", "created_by_caregiver_id", "created_at"},
-              "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "created_at"},
+              "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "superseded_by_claim_id", "created_at"},
               "evidence_source_relationships": {"id", "person_id", "source_evidence_id", "related_evidence_id", "relationship_type", "source_independence_status", "origin_group_key", "rationale", "reviewed_by_caregiver_id", "created_at"},
               "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
               "evidence_freshness_policies": {"id", "person_id", "domain_key", "policy_version", "max_age_days", "historical_after_days", "rationale", "created_by_caregiver_id", "created_at"},
@@ -686,6 +686,7 @@ jobs:
           createdb -h localhost -U postgres solenos_stamped_04
           createdb -h localhost -U postgres solenos_qwen_backfill
           createdb -h localhost -U postgres solenos_freshness_existing
+          createdb -h localhost -U postgres solenos_evidence_columns
 
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
@@ -701,6 +702,18 @@ jobs:
           test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "$expected_head"
 
 
+      - name: Preserve existing claim and observation rows during forward schema repair
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_evidence_columns
+          PSQL_URL: postgresql://postgres:postgres@localhost:5432/solenos_evidence_columns
+        working-directory: backend
+        run: |
+          python -m alembic upgrade 20261030_01_companion_turn_merge
+          python scripts/postgres_evidence_column_reconciliation.py seed
+          python -m alembic upgrade head
+          python scripts/postgres_evidence_column_reconciliation.py verify
+          expected_head="$(python -c 'from alembic.config import Config; from alembic.script import ScriptDirectory; s=ScriptDirectory.from_config(Config("alembic.ini")); heads=s.get_heads(); assert len(heads)==1, heads; print(heads[0])')"
+          test "$(psql "$PSQL_URL" -Atc "SELECT version_num FROM alembic_version")" = "$expected_head"
       - name: Upgrade a production-like database already stamped at revision 20261024_04
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_stamped_04
