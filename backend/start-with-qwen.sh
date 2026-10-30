@@ -8,7 +8,7 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:4b}"
 
 ollama serve >/tmp/ollama-runtime.log 2>&1 &
 OLLAMA_PID=$!
@@ -35,10 +35,13 @@ done
 # immediately; no network download is allowed to block caregiver workflows.
 if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
   (
-    if ! ollama list 2>/dev/null | grep -q 'qwen2.5:0.5b'; then
-      ollama pull qwen2.5:0.5b || echo "Optional Qwen model pull failed; core APIs remain available." >&2
+    if ! ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
+      echo "Pulling configured local Qwen model: $OLLAMA_MODEL"
+      ollama pull "$OLLAMA_MODEL" || echo "Optional Qwen model pull failed; core APIs remain available." >&2
+    else
+      echo "Configured local Qwen model is already present: $OLLAMA_MODEL"
     fi
-  ) >/tmp/qwen-model-pull.log 2>&1 &
+  ) &
 fi
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &

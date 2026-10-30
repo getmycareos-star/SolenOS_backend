@@ -1229,7 +1229,7 @@ def _contains_unsupported_operational_claim(
     ) and not re.search(r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", source):
         return True
     care_terms = r"\b(?:medication|medicine|prescription|dosage|dose)\b"
-    if re.search(care_terms, text) and not re.search(care_terms, source):
+    if re.search(care_terms, text):
         # Explicitly saying medication information is missing is grounded uncertainty,
         # not an invented medication fact. Still reject affirmative actions/advice.
         missing_medication = (
@@ -1237,9 +1237,52 @@ def _contains_unsupported_operational_claim(
             r"|\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:not recorded|not documented|not supplied|not provided|unknown|missing|unavailable|unverified)\b"
         )
         medication_action = (
-            r"\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:changed|increase(?:d)?|decrease(?:d)?|stop(?:ped)?|start(?:ed)?|missed|administered|taken|given|prescribed|recommended)\b"
+            r"\b(?:medication|medicine|prescription|dosage|dose)\b[^.!?;\n]{0,100}\b(?:changed?|increas(?:e|ed|ing)|decreas(?:e|ed|ing)|doubl(?:e|ed|ing)|stop(?:ped|ping)?|start(?:ed|ing)?|skip(?:ped|ping)?|hold|resume|administer(?:ed|ing)?|tak(?:e|en|ing)|giv(?:e|en|ing)|miss(?:ed|ing)|prescribed|recommended)\b"
+            r"|\b(?:change|adjust|alter|increase|decrease|double|stop|start|skip|hold|resume|administer|give|take|miss)(?:d|ed|ing)?\b[^.!?;\n]{0,80}\b(?:medication|medicine|prescription|dosage|dose)\b"
         )
-        if not re.search(missing_medication, text) or re.search(medication_action, text):
+        action_matches = list(re.finditer(medication_action, text))
+        # Accept an affirmative medication observation only when its ordered
+        # action wording is explicitly present in the caregiver's supplied source.
+        source_supported_action = bool(action_matches) and all(
+            re.search(
+                r"\b" + r"\s+".join(
+                    re.escape(term) for term in re.findall(r"[a-z]+", match.group(0))
+                ) + r"\b",
+                source,
+            )
+            for match in action_matches
+        )
+        # A policy-required refusal is not an unsupported medication fact. Small
+        # models often mention "dose" while explicitly declining to advise a
+        # change; rejecting that safe boundary caused otherwise valid workflows
+        # to fail closed with HTTP 503. Keep rejecting affirmative medication
+        # actions unless their exact action is present in the supplied source.
+        safe_medication_boundary_pattern = (
+            r"\b(?:cannot|can.t|unable to|not able to)\b.{0,100}\b(?:advise|recommend|confirm|determine|provide)\b"
+            r"|\b(?:do not|don.t|never|should not|must not)\s+(?:change|adjust|alter|increase|decrease|double|stop|start)\b.{0,100}\b(?:medication|medicine|prescription|dosage|dose)\b"
+            r"|\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:should not|must not|cannot|can.t|not to be)\s+(?:changed|adjusted|altered|increased|decreased|doubled|stopped|started)\b"
+            r"|\b(?:speak|check|confirm|contact|consult|discuss|review)\b.{0,100}\b(?:prescriber|clinician|doctor|pharmacist)\b"
+            r"|\b(?:prescriber|clinician|doctor|pharmacist)\b.{0,100}\b(?:confirm|advise|review|discuss)\b"
+            r"|\b(?:no|not)\s+(?:medication|dose|dosage)\s+(?:change|adjustment|increase|decrease)\b"
+        )
+        safe_medication_boundary = bool(re.search(safe_medication_boundary_pattern, text))
+        if action_matches and not source_supported_action:
+            # A safety refusal only excuses the action in the same sentence;
+            # it must not mask a separate unsupported affirmative claim.
+            for action_match in action_matches:
+                left = max(
+                    text.rfind(mark, 0, action_match.start())
+                    for mark in (".", ";", "!", "?", "\n")
+                ) + 1
+                right_candidates = [
+                    position for mark in (".", ";", "!", "?", "\n")
+                    if (position := text.find(mark, action_match.end())) >= 0
+                ]
+                right = min(right_candidates) if right_candidates else len(text)
+                clause = text[left:right]
+                if not re.search(safe_medication_boundary_pattern, clause):
+                    return True
+        if not re.search(missing_medication, text) and not source_supported_action and not safe_medication_boundary:
             return True
     weekdays = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     source_correction = re.search(

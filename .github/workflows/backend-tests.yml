@@ -387,7 +387,7 @@ jobs:
           echo "QWEN_E2E: wait for bundled model to finish downloading and become available"
           model_ready=0
           for attempt in $(seq 1 90); do
-            status_code=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 -H "$auth_header" \
+            status_code=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 60 -H "$auth_header" \
               http://127.0.0.1:8080/api/v1/assistant/status || true)
             if [ "$status_code" = "200" ] && python - <<'PY'
           import json
@@ -397,7 +397,7 @@ jobs:
               assert d.get("provider") == "local_ollama"
               assert d.get("inference_api") == "ollama_native_http"
               assert d.get("hosted_inference_api") is False
-              assert d.get("model") == "qwen2.5:0.5b"
+              assert d.get("model") == "qwen3.5:4b"
           except Exception:
               raise SystemExit(1)
           PY
@@ -474,7 +474,7 @@ jobs:
           greeting=""
           greeting_ready=0
           for attempt in $(seq 1 90); do
-            if greeting=$(curl --fail --silent --show-error --max-time 30 \
+            if greeting=$(curl --fail --silent --show-error --max-time 90 \
               -H "$auth_header" -H "Content-Type: application/json" \
               -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
               http://127.0.0.1:8080/api/v1/conversation/message 2>/tmp/qwen-greeting-error); then

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -16,7 +17,7 @@ from fastapi import HTTPException
 
 def get_ollama_config() -> tuple[str, str, float]:
     base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b").strip()
     try:
         timeout = max(5.0, min(float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180")), 180.0))
     except (TypeError, ValueError):
@@ -71,18 +72,17 @@ def qwen_chat(
     options: dict | None = None,
 ) -> str:
     base, model, configured_timeout = get_ollama_config()
-    # Keep inference memory bounded for Railway deployments. The 1.5B model's
-    # default context window can allocate a large KV cache and destabilize the
-    # same container that hosts FastAPI. Every workflow uses the shared gateway,
-    # so the limit applies consistently without changing model authority.
+    # Keep inference memory bounded for Railway deployments. Every workflow uses
+    # this shared gateway, so the limit applies consistently without changing
+    # the model's non-authoritative role.
     try:
-        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "1024")), 8192))
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
     except (TypeError, ValueError):
         num_ctx = 1024
     try:
-        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
+        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "384")), 1024))
     except (TypeError, ValueError):
-        num_predict = 96
+        num_predict = 384
     # Railway production is CPU-only; Ollama otherwise detected 48 threads in a
     # constrained container and real requests stalled. Bound per-request CPU
     # parallelism so inference does not oversubscribe the available vCPUs.
@@ -98,10 +98,31 @@ def qwen_chat(
     }
     if options:
         bounded_options.update(options)
+    # Per-workflow options may lower these budgets, but cannot exceed the
+    # deployment's configured resource limits.
+    try:
+        bounded_options["num_ctx"] = max(1024, min(int(bounded_options.get("num_ctx", num_ctx)), num_ctx))
+    except (TypeError, ValueError):
+        bounded_options["num_ctx"] = num_ctx
+    try:
+        bounded_options["num_predict"] = max(1, min(int(bounded_options.get("num_predict", num_predict)), num_predict))
+    except (TypeError, ValueError):
+        bounded_options["num_predict"] = num_predict
+    try:
+        bounded_options["num_thread"] = max(1, min(int(bounded_options.get("num_thread", num_thread)), num_thread))
+    except (TypeError, ValueError):
+        bounded_options["num_thread"] = num_thread
+    think_setting = os.getenv("OLLAMA_THINK", "false").strip().casefold()
+    think: bool | str = (
+        think_setting == "true" if think_setting in {"true", "false"}
+        else think_setting if think_setting in {"low", "medium", "high"}
+        else False
+    )
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
+        "think": think,
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": bounded_options,
     }
@@ -252,35 +273,77 @@ def extract_review_candidates(
 
 
 def qwen_runtime_status() -> dict:
-    """Confirm the configured model is actually served by the local Ollama runtime."""
+    """Verify model installation, loaded state, and a real Ollama inference pass."""
     base, model, timeout = get_ollama_config()
-    request = urllib.request.Request(
-        base + "/api/tags",
-        headers={"Accept": "application/json"},
-        method="GET",
-    )
-    try:
+
+    def get_json(path: str) -> dict:
+        request = urllib.request.Request(
+            base + path,
+            headers={"Accept": "application/json"},
+            method="GET",
+        )
         with urllib.request.urlopen(request, timeout=min(timeout, 10.0)) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+            result = json.loads(response.read().decode("utf-8"))
+        if not isinstance(result, dict):
+            raise ValueError("Ollama returned a non-object response.")
+        return result
+
+    try:
+        tags = get_json("/api/tags")
+        models = tags.get("models")
+        if not isinstance(models, list):
+            raise ValueError("Ollama returned an invalid model inventory.")
+        names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
+        if model not in names:
+            raise HTTPException(
+                status_code=503,
+                detail="The configured Qwen model is not installed in the local runtime.",
+            )
+
+        started = time.perf_counter()
+        # This is a genuine inference request, not an Ollama process or tag-list check.
+        smoke_reply = qwen_chat(
+            [
+                {"role": "system", "content": "Reply with the single word READY."},
+                {"role": "user", "content": "Runtime inference check."},
+            ],
+            timeout=min(timeout, 45.0),
+            options={"temperature": 0, "num_ctx": 1024, "num_predict": 8},
+        )
+        latency_ms = round((time.perf_counter() - started) * 1000, 1)
+        if not smoke_reply.strip():
+            raise ValueError("Ollama inference returned an empty response.")
+
+        process_state = get_json("/api/ps")
+        running_models = process_state.get("models", [])
+        loaded = any(
+            isinstance(item, dict)
+            and str(item.get("name") or item.get("model") or "") == model
+            for item in running_models
+        )
+        if not loaded:
+            raise HTTPException(
+                status_code=503,
+                detail="The configured Qwen model answered but is not reported as loaded by Ollama.",
+            )
+    except HTTPException:
+        raise
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         raise HTTPException(
             status_code=503,
-            detail="SolenOS local Qwen runtime is not responding.",
+            detail="SolenOS local Qwen is not inference-ready.",
         ) from exc
-    models = payload.get("models")
-    if not isinstance(models, list):
-        raise HTTPException(status_code=503, detail="Ollama returned an invalid model inventory.")
-    names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
-    if model not in names:
-        raise HTTPException(
-            status_code=503,
-            detail="The configured Qwen model is not installed in the local runtime.",
-        )
+
     return {
         "available": True,
+        "inference_ready": True,
         "model": model,
         "provider": "local_ollama",
         "inference_api": "ollama_native_http",
         "hosted_inference_api": False,
+        "model_installed": True,
+        "model_loaded": True,
+        "inference_smoke_test": True,
+        "inference_latency_ms": latency_ms,
         "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service",
     }
