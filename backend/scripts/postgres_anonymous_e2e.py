@@ -42,6 +42,50 @@ def request(method: str, path: str, *, body=None, token: str | None = None):
         return exc.code, decoded
 
 
+def upload_request(fields: dict[str, str], filename: str, content: bytes, token: str):
+    boundary = f"solenos-e2e-{os.getpid()}-{time.time_ns()}"
+    chunks = []
+    for name, value in fields.items():
+        chunks.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    chunks.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode()
+        + content + b"\r\n"
+    )
+    chunks.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        BASE_URL + "/api/v1/upload",
+        data=b"".join(chunks),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            payload = response.read()
+            return response.status, json.loads(payload) if payload else None
+    except urllib.error.HTTPError as exc:
+        payload = exc.read()
+        try:
+            decoded = json.loads(payload) if payload else None
+        except json.JSONDecodeError:
+            decoded = payload.decode("utf-8", "replace")
+        return exc.code, decoded
+
+
+def download_binary(evidence_id: str, token: str):
+    req = urllib.request.Request(
+        BASE_URL + f"/api/v1/upload/{evidence_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return response.status, response.read()
+
+
 def start_server():
     log_path = Path("/tmp/solenos-postgres-e2e-uvicorn.log")
     log = log_path.open("ab")
@@ -122,6 +166,37 @@ def main():
         )
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
+
+        # Two simultaneous uploads of identical bytes must not both be
+        # reported as originals. PostgreSQL advisory locking serializes the
+        # per-person fingerprint lookup and insert while preserving both rows.
+        duplicate_blob = b"\\x89PNG\\r\\n\\x1a\\nSolenOS PostgreSQL duplicate-upload concurrency fixture"
+        upload_fields = {
+            "person_id": person_a,
+            "caregiver_id": caregiver_a,
+            "evidence_type": "care_photo",
+            "extracted_text": "CI-only original binary upload fixture.",
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_uploads = list(pool.map(
+                lambda _: upload_request(
+                    upload_fields, "concurrent-care-photo.png", duplicate_blob, token_a
+                ),
+                range(2),
+            ))
+        require(all(status == 201 for status, _ in concurrent_uploads),
+                f"Concurrent identical uploads failed: {concurrent_uploads}")
+        upload_bodies = [body for _, body in concurrent_uploads]
+        upload_ids = {body.get("evidence_id") for body in upload_bodies}
+        require(len(upload_ids) == 2 and None not in upload_ids,
+                f"Both original upload records and their provenance must be retained: {upload_bodies}")
+        require(sorted(body.get("duplicate_detected") for body in upload_bodies) == [False, True],
+                f"Concurrent duplicate detection must produce exactly one original and one duplicate: {upload_bodies}")
+        original_upload_id = next(body["evidence_id"] for body in upload_bodies if not body["duplicate_detected"])
+        duplicate_upload_body = next(body for body in upload_bodies if body["duplicate_detected"])
+        require(duplicate_upload_body.get("duplicate_of_evidence_id") == original_upload_id,
+                f"Duplicate must point to the single canonical original: {upload_bodies}")
+
 
         # Professional-input evidence must resolve to a real source row in the
         # same PostgreSQL-backed care record; caregiver prose alone is not proof.
@@ -994,6 +1069,15 @@ def main():
         )
         require(status == 404,
                 f"Open Loop isolation failed after restart, got {status}: {cross_person_loop_after_restart}")
+
+        download_status, downloaded_blob = download_binary(original_upload_id, token_a)
+        require(download_status == 200 and downloaded_blob == duplicate_blob,
+                "Original binary evidence must remain byte-identical and accessible after application restart")
+        duplicate_status, downloaded_duplicate = download_binary(
+            duplicate_upload_body["evidence_id"], token_a
+        )
+        require(duplicate_status == 200 and downloaded_duplicate == duplicate_blob,
+                "Duplicate binary evidence must remain separately persisted and accessible after restart")
 
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
