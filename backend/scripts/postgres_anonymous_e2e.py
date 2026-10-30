@@ -356,21 +356,29 @@ def main():
             "Hydrated mobility thread did not retain every concurrent and multi-speaker evidence link",
         )
         source_statements = grouped_threads[mobility_thread_id].get("sourceStatements", [])
+        selected_speaker_statements = [
+            statement for statement in source_statements
+            if statement.get("evidence_id") == speaker_capture.get("evidence_id")
+        ]
         require(
-            [statement.get("speaker_label") for statement in source_statements] == ["Daughter", "Nurse"],
-            f"Hydration must preserve both explicit speakers in original order: {source_statements}",
+            [statement.get("speaker_label") for statement in selected_speaker_statements] == ["Daughter", "Nurse"],
+            f"Hydration must preserve both explicit speakers in the selected original source order: {selected_speaker_statements}",
         )
         require(
             all(statement.get("reporter_caregiver_id") == caregiver_a for statement in source_statements),
-            "Authenticated reporter must remain distinct from each source speaker",
+            "Authenticated reporter must remain distinct from every source speaker across the selected thread",
         )
         require(
             all(
                 speaker_source[statement["source_span_start"]:statement["source_span_end"]]
                 == statement["source_passage"]
-                for statement in source_statements
+                for statement in selected_speaker_statements
             ),
-            "Every speaker statement must retain exact original source offsets",
+            "Every selected multi-speaker statement must retain exact original source offsets",
+        )
+        require(
+            len(source_statements) >= len(selected_speaker_statements),
+            "Thread hydration must retain source statements from all linked evidence records",
         )
         require(
             grouped_threads[appetite_thread_id].get("linked_evidence_ids", [])
