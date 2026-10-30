@@ -3596,18 +3596,24 @@ def create_evidence_observation(
     if supersedes_id is not None:
         if not isinstance(supersedes_id, str) or not supersedes_id.strip():
             raise HTTPException(status_code=422, detail="supersedes_observation_id must be a valid observation ID")
-        superseded_observation = db.query(EvidenceObservation).filter(
-            EvidenceObservation.id == supersedes_id,
-            EvidenceObservation.person_id == person_id,
-            EvidenceObservation.evidence_id == evidence_id,
-        ).first()
+        superseded_observation = (
+            db.query(EvidenceObservation)
+            .join(Evidence, Evidence.id == EvidenceObservation.evidence_id)
+            .filter(
+                EvidenceObservation.id == supersedes_id,
+                EvidenceObservation.person_id == person_id,
+                Evidence.person_id == person_id,
+            )
+            .first()
+        )
         if superseded_observation is None:
-            raise HTTPException(status_code=422, detail="The superseded observation must belong to this evidence and care record")
+            raise HTTPException(status_code=422, detail="The superseded observation must belong to this authenticated care record")
         if superseded_observation.attribute != attribute.strip():
             raise HTTPException(status_code=422, detail="A correction must retain the same observation attribute")
+        if " ".join((superseded_observation.subject_label or "").split()).casefold() != " ".join(subject.strip().split()).casefold():
+            raise HTTPException(status_code=422, detail="A correction must retain the same subject as the observation it supersedes")
         existing_correction = db.query(EvidenceObservation.id).filter(
             EvidenceObservation.person_id == person_id,
-            EvidenceObservation.evidence_id == evidence_id,
             EvidenceObservation.supersedes_observation_id == supersedes_id,
         ).first()
         if existing_correction is not None:
