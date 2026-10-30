@@ -1223,7 +1223,7 @@ def _contains_unsupported_operational_claim(
     ) and not re.search(r"\b(?:she|he|they|the person)\s+(?:reports?|reported|says?|said|observed|noticed)\b", source):
         return True
     care_terms = r"\b(?:medication|medicine|prescription|dosage|dose)\b"
-    if re.search(care_terms, text) and not re.search(care_terms, source):
+    if re.search(care_terms, text):
         # Explicitly saying medication information is missing is grounded uncertainty,
         # not an invented medication fact. Still reject affirmative actions/advice.
         missing_medication = (
