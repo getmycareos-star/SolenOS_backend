@@ -1,10 +1,7 @@
 name: Messy-care benchmark gate
 
 on:
-  # This is a primary engineering gate: run for every PR to main, not only
-  # when a hand-maintained list of paths happens to match.
-  pull_request:
-    branches: [main]
+  # Main-only delivery gate: no feature-branch or pull-request implementation path.
   push:
     branches: [main]
   workflow_dispatch:
