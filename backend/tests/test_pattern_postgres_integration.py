@@ -326,245 +326,279 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
     reported_at = datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc)
     recorded_at = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
 
-    with Session() as db:
-        db.add_all([
-            Person(id=person_a, name="PostgreSQL reconstruction fixture A"),
-            Person(id=person_b, name="PostgreSQL reconstruction fixture B"),
-        ])
-        db.flush()
-        db.add_all([
-            Caregiver(id=uploader, name="Uploader caregiver", relationship="family", person_id=person_a),
-            Caregiver(id=reporter, name="Reporting caregiver", relationship="family", person_id=person_a),
-            Caregiver(id=other_caregiver, name="Other person caregiver", relationship="family", person_id=person_b),
-        ])
-        db.flush()
+    try:
+        with Session() as db:
+            db.add_all([
+                Person(id=person_a, name="PostgreSQL reconstruction fixture A"),
+                Person(id=person_b, name="PostgreSQL reconstruction fixture B"),
+            ])
+            db.flush()
+            db.add_all([
+                Caregiver(id=uploader, name="Uploader caregiver", relationship="family", person_id=person_a),
+                Caregiver(id=reporter, name="Reporting caregiver", relationship="family", person_id=person_a),
+                Caregiver(id=other_caregiver, name="Other person caregiver", relationship="family", person_id=person_b),
+            ])
+            db.flush()
 
-        db.add(CareEvent(
-            id=event_id,
-            person_id=person_a,
-            event_type="medication",
-            status="recorded",
-            occurred_at=occurred_at,
-            recorded_at=recorded_at,
-            title="Medication administration account",
-            description="A synthetic conflicting medication account.",
-            evidence_ids=[evidence_id],
-            created_by_caregiver_id=reporter,
-            time_provenance="reported_by_caregiver",
-        ))
-        db.add_all([
-            Evidence(
-                id=evidence_id,
+            db.add(CareEvent(
+                id=event_id,
                 person_id=person_a,
-                type="caregiver_report",
-                source_text="Daughter reports the evening dose was administered.",
-                uploaded_by_caregiver_id=uploader,
-                original_author="Daughter",
-                reported_by_label="Daughter",
-                reported_by_caregiver_id=reporter,
-                collected_by_caregiver_id=uploader,
-                collected_at=reported_at,
+                event_type="medication",
+                status="recorded",
                 occurred_at=occurred_at,
-                reported_at=reported_at,
-                evidence_status="reported",
-                source_type="caregiver_report",
-            ),
-            Evidence(
-                id=evidence_b_id,
-                person_id=person_b,
-                type="caregiver_report",
-                source_text="Private unrelated care information.",
-                uploaded_by_caregiver_id=other_caregiver,
-                reported_by_caregiver_id=other_caregiver,
-                reported_by_label="Other caregiver",
-                evidence_status="reported",
-                source_type="caregiver_report",
-            ),
-        ])
-        db.flush()
-
-        db.add_all([
-            CareAssertion(
-                id=assertion_a,
-                person_id=person_a,
-                subject_type="medication",
-                subject_id="evening-dose",
-                field="administration_status",
-                assertion_kind="event",
-                asserted_value="administered",
-                source_event_id=event_id,
-                source_label="Daughter report",
-                source_text="The dose was administered.",
+                recorded_at=recorded_at,
+                title="Medication administration account",
+                description="A synthetic conflicting medication account.",
                 evidence_ids=[evidence_id],
-                assertion_status="reported",
-                observed_at=occurred_at,
                 created_by_caregiver_id=reporter,
-            ),
-            CareAssertion(
-                id=assertion_b,
-                person_id=person_a,
-                subject_type="medication",
-                subject_id="evening-dose",
-                field="administration_status",
-                assertion_kind="event",
-                asserted_value="not_administered",
-                source_event_id=event_id,
-                source_label="Medication log",
-                source_text="The dose was not recorded as administered.",
-                evidence_ids=[evidence_id],
-                assertion_status="reported",
-                observed_at=occurred_at,
-                created_by_caregiver_id=uploader,
-            ),
-            Correction(
-                id=correction_id,
-                person_id=person_a,
-                target_type="care_assertion",
-                target_id=assertion_a,
-                original_text="The dose was administered.",
-                corrected_text="The daughter later corrected the report: she did not witness administration.",
-                caregiver_id=reporter,
-            ),
-            Correction(
-                id=correction_id_b,
-                person_id=person_a,
-                target_type="care_assertion",
-                target_id=assertion_a,
-                original_text="The daughter later corrected the report: she did not witness administration.",
-                corrected_text="The daughter cannot confirm whether administration occurred.",
-                caregiver_id=uploader,
-            ),
-            Contradiction(
-                id=conflict_id,
-                person_id=person_a,
-                subject_type="medication",
-                subject_id="evening-dose",
-                field="administration_status",
-                description="Conflicting caregiver and medication-log accounts remain unresolved.",
-                matching_candidate_ids=[assertion_a, assertion_b],
-                evidence_ids=[evidence_id],
-                source_assertion_ids=[assertion_a, assertion_b],
-                resolution_status="unresolved",
-            ),
-            OpenQuestion(
-                id=question_a,
-                person_id=person_a,
-                question="Was the evening dose administered?",
-                subject_type="medication",
-                subject_id="evening-dose",
-                status="open",
-                created_by_caregiver_id=reporter,
-            ),
-            OpenQuestion(
-                id=question_b,
-                person_id=person_a,
-                question="Did the new symptom occur before or after dinner?",
-                subject_type="symptom",
-                subject_id="new-symptom",
-                status="open",
-                created_by_caregiver_id=uploader,
-            ),
-        ])
-        db.flush()
-        db.add_all([
-            OpenQuestionAnswerEvent(
-                id=f"reconstruct-answer-v1-{suffix}",
-                question_id=question_a,
-                person_id=person_a,
-                answer="A caregiver initially reported that it was administered.",
-                answer_provenance="Initial family report",
-                evidence_ids=[evidence_id],
-                answer_version=1,
-                answered_by_caregiver_id=reporter,
-            ),
-            OpenQuestionAnswerEvent(
-                id=f"reconstruct-answer-v2-{suffix}",
-                question_id=question_a,
-                person_id=person_a,
-                answer="The earlier report was corrected; administration remains unverified.",
-                answer_provenance="Later correction review",
-                evidence_ids=[evidence_id],
-                answer_version=2,
-                answered_by_caregiver_id=uploader,
-            ),
-        ])
-        db.commit()
-
-    # New SQLAlchemy session: no identity-map state from the write transaction.
-    with Session() as db:
-        event = db.query(CareEvent).filter(CareEvent.id == event_id).one()
-        evidence = db.query(Evidence).filter(Evidence.id == evidence_id).one()
-        assertions = db.query(CareAssertion).filter(
-            CareAssertion.person_id == person_a,
-            CareAssertion.subject_id == "evening-dose",
-        ).order_by(CareAssertion.id).all()
-        corrections = db.query(Correction).filter(
-            Correction.person_id == person_a,
-            Correction.target_id == assertion_a,
-        ).order_by(Correction.id).all()
-        conflict = db.query(Contradiction).filter(Contradiction.id == conflict_id).one()
-        answers = db.query(OpenQuestionAnswerEvent).filter(
-            OpenQuestionAnswerEvent.question_id == question_a,
-            OpenQuestionAnswerEvent.person_id == person_a,
-        ).order_by(OpenQuestionAnswerEvent.answer_version).all()
-        medication_thread = db.query(OpenQuestion).filter(
-            OpenQuestion.person_id == person_a,
-            OpenQuestion.subject_type == "medication",
-            OpenQuestion.subject_id == "evening-dose",
-        ).all()
-        symptom_thread = db.query(OpenQuestion).filter(
-            OpenQuestion.person_id == person_a,
-            OpenQuestion.subject_type == "symptom",
-            OpenQuestion.subject_id == "new-symptom",
-        ).all()
-
-        assert event.occurred_at.replace(tzinfo=timezone.utc) == occurred_at
-        assert event.recorded_at.replace(tzinfo=timezone.utc) == recorded_at
-        assert event.occurred_at != event.recorded_at
-        assert evidence.uploaded_by_caregiver_id == uploader
-        assert evidence.reported_by_caregiver_id == reporter
-        assert evidence.original_author == "Daughter"
-        assert len(assertions) == 2
-        assert {row.asserted_value for row in assertions} == {"administered", "not_administered"}
-        assert len(corrections) == 2
-        correction_by_id = {row.id: row for row in corrections}
-        assert correction_by_id[correction_id].original_text == "The dose was administered."
-        assert "did not witness administration" in correction_by_id[correction_id].corrected_text
-        assert correction_by_id[correction_id_b].original_text == correction_by_id[correction_id].corrected_text
-        assert "cannot confirm" in correction_by_id[correction_id_b].corrected_text
-        assert conflict.resolution_status == "unresolved"
-        assert set(conflict.source_assertion_ids) == {assertion_a, assertion_b}
-        assert [row.answer_version for row in answers] == [1, 2]
-        assert answers[0].answer != answers[1].answer
-        assert len(medication_thread) == 1
-        assert len(symptom_thread) == 1
-        assert medication_thread[0].id != symptom_thread[0].id
-
-        # Person-scoped query and evidence validation must not cross care records.
-        scoped = UncertaintyEngine(db, person_id=person_a, caregiver_id=reporter)
-        assert scoped.list_open_questions(person_b) == []
-        with pytest.raises(ValueError, match="same care record"):
-            scoped._validate_person_evidence(person_a, [evidence_b_id])
-        assert db.query(Evidence).filter(
-            Evidence.person_id == person_a,
-            Evidence.id == evidence_b_id,
-        ).count() == 0
-
-        # Original source evidence and answer history are immutable; corrections
-        # and later answers must be appended rather than overwriting their origin.
-        evidence.source_text = "Attempted overwrite of the original source."
-        with pytest.raises(ValueError, match="Original evidence source text and fingerprint are immutable"):
+                time_provenance="reported_by_caregiver",
+            ))
+            db.add_all([
+                Evidence(
+                    id=evidence_id,
+                    person_id=person_a,
+                    type="caregiver_report",
+                    source_text="Daughter reports the evening dose was administered.",
+                    uploaded_by_caregiver_id=uploader,
+                    original_author="Daughter",
+                    reported_by_label="Daughter",
+                    reported_by_caregiver_id=reporter,
+                    collected_by_caregiver_id=uploader,
+                    collected_at=reported_at,
+                    occurred_at=occurred_at,
+                    reported_at=reported_at,
+                    evidence_status="reported",
+                    source_type="caregiver_report",
+                ),
+                Evidence(
+                    id=evidence_b_id,
+                    person_id=person_b,
+                    type="caregiver_report",
+                    source_text="Private unrelated care information.",
+                    uploaded_by_caregiver_id=other_caregiver,
+                    reported_by_caregiver_id=other_caregiver,
+                    reported_by_label="Other caregiver",
+                    evidence_status="reported",
+                    source_type="caregiver_report",
+                ),
+            ])
             db.flush()
-        db.rollback()
 
-    with Session() as db:
-        original_answer = db.query(OpenQuestionAnswerEvent).filter(
-            OpenQuestionAnswerEvent.question_id == question_a,
-            OpenQuestionAnswerEvent.answer_version == 1,
-        ).one()
-        original_answer.answer = "Attempted overwrite of answer version one."
-        with pytest.raises(ValueError, match="append-only"):
+            db.add_all([
+                CareAssertion(
+                    id=assertion_a,
+                    person_id=person_a,
+                    subject_type="medication",
+                    subject_id="evening-dose",
+                    field="administration_status",
+                    assertion_kind="event",
+                    asserted_value="administered",
+                    source_event_id=event_id,
+                    source_label="Daughter report",
+                    source_text="The dose was administered.",
+                    evidence_ids=[evidence_id],
+                    assertion_status="reported",
+                    observed_at=occurred_at,
+                    created_by_caregiver_id=reporter,
+                ),
+                CareAssertion(
+                    id=assertion_b,
+                    person_id=person_a,
+                    subject_type="medication",
+                    subject_id="evening-dose",
+                    field="administration_status",
+                    assertion_kind="event",
+                    asserted_value="not_administered",
+                    source_event_id=event_id,
+                    source_label="Medication log",
+                    source_text="The dose was not recorded as administered.",
+                    evidence_ids=[evidence_id],
+                    assertion_status="reported",
+                    observed_at=occurred_at,
+                    created_by_caregiver_id=uploader,
+                ),
+                Correction(
+                    id=correction_id,
+                    person_id=person_a,
+                    target_type="care_assertion",
+                    target_id=assertion_a,
+                    original_text="The dose was administered.",
+                    corrected_text="The daughter later corrected the report: she did not witness administration.",
+                    caregiver_id=reporter,
+                ),
+                Correction(
+                    id=correction_id_b,
+                    person_id=person_a,
+                    target_type="care_assertion",
+                    target_id=assertion_a,
+                    original_text="The daughter later corrected the report: she did not witness administration.",
+                    corrected_text="The daughter cannot confirm whether administration occurred.",
+                    caregiver_id=uploader,
+                ),
+                Contradiction(
+                    id=conflict_id,
+                    person_id=person_a,
+                    subject_type="medication",
+                    subject_id="evening-dose",
+                    field="administration_status",
+                    description="Conflicting caregiver and medication-log accounts remain unresolved.",
+                    matching_candidate_ids=[assertion_a, assertion_b],
+                    evidence_ids=[evidence_id],
+                    source_assertion_ids=[assertion_a, assertion_b],
+                    resolution_status="unresolved",
+                ),
+                OpenQuestion(
+                    id=question_a,
+                    person_id=person_a,
+                    question="Was the evening dose administered?",
+                    subject_type="medication",
+                    subject_id="evening-dose",
+                    status="open",
+                    created_by_caregiver_id=reporter,
+                ),
+                OpenQuestion(
+                    id=question_b,
+                    person_id=person_a,
+                    question="Did the new symptom occur before or after dinner?",
+                    subject_type="symptom",
+                    subject_id="new-symptom",
+                    status="open",
+                    created_by_caregiver_id=uploader,
+                ),
+            ])
             db.flush()
-        db.rollback()
+            db.add_all([
+                OpenQuestionAnswerEvent(
+                    id=f"reconstruct-answer-v1-{suffix}",
+                    question_id=question_a,
+                    person_id=person_a,
+                    answer="A caregiver initially reported that it was administered.",
+                    answer_provenance="Initial family report",
+                    evidence_ids=[evidence_id],
+                    answer_version=1,
+                    answered_by_caregiver_id=reporter,
+                ),
+                OpenQuestionAnswerEvent(
+                    id=f"reconstruct-answer-v2-{suffix}",
+                    question_id=question_a,
+                    person_id=person_a,
+                    answer="The earlier report was corrected; administration remains unverified.",
+                    answer_provenance="Later correction review",
+                    evidence_ids=[evidence_id],
+                    answer_version=2,
+                    answered_by_caregiver_id=uploader,
+                ),
+            ])
+            db.commit()
 
-    engine.dispose()
+        # New SQLAlchemy session: no identity-map state from the write transaction.
+        with Session() as db:
+            event = db.query(CareEvent).filter(CareEvent.id == event_id).one()
+            evidence = db.query(Evidence).filter(Evidence.id == evidence_id).one()
+            assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_a,
+                CareAssertion.subject_id == "evening-dose",
+            ).order_by(CareAssertion.id).all()
+            corrections = db.query(Correction).filter(
+                Correction.person_id == person_a,
+                Correction.target_id == assertion_a,
+            ).order_by(Correction.id).all()
+            conflict = db.query(Contradiction).filter(Contradiction.id == conflict_id).one()
+            answers = db.query(OpenQuestionAnswerEvent).filter(
+                OpenQuestionAnswerEvent.question_id == question_a,
+                OpenQuestionAnswerEvent.person_id == person_a,
+            ).order_by(OpenQuestionAnswerEvent.answer_version).all()
+            medication_thread = db.query(OpenQuestion).filter(
+                OpenQuestion.person_id == person_a,
+                OpenQuestion.subject_type == "medication",
+                OpenQuestion.subject_id == "evening-dose",
+            ).all()
+            symptom_thread = db.query(OpenQuestion).filter(
+                OpenQuestion.person_id == person_a,
+                OpenQuestion.subject_type == "symptom",
+                OpenQuestion.subject_id == "new-symptom",
+            ).all()
+
+            assert event.occurred_at.replace(tzinfo=timezone.utc) == occurred_at
+            assert event.recorded_at.replace(tzinfo=timezone.utc) == recorded_at
+            assert event.occurred_at != event.recorded_at
+            assert evidence.uploaded_by_caregiver_id == uploader
+            assert evidence.reported_by_caregiver_id == reporter
+            assert evidence.original_author == "Daughter"
+            assert len(assertions) == 2
+            assert {row.asserted_value for row in assertions} == {"administered", "not_administered"}
+            assert len(corrections) == 2
+            correction_by_id = {row.id: row for row in corrections}
+            assert correction_by_id[correction_id].original_text == "The dose was administered."
+            assert "did not witness administration" in correction_by_id[correction_id].corrected_text
+            assert correction_by_id[correction_id_b].original_text == correction_by_id[correction_id].corrected_text
+            assert "cannot confirm" in correction_by_id[correction_id_b].corrected_text
+            assert conflict.resolution_status == "unresolved"
+            assert set(conflict.source_assertion_ids) == {assertion_a, assertion_b}
+            assert [row.answer_version for row in answers] == [1, 2]
+            assert answers[0].answer != answers[1].answer
+            assert len(medication_thread) == 1
+            assert len(symptom_thread) == 1
+            assert medication_thread[0].id != symptom_thread[0].id
+
+            # Person-scoped query and evidence validation must not cross care records.
+            scoped = UncertaintyEngine(db, person_id=person_a, caregiver_id=reporter)
+            assert scoped.list_open_questions(person_b) == []
+            with pytest.raises(ValueError, match="same care record"):
+                scoped._validate_person_evidence(person_a, [evidence_b_id])
+            assert db.query(Evidence).filter(
+                Evidence.person_id == person_a,
+                Evidence.id == evidence_b_id,
+            ).count() == 0
+
+            # Original source evidence and answer history are immutable; corrections
+            # and later answers must be appended rather than overwriting their origin.
+            evidence.source_text = "Attempted overwrite of the original source."
+            with pytest.raises(ValueError, match="Original evidence source text and fingerprint are immutable"):
+                db.flush()
+            db.rollback()
+
+        with Session() as db:
+            original_answer = db.query(OpenQuestionAnswerEvent).filter(
+                OpenQuestionAnswerEvent.question_id == question_a,
+                OpenQuestionAnswerEvent.answer_version == 1,
+            ).one()
+            original_answer.answer = "Attempted overwrite of answer version one."
+            with pytest.raises(ValueError, match="append-only"):
+                db.flush()
+            db.rollback()
+    finally:
+        with Session() as cleanup:
+            cleanup.query(OpenQuestionAnswerEvent).filter(
+                OpenQuestionAnswerEvent.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(OpenQuestion).filter(
+                OpenQuestion.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(Contradiction).filter(
+                Contradiction.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(Correction).filter(
+                Correction.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(CareAssertion).filter(
+                CareAssertion.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(CareEvent).filter(
+                CareEvent.person_id == person_a
+            ).delete(synchronize_session=False)
+            cleanup.query(Evidence).filter(
+                Evidence.person_id.in_([person_a, person_b])
+            ).delete(synchronize_session=False)
+            cleanup.execute(
+                text("DELETE FROM care_state_revisions WHERE person_id IN (:person_a, :person_b)"),
+                {"person_a": person_a, "person_b": person_b},
+            )
+            cleanup.query(Caregiver).filter(
+                Caregiver.person_id.in_([person_a, person_b])
+            ).delete(synchronize_session=False)
+            cleanup.query(Person).filter(
+                Person.id.in_([person_a, person_b])
+            ).delete(synchronize_session=False)
+            cleanup.commit()
+        engine.dispose()
