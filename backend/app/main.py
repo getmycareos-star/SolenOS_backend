@@ -559,6 +559,10 @@ def get_situation(
         .order_by(CareEvent.occurred_at.asc(), CareEvent.id.asc())
         .all()
     )
+    evidence_order = {
+        evidence.id: index
+        for index, evidence in enumerate(evidence_rows)
+    }
     observations = []
     for evidence in evidence_rows:
         linked_event_ids = [
@@ -735,9 +739,13 @@ def get_situation(
             for conflict in unresolved_conflict_rows
             if conflict.subject_type in linked_subject_types
         ]
+        ordered_linked_evidence_ids = sorted(
+            linked_evidence_ids,
+            key=lambda evidence_id: (evidence_order.get(evidence_id, len(evidence_order)), evidence_id),
+        )
         linked_source_statements = [
             statement
-            for evidence_id in linked_evidence_ids
+            for evidence_id in ordered_linked_evidence_ids
             for statement in source_statements_by_evidence.get(evidence_id, [])
         ]
         linked_gaps = [
@@ -779,7 +787,7 @@ def get_situation(
             "signal_types": list(saved_situation.signal_types or []),
             "signal_ids": list(saved_situation.signal_ids or []),
             "linked_event_ids": [event.id for event in linked_events],
-            "linked_evidence_ids": sorted(linked_evidence_ids),
+            "linked_evidence_ids": ordered_linked_evidence_ids,
         })
 
     # Preserve separate event threads when no persisted situation model has
