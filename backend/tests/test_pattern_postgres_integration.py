@@ -9,7 +9,7 @@ import os
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from app.models.care import Caregiver, CareEvent, Person
