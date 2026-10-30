@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import Evidence
+from app.models.care import CareEvent, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
 
@@ -80,6 +80,7 @@ def test_caregiver_confirmed_companion_report_is_source_linked_and_idempotent(mo
         assert first_body["epistemic_status"] == "reported"
         assert first_body["independently_verified"] is False
         assert first_body["reporter_label"] == "Family caregiver"
+        assert first_body["event_id"]
 
         db = TestingSessionLocal()
         try:
@@ -102,7 +103,15 @@ def test_caregiver_confirmed_companion_report_is_source_linked_and_idempotent(mo
             assert assertion.asserted_value == report_text
             assert assertion.assertion_kind == "caregiver_reported_companion_contribution"
             assert assertion.assertion_status == "caregiver_reviewed"
+            assert assertion.source_event_id == first_body["event_id"]
             assert assertion.evidence_ids == [evidence.id]
+            event = db.query(CareEvent).filter_by(
+                id=first_body["event_id"],
+                person_id=person_id,
+            ).one()
+            assert event.event_type == "companion_caregiver_report"
+            assert event.evidence_ids == [evidence.id]
+            assert event.created_by_caregiver_id == caregiver_id
         finally:
             db.close()
 
@@ -113,6 +122,13 @@ def test_caregiver_confirmed_companion_report_is_source_linked_and_idempotent(mo
         assert context.status_code == 200, context.text
         assertions = context.json()["sources"]["assertions"]["items"]
         assert any(item["id"] == first_body["assertion_id"] for item in assertions)
+        current = client.get("/api/v1/care-continuity/current-care?limit_per_source=50", headers=headers)
+        assert current.status_code == 200, current.text
+        current_assertion = next(
+            item for item in current.json()["items"]
+            if item["id"] == first_body["assertion_id"]
+        )
+        assert current_assertion["source_event_id"] == first_body["event_id"]
         evidence_rows = context.json()["sources"]["evidence"]["items"]
         assert any(item["id"] == first_body["evidence_id"] for item in evidence_rows)
 
