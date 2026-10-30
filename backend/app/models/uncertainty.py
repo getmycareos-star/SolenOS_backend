@@ -72,6 +72,7 @@ class OpenQuestionAnswerEvent(Base):
     person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
     answer = Column(Text, nullable=False)
     answer_provenance = Column(Text, nullable=False)
+    evidence_ids = Column(JSONList, nullable=False, default=list)
     answered_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
