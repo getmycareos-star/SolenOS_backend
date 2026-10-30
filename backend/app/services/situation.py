@@ -17,7 +17,7 @@ def _utc_now() -> datetime:
 def _explicit_speaker_statements(source_text: str) -> list[dict]:
     """Extract only source-labelled statements with exact offsets; never infer speakers."""
     header = re.compile(
-        r"(?m)^(?:\\[[^\\]\\r\\n]+\\]\\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}):[ \\t]*"
+        r"(?m)^(?:\[[^\]\r\n]+\]\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}):[ \t]*"
     )
     matches = list(header.finditer(source_text))
     if len(matches) < 2:
