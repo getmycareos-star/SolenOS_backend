@@ -35,7 +35,7 @@ jobs:
           python -m pytest \
             backend/tests/test_situation_understanding_benchmark.py \
             backend/tests/test_messy_care_10000_scenarios.py \
-            backend/tests/test_messy_care_10000_postgres.py \\
+            backend/tests/test_messy_care_10000_postgres.py \
             backend/tests/test_longitudinal_messy_care_benchmark.py \
             backend/tests/test_longitudinal_change_benchmark.py \
             backend/tests/test_open_loop_messy_scenarios.py \
