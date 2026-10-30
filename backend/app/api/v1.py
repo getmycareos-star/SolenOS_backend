@@ -11,7 +11,7 @@ from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.models.anonymous_session import AnonymousSession
-from app.models.collaboration import ConsentRecord
+from app.models.collaboration import ConsentRecord, EvidenceUpload
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -400,6 +400,25 @@ def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db
             item["extra_metadata"] = parsed if isinstance(parsed, dict) else {
                 "metadata_integrity": "unexpected_json_type"
             }
+        elif not isinstance(metadata, dict):
+            item["extra_metadata"] = {}
+
+        # A document/photo row without its original binary is an inaccessible
+        # source, not a complete document record. Report the state explicitly;
+        # byte-level integrity is checked by the download endpoint.
+        if item.get("type") in {"document", "medication_photo", "care_photo"}:
+            blob_exists = (
+                db.query(EvidenceUpload.evidence_id)
+                .filter(EvidenceUpload.evidence_id == row.id)
+                .first()
+                is not None
+            )
+            integrity = dict(item["extra_metadata"].get("source_integrity") or {})
+            integrity["original_binary_available"] = blob_exists
+            integrity["original_binary_status"] = (
+                "available_unverified_until_download" if blob_exists else "missing"
+            )
+            item["extra_metadata"]["source_integrity"] = integrity
         response.append(item)
     return response
 
