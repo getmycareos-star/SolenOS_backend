@@ -95,3 +95,18 @@ def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 503
     assert "no usable response" in error.value.detail
+
+
+def test_qwen_gateway_sends_thinking_control_as_top_level_chat_parameter(monkeypatch):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def successful_chat(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(json.dumps({"message": {"content": "Hello, I can help."}}).encode())
+
+    monkeypatch.setenv("OLLAMA_THINK", "false")
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", successful_chat)
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hello"}]) == "Hello, I can help."
+    assert captured["payload"]["think"] is False
+    assert "think" not in captured["payload"]["options"]
