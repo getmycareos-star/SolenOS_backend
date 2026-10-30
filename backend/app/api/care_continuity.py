@@ -1147,6 +1147,12 @@ def current_care_projection(
             "source_collection": source_name,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
+            "reported_by_label": str(
+                row.get("reported_by_label")
+                or row.get("observer_label")
+                or row.get("author_label")
+                or ""
+            )[:160] or None,
             "occurred_at": occurred_at,
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
@@ -1217,6 +1223,10 @@ def current_care_projection(
         add("decisions", row, "Care decision", 9, require_open=True)
     for row in (sources.get("decision_outcomes") or {}).get("items", []):
         add("decision_outcomes", row, "Decision outcome", 9)
+    for row in (sources.get("open_loop_records") or {}).get("items", []):
+        raw_priority = row.get("priority")
+        priority = raw_priority if isinstance(raw_priority, int) and 0 <= raw_priority <= 10 else 4
+        add("open_loop_records", row, "Open care action", priority, require_open=True)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
