@@ -397,7 +397,7 @@ jobs:
               assert d.get("provider") == "local_ollama"
               assert d.get("inference_api") == "ollama_native_http"
               assert d.get("hosted_inference_api") is False
-              assert d.get("model") == "qwen2.5:0.5b"
+              assert d.get("model") == "qwen3.5:4b"
           except Exception:
               raise SystemExit(1)
           PY
