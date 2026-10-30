@@ -12,6 +12,7 @@ from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConversationSession, ConversationMessage
+from app.models.uncertainty import OpenQuestion
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -2425,5 +2426,70 @@ def test_companion_conversation_is_private_to_its_authenticated_caregiver():
             headers={"Authorization": f"Bearer {tokens[other_caregiver.id]}"},
         )
         assert different_person.status_code == 404
+    finally:
+        teardown_db()
+
+
+
+def test_historical_unresolved_questions_remain_retrievable_outside_recent_windows():
+    """An old unanswered care question must not disappear behind recent-history limits."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="historical-question-person", name="Historical Question Person")
+        caregiver = Caregiver(
+            id="historical-question-caregiver", name="Historical Question Caregiver",
+            email="historical-question@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="historical-question-other", name="Other Question Person")
+        other_caregiver = Caregiver(
+            id="historical-question-other-caregiver", name="Other Question Caregiver",
+            email="historical-question-other@example.com", relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        old_asked_at = datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc)
+        old_question = OpenQuestion(
+            id="historical-open-question",
+            person_id=person.id,
+            question="Was the mobility assessment ever completed?",
+            subject_type="appointment",
+            subject_id="mobility-assessment",
+            status="open",
+            asked_at=old_asked_at,
+            created_by_caregiver_id=caregiver.id,
+        )
+        recent_question = OpenQuestion(
+            id="recent-open-question",
+            person_id=person.id,
+            question="Is the follow-up appointment confirmed?",
+            subject_type="appointment",
+            subject_id="follow-up",
+            status="open",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([old_question, recent_question])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
+        response = client.get(f"/api/v1/uncertainty/questions/{person.id}?status=open")
+        assert response.status_code == 200, response.text
+        by_id = {item["id"]: item for item in response.json()}
+        assert set(by_id) == {old_question.id, recent_question.id}
+        assert by_id[old_question.id]["status"] == "open"
+        assert by_id[old_question.id]["asked_at"].startswith("2024-01-15T09:30:00")
+
+        foreign = other_client.get(
+            f"/api/v1/uncertainty/questions/{person.id}?status=open"
+        )
+        assert foreign.status_code == 200
+        assert foreign.json() == []
     finally:
         teardown_db()
