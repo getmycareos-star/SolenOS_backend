@@ -207,3 +207,63 @@ def test_document_analysis_does_not_disclose_another_persons_document(monkeypatc
         assert response.status_code == 404
     finally:
         teardown()
+
+
+
+def test_document_candidate_correction_requires_separate_explicit_acceptance(monkeypatch):
+    client = setup_client()
+    source = "The note says: Needed help standing from the chair."
+    monkeypatch.setattr(
+        document_intelligence,
+        "extract_review_candidates",
+        lambda source_text, **kwargs: {
+            "observations": [{
+                "subject": "Person",
+                "observation": "Needed help standing.",
+                "source_quote": "Needed help standing from the chair.",
+                "review_status": "pending_review",
+            }],
+            "open_questions": [],
+        },
+    )
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        evidence_id = save_document(person_id, caregiver_id, source)
+        headers = {"Authorization": f"Bearer {token}"}
+        analysis = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=headers)
+        assert analysis.status_code == 201, analysis.text
+        analysis_id = analysis.json()["analysis_id"]
+
+        corrected = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=headers,
+            json={
+                "candidate_index": 0,
+                "decision": "correct",
+                "corrected_subject": "Person",
+                "corrected_observation": "Needed physical assistance to stand from the chair.",
+            },
+        )
+        assert corrected.status_code == 200, corrected.text
+        assert corrected.json()["written_to_lcr"] is False
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+        finally:
+            db.close()
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=headers,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["written_to_lcr"] is True
+
+        listed = client.get("/api/v1/documents/intelligence?limit=30", headers=headers)
+        assert listed.status_code == 200, listed.text
+        assert listed.json()["count"] == 1
+        assert listed.json()["items"][0]["analysis_id"] == analysis_id
+    finally:
+        teardown()
