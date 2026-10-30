@@ -16,7 +16,9 @@ import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Person, Evidence, Correction
+from app.models.care_continuity import CareAssertion
+from app.models.uncertainty import Contradiction, OpenQuestion
 
 DATABASE_URL = os.environ.get("SOLENOS_BENCHMARK_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -70,6 +72,11 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
     people = []
     caregivers = []
     events = []
+    evidence_rows = []
+    assertion_rows = []
+    contradiction_rows = []
+    correction_rows = []
+    question_rows = []
     expected = {}
 
     try:
@@ -103,7 +110,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     reporter_id = caregiver_a_id if event_index % 2 == 0 else caregiver_b_id
                     # The same source anchor is deliberately reused by paired reports;
                     # separate event IDs and occurrence times must remain reconstructable.
-                    source_anchor = f"m10ks{suffix}{history_index:04d}{event_index // 2:02d}"
+                    source_anchor = f"m10ks{suffix}{case_id:05d}"
                     days_ago = (history_index * 37 + event_index * 11) % 730
                     occurred_at = reference - timedelta(
                         days=days_ago,
@@ -138,12 +145,141 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         created_by_caregiver_id=reporter_id,
                     )
                     events.append(event)
+                    evidence_rows.append(Evidence(
+                        id=source_anchor,
+                        person_id=person_id,
+                        type="caregiver_report",
+                        source_text=f"Original source report {case_id:05d}: {description}",
+                        uploaded_by_caregiver_id=caregiver_b_id,
+                        original_author=f"Reporter {event_index % 2}",
+                        reported_by_label=f"Reporter {event_index % 2}",
+                        reported_by_caregiver_id=reporter_id,
+                        collected_by_caregiver_id=caregiver_b_id,
+                        collected_at=reference + timedelta(minutes=case_id),
+                        occurred_at=occurred_at,
+                        reported_at=reference + timedelta(minutes=case_id),
+                        evidence_status="reported",
+                        source_type="caregiver_report",
+                        original_source_reference=f"synthetic://source/{case_id:05d}",
+                        source_text_sha256=None,
+                    ))
+                    assertion_id = f"m10kcl{suffix}{case_id:05d}"
+                    assertion_value = (
+                        "reported_present" if event_index % 2 == 0 else "reported_absent"
+                    )
+                    assertion_rows.append(CareAssertion(
+                        id=assertion_id,
+                        person_id=person_id,
+                        subject_type=domain,
+                        subject_id=f"{domain}-subject-{history_index:04d}",
+                        field="reported_status",
+                        assertion_kind="event",
+                        asserted_value=assertion_value,
+                        source_event_id=event_id,
+                        source_label=f"Reporter {event_index % 2}",
+                        source_text=description,
+                        evidence_ids=[source_anchor],
+                        assertion_status="reported",
+                        observed_at=occurred_at,
+                        created_by_caregiver_id=reporter_id,
+                    ))
+
+                    if family == "duplicate_source_lineage":
+                        duplicate_id = f"m10kdp{suffix}{case_id:05d}"
+                        evidence_rows.append(Evidence(
+                            id=duplicate_id,
+                            person_id=person_id,
+                            type="derived_summary",
+                            source_text=f"Duplicate import of source report {case_id:05d}.",
+                            uploaded_by_caregiver_id=caregiver_b_id,
+                            original_author=f"Reporter {event_index % 2}",
+                            reported_by_label=f"Reporter {event_index % 2}",
+                            reported_by_caregiver_id=reporter_id,
+                            collected_by_caregiver_id=caregiver_b_id,
+                            parent_evidence_id=source_anchor,
+                            evidence_status="derived",
+                            source_type="derived_summary",
+                            original_source_reference=f"synthetic://source/{case_id:05d}",
+                        ))
+
+                    if family == "conflicting_reports":
+                        conflicting_id = f"m10kcf{suffix}{case_id:05d}"
+                        assertion_rows.append(CareAssertion(
+                            id=conflicting_id,
+                            person_id=person_id,
+                            subject_type=domain,
+                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            field="reported_status",
+                            assertion_kind="event",
+                            asserted_value=(
+                                "reported_absent" if assertion_value == "reported_present"
+                                else "reported_present"
+                            ),
+                            source_event_id=event_id,
+                            source_label="Independent conflicting reporter",
+                            source_text=f"Conflicting account for case {case_id:05d}.",
+                            evidence_ids=[source_anchor],
+                            assertion_status="reported",
+                            observed_at=occurred_at,
+                            created_by_caregiver_id=(
+                                caregiver_b_id if reporter_id == caregiver_a_id else caregiver_a_id
+                            ),
+                        ))
+                        contradiction_rows.append(Contradiction(
+                            id=f"m10kco{suffix}{case_id:05d}",
+                            person_id=person_id,
+                            subject_type=domain,
+                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            field="reported_status",
+                            description=f"Unresolved conflicting reports for case {case_id:05d}.",
+                            matching_candidate_ids=[assertion_id, conflicting_id],
+                            evidence_ids=[source_anchor],
+                            source_assertion_ids=[assertion_id, conflicting_id],
+                            resolution_status="unresolved",
+                        ))
+
+                    if family == "correction_followup":
+                        correction_rows.extend([
+                            Correction(
+                                id=f"m10kcr1{suffix}{case_id:05d}",
+                                person_id=person_id,
+                                target_type="care_assertion",
+                                target_id=assertion_id,
+                                original_text=assertion_value,
+                                corrected_text="Reporter cannot confirm the original account.",
+                                caregiver_id=reporter_id,
+                            ),
+                            Correction(
+                                id=f"m10kcr2{suffix}{case_id:05d}",
+                                person_id=person_id,
+                                target_type="care_assertion",
+                                target_id=assertion_id,
+                                original_text="Reporter cannot confirm the original account.",
+                                corrected_text="The claim remains unverified pending source review.",
+                                caregiver_id=caregiver_b_id,
+                            ),
+                        ])
+
+                    if family == "unresolved_thread":
+                        question_rows.append(OpenQuestion(
+                            id=f"m10kqu{suffix}{case_id:05d}",
+                            person_id=person_id,
+                            question=f"Clarify the {domain} report for case {case_id:05d}.",
+                            subject_type=domain,
+                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            status="open",
+                            evidence_ids=[source_anchor],
+                            created_by_caregiver_id=reporter_id,
+                        ))
+
                     expected[event_id] = {
                         "person_id": person_id,
                         "caregiver_id": reporter_id,
+                        "uploader_id": caregiver_b_id,
                         "event_type": domain,
                         "occurred_at": occurred_at,
                         "evidence_id": source_anchor,
+                        "assertion_id": assertion_id,
                         "family": family,
                         "case_id": case_id,
                     }
@@ -158,6 +294,13 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             db.add_all(caregivers)
             db.flush()
             db.add_all(events)
+            db.flush()
+            db.add_all(evidence_rows)
+            db.flush()
+            db.add_all(assertion_rows)
+            db.add_all(contradiction_rows)
+            db.add_all(correction_rows)
+            db.add_all(question_rows)
             db.commit()
 
         # New SQLAlchemy session: no identity-map state from the writer session.
@@ -184,6 +327,21 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert row.evidence_ids == [wanted["evidence_id"]], (
                     f"{row.id}: source lineage changed"
                 )
+                evidence = reader.query(Evidence).filter(
+                    Evidence.id == wanted["evidence_id"],
+                    Evidence.person_id == wanted["person_id"],
+                ).one()
+                assert evidence.uploaded_by_caregiver_id == wanted["uploader_id"]
+                assert evidence.reported_by_caregiver_id == wanted["caregiver_id"]
+                assert evidence.source_text
+                assert evidence.source_text_sha256
+                claim = reader.query(CareAssertion).filter(
+                    CareAssertion.id == wanted["assertion_id"],
+                    CareAssertion.person_id == wanted["person_id"],
+                ).one()
+                assert claim.source_event_id == row.id
+                assert claim.evidence_ids == [wanted["evidence_id"]]
+                assert claim.created_by_caregiver_id == wanted["caregiver_id"]
                 assert row.recorded_at is not None, f"{row.id}: recorded time missing"
                 assert row.recorded_at != row.occurred_at, (
                     f"{row.id}: event time and recorded time were conflated"
@@ -194,6 +352,32 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 family_counts[wanted["family"]] += 1
 
             assert len(by_person) == HISTORY_COUNT
+            assert reader.query(Evidence).filter(
+                Evidence.id.like(f"m10ks{suffix}%")
+            ).count() == EXPECTED_CASE_COUNT
+            assert reader.query(CareAssertion).filter(
+                CareAssertion.id.like(f"m10kcl{suffix}%")
+            ).count() == EXPECTED_CASE_COUNT
+            conflict_records = reader.query(Contradiction).filter(
+                Contradiction.id.like(f"m10kco{suffix}%")
+            ).all()
+            assert len(conflict_records) == 50 * CASES_PER_HISTORY
+            assert all(row.resolution_status == "unresolved" for row in conflict_records)
+            assert all(len(row.source_assertion_ids or []) == 2 for row in conflict_records)
+            correction_records = reader.query(Correction).filter(
+                Correction.id.like(f"m10kcr%{suffix}%")
+            ).all()
+            assert len(correction_records) == 2 * 50 * CASES_PER_HISTORY
+            question_records = reader.query(OpenQuestion).filter(
+                OpenQuestion.id.like(f"m10kqu{suffix}%")
+            ).all()
+            assert len(question_records) == 50 * CASES_PER_HISTORY
+            assert all(row.status == "open" for row in question_records)
+            duplicate_records = reader.query(Evidence).filter(
+                Evidence.id.like(f"m10kdp{suffix}%")
+            ).all()
+            assert len(duplicate_records) == 50 * CASES_PER_HISTORY
+            assert all(row.parent_evidence_id for row in duplicate_records)
             assert set(family_counts) == set(FAMILIES)
             assert sum(family_counts.values()) == EXPECTED_CASE_COUNT
             assert all(count == 50 * CASES_PER_HISTORY for count in family_counts.values())
@@ -232,7 +416,22 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
         with Session() as cleanup:
             person_ids = [person.id for person in people]
             if person_ids:
+                cleanup.query(OpenQuestion).filter(OpenQuestion.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.query(Contradiction).filter(Contradiction.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.query(Correction).filter(Correction.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.query(CareAssertion).filter(CareAssertion.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
                 cleanup.query(CareEvent).filter(CareEvent.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.query(Evidence).filter(Evidence.person_id.in_(person_ids)).delete(
                     synchronize_session=False
                 )
                 cleanup.execute(
