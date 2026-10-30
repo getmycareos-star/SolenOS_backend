@@ -1144,6 +1144,26 @@ def current_care_projection(
             if value and str(value) in authorized_evidence_ids
         ]
         source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
+        reported_by_label = (
+            row.get("reported_by_label")
+            or row.get("observer_label")
+            or row.get("author_label")
+            or caregiver_labels.get(str(
+                row.get("reported_by_caregiver_id")
+                or row.get("observer_caregiver_id")
+                or row.get("created_by_caregiver_id")
+                or row.get("author_caregiver_id")
+                or row.get("uploaded_by_caregiver_id")
+                or ""
+            ))
+        )
+        if not reported_by_label and source_name == "assertions" and isinstance(row.get("source_text"), str):
+            try:
+                source_metadata = json.loads(row["source_text"])
+                if isinstance(source_metadata, dict):
+                    reported_by_label = source_metadata.get("reporter_label")
+            except (TypeError, json.JSONDecodeError):
+                pass
         origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
@@ -1165,20 +1185,7 @@ def current_care_projection(
             "source_event_id": row.get("source_event_id"),
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
-            "reported_by_label": str(
-                row.get("reported_by_label")
-                or row.get("observer_label")
-                or row.get("author_label")
-                or caregiver_labels.get(str(
-                    row.get("reported_by_caregiver_id")
-                    or row.get("observer_caregiver_id")
-                    or row.get("created_by_caregiver_id")
-                    or row.get("author_caregiver_id")
-                    or row.get("uploaded_by_caregiver_id")
-                    or ""
-                ))
-                or ""
-            )[:160] or None,
+            "reported_by_label": str(reported_by_label or "")[:160] or None,
             "occurred_at": occurred_at,
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
