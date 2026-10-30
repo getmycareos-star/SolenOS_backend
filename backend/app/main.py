@@ -635,10 +635,17 @@ def get_situation(
         .order_by(CareRecordRelationship.created_at.asc(), CareRecordRelationship.id.asc())
         .all()
     )
-    related_situations_by_id = {}
+    latest_relationship_by_pair = {}
     for relationship in relationship_rows:
-        source_id = relationship.source_id
-        target_id = relationship.target_id
+        pair = tuple(sorted((relationship.source_id, relationship.target_id)))
+        latest_relationship_by_pair[pair] = relationship
+
+    related_situations_by_id = {}
+    for (source_id, target_id), relationship in latest_relationship_by_pair.items():
+        if relationship.relationship_type != "related_to":
+            # A later explicit unrelated_to record retracts the active link
+            # without deleting the original relationship audit entry.
+            continue
         if (
             source_id == target_id
             or source_id not in persisted_situation_ids
