@@ -532,4 +532,21 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
             Evidence.id == evidence_b_id,
         ).count() == 0
 
+        # Original source evidence and answer history are immutable; corrections
+        # and later answers must be appended rather than overwriting their origin.
+        evidence.source_text = "Attempted overwrite of the original source."
+        with pytest.raises(ValueError, match="Original evidence source text and fingerprint are immutable"):
+            db.flush()
+        db.rollback()
+
+    with Session() as db:
+        original_answer = db.query(OpenQuestionAnswerEvent).filter(
+            OpenQuestionAnswerEvent.question_id == question_a,
+            OpenQuestionAnswerEvent.answer_version == 1,
+        ).one()
+        original_answer.answer = "Attempted overwrite of answer version one."
+        with pytest.raises(ValueError, match="append-only"):
+            db.flush()
+        db.rollback()
+
     engine.dispose()
