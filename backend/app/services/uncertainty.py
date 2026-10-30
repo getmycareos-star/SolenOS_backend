@@ -263,11 +263,26 @@ class UncertaintyEngine:
         answer_provenance = update_data.get("answer_provenance", db_question.answer_provenance)
         closed_reason = update_data.get("closed_reason", db_question.closed_reason)
         answer_evidence_ids = []
-        if new_status == "answered":
+        latest_answer_event = (
+            self.db.query(OpenQuestionAnswerEventModel)
+            .filter(
+                OpenQuestionAnswerEventModel.question_id == db_question.id,
+                OpenQuestionAnswerEventModel.person_id == db_question.person_id,
+            )
+            .order_by(OpenQuestionAnswerEventModel.answer_version.desc())
+            .first()
+        )
+        answer_content_changed = (
+            db_question.status != "answered"
+            or ("answer" in update_data and answer != db_question.answer)
+            or ("answer_provenance" in update_data and answer_provenance != db_question.answer_provenance)
+            or "evidence_ids" in update_data
+        )
+        if new_status == "answered" and answer_content_changed:
             # An answer is not complete because a caregiver typed text. It must
             # point to one or more persisted source records in this same care file.
             if "evidence_ids" not in update_data:
-                raise ValueError("Answering a clarification question requires linked source evidence IDs.")
+                raise ValueError("Answering or correcting a clarification answer requires linked source evidence IDs.")
             answer_evidence_ids = self._validate_person_evidence(
                 db_question.person_id, update_data.get("evidence_ids")
             )
@@ -277,6 +292,12 @@ class UncertaintyEngine:
                 *(db_question.evidence_ids or []),
                 *answer_evidence_ids,
             ]))
+        elif new_status == "answered":
+            answer_evidence_ids = list(
+                (latest_answer_event.evidence_ids if latest_answer_event else None)
+                or db_question.evidence_ids
+                or []
+            )
         if new_status == "answered":
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("An answered question requires a non-empty answer.")
@@ -294,16 +315,7 @@ class UncertaintyEngine:
         now = datetime.now(timezone.utc)
         answer_text = answer.strip() if isinstance(answer, str) else answer
         answer_source = answer_provenance.strip() if isinstance(answer_provenance, str) else answer_provenance
-        latest_answer_event = (
-            self.db.query(OpenQuestionAnswerEventModel)
-            .filter(
-                OpenQuestionAnswerEventModel.question_id == db_question.id,
-                OpenQuestionAnswerEventModel.person_id == db_question.person_id,
-            )
-            .order_by(OpenQuestionAnswerEventModel.answer_version.desc())
-            .first()
-        )
-        answer_was_recorded = new_status == "answered" and (
+        answer_was_recorded = new_status == "answered" and answer_content_changed and (
             db_question.status != "answered"
             or answer_text != db_question.answer
             or answer_source != db_question.answer_provenance
