@@ -632,11 +632,18 @@ def get_situation(
             .order_by(EvidenceObservationModel.created_at.asc(), EvidenceObservationModel.id.asc())
             .all()
         )
+    superseded_by_observation = {}
+    for statement in source_statement_rows:
+        if statement.supersedes_observation_id:
+            superseded_by_observation.setdefault(statement.supersedes_observation_id, []).append(statement.id)
     source_statements_by_evidence = {}
     for statement in source_statement_rows:
         source_statements_by_evidence.setdefault(statement.evidence_id, []).append({
             "id": statement.id,
             "evidence_id": statement.evidence_id,
+            "supersedes_observation_id": statement.supersedes_observation_id,
+            "correction_rationale": statement.correction_rationale,
+            "superseded_by_observation_ids": superseded_by_observation.get(statement.id, []),
             "speaker_label": statement.observer_label,
             "speaker_attribution_status": "explicit" if statement.observer_label else "unknown",
             "reporter_caregiver_id": statement.created_by_caregiver_id,
