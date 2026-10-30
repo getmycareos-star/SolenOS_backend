@@ -1,3 +1,4 @@
+# CI diagnostic: include the live Uvicorn exception tail when scoped-session isolation fails.
 """Real HTTP + PostgreSQL smoke test for anonymous care continuity.
 
 Runs only against the disposable PostgreSQL database supplied by CI. Starts and
