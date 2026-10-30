@@ -243,8 +243,10 @@ class UncertaintyEngine:
     def update_open_question(
         self, question_id: str, update: OpenQuestionUpdate
     ) -> Optional[OpenQuestionModel]:
+        # Serialize answer transitions per question on PostgreSQL. Each answer
+        # event receives a monotonic version even when timestamps share precision.
         db_question = (
-            self._target_query(OpenQuestionModel, question_id).first()
+            self._target_query(OpenQuestionModel, question_id).with_for_update().first()
         )
         if not db_question:
             return None
@@ -298,10 +300,7 @@ class UncertaintyEngine:
                 OpenQuestionAnswerEventModel.question_id == db_question.id,
                 OpenQuestionAnswerEventModel.person_id == db_question.person_id,
             )
-            .order_by(
-                OpenQuestionAnswerEventModel.created_at.desc(),
-                OpenQuestionAnswerEventModel.id.desc(),
-            )
+            .order_by(OpenQuestionAnswerEventModel.answer_version.desc())
             .first()
         )
         answer_was_recorded = new_status == "answered" and (
@@ -316,12 +315,16 @@ class UncertaintyEngine:
             update_data["answer"] = answer_text
             update_data["answer_provenance"] = answer_source
             db_question.answered_by_caregiver_id = self.caregiver_id
+            next_answer_version = (
+                latest_answer_event.answer_version + 1 if latest_answer_event else 1
+            )
             self.db.add(OpenQuestionAnswerEventModel(
                 question_id=db_question.id,
                 person_id=db_question.person_id,
                 answer=answer_text,
                 answer_provenance=answer_source,
                 evidence_ids=answer_evidence_ids,
+                answer_version=next_answer_version,
                 answered_by_caregiver_id=self.caregiver_id,
             ))
 
