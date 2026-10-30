@@ -376,7 +376,32 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
 def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db)):
     _require_session_scope(request, db, person_id)
-    return db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id).all()
+    rows = (
+        db.query(EvidenceModel)
+        .filter(EvidenceModel.person_id == person_id)
+        .order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc())
+        .all()
+    )
+    # Evidence.extra_metadata is stored as TEXT for migration compatibility,
+    # while the public schema exposes a structured object. Decode it at the
+    # boundary instead of leaking a JSON string that fails response validation.
+    response = []
+    for row in rows:
+        item = {
+            column.name: getattr(row, column.name)
+            for column in EvidenceModel.__table__.columns
+        }
+        metadata = item.get("extra_metadata")
+        if isinstance(metadata, str):
+            try:
+                parsed = json.loads(metadata)
+            except (TypeError, json.JSONDecodeError):
+                parsed = {"metadata_integrity": "invalid_json"}
+            item["extra_metadata"] = parsed if isinstance(parsed, dict) else {
+                "metadata_integrity": "unexpected_json_type"
+            }
+        response.append(item)
+    return response
 
 
 def _save_daily_capture_event(payload: dict, event_type: str, title: str, request: Request, db: Session):
