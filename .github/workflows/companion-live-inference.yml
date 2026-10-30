@@ -1,0 +1,60 @@
+name: Companion live Qwen inference evaluation
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "Dockerfile"
+      - "start-with-qwen.sh"
+      - ".github/workflows/companion-live-inference.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-live-qwen-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-qwen-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen2.5:0.5b
+      OLLAMA_TIMEOUT_SECONDS: "180"
+      OLLAMA_NUM_CTX: "1024"
+      OLLAMA_NUM_PREDICT: "96"
+      OLLAMA_NUM_THREADS: "2"
+      SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
+      DATABASE_URL: sqlite:////tmp/solenos-live-inference.db
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
+      - name: Start isolated Ollama runtime
+        run: |
+          docker run -d --name solenos-live-ollama -p 11434:11434 ollama/ollama:latest
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs solenos-live-ollama
+          exit 1
+      - name: Download the default-model candidate under test
+        run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
+      - name: Run live Companion inference evaluation
+        run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
+      - name: Stop isolated Ollama runtime
+        if: always()
+        run: docker rm -f solenos-live-ollama || true
