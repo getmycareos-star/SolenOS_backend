@@ -256,3 +256,16 @@ def test_thread_grouping_does_not_merge_through_transitive_label_similarity():
     assert len(groups) == 2
     assert any(len(group) == 2 and first in group and bridge in group for group in groups)
     assert any(group == [unrelated] for group in groups)
+
+
+def test_person_scoped_signals_can_link_only_through_shared_source_ids():
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["shared-event"])
+    second = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["shared-event"])
+    unrelated = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["other-event"])
+    groups = _group_related_signals([first, second, unrelated], "evidence_ids")
+
+    assert len(groups) == 2
+    assert any(len(group) == 2 and first in group and second in group for group in groups)
+    assert any(group == [unrelated] for group in groups)
