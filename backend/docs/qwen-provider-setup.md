@@ -4,27 +4,24 @@ SolenOS Companion and Daily Capture extraction use **Qwen through Ollama's nativ
 
 ## Runtime configuration
 
-The default `OLLAMA_BASE_URL` is empty. SolenOS rejects loopback addresses such as `127.0.0.1` and `localhost` in every environment, so the backend never silently connects to a developer's desktop Ollama process. Configure the Railway private service hostname and model on the backend service:
+The production Railway backend currently runs Ollama as a sidecar in the **same container** as FastAPI. The startup script configures:
 
-- `OLLAMA_BASE_URL=http://${{ollama.RAILWAY_PRIVATE_DOMAIN}}:11434`
+- `OLLAMA_BASE_URL=http://127.0.0.1:11434`
+- `OLLAMA_SIDECAR_ENABLED=true`
 - `OLLAMA_MODEL=qwen3.5:2b`
-- `OLLAMA_TIMEOUT_SECONDS=180`
+- `OLLAMA_MODELS=/root/.ollama/models`
+
+The gateway also accepts a private Railway Ollama service URL ending in `.railway.internal` when a separate service is intentionally configured. It rejects public hosted inference URLs and does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint.
+
+Qwen 3.5 2B is the proposed resource-conscious upgrade from the previous Qwen 2.5 0.5B default. The shared gateway defaults to a 4,096-token context and 256-token generation budget, both bounded and configurable through environment variables. These settings still require live latency and memory validation on Railway.
+
+## Railway deployment and persistence
+
+The bundled sidecar stores model files under `/root/.ollama/models`. Without a Railway volume mounted at `/root/.ollama`, model files live on the container's ephemeral filesystem and may need to be downloaded again after a redeployment. A persistent volume would preserve downloaded model layers across deployments, but it has a recurring storage charge and must be explicitly approved before creation.
+
+The startup script deliberately starts FastAPI even if Ollama or the model pull fails. Therefore, the backend's `/ready` health check alone does not prove that Qwen is installed or serving inference. Verify the configured model through the authenticated Qwen runtime-status endpoint and a real authenticated Companion request.
 
 No Qwen API key is needed or read by this integration.
-
-The resource-constrained Railway CPU runtime uses `qwen3.5:2b`; this is a smaller model than the previous `1.5b` configuration to reduce inference latency. The backend calls Ollama's native `POST /api/chat` endpoint and reads `message.content`. It sends no `Authorization` header. It does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint if local Ollama is unavailable.
-
-## Railway deployment
-
-**Do not use the local loopback URL in Railway.** Railway's backend container cannot reach Ollama on a developer's computer through `127.0.0.1`; loopback refers to the backend container itself.
-
-For the Railway setup, follow [railway-qwen-deployment.md](railway-qwen-deployment.md). It provides a separate Ollama service image, persistent model storage instructions, and the required private service URL. The backend service must set:
-
-- `OLLAMA_BASE_URL=http://${{ollama.RAILWAY_PRIVATE_DOMAIN}}:11434`
-- `OLLAMA_MODEL=qwen3.5:2b`
-- `OLLAMA_TIMEOUT_SECONDS=180`
-
-The backend treats loopback and public model URLs as not configured in every environment; only a Railway private service URL is accepted. This prevents an incorrect localhost value from being treated as a valid remote model connection. This repository does not itself create Railway services, configure Railway variables, attach volumes, or deploy services.
 
 ## How the three parts of SolenOS fit together
 
