@@ -12,6 +12,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.core.database import Base
 from app.models.care import Caregiver, CareEvent, Person
 from app.models.change import Baseline, Change, Pattern
 from app.models.significance import AssessmentDimension, SignificanceAssessment
@@ -32,6 +33,7 @@ REFERENCE_TIME = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
 
 def test_postgres_pattern_persistence_late_evidence_correction_and_person_isolation():
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     person_a_id = f"pattern-pg-a-{suffix}"
