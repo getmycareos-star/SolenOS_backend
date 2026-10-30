@@ -568,6 +568,7 @@ def update_situations(
         # evidence upload can still advance the situation without mixing ID types.
         context = dict(situation.context or {})
         context_type = context.get("type")
+        existing_ids = list(situation.signal_ids or [])
         if context_type == "situation_understanding":
             incoming_ids = list(new_event.evidence_ids or [])
             related_event_ids = list(context.get("event_ids") or [])
@@ -610,8 +611,6 @@ def update_situations(
                 # infer the namespace. Preserve it for explicit reconciliation.
                 continue
 
-        if context_type != "situation_understanding":
-            existing_ids = list(situation.signal_ids or [])
         additions = [item for item in incoming_ids if item and item not in existing_ids]
         if not additions and not event_reference_added:
             continue
