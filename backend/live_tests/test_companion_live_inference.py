@@ -338,3 +338,65 @@ def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordinati
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_live_qwen_compares_recorded_care_changes_without_inventing_a_cause(monkeypatch):
+    """Real inference must compare dated observations and preserve unknowns."""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TimedTestClient(app)
+    try:
+        session, _ = _create_synthetic_record(client)
+        token = session["access_token"]
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        headers = {"Authorization": f"Bearer {token}"}
+        now = datetime.now(timezone.utc)
+
+        db = TestingSessionLocal()
+        baseline = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=14), title="Usual meal intake",
+            description="Caregiver reported the person ate her usual full breakfast and lunch and drank her usual amount of fluids.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        changed = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=1), title="Reduced meal intake",
+            description="Caregiver reported the person ate about half her usual breakfast and declined lunch. The reason was not known.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([baseline, changed])
+        db.commit()
+        baseline_id, changed_id = baseline.id, changed.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": "Compare the recorded meal observations from two weeks ago and yesterday. What changed, what remains unknown, and what deserves follow-up?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        answer = data["reply"].casefold()
+        assert data["ai_generated"] is True
+        assert baseline_id in data["source_event_ids"]
+        assert changed_id in data["source_event_ids"]
+        assert any(term in answer for term in ("breakfast", "lunch", "meal", "eating", "intake"))
+        assert any(term in answer for term in ("unknown", "not recorded", "not known", "unclear", "cannot tell", "can't tell"))
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "conversation_only"
+        assert not any(unsupported in answer for unsupported in (
+            "she is dehydrated", "she has an infection", "this is a uti",
+            "the cause is dementia", "her dementia is worsening",
+        )), f"Companion invented a cause for the recorded change: {data['reply']!r}"
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
