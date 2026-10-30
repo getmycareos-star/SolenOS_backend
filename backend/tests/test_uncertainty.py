@@ -11,6 +11,8 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
+from app.models.collaboration import ConversationSession, ConversationMessage
+from app.models.uncertainty import OpenQuestion
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -2348,3 +2350,143 @@ def test_conflict_partial_resolution_reopen_and_history_preserve_unresolved_rema
     finally:
         teardown_db()
 
+
+def test_companion_conversation_is_private_to_its_authenticated_caregiver():
+    """Care-record membership does not grant access to another caregiver's private Companion thread."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="companion-private-person", name="Shared Care Record")
+        caregiver_a = Caregiver(
+            id="companion-private-a", name="Caregiver A",
+            email="companion-private-a@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        caregiver_b = Caregiver(
+            id="companion-private-b", name="Caregiver B",
+            email="companion-private-b@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="companion-private-other", name="Other Care Record")
+        other_caregiver = Caregiver(
+            id="companion-private-other-caregiver", name="Other Caregiver",
+            email="companion-private-other@example.com", relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver_a, caregiver_b, other_person, other_caregiver])
+        db.flush()
+
+        session = ConversationSession(
+            id="private-companion-session", person_id=person.id,
+            caregiver_id=caregiver_a.id, title="Private caregiver conversation",
+            status="active",
+        )
+        db.add(session)
+        db.flush()
+        db.add(ConversationMessage(
+            id="private-companion-message", session_id=session.id,
+            role="user", content="Private caregiver context.",
+            evidence_ids_json="[]", source_record_refs_json="[]",
+        ))
+
+        tokens = {}
+        for caregiver in (caregiver_a, caregiver_b, other_caregiver):
+            token = f"private-conversation-token-{caregiver.id}"
+            tokens[caregiver.id] = token
+            db.add(AnonymousSession(
+                person_id=caregiver.person_id,
+                caregiver_id=caregiver.id,
+                token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+            ))
+        db.commit()
+        db.close()
+
+        client = TestClient(app)
+        owner = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[caregiver_a.id]}"},
+        )
+        assert owner.status_code == 200, owner.text
+        assert owner.json()["messages"][0]["text"] == "Private caregiver context."
+
+        same_record_other_caregiver = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[caregiver_b.id]}"},
+        )
+        assert same_record_other_caregiver.status_code == 404
+
+        different_person = client.get(
+            f"/api/v1/conversation/{session.id}",
+            headers={"Authorization": f"Bearer {tokens[other_caregiver.id]}"},
+        )
+        assert different_person.status_code == 404
+    finally:
+        teardown_db()
+
+
+
+def test_historical_unresolved_questions_remain_retrievable_outside_recent_windows():
+    """An old unanswered care question must not disappear behind recent-history limits."""
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="historical-question-person", name="Historical Question Person")
+        caregiver = Caregiver(
+            id="historical-question-caregiver", name="Historical Question Caregiver",
+            email="historical-question@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        other_person = Person(id="historical-question-other", name="Other Question Person")
+        other_caregiver = Caregiver(
+            id="historical-question-other-caregiver", name="Other Question Caregiver",
+            email="historical-question-other@example.com", relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        old_asked_at = datetime(2024, 1, 15, 9, 30, tzinfo=timezone.utc)
+        old_question = OpenQuestion(
+            id="historical-open-question",
+            person_id=person.id,
+            question="Was the mobility assessment ever completed?",
+            subject_type="appointment",
+            subject_id="mobility-assessment",
+            status="open",
+            asked_at=old_asked_at,
+            created_by_caregiver_id=caregiver.id,
+        )
+        recent_question = OpenQuestion(
+            id="recent-open-question",
+            person_id=person.id,
+            question="Is the follow-up appointment confirmed?",
+            subject_type="appointment",
+            subject_id="follow-up",
+            status="open",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([old_question, recent_question])
+        db.commit()
+        db.close()
+
+        client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
+        response = client.get(f"/api/v1/uncertainty/questions/{person.id}?status=open")
+        assert response.status_code == 200, response.text
+        by_id = {item["id"]: item for item in response.json()}
+        assert set(by_id) == {old_question.id, recent_question.id}
+        assert by_id[old_question.id]["status"] == "open"
+        assert by_id[old_question.id]["asked_at"].startswith("2024-01-15T09:30:00")
+
+        foreign = other_client.get(
+            f"/api/v1/uncertainty/questions/{person.id}?status=open"
+        )
+        assert foreign.status_code == 403
+    finally:
+        teardown_db()
