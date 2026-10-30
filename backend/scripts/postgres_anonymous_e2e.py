@@ -713,8 +713,11 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
         require(status == 401, f"revoked token must be rejected, got {status}")
         # Revoking one capability must not break another caregiver's valid session.
-        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
-        require(status == 200, f"valid independent session failed after revocation, got {status}")
+        status, independent_evidence_read = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
+        require(
+            status == 200,
+            f"valid independent session failed after revocation, got {status}: {independent_evidence_read}",
+        )
 
         status, cross_write = request(
             "POST",
