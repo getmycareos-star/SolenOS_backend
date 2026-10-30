@@ -237,13 +237,41 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             ])
             db.commit()
 
+        # Explicitly resume the mobility thread with a new observation. The
+        # appetite thread must remain separate and retain its own evidence.
+        resumed = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "target_situation_id": "persisted-mobility-thread",
+                "raw_input": "The person is still unsteady when turning.",
+            },
+        )
+        assert resumed.status_code == 200, resumed.text
+        resumed_body = resumed.json()
+        assert resumed_body["situation_id"] == "persisted-mobility-thread"
+        resumed_evidence_id = resumed_body["evidence_id"]
+        with TestingSessionLocal() as db:
+            resumed_event = db.query(CareEvent).filter_by(
+                id=resumed_body["care_event_id"]
+            ).one()
+            saved_mobility = db.query(Situation).filter_by(
+                id="persisted-mobility-thread"
+            ).one()
+            assert resumed_event.situation_id == "persisted-mobility-thread"
+            assert resumed_evidence_id in saved_mobility.signal_ids
+
         hydrated = client.get("/api/situation", headers=headers)
         assert hydrated.status_code == 200, hydrated.text
         body = hydrated.json()
         threads = {item["id"]: item for item in body["ui_situations"]}
         assert "persisted-mobility-thread" in threads
         assert "persisted-appetite-thread" in threads
-        assert threads["persisted-mobility-thread"]["linked_evidence_ids"] == [first_evidence_id]
+        assert set(threads["persisted-mobility-thread"]["linked_evidence_ids"]) == {
+            first_evidence_id, resumed_evidence_id
+        }
         assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
         assert threads["persisted-mobility-thread"]["openQuestions"] == [
             "Has the unsteadiness also happened indoors?"
