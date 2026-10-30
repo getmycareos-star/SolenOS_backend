@@ -305,7 +305,7 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-    suffix = uuid.uuid4().hex
+    suffix = uuid.uuid4().hex[:8]
     person_a = f"reconstruct-person-a-{suffix}"
     person_b = f"reconstruct-person-b-{suffix}"
     uploader = f"reconstruct-uploader-{suffix}"
