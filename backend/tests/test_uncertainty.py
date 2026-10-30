@@ -348,6 +348,13 @@ def test_open_question_lifecycle():
         assert repeated_answer.status_code == 200, repeated_answer.text
         repeated_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
         assert len(repeated_history.json()) == 1, "identical answer retries must not append duplicate answer events"
+        metadata_only_update = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={"context": [{"note": "Caregiver reviewed the question context."}]},
+        )
+        assert metadata_only_update.status_code == 200, metadata_only_update.text
+        metadata_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert len(metadata_history.json()) == 1, "Metadata-only updates must not fabricate answer history"
 
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
