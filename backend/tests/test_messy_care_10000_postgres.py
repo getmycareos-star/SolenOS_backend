@@ -73,6 +73,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
     caregivers = []
     events = []
     evidence_rows = []
+    duplicate_evidence_rows = []
     assertion_rows = []
     contradiction_rows = []
     correction_rows = []
@@ -186,7 +187,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
 
                     if family == "duplicate_source_lineage":
                         duplicate_id = f"m10kdp{suffix}{case_id:05d}"
-                        evidence_rows.append(Evidence(
+                        duplicate_evidence_rows.append(Evidence(
                             id=duplicate_id,
                             person_id=person_id,
                             type="derived_summary",
@@ -296,6 +297,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             db.add_all(events)
             db.flush()
             db.add_all(evidence_rows)
+            db.flush()
+            db.add_all(duplicate_evidence_rows)
             db.flush()
             db.add_all(assertion_rows)
             db.add_all(contradiction_rows)
