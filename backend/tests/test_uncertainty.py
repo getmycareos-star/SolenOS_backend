@@ -291,12 +291,39 @@ def test_open_question_lifecycle():
         
         question_id = data["id"]
 
+        # A typed answer without persisted source evidence must remain open.
+        unsupported_answer = client.patch(
+            f"/api/v1/uncertainty/questions/{question_id}",
+            json={
+                "status": "answered",
+                "answer": "The caregiver reports that the appointment was attended.",
+                "answer_provenance": "Caregiver report recorded during the current session.",
+            },
+        )
+        assert unsupported_answer.status_code == 422, unsupported_answer.text
+        assert client.get("/api/v1/uncertainty/questions/person-5?status=open").json()[0]["status"] == "open"
+
+        first_source = client.post(
+            "/api/v1/evidence",
+            json={
+                "person_id": "person-5",
+                "uploaded_by_caregiver_id": "caregiver-5",
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": "The caregiver checked the visit record and confirms attendance.",
+            },
+        )
+        assert first_source.status_code in {200, 201}, first_source.text
+        first_evidence_id = first_source.json()["id"]
+
         first_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
                 "status": "answered",
                 "answer": "The caregiver reports that the appointment was attended.",
                 "answer_provenance": "Caregiver report recorded during the current session.",
+                "evidence_ids": [first_evidence_id],
             },
         )
         assert first_answer.status_code == 200, first_answer.text
@@ -307,6 +334,7 @@ def test_open_question_lifecycle():
         assert len(first_history.json()) == 1
         assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
         assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
+        assert first_history.json()[0]["evidence_ids"] == [first_evidence_id]
 
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
@@ -315,12 +343,26 @@ def test_open_question_lifecycle():
         assert reopened.status_code == 200, reopened.text
         assert reopened.json()["answer"] == "The caregiver reports that the appointment was attended."
 
+        second_source = client.post(
+            "/api/v1/evidence",
+            json={
+                "person_id": "person-5",
+                "uploaded_by_caregiver_id": "caregiver-5",
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": "The visit note also records that follow-up was discussed.",
+            },
+        )
+        assert second_source.status_code in {200, 201}, second_source.text
+        second_evidence_id = second_source.json()["id"]
         corrected_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
                 "status": "answered",
                 "answer": "The caregiver reports attendance and says follow-up was discussed.",
                 "answer_provenance": "Caregiver clarification updated after checking the visit note.",
+                "evidence_ids": [second_evidence_id],
             },
         )
         assert corrected_answer.status_code == 200, corrected_answer.text
@@ -330,6 +372,8 @@ def test_open_question_lifecycle():
         assert len(second_history.json()) == 2
         assert second_history.json()[0]["answer"] != second_history.json()[1]["answer"]
         assert all(row["person_id"] == "person-5" for row in second_history.json())
+        assert second_history.json()[0]["evidence_ids"] == [first_evidence_id]
+        assert second_history.json()[1]["evidence_ids"] == [second_evidence_id]
         assert other_client.get(
             f"/api/v1/uncertainty/questions/{question_id}/answer-history"
         ).status_code == 404
