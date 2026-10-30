@@ -164,7 +164,7 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
             json={
                 "observation_kind": "caregiver_report",
                 "epistemic_status": "reported",
-                "subject_label": "care recipient",
+                "subject_label": original_statement["subject_label"],
                 "attribute": "reported_statement",
                 "value_text": "Mom slipped in the hallway this morning.",
                 "context": "Caregiver correction to the structured interpretation; original source wording remains unchanged.",
@@ -181,6 +181,49 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         )
         assert correction.status_code == 201, correction.text
         correction_id = correction.json()["id"]
+
+        # A later source can correct a prior statement. The source being
+        # corrected remains immutable and both source records remain auditable.
+        later_source_text = "Daughter: I reviewed the discharge note; Mom slipped rather than fell."
+        later_source = client.post(
+            "/api/v1/evidence",
+            json={
+                "person_id": person_id,
+                "uploaded_by_caregiver_id": caregiver_id,
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": later_source_text,
+            },
+            headers=headers,
+        )
+        assert later_source.status_code in {200, 201}, later_source.text
+        later_evidence_id = later_source.json()["id"]
+        later_passage = "Mom slipped rather than fell."
+        later_start = later_source_text.index(later_passage)
+        cross_source_correction = client.post(
+            f"/api/v1/care-continuity/evidence/{later_evidence_id}/observations",
+            headers=headers,
+            json={
+                "observation_kind": "caregiver_report",
+                "epistemic_status": "reported",
+                "subject_label": original_statement["subject_label"],
+                "attribute": original_statement["attribute"],
+                "value_text": "Mom slipped in the hallway this morning.",
+                "context": "A later caregiver report corrects the earlier wording after reviewing the discharge note.",
+                "observer_label": "Daughter",
+                "source_passage": later_passage,
+                "source_span_start": later_start,
+                "source_span_end": later_start + len(later_passage),
+                "extraction_method": "caregiver_correction",
+                "extraction_version": "1",
+                "reported_at": datetime.now(timezone.utc).isoformat(),
+                "supersedes_observation_id": correction_id,
+                "correction_rationale": "Later source clarifies the earlier structured statement.",
+            },
+        )
+        assert cross_source_correction.status_code == 201, cross_source_correction.text
+        cross_source_correction_id = cross_source_correction.json()["id"]
 
         hydrated = client.get("/api/situation", headers=headers)
         assert hydrated.status_code == 200, hydrated.text
@@ -204,6 +247,15 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert original_after_correction["superseded_by_observation_ids"] == [correction_id]
         assert correction_after_hydration["supersedes_observation_id"] == original_statement["id"]
         assert correction_after_hydration["correction_rationale"]
+        assert correction_after_hydration["superseded_by_observation_ids"] == [cross_source_correction_id]
+        cross_source_rows = [
+            item for item in source_statements
+            if item["id"] in {correction_id, cross_source_correction_id}
+        ]
+        assert len(cross_source_rows) == 2
+        assert cross_source_rows[1]["evidence_id"] == later_evidence_id
+        assert cross_source_rows[1]["supersedes_observation_id"] == correction_id
+        assert cross_source_rows[1]["source_passage"] == later_passage
         assert all(
             source[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
             for item in source_statements
