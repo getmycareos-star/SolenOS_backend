@@ -206,6 +206,7 @@ def test_postgres_concurrent_conflict_transitions_form_a_serial_audit_chain():
     from app.services.uncertainty import UncertaintyEngine
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Base.metadata.create_all(bind=engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     person_id = f"conflict-concurrency-person-{suffix}"
