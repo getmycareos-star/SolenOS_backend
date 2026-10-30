@@ -2489,7 +2489,6 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
         foreign = other_client.get(
             f"/api/v1/uncertainty/questions/{person.id}?status=open"
         )
-        assert foreign.status_code == 200
-        assert foreign.json() == []
+        assert foreign.status_code == 403
     finally:
         teardown_db()
