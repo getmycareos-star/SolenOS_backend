@@ -167,6 +167,44 @@ def main():
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
 
+        # Concurrent care captures must each commit their own source and
+        # event rows. A process restart must not collapse them into one
+        # synthetic "active situation" or lose either original report.
+        capture_payloads = [
+            {
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "raw_input": "Daughter: She ate most of breakfast today.",
+                "capture_category": "meal",
+            },
+            {
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "raw_input": "Nurse: She was unsteady when walking this afternoon.",
+                "capture_category": "behavior",
+            },
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_captures = list(pool.map(
+                lambda payload: request("POST", "/api/situation", body=payload, token=token_a),
+                capture_payloads,
+            ))
+        require(all(status == 200 for status, _ in concurrent_captures),
+                f"Concurrent care captures failed: {concurrent_captures}")
+        concurrent_capture_event_ids = {
+            body.get("care_event_id") for _, body in concurrent_captures
+        }
+        concurrent_capture_evidence_ids = {
+            body.get("evidence_id") for _, body in concurrent_captures
+        }
+        require(
+            len(concurrent_capture_event_ids) == 2
+            and None not in concurrent_capture_event_ids
+            and len(concurrent_capture_evidence_ids) == 2
+            and None not in concurrent_capture_evidence_ids,
+            f"Concurrent care capture writes must preserve both distinct evidence/event pairs: {concurrent_captures}",
+        )
+
         # Two simultaneous uploads of identical bytes must not both be
         # reported as originals. PostgreSQL advisory locking serializes the
         # per-person fingerprint lookup and insert while preserving both rows.
@@ -1084,6 +1122,20 @@ def main():
 
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
+        restarted_event_ids = {
+            event.get("id") for event in hydration_after_restart.get("events", [])
+        }
+        require(
+            concurrent_capture_event_ids.issubset(restarted_event_ids),
+            "Both concurrent care events must survive application restart",
+        )
+        restarted_evidence_ids = {
+            item.get("id") for item in hydration_after_restart.get("active_care_situation", {}).get("observations", [])
+        }
+        require(
+            concurrent_capture_evidence_ids.issubset(restarted_evidence_ids),
+            "Both concurrent source evidence records must survive application restart",
+        )
         observations_after_restart = [
             item.get("raw_text")
             for item in (hydration_after_restart.get("active_care_situation") or {}).get("observations", [])
