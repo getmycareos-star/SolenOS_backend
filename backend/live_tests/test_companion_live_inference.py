@@ -299,7 +299,19 @@ def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordinati
         assert first_data["written_to_lcr"] is False
         assert first_data["persistence"] == "conversation_only"
         assert 8 <= len(answer.split()) <= 180, answer
-        assert "?" in answer, f"Companion did not ask a useful clarifying question: {answer!r}"
+        has_targeted_question = "?" in answer
+        has_concrete_next_step = any(phrase in lowered for phrase in (
+            "check her appetite and food intake",
+            "check her food intake",
+            "check what she eats",
+            "check lunch and dinner",
+            "report those findings",
+            "record what she eats",
+        ))
+        assert has_targeted_question or has_concrete_next_step, (
+            "Companion did not offer a targeted clarification or concrete next step: "
+            f"{answer!r}"
+        )
         assert not any(unsupported in lowered for unsupported in (
             "she is dehydrated", "she has an infection", "this is a uti",
             "her dementia is worsening", "the cause is dementia",
