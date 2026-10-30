@@ -686,6 +686,7 @@ jobs:
           createdb -h localhost -U postgres solenos_stamped_04
           createdb -h localhost -U postgres solenos_qwen_backfill
           createdb -h localhost -U postgres solenos_freshness_existing
+          createdb -h localhost -U postgres solenos_evidence_columns
           createdb -h localhost -U postgres solenos_messy_care_benchmark
 
       - name: Run persisted messy-care benchmark against PostgreSQL
@@ -693,7 +694,6 @@ jobs:
           SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
         working-directory: backend
         run: python -m pytest tests/test_longitudinal_messy_care_benchmark.py -q
-          createdb -h localhost -U postgres solenos_evidence_columns
 
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
