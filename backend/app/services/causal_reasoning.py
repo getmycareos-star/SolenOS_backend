@@ -636,37 +636,10 @@ class CausalReasoningEngine:
         window: timedelta,
         cause_description: str,
     ) -> List[ConfounderModel]:
-        if not cause_time:
-            return []
-
-        center = cause_time
-        window_start = _ensure_utc(center) - window
-        window_end = _ensure_utc(center) + window
-
-        events = (
-            self.db.query(CareEventModel)
-            .filter(
-                CareEventModel.person_id == person_id,
-                CareEventModel.occurred_at >= window_start,
-                CareEventModel.occurred_at <= window_end,
-            )
-            .all()
-        )
-
-        confounders = []
-        for e in events:
-            if cause_description and cause_description.lower() in e.title.lower():
-                continue
-            conf = ConfounderModel(
-                person_id=person_id,
-                hypothesis_id="pending",
-                factor_type=e.event_type,
-                description=e.title,
-                plausibility=CausalConfidence.POSSIBLE,
-                evidence_ids=e.evidence_ids,
-            )
-            confounders.append(conf)
-        return confounders
+        # Temporal proximity alone does not establish a confounding relationship.
+        # Confounders must be explicitly assessed and persisted through the
+        # hypothesis evidence workflow; never auto-label every nearby event.
+        return []
 
     def _identify_alternative_explanations(
         self,
@@ -677,37 +650,10 @@ class CausalReasoningEngine:
         cause_description: str,
         outcome_description: str,
     ) -> List[AlternativeExplanationModel]:
-        if not cause_time:
-            return []
-
-        center = cause_time
-        window_start = _ensure_utc(center) - window
-        window_end = _ensure_utc(center) + window
-
-        events = (
-            self.db.query(CareEventModel)
-            .filter(
-                CareEventModel.person_id == person_id,
-                CareEventModel.occurred_at >= window_start,
-                CareEventModel.occurred_at <= window_end,
-            )
-            .all()
-        )
-
-        alternatives = []
-        for e in events:
-            if cause_description and cause_description.lower() in e.title.lower():
-                continue
-            alt = AlternativeExplanationModel(
-                person_id=person_id,
-                hypothesis_id="pending",
-                explanation_type=e.event_type,
-                description=e.title,
-                plausibility=CausalConfidence.POSSIBLE,
-                evidence_ids=e.evidence_ids,
-            )
-            alternatives.append(alt)
-        return alternatives
+        # A nearby event is not automatically an alternative explanation.
+        # Alternatives require an explicit, reviewable hypothesis with linked
+        # evidence, recorded through add_alternative_explanation().
+        return []
 
     def _collect_evidence(
         self,
