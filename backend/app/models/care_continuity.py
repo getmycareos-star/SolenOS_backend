@@ -21,6 +21,27 @@ from app.core.database import Base
 from app.core.types import JSONList
 
 
+class CareRecordRelationship(Base):
+    """Explicit non-merging relationship between two care-record entities."""
+
+    __tablename__ = "care_record_relationships"
+    __table_args__ = (
+        Index("ix_care_record_relationships_person_source", "person_id", "source_type", "source_id"),
+        Index("ix_care_record_relationships_person_target", "person_id", "target_type", "target_id"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    person_id = Column(String(36), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    source_type = Column(String(80), nullable=False)
+    source_id = Column(String(36), nullable=False)
+    relationship_type = Column(String(80), nullable=False)
+    target_type = Column(String(80), nullable=False)
+    target_id = Column(String(36), nullable=False)
+    provenance = Column(Text, nullable=True)
+    created_by_caregiver_id = Column(String(36), ForeignKey("caregivers.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CareStateRevision(Base):
     __tablename__ = "care_state_revisions"
     __table_args__ = (
