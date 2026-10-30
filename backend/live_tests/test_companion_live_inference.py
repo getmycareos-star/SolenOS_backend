@@ -336,3 +336,78 @@ def test_live_qwen_document_intelligence_promotes_only_caregiver_accepted_source
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_live_daily_capture_is_immediately_readable_from_lcr_and_daily_history(monkeypatch):
+    """Use the real Daily Care write route and prove the saved event reaches LCR reads."""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    try:
+        session, _ = _create_synthetic_record(client)
+        token = session["access_token"]
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        headers = {"Authorization": f"Bearer {token}"}
+        daily_note = (
+            "Caregiver observed that the person needed hands-on support to stand "
+            "from the dining chair this morning. This is a caregiver observation; "
+            "the reason for the change is not known."
+        )
+
+        saved = client.post(
+            "/api/v1/daily/log",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "notes": daily_note,
+                "vitals": [],
+                "scales": [],
+                "medications": [],
+            },
+        )
+        assert saved.status_code == 200, saved.text
+        receipt = saved.json()
+        event_id = receipt.get("id")
+        assert event_id, "Daily Care did not return the persisted care-event ID."
+        assert receipt["qwen_written_to_lcr"] is False
+        assert receipt["qwen_review_required"] is True
+
+        current = client.get(
+            "/api/v1/care-continuity/current-care?limit_per_source=50",
+            headers=headers,
+        )
+        assert current.status_code == 200, current.text
+        matching = [
+            item for item in current.json().get("items", [])
+            if item.get("id") == event_id
+        ]
+        assert matching, "The newly saved Daily Care event is not visible in the LCR current-care projection."
+        assert matching[0]["source_collection"] == "events"
+        assert matching[0]["kind"] == "Daily care entry"
+
+        history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=100",
+            headers=headers,
+        )
+        assert history.status_code == 200, history.text
+        history_ids = {
+            str(item.get("source_id"))
+            for item in history.json().get("records", [])
+            if item.get("source_type") == "care_event"
+        }
+        assert event_id in history_ids, "Daily Care history cannot retrieve the event it just saved."
+
+        db = TestingSessionLocal()
+        try:
+            persisted = db.query(CareEvent).filter_by(id=event_id, person_id=person_id).one()
+            assert persisted.created_by_caregiver_id == caregiver_id
+            assert "daily_capture" in (persisted.tags or [])
+            assert daily_note in persisted.description
+        finally:
+            db.close()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
