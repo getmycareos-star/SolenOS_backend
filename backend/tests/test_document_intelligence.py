@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
+from app.models.capture_analysis import CaptureAnalysis
 
 main_module = importlib.import_module("app.main")
 document_intelligence = importlib.import_module("app.api.document_intelligence")
@@ -265,5 +266,52 @@ def test_document_candidate_correction_requires_separate_explicit_acceptance(mon
         assert listed.status_code == 200, listed.text
         assert listed.json()["count"] == 1
         assert listed.json()["items"][0]["analysis_id"] == analysis_id
+    finally:
+        teardown()
+
+
+
+def test_document_intelligence_list_is_scoped_to_the_authenticated_caregiver():
+    client = setup_client()
+    try:
+        token_a, person_a, caregiver_a = create_session(client, "Caregiver A")
+        token_b, _, _ = create_session(client, "Caregiver B")
+        evidence_id = save_document(person_a, caregiver_a, "The discharge note states: needs support walking.")
+        db = TestingSessionLocal()
+        try:
+            db.add(CaptureAnalysis(
+                person_id=person_a,
+                caregiver_id=caregiver_a,
+                source_event_id=None,
+                source_evidence_id=evidence_id,
+                source_text="The discharge note states: needs support walking.",
+                extraction_status="available",
+                candidates={
+                    "kind": "document_intelligence_v1",
+                    "document_name": "discharge-summary.txt",
+                    "observations": [],
+                    "open_questions": [],
+                },
+                review_history=[],
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        own = client.get(
+            "/api/v1/documents/intelligence?limit=50",
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert own.status_code == 200, own.text
+        assert own.json()["count"] == 1
+        assert own.json()["items"][0]["source_evidence_id"] == evidence_id
+
+        other = client.get(
+            "/api/v1/documents/intelligence?limit=50",
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+        assert other.status_code == 200, other.text
+        assert other.json()["count"] == 0
+        assert other.json()["items"] == []
     finally:
         teardown()
