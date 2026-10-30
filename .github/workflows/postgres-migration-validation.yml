@@ -109,7 +109,7 @@ jobs:
               "evidence": {"person_id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_by_caregiver_id", "original_author", "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id", "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel", "original_source_reference", "parent_evidence_id", "source_text_sha256", "ingested_at", "reported_at", "collection_method", "origin_device_ref", "transfer_source", "transfer_reference", "ingestion_key", "ingestion_request_sha256"},
               "evidence_review_records": {"evidence_id", "person_id", "review_type", "outcome", "rationale", "criteria", "policy_version", "source_attribution_snapshot", "reviewed_by_caregiver_id", "created_at"},
               "evidence_claim_dependencies": {"id", "person_id", "claim_id", "depends_on_claim_id", "dependency_type", "rationale", "created_by_caregiver_id", "created_at"},
-              "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "created_at"},
+              "evidence_claim_assessments": {"id", "person_id", "claim_id", "claim_version", "status", "rationale", "policy_version", "evidence_links", "reviewed_by_caregiver_id", "supersedes_assessment_id", "superseded_by_claim_id", "created_at"},
               "evidence_source_relationships": {"id", "person_id", "source_evidence_id", "related_evidence_id", "relationship_type", "source_independence_status", "origin_group_key", "rationale", "reviewed_by_caregiver_id", "created_at"},
               "evidence_observations": {"id", "person_id", "evidence_id", "supersedes_observation_id", "correction_rationale", "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "source_passage", "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note", "extraction_method", "extraction_version", "created_by_caregiver_id", "recorded_at"},
               "evidence_freshness_policies": {"id", "person_id", "domain_key", "policy_version", "max_age_days", "historical_after_days", "rationale", "created_by_caregiver_id", "created_at"},
@@ -759,6 +759,43 @@ jobs:
           test "$(psql "$PSQL_URL" -Atc "SELECT review_status FROM qwen_model_outputs WHERE job_id='job-qwen-backfill'")" = "pending_review"
           test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_safety_evaluations WHERE job_id='job-qwen-backfill' AND human_review_required")" = "1"
           test "$(psql "$PSQL_URL" -Atc "SELECT COUNT(*) FROM qwen_job_events WHERE job_id='job-qwen-backfill' AND event_type='legacy_output_backfilled'")" = "1"
+
+      - name: Verify forward repair of partially migrated evidence supersession schema
+        working-directory: backend
+        run: |
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "
+            ALTER TABLE evidence_claim_assessments DROP COLUMN superseded_by_claim_id;
+            ALTER TABLE evidence_observations DROP COLUMN supersedes_observation_id;
+            ALTER TABLE evidence_observations DROP COLUMN correction_rationale;
+            UPDATE alembic_version
+              SET version_num = '20261030_01_companion_turn_merge';
+          "
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          inspector = inspect(create_engine(os.environ["DATABASE_URL"]))
+          expected = {
+              "evidence_claim_assessments": "superseded_by_claim_id",
+              "evidence_observations": "supersedes_observation_id",
+          }
+          for table, column in expected.items():
+              assert column in {item["name"] for item in inspector.get_columns(table)}, (table, column)
+          assert "correction_rationale" in {
+              item["name"] for item in inspector.get_columns("evidence_observations")
+          }
+          for table, column, target in (
+              ("evidence_claim_assessments", "superseded_by_claim_id", "care_assertions"),
+              ("evidence_observations", "supersedes_observation_id", "evidence_observations"),
+          ):
+              assert any(
+                  column in (fk.get("constrained_columns") or [])
+                  and fk.get("referred_table") == target
+                  for fk in inspector.get_foreign_keys(table)
+              ), (table, column, target)
+          print("PASS partial evidence supersession schema repaired without replacing records")
+          PY
 
       - name: Test empty legacy caregivers table is reconciled on PostgreSQL
         env:
