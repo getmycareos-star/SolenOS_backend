@@ -217,7 +217,7 @@ def review_document_candidate(
     if not isinstance(observations, list) or payload.candidate_index >= len(observations):
         raise HTTPException(status_code=404, detail="Document candidate not found")
     candidate = observations[payload.candidate_index]
-    if not isinstance(candidate, dict) or candidate.get("review_status") != "pending_review":
+    if not isinstance(candidate, dict) or candidate.get("review_status") not in {"pending_review", "corrected_pending_approval"}:
         raise HTTPException(status_code=409, detail="This document candidate already has a review decision")
 
     original = dict(candidate)
@@ -232,8 +232,8 @@ def review_document_candidate(
         candidate["observation"] = observation[:500]
         candidate["review_status"] = "corrected_pending_approval"
     else:
-        if candidate.get("review_status") != "pending_review":
-            raise HTTPException(status_code=409, detail="Corrected candidates must be accepted in a separate review action")
+        if candidate.get("review_status") not in {"pending_review", "corrected_pending_approval"}:
+            raise HTTPException(status_code=409, detail="This document candidate is not awaiting acceptance")
         quote = candidate.get("source_quote")
         if not isinstance(quote, str) or not quote or quote not in (evidence.source_text or ""):
             raise HTTPException(status_code=409, detail="The candidate no longer matches the preserved source document")
