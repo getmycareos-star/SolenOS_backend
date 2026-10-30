@@ -37,6 +37,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Situation as SituationModel
+from app.models.care_continuity import EvidenceObservation as EvidenceObservationModel
 from app.models.uncertainty import (
     OpenQuestion as OpenQuestionModel,
     Contradiction as ContradictionModel,
