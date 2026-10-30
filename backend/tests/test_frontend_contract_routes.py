@@ -425,7 +425,7 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
         assert evidence_id in response.json()["source_evidence_ids"]
 
         user_payload = captured["messages"][-1]["content"]
-        assert "Caregiver question: What does the uploaded document say?" in user_payload
+        assert "Caregiver message: What does the uploaded document say?" in user_payload
         assert "care-letter.txt" in user_payload
         assert "follow-up date is not stated" in user_payload.casefold()
         assert "evidence lineage" in user_payload.casefold()

@@ -129,7 +129,7 @@ def issue_session(db, person, caregiver):
         person_id=person.id,
         caregiver_id=caregiver.id,
         token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        expires_at=NOW + timedelta(days=1),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
     ))
     db.flush()
     return token
