@@ -55,6 +55,7 @@ class SituationEvent(BaseModel):
     occurred_at: datetime
     time_provenance: Optional[Literal["caregiver_reported_event_time", "entry_time_defaulted"]] = None
     evidence_ids: Optional[List[str]] = None
+    situation_id: Optional[str] = None
 
 
 class InteractionPauseResponse(BaseModel):
@@ -88,6 +89,7 @@ class SituationResponse(BaseModel):
     care_session_id: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
     ui_situations: List[Dict[str, Any]] = Field(default_factory=list)
+    care_situation_groups: Optional[List[Dict[str, Any]]] = None
     active_care_situation: Optional[Dict[str, Any]] = None
     active_care_situation_turn: Optional[Dict[str, Any]] = None
     return_continuity: Optional[Dict[str, Any]] = None
