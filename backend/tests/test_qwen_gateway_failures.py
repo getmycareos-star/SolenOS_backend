@@ -106,7 +106,12 @@ def test_qwen_gateway_sends_thinking_control_as_top_level_chat_parameter(monkeyp
         return FakeResponse(json.dumps({"message": {"content": "Hello, I can help."}}).encode())
 
     monkeypatch.setenv("OLLAMA_THINK", "false")
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "256")
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", successful_chat)
-    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hello"}]) == "Hello, I can help."
+    assert qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "hello"}],
+        options={"num_predict": 999},
+    ) == "Hello, I can help."
     assert captured["payload"]["think"] is False
     assert "think" not in captured["payload"]["options"]
+    assert captured["payload"]["options"]["num_predict"] == 256
