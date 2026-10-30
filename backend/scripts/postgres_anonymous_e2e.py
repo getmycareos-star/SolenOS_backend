@@ -380,8 +380,37 @@ def main():
                   "verification_rule": "The linked synthetic source record is present and was reviewed.",
                   "idempotency_key": "postgres-open-loop-reconciliation-verify-001"},
         )
-        require(status == 200 and contradiction_verified.get("outcome_status") == "outcome_verified",
-                f"Contradiction verification failed: {status}: {contradiction_verified}")
+        require(status == 200 and contradiction_verified.get("outcome_status") == "outcome_reported",
+                f"Contradiction caregiver attestation must remain reported: {status}: {contradiction_verified}")
+        # A contradiction cannot be closed by reconciliation or attestation alone.
+        # Require a separately persisted pair-level independent-source relationship.
+        status, contradiction_relationship = request(
+            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/relationships",
+            token=token_a,
+            body={
+                "related_evidence_id": workflow_second_source_id,
+                "relationship_type": "corroborates",
+                "source_independence_status": "independent",
+                "scope_type": "evidence_pair",
+                "rationale": "CI fixture explicitly records separate source origins for contradiction review.",
+            },
+        )
+        require(status == 201 and contradiction_relationship.get("id"),
+                f"Contradiction independent-source relationship creation failed: {status}: {contradiction_relationship}")
+        status, contradiction_corroborated = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/corroborate-outcome", token=token_a,
+            body={
+                "text": "Synthetic independent-source corroboration review for contradiction",
+                "evidence": [
+                    {"kind": "care_record_source", "evidence_id": professional_source_id},
+                    {"kind": "care_record_source", "evidence_id": workflow_second_source_id},
+                ],
+                "verification_rule": "The contradiction outcome must have two separately originated source records.",
+                "idempotency_key": "postgres-open-loop-reconciliation-corroborate-001",
+            },
+        )
+        require(status == 200 and contradiction_corroborated.get("outcome_status") == "outcome_verified",
+                f"Contradiction independent corroboration failed: {status}: {contradiction_corroborated}")
         status, contradiction_closed = request(
             "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
             body={"text": "Synthetic closure after reconciliation and verification",
@@ -395,7 +424,7 @@ def main():
         )
         contradiction_event_types = {event.get("event_type") for event in contradiction_history}
         require(status == 200 and {
-            "created", "contradiction_reconciled", "outcome_verified", "closure_verified",
+            "created", "contradiction_reconciled", "outcome_attested", "outcome_corroborated", "closure_verified",
         }.issubset(contradiction_event_types),
                 f"Contradiction audit history is incomplete: {status}: {contradiction_history}")
 
