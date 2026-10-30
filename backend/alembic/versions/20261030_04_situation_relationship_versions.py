@@ -1,13 +1,13 @@
 """Add deterministic monotonic versions to explicit situation relationships.
 
-Revision ID: 20261030_04_situation_relationship_versions
+Revision ID: 20261030_04_sit_rel_ver
 Revises: 20261030_03_q_answer_evidence
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, select, update
 
-revision = "20261030_04_situation_relationship_versions"
+revision = "20261030_04_sit_rel_ver"
 down_revision = "20261030_03_q_answer_evidence"
 branch_labels = None
 depends_on = None
