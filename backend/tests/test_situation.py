@@ -156,6 +156,32 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         listed_rows = listed.json()
         assert len(listed_rows) == 3
         assert [row["observer_label"] for row in listed_rows] == ["Daughter", "Nurse", "Daughter"]
+
+        original_statement = listed_rows[0]
+        correction = client.post(
+            f"/api/v1/care-continuity/evidence/{evidence_id}/observations",
+            headers=headers,
+            json={
+                "observation_kind": "caregiver_report",
+                "epistemic_status": "reported",
+                "subject_label": "care recipient",
+                "attribute": "reported_statement",
+                "value_text": "Mom slipped in the hallway this morning.",
+                "context": "Caregiver correction to the structured interpretation; original source wording remains unchanged.",
+                "observer_label": "Daughter",
+                "source_passage": original_statement["source_passage"],
+                "source_span_start": original_statement["source_span_start"],
+                "source_span_end": original_statement["source_span_end"],
+                "extraction_method": "caregiver_correction",
+                "extraction_version": "1",
+                "reported_at": datetime.now(timezone.utc).isoformat(),
+                "supersedes_observation_id": original_statement["id"],
+                "correction_rationale": "Caregiver clarified the structured wording after reviewing the original report.",
+            },
+        )
+        assert correction.status_code == 201, correction.text
+        correction_id = correction.json()["id"]
+
         hydrated = client.get("/api/situation", headers=headers)
         assert hydrated.status_code == 200, hydrated.text
         source_thread = next(
@@ -165,9 +191,14 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         source_statements = source_thread["sourceStatements"]
         assert [item["speaker_label"] for item in source_statements] == ["Daughter", "Nurse", "Daughter"]
         assert all(item["reporter_caregiver_id"] == caregiver_id for item in source_statements)
-        assert all(item["speaker_attribution_status"] == "explicit" for item in source_statements)
+        assert all(item["speaker_attribution_status"] == "explicit" for item in source_statements[:3])
         assert source_statements[0]["occurred_at"] is not None
         assert source_statements[1]["occurred_at"] is None
+        original_after_correction = next(item for item in source_statements if item["id"] == original_statement["id"])
+        correction_after_hydration = next(item for item in source_statements if item["id"] == correction_id)
+        assert original_after_correction["superseded_by_observation_ids"] == [correction_id]
+        assert correction_after_hydration["supersedes_observation_id"] == original_statement["id"]
+        assert correction_after_hydration["correction_rationale"]
         assert all(
             source[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
             for item in source_statements
