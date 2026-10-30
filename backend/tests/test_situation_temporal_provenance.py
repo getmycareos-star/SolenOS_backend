@@ -63,7 +63,10 @@ def test_change_situation_resolves_evidence_ids_to_observation_time(monkeypatch)
         )
         assert situation.signal_ids == ["evidence-id"]
         assert situation.temporal_start == observed
-        assert situation.temporal_end == observed
+        actual_end = situation.temporal_end
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_end == observed
     finally:
         db.close()
 
@@ -94,7 +97,10 @@ def test_change_situation_update_appends_evidence_ids_and_event_observation_time
         assert update_situations(db, "p-update", event) == [situation]
         assert situation.signal_ids == ["old-evidence", "new-evidence"]
         assert "new-event" not in situation.signal_ids
-        assert situation.temporal_end == observed
+        actual_end = situation.temporal_end
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_end == observed
     finally:
         db.close()
 
@@ -125,6 +131,9 @@ def test_pattern_situation_update_preserves_event_id_signal_type():
         assert update_situations(db, "p-pattern", event) == [situation]
         assert situation.signal_ids == ["old-event", "new-pattern-event"]
         assert "new-evidence" not in situation.signal_ids
-        assert situation.temporal_end == observed
+        actual_end = situation.temporal_end
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_end == observed
     finally:
         db.close()

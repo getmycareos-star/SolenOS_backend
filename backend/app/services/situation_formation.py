@@ -117,19 +117,28 @@ def _form_change_situation(
         signal_types.append(c.subject_type)
     signal_ids = list(set(signal_ids))
     signal_types = list(set(signal_types))
-    # Change.evidence_ids are Evidence primary keys, not CareEvent IDs.
-    # Resolve observation time from source evidence; upload and analysis times
-    # are not substitutes for when the care was observed.
+    # Historical Change rows can contain either Evidence IDs (current
+    # contract) or CareEvent IDs (legacy contract). Resolve both person-scoped
+    # namespaces so known source observation times always outrank analysis time.
     source_evidence = (
         db.query(Evidence)
         .filter(Evidence.person_id == person_id, Evidence.id.in_(signal_ids))
         .all()
         if signal_ids else []
     )
+    source_events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(signal_ids))
+        .all()
+        if signal_ids else []
+    )
     source_times = [
         observed_at
-        for evidence in source_evidence
-        if (observed_at := _ensure_utc(evidence.occurred_at)) is not None
+        for observed_at in (
+            [_ensure_utc(item.occurred_at) for item in source_evidence]
+            + [_ensure_utc(item.occurred_at) for item in source_events]
+        )
+        if observed_at is not None
     ]
     if source_times:
         temporal_start = min(source_times)
@@ -555,8 +564,9 @@ def update_situations(
             continue
 
         # Change situations store evidence IDs; pattern situations store event
-        # IDs. Never mix the two identifier namespaces in signal_ids.
+        # IDs. Infer legacy rows only from person-scoped persisted identifiers.
         context_type = (situation.context or {}).get("type")
+        existing_ids = list(situation.signal_ids or [])
         if context_type == "situation_understanding":
             incoming_ids = list(new_event.evidence_ids or [])
         elif context_type in {
@@ -565,11 +575,26 @@ def update_situations(
         }:
             incoming_ids = [new_event.id]
         else:
-            # Legacy rows without declared signal semantics cannot be safely
-            # extended. Leave them intact for explicit reconciliation.
-            continue
-
-        existing_ids = list(situation.signal_ids or [])
+            evidence_matches = (
+                db.query(Evidence.id)
+                .filter(Evidence.person_id == person_id, Evidence.id.in_(existing_ids))
+                .all()
+                if existing_ids else []
+            )
+            event_matches = (
+                db.query(CareEvent.id)
+                .filter(CareEvent.person_id == person_id, CareEvent.id.in_(existing_ids))
+                .all()
+                if existing_ids else []
+            )
+            if evidence_matches and event_matches:
+                continue
+            if evidence_matches:
+                incoming_ids = list(new_event.evidence_ids or [])
+            else:
+                # Legacy situation rows used CareEvent IDs. Preserve that
+                # contract when no evidence-ID identity can be established.
+                incoming_ids = [new_event.id]
         additions = [item for item in incoming_ids if item and item not in existing_ids]
         if not additions:
             continue
