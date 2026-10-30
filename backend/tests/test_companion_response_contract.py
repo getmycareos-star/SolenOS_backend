@@ -607,3 +607,97 @@ def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeyp
             db.close()
     finally:
         teardown()
+
+
+def test_companion_deterministically_blocks_conflicting_same_day_event_reports(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["called"] = True
+        return "Yes, the records agree that a fall happened overnight."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        event_time = datetime.now(timezone.utc) - timedelta(days=1)
+        no_fall = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=event_time,
+            title="Overnight fall report A",
+            description="One care report states that no fall was observed overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        fall = CareEvent(
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=event_time,
+            title="Overnight fall report B",
+            description="Another care report states that the person fell overnight.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([no_fall, fall])
+        db.commit()
+        no_fall_id, fall_id = no_fall.id, fall.id
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "Do the records agree about whether a fall happened overnight?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert captured.get("called") is True
+        assert "conflict" in data["reply"].casefold()
+        assert "unresolved" in data["reply"].casefold()
+        assert data["guard_verdict"] == "blocked"
+        assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert no_fall_id in data["source_event_ids"]
+        assert fall_id in data["source_event_ids"]
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareEvent).count() == 2
+            assert db.query(ConversationMessage).count() == 2
+        finally:
+            db.close()
+    finally:
+        teardown()
+
+
+def test_companion_conflict_guard_does_not_merge_opposite_reports_from_different_dates():
+    first_date = datetime(2026, 10, 28, tzinfo=timezone.utc).isoformat()
+    second_date = datetime(2026, 10, 29, tzinfo=timezone.utc).isoformat()
+    context = [
+        "LCR event evidence: " + __import__("json").dumps({
+            "event_id": "no-fall-yesterday",
+            "status": "recorded",
+            "title": "Fall report",
+            "description": "No fall was observed overnight.",
+            "occurred_at": first_date,
+        }),
+        "LCR event evidence: " + __import__("json").dumps({
+            "event_id": "fall-today",
+            "status": "recorded",
+            "title": "Fall report",
+            "description": "The person fell overnight.",
+            "occurred_at": second_date,
+        }),
+    ]
+    assert collaboration._contradictory_event_evidence_response(
+        "Do the records agree about whether a fall happened overnight?", context
+    ) is None
