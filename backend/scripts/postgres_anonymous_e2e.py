@@ -170,7 +170,7 @@ def main():
         # Two simultaneous uploads of identical bytes must not both be
         # reported as originals. PostgreSQL advisory locking serializes the
         # per-person fingerprint lookup and insert while preserving both rows.
-        duplicate_blob = b"\\x89PNG\\r\\n\\x1a\\nSolenOS PostgreSQL duplicate-upload concurrency fixture"
+        duplicate_blob = b"\x89PNG\r\n\x1a\nSolenOS PostgreSQL duplicate-upload concurrency fixture"
         upload_fields = {
             "person_id": person_a,
             "caregiver_id": caregiver_a,
