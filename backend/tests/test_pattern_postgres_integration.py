@@ -568,37 +568,8 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
                 db.flush()
             db.rollback()
     finally:
-        with Session() as cleanup:
-            cleanup.query(OpenQuestionAnswerEvent).filter(
-                OpenQuestionAnswerEvent.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(OpenQuestion).filter(
-                OpenQuestion.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(Contradiction).filter(
-                Contradiction.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(Correction).filter(
-                Correction.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(CareAssertion).filter(
-                CareAssertion.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(CareEvent).filter(
-                CareEvent.person_id == person_a
-            ).delete(synchronize_session=False)
-            cleanup.query(Evidence).filter(
-                Evidence.person_id.in_([person_a, person_b])
-            ).delete(synchronize_session=False)
-            cleanup.execute(
-                text("DELETE FROM care_state_revisions WHERE person_id IN (:person_a, :person_b)"),
-                {"person_a": person_a, "person_b": person_b},
-            )
-            cleanup.query(Caregiver).filter(
-                Caregiver.person_id.in_([person_a, person_b])
-            ).delete(synchronize_session=False)
-            cleanup.query(Person).filter(
-                Person.id.in_([person_a, person_b])
-            ).delete(synchronize_session=False)
-            cleanup.commit()
+        # This test runs against a disposable PostgreSQL database. Answer events are
+        # protected by an append-only database trigger, so deleting them to clean up
+        # would violate the very integrity contract this test verifies. Keep this
+        # uniquely suffixed fixture in the ephemeral database and dispose the engine.
         engine.dispose()
