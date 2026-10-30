@@ -145,7 +145,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
+        assert calls[0][-1]["content"].startswith("Caregiver message: Hey, how are you?")
     finally:
         teardown()
 
@@ -177,7 +177,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
         assert response.json()["ai_generated"] is True
         assert len(calls) == 2
         assert "Revise your previous response" in calls[1][0][-1]["content"]
-        assert calls[1][1]["num_predict"] == 16
+        assert calls[1][1]["num_predict"] == 32
     finally:
         teardown()
 
