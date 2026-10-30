@@ -307,6 +307,7 @@ class UncertaintyEngine:
             db_question.status != "answered"
             or answer_text != db_question.answer
             or answer_source != db_question.answer_provenance
+            or latest_answer_event is None
             or list(latest_answer_event.evidence_ids or []) != answer_evidence_ids
         )
         if answer_was_recorded:
