@@ -13,7 +13,7 @@ The production Railway backend currently runs Ollama as a sidecar in the **same 
 
 The gateway also accepts a private Railway Ollama service URL ending in `.railway.internal` when a separate service is intentionally configured. It rejects public hosted inference URLs and does not fall back to Gemini, OpenAI, or a hosted Qwen endpoint.
 
-Qwen 3.5 4B (Q4_K_M) is the proposed production candidate, replacing the previous Qwen 2.5 0.5B default. Its Ollama registry download is approximately 3.4 GB; this is not the full runtime memory requirement. The Railway service has 8 GB RAM and 8 vCPUs, but actual peak memory and inference latency must be measured before promotion. The shared gateway defaults to a 4,096-token context and 256-token generation budget, both bounded and configurable through environment variables. These settings still require live latency and memory validation on Railway.
+Qwen 3.5 4B (Q4_K_M) is the proposed production candidate, replacing the previous Qwen 2.5 0.5B default. Its Ollama registry download is approximately 3.4 GB; this is not the full runtime memory requirement. The Railway service has 8 GB RAM and 8 vCPUs, but actual peak memory and inference latency must be measured before promotion. The shared gateway defaults to a 4,096-token context and 256-token generation budget, both bounded and configurable through environment variables. These settings still require live latency and memory validation on Railway. The pull-request evaluation runs the same authenticated Companion scenario suite against the previous 0.5B baseline and the 4B candidate, recording quality pass rate, end-to-end request p50/p95, and Ollama container peak memory for both.
 
 ## Railway deployment and persistence
 
