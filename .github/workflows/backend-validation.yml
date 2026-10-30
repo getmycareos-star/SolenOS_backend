@@ -43,7 +43,7 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Wait for deployed service health and database readiness
@@ -80,7 +80,38 @@ jobs:
           done
           test "$ready" = "1"
 
-      # Qwen runtime readiness is intentionally not a deployment gate while work is focused on care continuity.
+      - name: Verify deployed Qwen model is installed, loaded and inference-ready
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base='https://solenosbackend-production.up.railway.app'
+          ready=0
+          for attempt in $(seq 1 60); do
+            code=$(curl --silent --show-error --output /tmp/solenos-qwen-status.json --write-out '%{http_code}' --max-time 60 "${base}/api/v1/assistant/status" || true)
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json
+          with open("/tmp/solenos-qwen-status.json", encoding="utf-8") as stream:
+              data = json.load(stream)
+          assert data.get("model") == "qwen3.5:4b", data
+          assert data.get("available") is True, data
+          assert data.get("inference_ready") is True, data
+          assert data.get("model_installed") is True, data
+          assert data.get("model_loaded") is True, data
+          assert data.get("inference_smoke_test") is True, data
+          assert isinstance(data.get("inference_latency_ms"), (int, float)), data
+          print("PASS: production Qwen 3.5 4B returned a real inference response.")
+          print("Inference latency ms:", data["inference_latency_ms"])
+          PY
+            then
+              ready=1
+              break
+            fi
+            echo "Attempt ${attempt}: Qwen inference readiness HTTP ${code}; waiting for model pull/load."
+            sleep 20
+          done
+          test "$ready" = "1"
+
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
