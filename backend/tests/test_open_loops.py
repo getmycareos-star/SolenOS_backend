@@ -1,12 +1,14 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
+import app.api.open_loops as open_loop_api
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
@@ -115,6 +117,67 @@ def test_open_loop_persists_and_lists_only_within_server_issued_session():
     assert isolated.json()["items"] == []
     denied = client.get(f"/api/v1/open-loops/{created['id']}", headers=second_headers)
     assert denied.status_code == 404, denied.text
+
+
+
+def test_concurrent_create_audit_collision_returns_the_committed_occurrence(monkeypatch):
+    client = TestClient(app)
+    _, headers = session(client, "Concurrent idempotency recipient")
+    payload = {
+        "loop_type": "awaiting_response",
+        "title": "Confirm the clinic callback",
+        "description": "The clinic callback is not yet confirmed.",
+        "request_text": "Please confirm the callback time.",
+        "recipient_label": "CI-only clinic",
+        "evidence": [{"kind": "ci_fixture", "text": "Concurrent create race regression."}],
+        "idempotency_key": "concurrent-create-audit-collision",
+    }
+    original_audit = open_loop_api._audit
+
+    def simulate_winning_request(db, loop, event_type, before, evidence=None, key=None, actor="session_caregiver"):
+        if event_type == "created" and key == payload["idempotency_key"]:
+            # Model the interleaving where another request commits the same
+            # occurrence after this request's initial lookup but before audit.
+            db.rollback()
+            db.add(loop)
+            db.flush()
+            db.add(open_loop_api.OpenLoopOccurrence(
+                loop_id=loop.id,
+                person_id=loop.person_id,
+                caregiver_id=loop.caregiver_id,
+                source_type=loop.source_type,
+                source_id=loop.source_id,
+                source_fingerprint=loop.source_fingerprint,
+                evidence=loop.evidence or [],
+                idempotency_key=key,
+            ))
+            db.add(open_loop_api.OpenLoopEvent(
+                loop_id=loop.id,
+                person_id=loop.person_id,
+                caregiver_id=loop.caregiver_id,
+                event_type="created",
+                before_state=None,
+                after_state=open_loop_api._snapshot(loop),
+                evidence=evidence or [],
+                idempotency_key=key,
+                actor=actor,
+            ))
+            db.commit()
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key has already been used for this care record",
+            )
+        return original_audit(db, loop, event_type, before, evidence, key, actor)
+
+    monkeypatch.setattr(open_loop_api, "_audit", simulate_winning_request)
+    response = client.post("/api/v1/open-loops", headers=headers, json=payload)
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["recurrence_detected"] is True
+    assert created["id"]
+    listed = client.get("/api/v1/open-loops", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()["items"]] == [created["id"]]
 
 
 def test_deadline_requires_timezone_and_source():
