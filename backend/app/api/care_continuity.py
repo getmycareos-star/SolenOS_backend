@@ -3033,8 +3033,8 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 raise HTTPException(status_code=404, detail="Source event was not found in this care record")
 
     if resource == "relationships" and data.get("source_type") == "situation" and data.get("target_type") == "situation":
-        if data.get("relationship_type") != "related_to":
-            raise HTTPException(status_code=422, detail="Situation links must use the non-causal related_to relationship")
+        if data.get("relationship_type") not in {"related_to", "unrelated_to"}:
+            raise HTTPException(status_code=422, detail="Situation relationships must be related_to or an explicit unrelated_to correction")
         rationale = data.get("provenance")
         if not isinstance(rationale, str) or len(rationale.strip()) < 12:
             raise HTTPException(status_code=422, detail="Situation links require explicit caregiver relationship provenance of at least 12 characters")
@@ -3062,27 +3062,26 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             )
             db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
         data["source_id"], data["target_id"] = pair
-        duplicate_link = db.execute(
-            select(relationship_table.c.id).where(
+        latest_pair_link = db.execute(
+            select(
+                relationship_table.c.id,
+                relationship_table.c.relationship_type,
+            ).where(
                 relationship_table.c.person_id == person_id,
-                or_(
-                    (
-                        (relationship_table.c.source_type == "situation")
-                        & (relationship_table.c.source_id == data["source_id"])
-                        & (relationship_table.c.target_type == "situation")
-                        & (relationship_table.c.target_id == data["target_id"])
-                    ),
-                    (
-                        (relationship_table.c.source_type == "situation")
-                        & (relationship_table.c.source_id == data["target_id"])
-                        & (relationship_table.c.target_type == "situation")
-                        & (relationship_table.c.target_id == data["source_id"])
-                    ),
-                ),
+                relationship_table.c.source_type == "situation",
+                relationship_table.c.source_id == data["source_id"],
+                relationship_table.c.target_type == "situation",
+                relationship_table.c.target_id == data["target_id"],
+            ).order_by(
+                relationship_table.c.created_at.desc(),
+                relationship_table.c.id.desc(),
             ).limit(1)
         ).first()
-        if duplicate_link:
-            raise HTTPException(status_code=409, detail="These two care situations are already linked")
+        if data["relationship_type"] == "related_to":
+            if latest_pair_link and latest_pair_link.relationship_type == "related_to":
+                raise HTTPException(status_code=409, detail="These two care situations are already linked")
+        elif not latest_pair_link or latest_pair_link.relationship_type != "related_to":
+            raise HTTPException(status_code=409, detail="There is no active related-situation link to retract")
 
     if resource == "fact-evidence":
         fact_evidence = _table(db, "care_fact_evidence")
