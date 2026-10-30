@@ -8,6 +8,7 @@ contradiction transitions, correction lineage, open questions, authorization, an
 concurrent writers. This is synthetic engineering evidence, not clinical validation.
 """
 from collections import Counter, defaultdict
+import json
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
@@ -122,6 +123,32 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         hours=(event_index * 3) % 24,
                         minutes=(history_index * 7) % 60,
                     )
+                    if family == "time_zone_boundary":
+                        occurred_at = occurred_at.astimezone(
+                            timezone(timedelta(hours=5, minutes=30))
+                        )
+                    subject_id = (
+                        f"near-match-{history_index:04d}"
+                        if family == "cross_domain_near_match"
+                        else f"{domain}-subject-{history_index:04d}"
+                    )
+                    evidence_metadata = {}
+                    if family == "stale_observation":
+                        evidence_metadata.update({
+                            "observed_at": occurred_at.isoformat(),
+                            "max_age_days": 30,
+                        })
+                    if family == "partial_document":
+                        evidence_metadata.update({
+                            "quality": "partial",
+                            "extraction_status": "partial",
+                            "readable": False,
+                        })
+                    if family == "incomplete_history":
+                        evidence_metadata.update({
+                            "quality": "partial",
+                            "temporal_scope": "historical",
+                        })
                     # Backdated and delayed cases intentionally separate event time
                     # from the database-assigned recorded_at timestamp.
                     if family in {"backdated_observation", "historical_reconstruction"}:
@@ -151,7 +178,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         evidence_ids=[source_anchor],
                         time_provenance=(
                             "imported_document"
-                            if event_index % 3 == 0
+                            if family == "partial_document" or event_index % 3 == 0
                             else "caregiver_observed"
                         ),
                         tags=[family, f"case:{case_id:05d}"],
@@ -200,7 +227,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         id=assertion_id,
                         person_id=person_id,
                         subject_type=domain,
-                        subject_id=f"{domain}-subject-{history_index:04d}",
+                        subject_id=subject_id,
                         field="reported_status",
                         assertion_kind="event",
                         asserted_value=assertion_value,
@@ -237,7 +264,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             id=conflicting_id,
                             person_id=person_id,
                             subject_type=domain,
-                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            subject_id=subject_id,
                             field="reported_status",
                             assertion_kind="event",
                             asserted_value=(
@@ -295,7 +322,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             person_id=person_id,
                             question=f"Clarify the {domain} report for case {case_id:05d}.",
                             subject_type=domain,
-                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            subject_id=subject_id,
                             status="open",
                             evidence_ids=[source_anchor],
                             created_by_caregiver_id=reporter_id,
