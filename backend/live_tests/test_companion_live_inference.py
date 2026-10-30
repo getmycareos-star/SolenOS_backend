@@ -255,3 +255,74 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordination(monkeypatch):
+    """Exercise real authenticated inference for messy, non-question caregiver input."""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    try:
+        session, _ = _create_synthetic_record(client)
+        token = session["access_token"]
+        person_id = session["person"]["id"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        statement = (
+            "I'm trying to coordinate care for my grandmother. My brother says she is fine, "
+            "but I noticed she has eaten less at breakfast for three mornings. I have not checked "
+            "lunch or dinner, and I don't know whether the changes are connected."
+        )
+        first = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": statement},
+        )
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        answer = first_data["reply"].strip()
+        lowered = answer.casefold()
+        assert first_data["ai_generated"] is True
+        assert first_data["written_to_lcr"] is False
+        assert first_data["persistence"] == "conversation_only"
+        assert 8 <= len(answer.split()) <= 180, answer
+        assert "?" in answer, f"Companion did not ask a useful clarifying question: {answer!r}"
+        assert not any(unsupported in lowered for unsupported in (
+            "she is dehydrated", "she has an infection", "this is a uti",
+            "her dementia is worsening", "the cause is dementia",
+        )), f"Companion converted an unknown into a care fact: {answer!r}"
+
+        follow_up = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "session_id": first_data["session_id"],
+                "text": "What should I ask my brother to check today?",
+            },
+        )
+        assert follow_up.status_code == 200, follow_up.text
+        follow_data = follow_up.json()
+        follow_answer = follow_data["reply"].casefold()
+        assert follow_data["ai_generated"] is True
+        assert follow_data["session_id"] == first_data["session_id"]
+        assert follow_data["written_to_lcr"] is False
+        assert any(term in follow_answer for term in (
+            "breakfast", "meal", "food", "eating", "appetite", "fluid", "drink",
+        )), f"Companion lost the caregiver's earlier context: {follow_data['reply']!r}"
+
+        greeting = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "Good morning"},
+        )
+        assert greeting.status_code == 200, greeting.text
+        greeting_data = greeting.json()
+        assert greeting_data["ai_generated"] is True
+        assert 2 <= len(greeting_data["reply"].split()) <= 20
+        assert greeting_data["written_to_lcr"] is False
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
