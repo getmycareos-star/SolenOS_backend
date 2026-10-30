@@ -227,17 +227,19 @@ def test_thread_grouping_uses_only_explicit_shared_source_ids():
     from types import SimpleNamespace
 
     first = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-1"])
-    same_domain_source = SimpleNamespace(subject_type="sleep", subject_id="overnight", event_ids=["event-1"])
+    same_subject_source = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-1"])
+    other_subject_same_source = SimpleNamespace(subject_type="sleep", subject_id="overnight", event_ids=["event-1"])
     other_domain_same_source = SimpleNamespace(subject_type="mobility", subject_id="walking", event_ids=["event-1"])
     nearby_but_unrelated = SimpleNamespace(subject_type="sleep", subject_id="night", event_ids=["event-2"])
 
     groups = _group_related_signals(
-        [first, same_domain_source, other_domain_same_source, nearby_but_unrelated],
+        [first, same_subject_source, other_subject_same_source, nearby_but_unrelated],
         "event_ids",
     )
 
-    assert len(groups) == 3
-    assert any(len(group) == 2 and first in group and same_domain_source in group for group in groups)
+    assert len(groups) == 4
+    assert any(len(group) == 2 and first in group and same_subject_source in group for group in groups)
+    assert any(group == [other_subject_same_source] for group in groups)
     assert any(group == [other_domain_same_source] for group in groups)
     assert any(group == [nearby_but_unrelated] for group in groups)
 
