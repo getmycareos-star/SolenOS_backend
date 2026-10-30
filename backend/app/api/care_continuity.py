@@ -1072,6 +1072,7 @@ def current_care_projection(
     context = build_lcr_context(db, person_id, limit_per_source=limit_per_source)
     sources = context.get("sources") or {}
     candidate_evidence_ids: set[str] = set()
+    reporter_ids: set[str] = set()
     for source_name, source_value in sources.items():
         for source_item in source_value.get("items") or []:
             if source_name == "evidence" and source_item.get("id"):
@@ -1081,6 +1082,22 @@ def current_care_projection(
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
+            reporter_id = (
+                source_item.get("reported_by_caregiver_id")
+                or source_item.get("observer_caregiver_id")
+                or source_item.get("created_by_caregiver_id")
+                or source_item.get("author_caregiver_id")
+                or source_item.get("uploaded_by_caregiver_id")
+            )
+            if reporter_id:
+                reporter_ids.add(str(reporter_id))
+    caregiver_labels = {
+        str(row.id): row.name
+        for row in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(reporter_ids),
+        ).all()
+    } if reporter_ids else {}
     authorized_evidence_ids = set()
     if candidate_evidence_ids:
         authorized_evidence_ids = {
@@ -1151,6 +1168,14 @@ def current_care_projection(
                 row.get("reported_by_label")
                 or row.get("observer_label")
                 or row.get("author_label")
+                or caregiver_labels.get(str(
+                    row.get("reported_by_caregiver_id")
+                    or row.get("observer_caregiver_id")
+                    or row.get("created_by_caregiver_id")
+                    or row.get("author_caregiver_id")
+                    or row.get("uploaded_by_caregiver_id")
+                    or ""
+                ))
                 or ""
             )[:160] or None,
             "occurred_at": occurred_at,
