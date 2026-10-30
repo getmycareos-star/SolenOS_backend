@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.main import app  # noqa: F401 - registers all ORM models and revision listeners
-from app.models.care import Caregiver, Person
+from app.models.care import Caregiver, Evidence, Person
 from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.uncertainty import Contradiction
 from app.schemas.care_continuity import CareAssertionCreate
@@ -88,12 +88,39 @@ def test_100_conflicting_reports_survive_commit_and_fresh_session(
                       person_id=person_id, email=f"b-{suffix}@benchmark.invalid"),
         ])
         writer.flush()
+        evidence_a_id = f"mc-ea-{suffix}"
+        evidence_b_id = f"mc-eb-{suffix}"
+        writer.add_all([
+            Evidence(
+                id=evidence_a_id, person_id=person_id, type="note",
+                source_text=f"Reporter A source: {first_value}",
+                uploaded_by_caregiver_id=caregiver_a_id,
+                original_author="Reporter A", reported_by_label="Reporter A",
+                reported_by_caregiver_id=caregiver_a_id,
+                collected_by_caregiver_id=caregiver_a_id,
+                occurred_at=observed_at, reported_at=observed_at + timedelta(minutes=2),
+                original_source_reference=f"benchmark://{suffix}/report-a",
+            ),
+            Evidence(
+                id=evidence_b_id, person_id=person_id, type="note",
+                source_text=f"Reporter B source: {second_value}",
+                uploaded_by_caregiver_id=caregiver_b_id,
+                original_author="Reporter B", reported_by_label="Reporter B",
+                reported_by_caregiver_id=caregiver_b_id,
+                collected_by_caregiver_id=caregiver_b_id,
+                occurred_at=observed_at + timedelta(minutes=1),
+                reported_at=observed_at + timedelta(minutes=3),
+                original_source_reference=f"benchmark://{suffix}/report-b",
+            ),
+        ])
+        writer.flush()
 
         first = create_assertion(writer, CareAssertionCreate(
             person_id=person_id, subject_type="care_recipient", subject_id=person_id,
             field=field, asserted_value=first_value,
             source_label=f"Reporter A / case {case_number}",
             source_text=f"Reporter A states: {first_value}",
+            evidence_ids=[evidence_a_id],
             observed_at=observed_at, created_by_caregiver_id=caregiver_a_id,
         ), commit=False)
         second = create_assertion(writer, CareAssertionCreate(
@@ -101,6 +128,7 @@ def test_100_conflicting_reports_survive_commit_and_fresh_session(
             field=field, asserted_value=second_value,
             source_label=f"Reporter B / case {case_number}",
             source_text=f"Reporter B states: {second_value}",
+            evidence_ids=[evidence_b_id],
             observed_at=observed_at + timedelta(minutes=1),
             created_by_caregiver_id=caregiver_b_id,
         ), commit=False)
@@ -120,6 +148,28 @@ def test_100_conflicting_reports_survive_commit_and_fresh_session(
         assert by_value[second_value].created_by_caregiver_id == caregiver_b_id
         assert by_value[first_value].source_label.startswith("Reporter A")
         assert by_value[second_value].source_label.startswith("Reporter B")
+        assert by_value[first_value].evidence_ids == [evidence_a_id]
+        assert by_value[second_value].evidence_ids == [evidence_b_id]
+        assert by_value[first_value].observed_at == observed_at
+        assert by_value[second_value].observed_at == observed_at + timedelta(minutes=1)
+        evidence_rows = reader.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_([evidence_a_id, evidence_b_id]),
+        ).all()
+        assert {row.id for row in evidence_rows} == {evidence_a_id, evidence_b_id}
+        evidence_by_id = {row.id: row for row in evidence_rows}
+        assert evidence_by_id[evidence_a_id].reported_by_caregiver_id == caregiver_a_id
+        assert evidence_by_id[evidence_b_id].reported_by_caregiver_id == caregiver_b_id
+        assert evidence_by_id[evidence_a_id].original_author == "Reporter A"
+        assert evidence_by_id[evidence_b_id].original_author == "Reporter B"
+        for row in evidence_rows:
+            recorded = row.ingested_at
+            if recorded.tzinfo is None:
+                recorded = recorded.replace(tzinfo=timezone.utc)
+            occurred = row.occurred_at
+            if occurred.tzinfo is None:
+                occurred = occurred.replace(tzinfo=timezone.utc)
+            assert recorded > occurred, "ingestion time must remain distinct from event time"
         assert by_value[first_value].assertion_status == "reported"
         assert by_value[second_value].assertion_status == "reported"
 
