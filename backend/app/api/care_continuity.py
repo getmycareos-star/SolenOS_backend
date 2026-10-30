@@ -3103,6 +3103,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                     ),
                 ),
             ).order_by(
+                relationship_table.c.relationship_version.desc(),
                 relationship_table.c.created_at.desc(),
                 relationship_table.c.id.desc(),
             ).limit(1)
