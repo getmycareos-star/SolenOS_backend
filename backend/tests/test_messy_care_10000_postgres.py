@@ -166,7 +166,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     title = f"{family} {domain} event {case_id:05d}"
                     description = (
                         f"Synthetic source report {case_id:05d}; "
-                        f"history={history_index:04d}; domain={domain}; reporter={event_index % 2}."
+                        f"history={history_index:04d}; domain={domain}; reporter={reporter_id}."
                     )
                     event = CareEvent(
                         id=event_id,
@@ -199,8 +199,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             else f"Original source report {case_id:05d}: {description}"
                         ),
                         uploaded_by_caregiver_id=caregiver_b_id,
-                        original_author=f"Reporter {event_index % 2}",
-                        reported_by_label=f"Reporter {event_index % 2}",
+                        original_author=("Reporter A" if reporter_id == caregiver_a_id else "Reporter B"),
+                        reported_by_label=("Reporter A" if reporter_id == caregiver_a_id else "Reporter B"),
                         reported_by_caregiver_id=(None if family == "incomplete_history" else reporter_id),
                         collected_by_caregiver_id=caregiver_b_id,
                         collected_at=reference + timedelta(minutes=case_id),
@@ -223,6 +223,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         ),
                         source_type="caregiver_report",
                         original_source_reference=f"synthetic://source/{case_id:05d}",
+                        extra_metadata=json.dumps(evidence_metadata, sort_keys=True),
                         source_text_sha256=None,
                     ))
                     assertion_id = f"m10kcl{suffix}{case_id:05d}"
@@ -238,7 +239,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         assertion_kind="event",
                         asserted_value=assertion_value,
                         source_event_id=event_id,
-                        source_label=f"Reporter {event_index % 2}",
+                        source_label=("Reporter A" if reporter_id == caregiver_a_id else "Reporter B"),
                         source_text=description,
                         evidence_ids=[source_anchor],
                         assertion_status=("planned" if family == "planned_not_completed" else "reported"),
@@ -291,7 +292,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             id=f"m10kco{suffix}{case_id:05d}",
                             person_id=person_id,
                             subject_type=domain,
-                            subject_id=f"{domain}-subject-{history_index:04d}",
+                            subject_id=subject_id,
                             field="reported_status",
                             description=f"Unresolved conflicting reports for case {case_id:05d}.",
                             matching_candidate_ids=[assertion_id, conflicting_id],
@@ -402,6 +403,14 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     assert evidence.reported_by_caregiver_id == wanted["caregiver_id"]
                 assert evidence.source_text
                 assert evidence.source_text_sha256
+                metadata = json.loads(evidence.extra_metadata or "{}")
+                if wanted["family"] == "stale_observation":
+                    assert metadata.get("max_age_days") == 30
+                if wanted["family"] == "partial_document":
+                    assert metadata.get("readable") is False
+                    assert metadata.get("extraction_status") == "partial"
+                if wanted["family"] == "incomplete_history":
+                    assert metadata.get("temporal_scope") == "historical"
                 claim = reader.query(CareAssertion).filter(
                     CareAssertion.id == wanted["assertion_id"],
                     CareAssertion.person_id == wanted["person_id"],
