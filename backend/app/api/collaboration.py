@@ -2461,12 +2461,12 @@ def save_companion_care_report(
     # Require a first-person or explicitly attributed report and store the exact
     # caregiver text; never rewrite a nurse/doctor statement as independently verified.
     report_signal = re.compile(
-        r"\\b(?:i\\s+(?:saw|noticed|observed|recorded|measured|spoke|talked|was\\s+told|heard)|"
-        r"we\\s+(?:saw|noticed|observed|recorded|heard)|"
-        r"(?:the\\s+)?(?:nurse|doctor|clinician|therapist|care\\s+professional)\\s+"
-        r"(?:said|told\\s+me|reported|explained)|"
-        r"(?:my|our)\\s+(?:sister|brother|mother|father|family\\s+member|caregiver)\\s+"
-        r"(?:said|told\\s+me|reported|noticed|observed))\\b",
+        r"\b(?:i\s+(?:saw|noticed|observed|recorded|measured|spoke|talked|was\s+told|heard)|"
+        r"we\s+(?:saw|noticed|observed|recorded|heard)|"
+        r"(?:the\s+)?(?:nurse|doctor|clinician|therapist|care\s+professional)\s+"
+        r"(?:said|told\s+me|reported|explained)|"
+        r"(?:my|our)\s+(?:sister|brother|mother|father|family\s+member|caregiver)\s+"
+        r"(?:said|told\s+me|reported|noticed|observed))\b",
         re.IGNORECASE,
     )
     if not report_signal.search(message.content or ""):
