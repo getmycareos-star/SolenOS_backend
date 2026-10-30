@@ -35,6 +35,7 @@ jobs:
           python -m pytest \
             backend/tests/test_situation_understanding_benchmark.py \
             backend/tests/test_messy_care_10000_scenarios.py \
+            backend/tests/test_messy_care_10000_postgres.py \\
             backend/tests/test_longitudinal_messy_care_benchmark.py \
             backend/tests/test_longitudinal_change_benchmark.py \
             backend/tests/test_open_loop_messy_scenarios.py \
@@ -93,7 +94,7 @@ jobs:
   postgres-longitudinal-integration:
     name: PostgreSQL longitudinal persistence benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:17
