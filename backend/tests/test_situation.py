@@ -169,7 +169,7 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert source_statements[0]["occurred_at"] is not None
         assert source_statements[1]["occurred_at"] is None
         assert all(
-            source_text[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
+            source[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
             for item in source_statements
         )
     finally:
