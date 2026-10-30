@@ -12,6 +12,9 @@ from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.care_continuity import EvidenceObservation
+from app.models.change import Situation
+from app.models.uncertainty import OpenQuestion
+from app.core.change_enums import SituationType, SituationState
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
 
@@ -153,6 +156,100 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         listed_rows = listed.json()
         assert len(listed_rows) == 3
         assert [row["observer_label"] for row in listed_rows] == ["Daughter", "Nurse", "Daughter"]
+    finally:
+        teardown_db()
+
+
+@pytest.mark.session_security
+def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Distinct Thread Hydration")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+
+        first = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "raw_input": "The person has been unsteady when walking.",
+            },
+        )
+        second = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "raw_input": "The person has been eating less at dinner.",
+            },
+        )
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+
+        with TestingSessionLocal() as db:
+            first_event = db.query(CareEvent).filter_by(id=first.json()["care_event_id"]).one()
+            second_event = db.query(CareEvent).filter_by(id=second.json()["care_event_id"]).one()
+            first_evidence_id = first.json()["evidence_id"]
+            second_evidence_id = second.json()["evidence_id"]
+            first_situation = Situation(
+                id="persisted-mobility-thread",
+                person_id=person_id,
+                situation_type=SituationType.UNKNOWN,
+                state=SituationState.ACTIVE,
+                title="Walking stability",
+                description="A separately persisted mobility concern.",
+                signal_ids=[first_evidence_id],
+                signal_types=["mobility"],
+                temporal_start=first_event.occurred_at,
+                temporal_end=first_event.occurred_at,
+            )
+            second_situation = Situation(
+                id="persisted-appetite-thread",
+                person_id=person_id,
+                situation_type=SituationType.UNKNOWN,
+                state=SituationState.ACTIVE,
+                title="Eating pattern",
+                description="A separately persisted eating concern.",
+                signal_ids=[second_evidence_id],
+                signal_types=["appetite"],
+                temporal_start=second_event.occurred_at,
+                temporal_end=second_event.occurred_at,
+            )
+            first_event.situation_id = first_situation.id
+            second_event.situation_id = second_situation.id
+            db.add_all([
+                first_situation,
+                second_situation,
+                OpenQuestion(
+                    id="open-mobility-question",
+                    person_id=person_id,
+                    question="Has the unsteadiness also happened indoors?",
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    status="open",
+                ),
+            ])
+            db.commit()
+
+        hydrated = client.get("/api/situation", headers=headers)
+        assert hydrated.status_code == 200, hydrated.text
+        body = hydrated.json()
+        threads = {item["id"]: item for item in body["ui_situations"]}
+        assert "persisted-mobility-thread" in threads
+        assert "persisted-appetite-thread" in threads
+        assert threads["persisted-mobility-thread"]["linked_evidence_ids"] == [first_evidence_id]
+        assert threads["persisted-appetite-thread"]["linked_evidence_ids"] == [second_evidence_id]
+        assert threads["persisted-mobility-thread"]["openQuestions"] == [
+            "Has the unsteadiness also happened indoors?"
+        ]
+        assert threads["persisted-appetite-thread"]["openQuestions"] == []
+        assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
     finally:
         teardown_db()
 
