@@ -12,6 +12,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
+from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceReviewRecord, EvidenceClaimAssessment
 from app.api.care_continuity import _near_duplicate_candidates
 
@@ -299,9 +300,93 @@ def test_source_text_integrity_endpoint_is_person_scoped_and_reports_exact_text_
     ).hexdigest()
     assert payload["hash_scope"] == "exact UTF-8 encoding of the currently stored source_text field"
     assert payload["original_file_authenticity_verified"] is False
+    assert payload["original_binary_status"] == "not_applicable"
+    assert payload["exact_source_text_duplicate_candidate_ids"] == []
+    assert payload["exact_binary_duplicate_candidate_ids"] == []
+    assert payload["freshness_status"] == "not_assessed"
+    assert payload["completeness_status"] == "not_assessed"
 
     foreign = client_b.get("/api/v1/care-continuity/evidence/review-evidence-a/integrity")
     assert foreign.status_code == 404
+
+
+def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(review_records):
+    client_a, _ = review_records
+    binary = b"%PDF-1.7\\nSolenOS source integrity fixture\\n"
+    digest = hashlib.sha256(binary).hexdigest()
+    source_text = "Discharge summary: mobility support required."
+    text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+    db = SessionLocal()
+    try:
+        document_a = Evidence(
+            id="integrity-document-a",
+            person_id="review-person-a",
+            type="document",
+            source_text=source_text,
+            source_text_sha256=text_hash,
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        document_b = Evidence(
+            id="integrity-document-b",
+            person_id="review-person-a",
+            type="document",
+            source_text=source_text,
+            source_text_sha256=text_hash,
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        inaccessible = Evidence(
+            id="integrity-document-missing",
+            person_id="review-person-a",
+            type="document",
+            source_text="Extracted text remains, but the original file is missing.",
+            source_text_sha256=hashlib.sha256(
+                b"Extracted text remains, but the original file is missing."
+            ).hexdigest(),
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        db.add_all([document_a, document_b, inaccessible])
+        db.flush()
+        db.add_all([
+            EvidenceUpload(
+                evidence_id=document_a.id,
+                filename="discharge.pdf",
+                mime_type="application/pdf",
+                content=binary,
+                size_bytes=len(binary),
+                sha256=digest,
+            ),
+            EvidenceUpload(
+                evidence_id=document_b.id,
+                filename="discharge-copy.pdf",
+                mime_type="application/pdf",
+                content=binary,
+                size_bytes=len(binary),
+                sha256=digest,
+            ),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+    verified = client_a.get(
+        "/api/v1/care-continuity/evidence/integrity-document-a/integrity"
+    )
+    assert verified.status_code == 200, verified.text
+    integrity = verified.json()
+    assert integrity["original_binary_status"] == "match"
+    assert integrity["original_binary_available"] is True
+    assert integrity["exact_source_text_duplicate_candidate_ids"] == ["integrity-document-b"]
+    assert integrity["exact_binary_duplicate_candidate_ids"] == ["integrity-document-b"]
+    assert integrity["duplicate_candidate_status"] == "candidate_found"
+
+    missing = client_a.get(
+        "/api/v1/care-continuity/evidence/integrity-document-missing/integrity"
+    )
+    assert missing.status_code == 200, missing.text
+    missing_integrity = missing.json()
+    assert missing_integrity["original_binary_status"] == "missing"
+    assert missing_integrity["original_binary_available"] is False
+    assert missing_integrity["source_text_integrity_status"] == "match"
 
 
 def test_original_evidence_source_text_and_hash_cannot_be_changed_through_orm(review_records):
