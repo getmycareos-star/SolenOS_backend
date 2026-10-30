@@ -1,8 +1,8 @@
 name: Messy-care benchmark gate
 
 on:
-  # This is a primary engineering gate: run for every PR to main, not only
-  # when a hand-maintained list of paths happens to match.
+  # Primary engineering acceptance gate: evaluate every proposed change to main
+  # before merge, and re-run after changes land on main.
   pull_request:
     branches: [main]
   push:
@@ -37,17 +37,18 @@ jobs:
         run: |
           python -m pytest \
             backend/tests/test_situation_understanding_benchmark.py \
+            backend/tests/test_messy_care_10000_scenarios.py \
             backend/tests/test_longitudinal_messy_care_benchmark.py \
             backend/tests/test_longitudinal_change_benchmark.py \
             backend/tests/test_open_loop_messy_scenarios.py \
             backend/tests/test_situation_temporal_provenance.py \
             backend/tests/test_evidence_lineage.py \
+            backend/tests/test_evidence_review_persistence.py \
             backend/tests/test_care_continuity_link_validation.py \
             backend/tests/test_uncertainty_benchmark.py \
             backend/tests/test_situation.py \
             backend/tests/test_uncertainty.py \
             backend/tests/test_appointment_workspace.py \
-            backend/tests/test_evidence_review_persistence.py \
             backend/tests/test_persisted_capture_review.py \
             -q -s --junitxml=/tmp/messy-care-contract.xml
 
@@ -112,7 +113,6 @@ jobs:
           --health-retries 12
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
-      DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
