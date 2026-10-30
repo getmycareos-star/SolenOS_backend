@@ -1735,7 +1735,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.refresh(session)
         # Keep the conversation container durable even if model inference fails.
         # This commit contains no care-record facts or conversation messages.
-        db.commit()
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Companion conversation session failed to persist")
+            raise HTTPException(
+                status_code=503,
+                detail="Companion conversation could not be confirmed as persisted. No saved response is confirmed; please retry.",
+            ) from exc
 
     lowered = user_text.casefold()
     emergency_pattern = re.compile(
