@@ -1237,7 +1237,8 @@ def _contains_unsupported_operational_claim(
             r"|\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:not recorded|not documented|not supplied|not provided|unknown|missing|unavailable|unverified)\b"
         )
         medication_action = (
-            r"\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:changed|increase(?:d)?|decrease(?:d)?|stop(?:ped)?|start(?:ed)?|missed|administered|taken|given|prescribed|recommended)\b"
+            r"\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:changed?|increas(?:e|ed|ing)|decreas(?:e|ed|ing)|doubl(?:e|ed|ing)|stop(?:ped|ping)?|start(?:ed|ing)?|skip(?:ped|ping)?|hold|resume|administer(?:ed|ing)?|tak(?:e|en|ing)|giv(?:e|en|ing)|miss(?:ed|ing)|prescribed|recommended)\b"
+            r"|\b(?:change|adjust|alter|increase|decrease|double|stop|start|skip|hold|resume|administer|give|take|miss)(?:d|ed|ing)?\b.{0,80}\b(?:medication|medicine|prescription|dosage|dose)\b"
         )
         action_matches = list(re.finditer(medication_action, text))
         # Accept an affirmative medication observation only when its ordered
