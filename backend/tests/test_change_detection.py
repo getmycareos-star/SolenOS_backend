@@ -14,6 +14,7 @@ from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
+from app.models.significance import SignificanceAssessment
 from app.models.observation_coverage import ObservationCoverage
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -456,6 +457,89 @@ def test_situation_type_preserves_mixed_and_unknown_directions():
             assert situation.situation_type == expected, (
                 f"{subject}: expected {expected.value}, got {situation.situation_type.value}"
             )
+        db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_situation_candidate_flags_use_assessment_values_not_object_truthiness():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-significance-flags", name="Significance Flags Person")
+        caregiver = Caregiver(
+            id="caregiver-significance-flags",
+            name="Significance Flags Caregiver",
+            email="significance-flags@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+
+        from app.core.change_enums import (
+            ChangeDirection,
+            ChangeType,
+            SignificanceVerdict,
+        )
+        from app.services.situation_formation import _form_change_situation
+
+        now = datetime.now(timezone.utc)
+
+        def make_situation(case_id, assessment_flags, change_flags):
+            assessment_id = None
+            if assessment_flags is not None:
+                assessment = SignificanceAssessment(
+                    person_id=person.id,
+                    subject_type="mobility",
+                    subject_id=case_id,
+                    verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                    dimensions=[],
+                    evidence_ids=[],
+                    attention_candidate=assessment_flags[0],
+                    follow_up_candidate=assessment_flags[1],
+                )
+                db.add(assessment)
+                db.flush()
+                assessment_id = assessment.id
+
+            change = Change(
+                person_id=person.id,
+                subject_type="mobility",
+                subject_id=case_id,
+                change_type=ChangeType.INCREASE,
+                change_direction=ChangeDirection.INCREASING,
+                previous_state="Earlier mobility observations",
+                current_state="More mobility assistance reported",
+                comparison_window_start=now - timedelta(days=30),
+                comparison_window_end=now,
+                evidence_ids=[],
+                explanation="Synthetic candidate-flag regression fixture.",
+                significance_assessment_id=assessment_id,
+                significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+                attention_candidate=change_flags[0],
+                follow_up_candidate=change_flags[1],
+                created_at=now,
+            )
+            db.add(change)
+            db.flush()
+            return _form_change_situation(db, person.id, [change], [], now)
+
+        assessed_false = make_situation("assessed-false", (False, False), (True, True))
+        assert assessed_false is not None
+        assert assessed_false.attention_candidate is False
+        assert assessed_false.follow_up_candidate is False
+
+        no_assessment = make_situation("no-assessment", None, (True, True))
+        assert no_assessment is not None
+        assert no_assessment.attention_candidate is True
+        assert no_assessment.follow_up_candidate is True
+
+        assessed_true = make_situation("assessed-true", (True, True), (False, False))
+        assert assessed_true is not None
+        assert assessed_true.attention_candidate is True
+        assert assessed_true.follow_up_candidate is True
         db.close()
     finally:
         teardown_db()

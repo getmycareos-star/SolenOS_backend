@@ -163,9 +163,28 @@ def _form_change_situation(
         # A directional count change alone does not establish decline or recovery.
         situation_type = SituationType.UNKNOWN
     relevant_patterns = [p for p in patterns if p.subject_type in signal_types]
-    primary = _primary_significance(db, changes[0])
-    attention = any((_primary_significance(db, c) or _bool_none(c.attention_candidate)) for c in changes)
-    follow_up = any((_primary_significance(db, c) or _bool_none(c.follow_up_candidate)) for c in changes)
+    significance_by_change = [
+        (change, _primary_significance(db, change))
+        for change in changes
+    ]
+    primary = next(
+        (assessment for _, assessment in significance_by_change if assessment is not None),
+        None,
+    )
+    # A persisted assessment is authoritative even when its candidate flag is
+    # false. Fall back to the change-level hint only when no assessment exists.
+    attention = any(
+        assessment.attention_candidate
+        if assessment is not None
+        else _bool_none(change.attention_candidate)
+        for change, assessment in significance_by_change
+    )
+    follow_up = any(
+        assessment.follow_up_candidate
+        if assessment is not None
+        else _bool_none(change.follow_up_candidate)
+        for change, assessment in significance_by_change
+    )
 
     context = _build_situation_context(db, person_id, changes, primary)
     alternative_interpretations = _derive_alternatives(db, person_id, changes, patterns)
