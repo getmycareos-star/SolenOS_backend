@@ -2123,9 +2123,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text, [*event_context, *assertion_context, *evidence_context, *shared_lcr_lines]
         )
         system_prompt = (
-            "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
-            "in plain natural language. Do not use canned replies or fixed response maps. Use only relevant authorized "
-            "care-record context. First answer the caregiver’s actual question; be concise unless detail is needed. "
+            "You are SolenOS AI Companion for family caregivers. Respond to the caregiver's current message, whether it is a "
+            "question, observation, concern, update, or request, in plain natural language. Do not use canned replies or "
+            "fixed response maps. Use only relevant authorized care-record context. For a statement, acknowledge what "
+            "the caregiver actually reported, separate it from persisted record facts, identify material unknowns, and "
+            "offer one useful next step or one targeted clarifying question when needed. Do not require the caregiver to "
+            "phrase every concern as a question. Be concise unless detail is needed. "
             "Distinguish recorded facts, caregiver reports, interpretation, uncertainty, and conflicts. You may use chat "
             "history to resolve references, but never treat chat history as proof of a care event; assistant statements "
             "are not care evidence. Never invent events, dates, symptoms, diagnoses, medication status, outcomes, "
@@ -2150,8 +2153,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # never treated as evidence. Standalone questions do not inherit old turns.
         if retrieval_query.strip() != user_text.strip():
             model_messages.extend(
-                {"role": row.role, "content": (row.content or "")[:180]}
-                for row in reversed(prior_messages[:2])
+                {"role": row.role, "content": (row.content or "")[:400]}
+                for row in reversed(prior_messages[:6])
                 if row.role in {"user", "assistant"}
             )
 
@@ -2168,7 +2171,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         context_chars = 0
         for line in model_context_lines:
             rendered_line = _humanize_model_context_line(line)
-            if context_chars + len(rendered_line) > 2400:
+            if context_chars + len(rendered_line) > 6000:
                 continue
             bounded_context.append(rendered_line)
             context_chars += len(rendered_line)
@@ -2176,9 +2179,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "role": "user",
             "content": (
                 f"Caregiver message: {user_text}\n\n"
-                "Relevant authorized care context follows. Use only records relevant to the question. "
-                "Do not describe the context format or list unrelated records. If the context does not answer "
-                "the question, say the information is not recorded.\n"
+                "Relevant authorized care context follows. Use only records relevant to the caregiver's message. "
+                "Do not describe the context format or list unrelated records. Distinguish the caregiver's current "
+                "report from persisted Living Care Record facts. If the record does not contain requested historical "
+                "information, say it is not recorded; do not treat the current message as an already-saved record.\n"
                 + ("\n".join(bounded_context) if bounded_context else "No matching authorized care-record context was retrieved.")
             ),
         })
