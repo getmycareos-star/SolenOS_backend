@@ -50,6 +50,17 @@ def upgrade() -> None:
             relationships.c.id,
         )
     ).mappings().all()
+    rows = sorted(
+        rows,
+        key=lambda row: (
+            row["person_id"],
+            row["source_type"],
+            row["target_type"],
+            *sorted((row["source_id"], row["target_id"])),
+            row["created_at"],
+            row["id"],
+        ),
+    )
 
     versions = {}
     for row in rows:
