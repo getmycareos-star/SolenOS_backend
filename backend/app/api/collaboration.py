@@ -2525,6 +2525,32 @@ def save_companion_care_report(
     else:
         evidence = existing
 
+    report_event = None
+    existing_report_events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.event_type == "companion_caregiver_report",
+        CareEvent.created_by_caregiver_id == caregiver_id,
+    ).all()
+    for candidate_event in existing_report_events:
+        if str(evidence.id) in [str(value) for value in (candidate_event.evidence_ids or [])]:
+            report_event = candidate_event
+            break
+    if report_event is None:
+        report_event = CareEvent(
+            person_id=person_id,
+            event_type="companion_caregiver_report",
+            status="recorded",
+            occurred_at=now,
+            title="Caregiver report from AI Companion",
+            description=message.content,
+            evidence_ids=[str(evidence.id)],
+            time_provenance="server_recorded_at",
+            tags=["companion_report", "caregiver_report", f"companion_message:{message.id}"],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(report_event)
+        db.flush()
+
     assertion = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
         CareAssertion.assertion_kind == "caregiver_reported_companion_contribution",
@@ -2538,6 +2564,7 @@ def save_companion_care_report(
             field="caregiver_reported_statement",
             assertion_kind="caregiver_reported_companion_contribution",
             asserted_value=message.content,
+            source_event_id=report_event.id,
             source_label=f"Caregiver report by {caregiver.name} via AI Companion",
             source_text=json.dumps({
                 "conversation_session_id": session.id,
@@ -2551,10 +2578,13 @@ def save_companion_care_report(
             updated_by_caregiver_id=caregiver_id,
         )
         db.add(assertion)
+    elif assertion.source_event_id is None:
+        assertion.source_event_id = report_event.id
 
     try:
         db.commit()
         db.refresh(evidence)
+        db.refresh(report_event)
         db.refresh(assertion)
     except IntegrityError:
         db.rollback()
@@ -2569,11 +2599,19 @@ def save_companion_care_report(
         ).first()
         if evidence is None or assertion is None:
             raise HTTPException(status_code=409, detail="The Companion report conflicted with another record write. Retry the same confirmation.")
+        report_event = db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.event_type == "companion_caregiver_report",
+            CareEvent.created_by_caregiver_id == caregiver_id,
+        ).order_by(CareEvent.recorded_at.desc()).first()
+        if report_event is None:
+            raise HTTPException(status_code=409, detail="The Companion report evidence was saved without its timeline event. Retry the same confirmation.")
     return {
         "saved": True,
         "already_saved": existing is not None and assertion is not None,
         "message_id": message.id,
         "evidence_id": str(evidence.id),
+        "event_id": str(report_event.id),
         "assertion_id": str(assertion.id),
         "reporter_label": caregiver.name,
         "epistemic_status": "reported",
