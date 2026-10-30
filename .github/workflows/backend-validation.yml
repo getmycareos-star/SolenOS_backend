@@ -43,15 +43,15 @@ jobs:
         run: pytest -q
 
   deployed-smoke:
-    if: github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Wait for deployed service health and database readiness
-        timeout-minutes: 16
+        timeout-minutes: 35
         run: |
           base='https://solenosbackend-production.up.railway.app'
           ready=0
-          for attempt in $(seq 1 48); do
+          for attempt in $(seq 1 90); do
             health=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 "${base}/health" || true)
             ready_json=$(curl --silent --show-error --fail --max-time 20 "${base}/ready" 2>/dev/null || true)
             status=0
@@ -105,6 +105,39 @@ jobs:
               raise SystemExit(f"Deployed OpenAPI is missing core continuity routes: {missing}")
           print("PASS: deployed OpenAPI exposes anonymous sessions, refresh, evidence reads, and care capture.")
           PY
+
+      - name: Verify deployed Qwen 3.5 4B installation and real inference
+        timeout-minutes: 20
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base='https://solenosbackend-production.up.railway.app'
+          ready=0
+          for attempt in $(seq 1 90); do
+            code=$(curl --silent --show-error --output /tmp/solenos-qwen-status.json --write-out '%{http_code}' --max-time 60 "${base}/api/v1/assistant/status" || true)
+            if [ "$code" = "200" ] && python - <<'PY'
+          import json
+          data = json.load(open("/tmp/solenos-qwen-status.json", encoding="utf-8"))
+          assert data.get("available") is True, data
+          assert data.get("inference_ready") is True, data
+          assert data.get("model") == "qwen3.5:4b", data
+          assert data.get("model_installed") is True, data
+          assert data.get("model_loaded") is True, data
+          assert data.get("inference_smoke_test") is True, data
+          assert data.get("provider") == "local_ollama", data
+          assert data.get("hosted_inference_api") is False, data
+          print("PASS: deployed Qwen 3.5 4B is installed, loaded, and returned a real inference response.")
+          PY
+            then
+              ready=1
+              break
+            fi
+            echo "Qwen 3.5 4B not inference-ready yet (HTTP $code; attempt $attempt/90)."
+            cat /tmp/solenos-qwen-status.json >&2 || true
+            sleep 10
+          done
+          test "$ready" = "1"
+
       - name: Diagnose deployed route paths
         if: always()
         shell: bash
