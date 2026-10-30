@@ -75,16 +75,18 @@ class CausalReasoningEngine:
             .all()
         )
 
-        reference = None
-        if reference_event_id:
-            reference = next(
-                (e for e in events if e.id == reference_event_id), None
-            )
+        # A temporal comparison needs an explicitly selected anchor. Choosing
+        # the earliest event when the caller omits or mistypes the reference ID
+        # silently invents a cause/outcome frame from an arbitrary timeline.
+        if not reference_event_id:
+            return []
 
+        reference = next(
+            (event for event in events if event.id == reference_event_id), None
+        )
         if reference is None:
-            reference = events[0] if events else None
-
-        if reference is None:
+            # This also rejects IDs belonging to another person because the
+            # candidate list above is already scoped to person_id.
             return []
 
         ref_time = _ensure_utc(reference.occurred_at)

@@ -596,6 +596,18 @@ def test_identify_temporal_associations():
         assert "Fall documented" in related_titles
         assert "Annual checkup" not in related_titles
         assert all(a.relation_type in ("before", "after", "simultaneous") for a in associations)
+
+        # Never choose the earliest event as an implicit causal reference.
+        assert engine.identify_temporal_associations(
+            person_id="person-13",
+            reference_event_id=None,
+            window=timedelta(days=14),
+        ) == []
+        assert engine.identify_temporal_associations(
+            person_id="person-13",
+            reference_event_id="event-from-another-person",
+            window=timedelta(days=14),
+        ) == []
         db.close()
     finally:
         teardown_db()
