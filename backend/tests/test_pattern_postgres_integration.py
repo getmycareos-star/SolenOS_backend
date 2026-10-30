@@ -423,6 +423,7 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
                 target_id=assertion_a,
                 original_text="The dose was administered.",
                 corrected_text="The daughter later corrected the report: she did not witness administration.",
+                caregiver_id=reporter,
             ),
             Correction(
                 id=correction_id_b,
@@ -431,6 +432,7 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
                 target_id=assertion_a,
                 original_text="The daughter later corrected the report: she did not witness administration.",
                 corrected_text="The daughter cannot confirm whether administration occurred.",
+                caregiver_id=uploader,
             ),
             Contradiction(
                 id=conflict_id,
