@@ -8,8 +8,9 @@ A capability is **not complete** because a route exists, a unit test passes, a m
 
 ## Current gate
 
-The GitHub Actions workflow `.github/workflows/situation-understanding-benchmark.yml` runs on every pull request targeting `main`, every push to `main`, and manual dispatch. It executes:
+The GitHub Actions workflow `.github/workflows/situation-understanding-benchmark.yml` runs on pushes to `main` and manual dispatch. Implementation and benchmark changes are committed directly to `main`; this workstream does not use pull requests. It executes:
 
+- 10,000 deterministic adversarial uncertainty scenarios (10 families × 1,000 independently labelled variants), with per-case safety assertions and a corpus SHA-256.
 - Adversarial situation-understanding and uncertainty contracts.
 - Longitudinal event and change-detection cases.
 - Open Loop messy-care workflow cases.
@@ -84,4 +85,4 @@ No production caregiver data may be copied into a benchmark corpus. Real-world e
 
 ## Current status
 
-This workflow change makes the existing synthetic adversarial and PostgreSQL longitudinal suites run on every PR instead of only selected path changes. It is the first enforcement step, not proof that the complete end-to-end benchmark corpus described above is finished. Until the full ingest → reconcile → persist → retrieve → explain corpus and its required evidence exist and pass, broader messy-care capability claims remain **unverified**.
+The main-only gate now executes a 10,000-case deterministic uncertainty contract corpus alongside the existing adversarial contracts and PostgreSQL longitudinal suite. The 10,000 cases exercise uncertainty classification, contradictions, inaccessible sources, duplicate lineage, unverified reports, missing attribution/time, stale or unreadable evidence, causal overreach, and invalid evidence references. This is a substantial synthetic contract expansion, but it is not 10,000 independent end-to-end database histories. The complete ingest → reconcile → persist → retrieve → explain benchmark still requires broader PostgreSQL-backed scenario generation, attribution/correction/thread reconstruction, restart and identity-transition coverage, and per-case traceability evidence. Until those end-to-end requirements exist and pass, a 9.5/10 capability rating remains **unearned**.
