@@ -267,3 +267,16 @@ def test_unscoped_subjects_group_only_on_exact_shared_source_ids():
     assert any(len(group) == 2 and first in group and same_source in group for group in groups)
     assert any(group == [unrelated_source] for group in groups)
     assert any(group == [explicitly_scoped] for group in groups)
+
+
+def test_person_scoped_signals_can_link_only_through_shared_source_ids():
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["shared-event"])
+    second = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["shared-event"])
+    unrelated = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["other-event"])
+    groups = _group_related_signals([first, second, unrelated], "evidence_ids")
+
+    assert len(groups) == 2
+    assert any(len(group) == 2 and first in group and second in group for group in groups)
+    assert any(group == [unrelated] for group in groups)
