@@ -15,7 +15,7 @@ import re
 from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, or_, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, or_, text, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -3048,6 +3048,20 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             if selected is None:
                 raise HTTPException(status_code=404, detail="Both linked situations must exist in this care record")
         relationship_table = _table(db, "care_record_relationships")
+        # Serialize the symmetric pair before checking for an existing link.
+        # This prevents two simultaneous caregivers from creating reverse-order
+        # duplicates on PostgreSQL.
+        pair = sorted((data["source_id"], data["target_id"]))
+        if db.get_bind().dialect.name == "postgresql":
+            lock_key = int.from_bytes(
+                hashlib.sha256(
+                    f"{person_id}:situation-related:{pair[0]}:{pair[1]}".encode("utf-8")
+                ).digest()[:8],
+                byteorder="big",
+                signed=True,
+            )
+            db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        data["source_id"], data["target_id"] = pair
         duplicate_link = db.execute(
             select(relationship_table.c.id).where(
                 relationship_table.c.person_id == person_id,
