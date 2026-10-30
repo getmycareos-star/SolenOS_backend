@@ -300,6 +300,8 @@ def test_source_text_integrity_endpoint_is_person_scoped_and_reports_exact_text_
     ).hexdigest()
     assert payload["hash_scope"] == "exact UTF-8 encoding of the currently stored source_text field"
     assert payload["original_file_authenticity_verified"] is False
+    assert payload["external_source_reference"] is None
+    assert payload["external_source_reference_access_status"] == "not_provided"
     assert payload["original_binary_status"] == "not_applicable"
     assert payload["exact_source_text_duplicate_candidate_ids"] == []
     assert payload["exact_binary_duplicate_candidate_ids"] == []
@@ -427,6 +429,32 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
     assert corrupted.status_code == 200, corrupted.text
     assert corrupted.json()["original_binary_status"] == "mismatch"
     assert corrupted.json()["original_binary_available"] is True
+
+
+def test_external_source_references_are_explicitly_unverified_without_fetching(review_records):
+    client_a, _ = review_records
+    db = SessionLocal()
+    try:
+        external = Evidence(
+            id="external-source-reference",
+            person_id="review-person-a",
+            type="document",
+            source_text="Imported external document reference.",
+            original_source_reference="https://example.invalid/care-record.pdf",
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        db.add(external)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client_a.get(
+        "/api/v1/care-continuity/evidence/external-source-reference/integrity"
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["external_source_reference"] == "https://example.invalid/care-record.pdf"
+    assert payload["external_source_reference_access_status"] == "not_checked"
 
 
 def test_original_evidence_source_text_and_hash_cannot_be_changed_through_orm(review_records):
