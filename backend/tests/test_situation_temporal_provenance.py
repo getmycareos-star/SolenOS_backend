@@ -237,6 +237,6 @@ def test_situation_thread_grouping_uses_shared_source_only_within_same_domain():
     )
 
     assert len(groups) == 3
-    assert any(set(group) == {first, same_source} for group in groups)
+    assert any(len(group) == 2 and first in group and same_source in group for group in groups)
     assert any(group == [other_source] for group in groups)
     assert any(group == [other_domain] for group in groups)
