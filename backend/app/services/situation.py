@@ -57,7 +57,7 @@ def _explicit_speaker_statements(source_text: str) -> list[dict]:
             else:
                 header_context = f"Source header date text (time/timezone unspecified): {raw_header_time}"
         statements.append({
-            "speaker_label": (match.group("label") or match.group("bracket_label") or "").strip(),
+            "speaker_label": (match.group("bracket_label") or match.group("label") or "").strip(),
             "source_passage": passage,
             "source_span_start": start,
             "source_span_end": end,
