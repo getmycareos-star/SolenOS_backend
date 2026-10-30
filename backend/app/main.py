@@ -20,6 +20,7 @@ from app.api.safety import router as safety_router
 from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router, _ollama_url, _ollama_chat
 from app.api.document_extract import router as document_extract_router
+from app.api.document_intelligence import router as document_intelligence_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
@@ -200,6 +201,7 @@ collaboration_router.routes[:] = [
 ]
 app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
+app.include_router(document_intelligence_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
@@ -317,7 +319,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             target_person_id = path_params.get("person_id") or request.query_params.get("person_id") or scoped_person_id
         if (
             path.startswith("/api/v1/community")
-            or path == "/api/v1/upload"
+            or path.startswith("/api/v1/upload")
             or path.startswith("/api/v1/assistant/")
             or path.startswith("/api/v1/reminders")
             or path.startswith("/api/v1/care-continuity")
@@ -328,6 +330,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/daily-care/intelligence")
             or path.startswith("/api/v1/appointment-workspaces")
             or path.startswith("/api/v1/open-loops")
+            or path.startswith("/api/v1/documents")
             or path.startswith("/api/v1/uncertainty")
         ):
             # These operations use the bearer session as their record scope.

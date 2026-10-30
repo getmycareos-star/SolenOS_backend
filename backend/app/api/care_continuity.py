@@ -1072,6 +1072,7 @@ def current_care_projection(
     context = build_lcr_context(db, person_id, limit_per_source=limit_per_source)
     sources = context.get("sources") or {}
     candidate_evidence_ids: set[str] = set()
+    reporter_ids: set[str] = set()
     for source_name, source_value in sources.items():
         for source_item in source_value.get("items") or []:
             if source_name == "evidence" and source_item.get("id"):
@@ -1081,6 +1082,22 @@ def current_care_projection(
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
+            reporter_id = (
+                source_item.get("reported_by_caregiver_id")
+                or source_item.get("observer_caregiver_id")
+                or source_item.get("created_by_caregiver_id")
+                or source_item.get("author_caregiver_id")
+                or source_item.get("uploaded_by_caregiver_id")
+            )
+            if reporter_id:
+                reporter_ids.add(str(reporter_id))
+    caregiver_labels = {
+        str(row.id): row.name
+        for row in db.query(Caregiver).filter(
+            Caregiver.person_id == person_id,
+            Caregiver.id.in_(reporter_ids),
+        ).all()
+    } if reporter_ids else {}
     authorized_evidence_ids = set()
     if candidate_evidence_ids:
         authorized_evidence_ids = {
@@ -1127,6 +1144,26 @@ def current_care_projection(
             if value and str(value) in authorized_evidence_ids
         ]
         source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
+        reported_by_label = (
+            row.get("reported_by_label")
+            or row.get("observer_label")
+            or row.get("author_label")
+            or caregiver_labels.get(str(
+                row.get("reported_by_caregiver_id")
+                or row.get("observer_caregiver_id")
+                or row.get("created_by_caregiver_id")
+                or row.get("author_caregiver_id")
+                or row.get("uploaded_by_caregiver_id")
+                or ""
+            ))
+        )
+        if not reported_by_label and source_name == "assertions" and isinstance(row.get("source_text"), str):
+            try:
+                source_metadata = json.loads(row["source_text"])
+                if isinstance(source_metadata, dict):
+                    reported_by_label = source_metadata.get("reporter_label")
+            except (TypeError, json.JSONDecodeError):
+                pass
         origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
@@ -1145,8 +1182,10 @@ def current_care_projection(
             "status": status,
             "epistemic_status": row.get("epistemic_status") or row.get("epistemic_state") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
             "source_collection": source_name,
+            "source_event_id": row.get("source_event_id"),
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
+            "reported_by_label": str(reported_by_label or "")[:160] or None,
             "occurred_at": occurred_at,
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
@@ -1215,6 +1254,12 @@ def current_care_projection(
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
         add("decisions", row, "Care decision", 9, require_open=True)
+    for row in (sources.get("decision_outcomes") or {}).get("items", []):
+        add("decision_outcomes", row, "Decision outcome", 9)
+    for row in (sources.get("open_loop_records") or {}).get("items", []):
+        raw_priority = row.get("priority")
+        priority = raw_priority if isinstance(raw_priority, int) and 0 <= raw_priority <= 10 else 4
+        add("open_loop_records", row, "Open care action", priority, require_open=True)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))

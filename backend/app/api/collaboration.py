@@ -355,9 +355,11 @@ async def upload_evidence(
 @router.get("/upload/{evidence_id}")
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scope(request, db)
-    evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
-    if not evidence:
+    evidence = db.query(EvidenceModel).filter_by(id=evidence_id).first()
+    if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
+    if str(evidence.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This evidence belongs to another care record")
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
@@ -2379,13 +2381,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
     )
     try:
-        db.add(ConversationMessage(
+        user_row = ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
             source_record_refs_json="[]",
-        ))
+        )
+        db.add(user_row)
         db.add(assistant_row)
         db.commit()
+        db.refresh(user_row)
         db.refresh(assistant_row)
     except Exception as exc:
         db.rollback()
@@ -2403,6 +2407,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     return {
         "session_id": session.id,
         "person_id": person_id,
+        "user_message_id": user_row.id,
+        "assistant_message_id": assistant_row.id,
         "reply": reply,
         "guard_verdict": verdict,
         "safety_note": safety_note,
@@ -2421,12 +2427,197 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "written_to_lcr": False,
         "persistence": "conversation_only",
         "messages": [{
+            "id": row.id,
             "role": row.role,
             "text": row.content,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "guard_verdict": row.guard_verdict,
             "safety_note": row.safety_note,
         } for row in history],
+    }
+
+
+@router.post("/conversation/{session_id}/messages/{message_id}/care-report", status_code=201)
+def save_companion_care_report(
+    session_id: str,
+    message_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Persist a caregiver-confirmed Companion statement as reported LCR evidence."""
+    person_id, caregiver_id = _scope(request, db)
+    session = db.query(ConversationSession).filter_by(
+        id=session_id, person_id=person_id, caregiver_id=caregiver_id
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver attribution is not linked to this care record")
+
+    message = db.query(ConversationMessage).filter(
+        ConversationMessage.id == message_id,
+        ConversationMessage.session_id == session.id,
+        ConversationMessage.role == "user",
+    ).with_for_update().first()
+    if message is None:
+        raise HTTPException(status_code=404, detail="Caregiver message not found")
+
+    # The endpoint is a confirmation action, not a general transcript export.
+    # Require a first-person or explicitly attributed report and store the exact
+    # caregiver text; never rewrite a nurse/doctor statement as independently verified.
+    report_signal = re.compile(
+        r"\b(?:i\s+(?:saw|noticed|observed|recorded|measured|spoke|talked|was\s+told|heard)|"
+        r"we\s+(?:saw|noticed|observed|recorded|heard)|"
+        r"(?:the\s+)?(?:nurse|doctor|clinician|therapist|care\s+professional)\s+"
+        r"(?:said|told\s+me|reported|explained)|"
+        r"(?:my|our)\s+(?:sister|brother|mother|father|family\s+member|caregiver)\s+"
+        r"(?:said|told\s+me|reported|noticed|observed))\b",
+        re.IGNORECASE,
+    )
+    if not report_signal.search(message.content or ""):
+        raise HTTPException(
+            status_code=422,
+            detail="This message does not contain a clearly attributed caregiver report. Add the information in Daily Care with its source instead.",
+        )
+
+    ingestion_key = f"companion-message:{message.id}"[:128]
+    fingerprint = hashlib.sha256(
+        f"{person_id}:{caregiver_id}:{message.content}".encode("utf-8")
+    ).hexdigest()
+    existing = db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.ingestion_key == ingestion_key,
+    ).first()
+    now = datetime.now(timezone.utc)
+    if existing is not None and existing.ingestion_request_sha256 != fingerprint:
+        raise HTTPException(status_code=409, detail="This Companion message was already recorded with different source content.")
+
+    if existing is None:
+        evidence = EvidenceModel(
+            person_id=person_id,
+            type="caregiver_report",
+            evidence_kind="reported_statement",
+            epistemic_status="reported",
+            source_text=message.content,
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata=json.dumps({
+                "conversation_session_id": session.id,
+                "conversation_message_id": message.id,
+                "reporter_label": caregiver.name,
+                "third_party_statements": "Relayed by the caregiver; not independently verified.",
+            }, ensure_ascii=False),
+            time_provenance="server_recorded_report_time",
+            evidence_status="recorded",
+            source_type="companion_caregiver_report",
+            reported_by_label=caregiver.name,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+            collected_at=now,
+            reported_at=now,
+            origin_channel="ai_companion",
+            original_source_reference=f"conversation_message:{message.id}",
+            ingestion_key=ingestion_key,
+            ingestion_request_sha256=fingerprint,
+        )
+        db.add(evidence)
+        db.flush()
+    else:
+        evidence = existing
+
+    report_event = None
+    existing_report_events = db.query(CareEvent).filter(
+        CareEvent.person_id == person_id,
+        CareEvent.event_type == "companion_caregiver_report",
+        CareEvent.created_by_caregiver_id == caregiver_id,
+    ).all()
+    for candidate_event in existing_report_events:
+        if str(evidence.id) in [str(value) for value in (candidate_event.evidence_ids or [])]:
+            report_event = candidate_event
+            break
+    if report_event is None:
+        report_event = CareEvent(
+            person_id=person_id,
+            event_type="companion_caregiver_report",
+            status="recorded",
+            occurred_at=now,
+            title="Caregiver report from AI Companion",
+            description=message.content,
+            evidence_ids=[str(evidence.id)],
+            time_provenance="server_recorded_at",
+            tags=["companion_report", "caregiver_report", f"companion_message:{message.id}"],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(report_event)
+        db.flush()
+
+    assertion = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.assertion_kind == "caregiver_reported_companion_contribution",
+        CareAssertion.source_text.ilike(f"%{message.id}%"),
+    ).first()
+    if assertion is None:
+        assertion = CareAssertion(
+            person_id=person_id,
+            subject_type="person",
+            subject_id=person_id,
+            field="caregiver_reported_statement",
+            assertion_kind="caregiver_reported_companion_contribution",
+            asserted_value=message.content,
+            source_event_id=report_event.id,
+            source_label=f"Caregiver report by {caregiver.name} via AI Companion",
+            source_text=json.dumps({
+                "conversation_session_id": session.id,
+                "conversation_message_id": message.id,
+                "reporter_label": caregiver.name,
+                "epistemic_limit": "Caregiver-reported information. Any third-party statement is relayed, not independently verified.",
+            }, ensure_ascii=False),
+            evidence_ids=[str(evidence.id)],
+            assertion_status="caregiver_reviewed",
+            created_by_caregiver_id=caregiver_id,
+            updated_by_caregiver_id=caregiver_id,
+        )
+        db.add(assertion)
+    elif assertion.source_event_id is None:
+        assertion.source_event_id = report_event.id
+
+    try:
+        db.commit()
+        db.refresh(evidence)
+        db.refresh(report_event)
+        db.refresh(assertion)
+    except IntegrityError:
+        db.rollback()
+        evidence = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.ingestion_key == ingestion_key,
+        ).first()
+        assertion = db.query(CareAssertion).filter(
+            CareAssertion.person_id == person_id,
+            CareAssertion.assertion_kind == "caregiver_reported_companion_contribution",
+            CareAssertion.source_text.ilike(f"%{message.id}%"),
+        ).first()
+        if evidence is None or assertion is None:
+            raise HTTPException(status_code=409, detail="The Companion report conflicted with another record write. Retry the same confirmation.")
+        report_event = db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.event_type == "companion_caregiver_report",
+            CareEvent.created_by_caregiver_id == caregiver_id,
+        ).order_by(CareEvent.recorded_at.desc()).first()
+        if report_event is None:
+            raise HTTPException(status_code=409, detail="The Companion report evidence was saved without its timeline event. Retry the same confirmation.")
+    return {
+        "saved": True,
+        "already_saved": existing is not None and assertion is not None,
+        "message_id": message.id,
+        "evidence_id": str(evidence.id),
+        "event_id": str(report_event.id),
+        "assertion_id": str(assertion.id),
+        "reporter_label": caregiver.name,
+        "epistemic_status": "reported",
+        "independently_verified": False,
+        "written_to_lcr": True,
+        "message": "Saved as a caregiver-reported statement in the Living Care Record. Third-party statements remain attributed as reported, not independently verified.",
     }
 
 
@@ -2438,6 +2629,7 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         raise HTTPException(status_code=404, detail="Conversation not found")
     rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
     return {"session_id": session.id, "person_id": person_id, "messages": [{
+        "id": row.id,
         "role": row.role,
         "text": row.content,
         "created_at": row.created_at.isoformat() if row.created_at else None,

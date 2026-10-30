@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import (
     Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text,
-    UniqueConstraint, and_, or_
+    UniqueConstraint, and_, or_, text as sql_text
 )
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -304,6 +304,15 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
                             "source_type": payload.source_type},
                            sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
+    if payload.idempotency_key and db.bind is not None and db.bind.dialect.name == "postgresql":
+        # Serialize same-key creates per care record before any lookup or write.
+        # The transaction-scoped lock makes concurrent retries observe the
+        # committed winner under PostgreSQL READ COMMITTED isolation.
+        lock_key = f"open-loop-create:{person_id}:{payload.idempotency_key}"
+        db.execute(
+            sql_text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+            {"lock_key": lock_key},
+        )
     if payload.idempotency_key:
         replay = db.query(OpenLoopOccurrence).filter(
             OpenLoopOccurrence.person_id == person_id,
