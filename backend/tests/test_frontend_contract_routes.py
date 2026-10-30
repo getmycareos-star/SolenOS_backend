@@ -244,6 +244,16 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert duplicate_upload.json()["duplicate_detected"] is True
         assert duplicate_upload.json()["duplicate_of_evidence_id"] == evidence_id
 
+        evidence_list = client.get(f"/api/v1/evidence/{person_id}", headers=auth)
+        assert evidence_list.status_code == 200, evidence_list.text
+        listed_uploads = [
+            item for item in evidence_list.json()
+            if item["id"] in {evidence_id, duplicate_upload.json()["evidence_id"]}
+        ]
+        assert len(listed_uploads) == 2
+        assert all(isinstance(item.get("extra_metadata"), dict) for item in listed_uploads)
+        assert any(item["extra_metadata"].get("duplicate_detected") is True for item in listed_uploads)
+
         db = TestingSessionLocal()
         saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
         assert saved_evidence is not None
