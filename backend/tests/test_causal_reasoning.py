@@ -124,7 +124,7 @@ def test_hypothesis_is_not_promoted_to_fact():
         teardown_db()
 
 
-def test_alternative_explanations_identified_from_record():
+def test_unrelated_nearby_event_is_not_promoted_to_alternative_explanation():
     setup_db()
     try:
         db = TestingSessionLocal()
@@ -157,15 +157,14 @@ def test_alternative_explanations_identified_from_record():
             outcome_time=outcome_time,
         )
 
-        alt_descs = [a["description"] for a in result.alternative_explanations]
-        assert any("illness" in d.lower() or "acute" in d.lower() for d in alt_descs)
-        assert len(result.alternative_explanations) > 0
+        assert result.alternative_explanations == []
+        assert result.causal_confidence == CausalConfidence.INSUFFICIENT
         db.close()
     finally:
         teardown_db()
 
 
-def test_confounder_preserves_ambiguity():
+def test_unrelated_nearby_event_is_not_promoted_to_confounder():
     setup_db()
     try:
         db = TestingSessionLocal()
@@ -198,14 +197,9 @@ def test_confounder_preserves_ambiguity():
             outcome_time=outcome_time,
         )
 
-        assert len(result.confounders) > 0
-        # One nearby event may be a possible alternative context, but it
-        # is not contradictory evidence and must not be promoted to a conflict.
-        assert result.causal_confidence == CausalConfidence.PLAUSIBLE
-        assert any(
-            "not established as a confounder" in item
-            for item in result.what_else_is_known
-        )
+        assert result.confounders == []
+        assert result.causal_confidence == CausalConfidence.INSUFFICIENT
+        assert result.contradictory_evidence == []
         db.close()
     finally:
         teardown_db()
