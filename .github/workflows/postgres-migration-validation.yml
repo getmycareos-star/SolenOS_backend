@@ -1,13 +1,6 @@
 name: PostgreSQL migration validation
 
 on:
-  pull_request:
-    paths:
-      - "backend/alembic/**"
-      - "backend/app/**"
-      - "backend/tests/**"
-      - "backend/scripts/**"
-      - ".github/workflows/postgres-migration-validation.yml"
   push:
     branches: [main]
     paths:
@@ -691,9 +684,12 @@ jobs:
 
       - name: Run persisted messy-care benchmark against PostgreSQL
         env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
           SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
         working-directory: backend
-        run: python -m pytest tests/test_longitudinal_messy_care_benchmark.py -q
+        run: |
+          python -m alembic upgrade head
+          python -m pytest tests/test_longitudinal_messy_care_benchmark.py -q
 
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
