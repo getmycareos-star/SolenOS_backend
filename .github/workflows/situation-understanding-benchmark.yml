@@ -203,10 +203,9 @@ jobs:
                       caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).one()
                       assert caregiver.id == caregiver_id
                       print("POSTGRES_CARE_EVENT_FRESH_SESSION_AFTER_RESTART=PASS")
-                      db.delete(event)
-                      db.delete(caregiver)
-                      db.delete(db.query(Person).filter_by(id=person_id).one())
-                      db.commit()
+                  # This CI database is disposable and is destroyed after the job.
+                  # Do not delete the fixture person: schema-owned state revisions
+                  # may intentionally retain a foreign-key reference to it.
                   restarted_engine.dispose()
                   break
               except Exception as error:
