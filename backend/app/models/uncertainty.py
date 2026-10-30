@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Enum as SQLEnum, event
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, event
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Session
 import uuid
