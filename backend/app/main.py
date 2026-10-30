@@ -632,7 +632,11 @@ def get_situation(
             CareRecordRelationship.source_type == "situation",
             CareRecordRelationship.target_type == "situation",
         )
-        .order_by(CareRecordRelationship.created_at.asc(), CareRecordRelationship.id.asc())
+        .order_by(
+            CareRecordRelationship.relationship_version.asc(),
+            CareRecordRelationship.created_at.asc(),
+            CareRecordRelationship.id.asc(),
+        )
         .all()
     )
     latest_relationship_by_pair = {}
