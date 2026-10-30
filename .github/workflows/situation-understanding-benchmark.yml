@@ -73,10 +73,10 @@ jobs:
           print(f"MESSY_CARE_CASES_FAILED={failures}")
           print(f"MESSY_CARE_CASES_ERRORED={errors}")
           print(f"MESSY_CARE_CASES_SKIPPED={skipped}")
-          if not executed or failures or errors or skipped:
+          if tests < 10000 or not executed or failures or errors or skipped:
               raise SystemExit(
-                  "Messy-care gate failed: require nonzero execution and zero failures, "
-                  "errors, or skips."
+                  "Messy-care gate failed: require at least 10,000 declared scenarios, "
+                  "nonzero execution, and zero failures, errors, or skips."
               )
           PY
           test "${{ steps.benchmark.outcome }}" = "success"
