@@ -26,11 +26,11 @@ def test_production_origin_can_preflight_care_write_routes():
         assert "POST" in response.headers.get("access-control-allow-methods", "")
 
 
-def test_rejected_preflight_logs_origin_and_requested_headers_without_request_data(caplog):
-    import logging
+def test_rejected_preflight_logs_origin_and_requested_headers_without_request_data():
+    from unittest.mock import patch
 
     client = TestClient(app)
-    with caplog.at_level(logging.WARNING):
+    with patch("app.main.logger.warning") as warning:
         response = client.options(
             "/api/situation",
             headers={
@@ -39,9 +39,18 @@ def test_rejected_preflight_logs_origin_and_requested_headers_without_request_da
                 "Access-Control-Request-Headers": "authorization,content-type",
             },
         )
+
     assert response.status_code == 400
-    assert "Rejected browser preflight" in caplog.text
-    assert "https://unrecognized.invalid" in caplog.text
-    assert "requested_method=POST" in caplog.text
-    assert "requested_headers=authorization,content-type" in caplog.text
-    assert "Authorization:" not in caplog.text
+    warning.assert_called_once()
+    message, *metadata = warning.call_args.args
+    assert message.startswith("Rejected browser preflight")
+    assert metadata == [
+        "/api/situation",
+        "https://unrecognized.invalid",
+        "POST",
+        "authorization,content-type",
+        400,
+    ]
+    # The logger receives header names only, never an Authorization value or
+    # request body/care record data.
+    assert "Authorization:" not in repr(warning.call_args)
