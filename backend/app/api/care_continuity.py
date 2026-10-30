@@ -24,6 +24,7 @@ from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
 from app.models.care import Evidence, Caregiver, CareEvent
+from app.models.change import Situation as SituationModel
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import ObservationCoverageCreate
 from app.services.observation_coverage import assess_observation_coverage
@@ -3030,6 +3031,44 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 event_table.c.person_id == person_id,
             )).first():
                 raise HTTPException(status_code=404, detail="Source event was not found in this care record")
+
+    if resource == "relationships" and data.get("source_type") == "situation" and data.get("target_type") == "situation":
+        if data.get("relationship_type") != "related_to":
+            raise HTTPException(status_code=422, detail="Situation links must use the non-causal related_to relationship")
+        rationale = data.get("provenance")
+        if not isinstance(rationale, str) or len(rationale.strip()) < 12:
+            raise HTTPException(status_code=422, detail="Situation links require a caregiver rationale of at least 12 characters")
+        if data["source_id"] == data["target_id"]:
+            raise HTTPException(status_code=422, detail="A situation cannot be related to itself")
+        for selected_id in (data["source_id"], data["target_id"]):
+            selected = db.query(SituationModel.id).filter(
+                SituationModel.id == selected_id,
+                SituationModel.person_id == person_id,
+            ).first()
+            if selected is None:
+                raise HTTPException(status_code=404, detail="Both linked situations must exist in this care record")
+        relationship_table = _table(db, "care_record_relationships")
+        duplicate_link = db.execute(
+            select(relationship_table.c.id).where(
+                relationship_table.c.person_id == person_id,
+                or_(
+                    (
+                        (relationship_table.c.source_type == "situation")
+                        & (relationship_table.c.source_id == data["source_id"])
+                        & (relationship_table.c.target_type == "situation")
+                        & (relationship_table.c.target_id == data["target_id"])
+                    ),
+                    (
+                        (relationship_table.c.source_type == "situation")
+                        & (relationship_table.c.source_id == data["target_id"])
+                        & (relationship_table.c.target_type == "situation")
+                        & (relationship_table.c.target_id == data["source_id"])
+                    ),
+                ),
+            ).limit(1)
+        ).first()
+        if duplicate_link:
+            raise HTTPException(status_code=409, detail="These two care situations are already linked")
 
     if resource == "fact-evidence":
         fact_evidence = _table(db, "care_fact_evidence")
