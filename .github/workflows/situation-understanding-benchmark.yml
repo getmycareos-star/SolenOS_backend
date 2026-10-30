@@ -134,6 +134,7 @@ jobs:
         continue-on-error: true
         run: |
           python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py \
+            backend/tests/test_messy_care_100_assertion_journeys.py \
             -q -s --junitxml=/tmp/postgres-longitudinal.xml
 
       - name: Enforce PostgreSQL benchmark execution
@@ -152,10 +153,16 @@ jobs:
           failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
           errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
           skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+          scenario_cases = [case for suite in suites for case in suite.findall("testcase")
+                            if case.attrib.get("name", "").startswith("test_100_conflicting_reports_survive_commit_and_fresh_session")]
+          scenario_ids = [case.attrib.get("name") for case in scenario_cases]
+          print(f"POSTGRES_DISTINCT_ASSERTION_JOURNEYS={len(set(scenario_ids))}")
           print(f"POSTGRES_MESSY_CARE_CASES_DECLARED={tests}")
           print(f"POSTGRES_MESSY_CARE_CASES_FAILED={failures}")
           print(f"POSTGRES_MESSY_CARE_CASES_ERRORED={errors}")
           print(f"POSTGRES_MESSY_CARE_CASES_SKIPPED={skipped}")
+          if len(scenario_ids) != 100 or len(set(scenario_ids)) != 100:
+              raise SystemExit("PostgreSQL gate requires all 100 uniquely identified assertion journeys.")
           if not tests or failures or errors or skipped:
               raise SystemExit("PostgreSQL messy-care benchmark gate failed.")
           PY
