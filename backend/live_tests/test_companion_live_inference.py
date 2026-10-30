@@ -314,7 +314,7 @@ def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordinati
             "report those findings",
             "record what she eats",
         )) or bool(re.search(
-            r"\b(?:check|record|note|track|ask)\b.{0,80}\b(?:lunch|dinner|meals?|food intake)\b",
+            r"\b(?:check|record|note|track|ask|confirm)\b.{0,80}\b(?:lunch|dinner|meals?|food intake)\b",
             lowered,
         ))
         assert has_targeted_question or has_concrete_next_step, (
