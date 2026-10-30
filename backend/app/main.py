@@ -749,6 +749,7 @@ def get_situation(
         "events": event_payload,
         "situations": [{
             "id": item["id"],
+            "persisted_thread": item.get("persisted_thread") is True,
             "title": item["title"],
             "description": item.get("contextSummary", ""),
             "state": item.get("status", "active"),
