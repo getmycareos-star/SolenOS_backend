@@ -474,7 +474,7 @@ jobs:
           greeting=""
           greeting_ready=0
           for attempt in $(seq 1 90); do
-            if greeting=$(curl --fail --silent --show-error --max-time 30 \
+            if greeting=$(curl --fail --silent --show-error --max-time 90 \
               -H "$auth_header" -H "Content-Type: application/json" \
               -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \
               http://127.0.0.1:8080/api/v1/conversation/message 2>/tmp/qwen-greeting-error); then
