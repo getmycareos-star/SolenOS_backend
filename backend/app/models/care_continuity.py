@@ -28,7 +28,7 @@ class CareRecordRelationship(Base):
     __table_args__ = (
         Index("ix_care_record_relationships_person_source", "person_id", "source_type", "source_id"),
         Index("ix_care_record_relationships_person_target", "person_id", "target_type", "target_id"),
-        Index("ix_care_record_relationships_pair_version", "person_id", "source_type", "source_id", "target_type", "target_id", "relationship_version"),
+        Index("ix_care_record_relationships_pair_version", "person_id", "source_type", "source_id", "target_type", "target_id", "relationship_version", unique=True),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
