@@ -225,6 +225,25 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert uploaded.status_code == 201, uploaded.text
         evidence_id = uploaded.json()["evidence_id"]
         assert uploaded.json()["persisted"] is True
+        assert uploaded.json()["duplicate_detected"] is False
+        assert uploaded.json()["source_integrity"]["binary_checksum_verified_at_ingest"] is True
+        assert uploaded.json()["source_integrity"]["original_binary_persisted"] is True
+
+        duplicate_upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+                "extracted_text": "Text checked against the scan.",
+            },
+            files={"file": ("medication-copy.png", original, "image/png")},
+        )
+        assert duplicate_upload.status_code == 201, duplicate_upload.text
+        assert duplicate_upload.json()["duplicate_detected"] is True
+        assert duplicate_upload.json()["duplicate_of_evidence_id"] == evidence_id
+
         db = TestingSessionLocal()
         saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
         assert saved_evidence is not None
