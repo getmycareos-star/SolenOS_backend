@@ -71,9 +71,9 @@ def qwen_chat(
     options: dict | None = None,
 ) -> str:
     base, model, configured_timeout = get_ollama_config()
-    # Keep inference memory bounded for Railway deployments. The model context window is bounded to protect the FastAPI process sharing
-    # this container. Every workflow uses the shared gateway, so the limit applies
-    # consistently without changing model authority.
+    # Keep inference memory bounded for Railway deployments. Every workflow uses
+    # this shared gateway, so the limit applies consistently without changing
+    # the model's non-authoritative role.
     try:
         num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
     except (TypeError, ValueError):
@@ -81,7 +81,7 @@ def qwen_chat(
     try:
         num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "256")), 1024))
     except (TypeError, ValueError):
-        num_predict = 96
+        num_predict = 256
     # Railway production is CPU-only; Ollama otherwise detected 48 threads in a
     # constrained container and real requests stalled. Bound per-request CPU
     # parallelism so inference does not oversubscribe the available vCPUs.
