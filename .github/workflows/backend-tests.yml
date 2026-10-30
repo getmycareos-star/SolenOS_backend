@@ -731,7 +731,7 @@ jobs:
       OLLAMA_THINK: "false"
       OLLAMA_TIMEOUT_SECONDS: "180"
       OLLAMA_NUM_CTX: "4096"
-      OLLAMA_NUM_PREDICT: "256"
+      OLLAMA_NUM_PREDICT: "384"
       OLLAMA_NUM_THREADS: "4"
       SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
       DATABASE_URL: sqlite:////tmp/solenos-live-inference.db
