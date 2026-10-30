@@ -193,6 +193,25 @@ def main():
         # Frontend-aligned complete workflow against the real PostgreSQL-backed API:
         # create -> response/action -> outcome -> explicit verification -> close -> history.
         workflow_source = [{"kind": "care_record_source", "evidence_id": professional_source_id}]
+        status, workflow_second_source = request(
+            "POST", "/api/v1/evidence", token=token_a, body={
+                "person_id": person_a,
+                "uploaded_by_caregiver_id": caregiver_a,
+                "type": "document",
+                "evidence_kind": "documented_record",
+                "epistemic_status": "unverified",
+                "source_text": "Second synthetic CI-only source with separately reviewed provenance.",
+                "source_type": "ci_open_loop_fixture",
+                "ingestion_key": "postgres-open-loop-workflow-source-002",
+            },
+        )
+        require(status in {200, 201} and workflow_second_source.get("id"),
+                f"Second PostgreSQL source evidence creation failed: {status}: {workflow_second_source}")
+        workflow_second_source_id = workflow_second_source["id"]
+        workflow_source_pair = [
+            {"kind": "care_record_source", "evidence_id": professional_source_id},
+            {"kind": "care_record_source", "evidence_id": workflow_second_source_id},
+        ]
         status, workflow_loop = request(
             "POST", "/api/v1/open-loops", token=token_a, body={
                 "loop_type": "follow_up",
@@ -230,8 +249,32 @@ def main():
                   "verification_rule": "The linked synthetic source record is present and was reviewed.",
                   "idempotency_key": "postgres-open-loop-full-verify-001"},
         )
-        require(status == 200 and workflow_verified.get("outcome_status") == "outcome_verified",
-                f"Full workflow outcome verification failed: {status}: {workflow_verified}")
+        require(status == 200 and workflow_verified.get("outcome_status") == "outcome_reported",
+                f"Full workflow caregiver attestation failed: {status}: {workflow_verified}")
+        status, workflow_relationship = request(
+            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/relationships",
+            token=token_a,
+            body={
+                "related_evidence_id": workflow_second_source_id,
+                "relationship_type": "corroborates",
+                "source_independence_status": "independent",
+                "scope_type": "evidence_pair",
+                "rationale": "CI fixture explicitly records separate source origins.",
+            },
+        )
+        require(status == 201 and workflow_relationship.get("id"),
+                f"Independent source relationship creation failed: {status}: {workflow_relationship}")
+        status, workflow_corroborated = request(
+            "POST", f"/api/v1/open-loops/{workflow_loop_id}/corroborate-outcome", token=token_a,
+            body={
+                "text": "Synthetic independent-source corroboration review",
+                "evidence": workflow_source_pair,
+                "verification_rule": "The outcome must be supported by two separately originated source records.",
+                "idempotency_key": "postgres-open-loop-full-corroborate-001",
+            },
+        )
+        require(status == 200 and workflow_corroborated.get("outcome_status") == "outcome_verified",
+                f"Full workflow independent corroboration failed: {status}: {workflow_corroborated}")
         status, workflow_closed = request(
             "POST", f"/api/v1/open-loops/{workflow_loop_id}/close", token=token_a,
             body={"text": "Synthetic closure after recorded verification",
@@ -246,7 +289,7 @@ def main():
         workflow_event_types = {event.get("event_type") for event in workflow_history}
         require(status == 200 and {
             "created", "response_recorded", "action_recorded", "outcome_reported",
-            "outcome_verified", "closure_verified",
+            "outcome_attested", "outcome_corroborated", "closure_verified",
         }.issubset(workflow_event_types),
                 f"Full workflow audit history is incomplete: {status}: {workflow_history}")
 
@@ -337,8 +380,28 @@ def main():
                   "verification_rule": "The linked synthetic source record is present and was reviewed.",
                   "idempotency_key": "postgres-open-loop-reconciliation-verify-001"},
         )
-        require(status == 200 and contradiction_verified.get("outcome_status") == "outcome_verified",
-                f"Contradiction verification failed: {status}: {contradiction_verified}")
+        require(status == 200 and contradiction_verified.get("outcome_status") == "outcome_reported",
+                f"Contradiction caregiver attestation must remain reported: {status}: {contradiction_verified}")
+        # A contradiction cannot be closed by reconciliation or attestation alone.
+        # Require a separately persisted pair-level independent-source relationship.
+        # Reuse the same persisted pair-level relationship created and verified
+        # in the preceding end-to-end workflow; relationship uniqueness is enforced.
+        require(workflow_relationship.get("id"),
+                "The independently assessed source pair must persist before contradiction corroboration")
+        status, contradiction_corroborated = request(
+            "POST", f"/api/v1/open-loops/{contradiction_id}/corroborate-outcome", token=token_a,
+            body={
+                "text": "Synthetic independent-source corroboration review for contradiction",
+                "evidence": [
+                    {"kind": "care_record_source", "evidence_id": professional_source_id},
+                    {"kind": "care_record_source", "evidence_id": workflow_second_source_id},
+                ],
+                "verification_rule": "The contradiction outcome must have two separately originated source records.",
+                "idempotency_key": "postgres-open-loop-reconciliation-corroborate-001",
+            },
+        )
+        require(status == 200 and contradiction_corroborated.get("outcome_status") == "outcome_verified",
+                f"Contradiction independent corroboration failed: {status}: {contradiction_corroborated}")
         status, contradiction_closed = request(
             "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
             body={"text": "Synthetic closure after reconciliation and verification",
@@ -352,7 +415,7 @@ def main():
         )
         contradiction_event_types = {event.get("event_type") for event in contradiction_history}
         require(status == 200 and {
-            "created", "contradiction_reconciled", "outcome_verified", "closure_verified",
+            "created", "contradiction_reconciled", "outcome_attested", "outcome_corroborated", "closure_verified",
         }.issubset(contradiction_event_types),
                 f"Contradiction audit history is incomplete: {status}: {contradiction_history}")
 

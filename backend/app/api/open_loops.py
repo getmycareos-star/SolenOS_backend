@@ -629,7 +629,7 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
         "interpretation_limit": "Persisted source linkage and caregiver review do not automatically establish semantic entailment or prove which account is true.",
     }
     loop.outcome_evidence = [*(loop.outcome_evidence or []), reconciliation]
-    loop.outcome_status = "outcome_verified"
+    loop.outcome_status = "outcome_reported"
     _audit(db, loop, "contradiction_reconciled", before, payload.evidence, payload.idempotency_key)
     db.commit()
     db.refresh(loop)
@@ -656,7 +656,7 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
 def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_verified", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key)
     if replay is not None:
         return replay
     if not payload.evidence or not (loop.verification_rule or payload.verification_rule):
@@ -673,9 +673,70 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
         "semantic_grounding_status": "not_automatically_verified",
         "interpretation_limit": "Persisted source linkage verifies record existence and scope; it does not automatically establish semantic entailment, prove which account is true, or establish that an action caused the outcome.",
     }]
-    loop.outcome_status = "outcome_verified"
-    _audit(db, loop, "outcome_verified", before, payload.evidence, payload.idempotency_key)
+    loop.outcome_status = "outcome_reported"
+    _audit(db, loop, "outcome_attested", before, payload.evidence, payload.idempotency_key)
     db.commit()
+    db.refresh(loop)
+    return _snapshot(loop)
+
+
+@router.post("/{loop_id}/corroborate-outcome")
+def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
+    """Record a caregiver-reviewed independent source relationship for an outcome.
+
+    This verifies that an explicit, same-person, pair-level lineage assessment exists.
+    It does not infer semantic entailment, truth, or causation from source linkage.
+    """
+    person_id, caregiver_id = _scope(request, db)
+    loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key)
+    if replay is not None:
+        return replay
+    if not payload.verification_rule and not loop.verification_rule:
+        raise HTTPException(status_code=409, detail="Outcome corroboration requires an explicit verification rule")
+    evidence_ids = _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
+    if len(evidence_ids) != 2:
+        raise HTTPException(status_code=422, detail="Independent corroboration requires exactly two distinct persisted source evidence IDs")
+    from app.models.care_continuity import EvidenceSourceRelationship
+    a, b = sorted(evidence_ids)
+    relationship = db.query(EvidenceSourceRelationship).filter(
+        EvidenceSourceRelationship.person_id == person_id,
+        EvidenceSourceRelationship.relationship_type == "corroborates",
+        EvidenceSourceRelationship.source_independence_status == "independent",
+        EvidenceSourceRelationship.scope_type == "evidence_pair",
+        EvidenceSourceRelationship.scope_id == "",
+        EvidenceSourceRelationship.origin_group_key.is_(None),
+        or_(
+            and_(EvidenceSourceRelationship.source_evidence_id == a, EvidenceSourceRelationship.related_evidence_id == b),
+            and_(EvidenceSourceRelationship.source_evidence_id == b, EvidenceSourceRelationship.related_evidence_id == a),
+        ),
+    ).first()
+    if relationship is None:
+        raise HTTPException(status_code=409, detail="No caregiver-reviewed independent corroboration relationship exists for these two sources")
+    before = _snapshot(loop)
+    loop.verification_rule = loop.verification_rule or payload.verification_rule
+    loop.outcome_evidence = [*(loop.outcome_evidence or []), {
+        "kind": "independent_source_corroboration_assessment",
+        "text": payload.text,
+        "evidence": payload.evidence,
+        "verification_rule": loop.verification_rule,
+        "source_relationship_id": relationship.id,
+        "source_independence_status": relationship.source_independence_status,
+        "assessment_basis": "persisted_caregiver_reviewed_independent_evidence_pair",
+        "semantic_grounding_status": "not_automatically_verified",
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "interpretation_limit": "The care record contains a caregiver-reviewed independent-source relationship for this pair. This does not automatically establish that either source semantically entails the outcome, that either source is true, or that an action caused the outcome.",
+    }]
+    loop.outcome_status = "outcome_verified"
+    _audit(db, loop, "outcome_corroborated", before, payload.evidence, payload.idempotency_key)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key)
+        if replay is not None:
+            return replay
+        raise HTTPException(status_code=409, detail="Concurrent outcome corroboration conflicted; retry with the same idempotency key")
     db.refresh(loop)
     return _snapshot(loop)
 

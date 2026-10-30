@@ -68,6 +68,22 @@ def create_source_evidence(loop, text="Persisted source record for outcome verif
         db.close()
 
 
+def create_independent_corroboration(client, headers, source_id, related_id):
+    response = client.post(
+        f"/api/v1/care-continuity/evidence/{source_id}/relationships",
+        headers=headers,
+        json={
+            "related_evidence_id": related_id,
+            "relationship_type": "corroborates",
+            "source_independence_status": "independent",
+            "scope_type": "evidence_pair",
+            "rationale": "Caregiver reviewed provenance and determined these are separately originated sources.",
+        },
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
 def create_loop(client, headers, loop_type="unresolved_concern", **overrides):
     payload = {
         "loop_type": loop_type,
@@ -168,22 +184,55 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     )
     assert cross_person.status_code == 404, cross_person.text
 
-    source_id = create_source_evidence(loop)
-    verified = client.post(
+    source_id = create_source_evidence(loop, "Persisted first source for outcome corroboration")
+    second_source_id = create_source_evidence(loop, "Persisted second source with separately reviewed provenance")
+    attested = client.post(
         f"/api/v1/open-loops/{loop['id']}/verify-outcome",
         headers=headers,
         json={
-            "text": "Outcome checked against the stated verification rule",
+            "text": "Caregiver reviewed one linked source",
             "evidence": [{"evidence_id": source_id, "kind": "supporting_record"}],
-            "verification_rule": "The recorded intended outcome is corroborated by the linked source record.",
+            "verification_rule": "The intended outcome must be supported by independent source records.",
         },
     )
-    assert verified.status_code == 200, verified.text
-    assert verified.json()["outcome_status"] == "outcome_verified"
-    verification_record = verified.json()["outcome_evidence"][-1]
-    assert verification_record["verification_basis"] == "caregiver_attestation_with_persisted_source_link"
-    assert verification_record["semantic_grounding_status"] == "not_automatically_verified"
-    assert "not automatically establish semantic entailment" in verification_record["interpretation_limit"]
+    assert attested.status_code == 200, attested.text
+    assert attested.json()["outcome_status"] == "outcome_reported"
+    attestation = attested.json()["outcome_evidence"][-1]
+    assert attestation["verification_basis"] == "caregiver_attestation_with_persisted_source_link"
+    assert attestation["semantic_grounding_status"] == "not_automatically_verified"
+
+    premature_close = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={"text": "Closure reviewed", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert premature_close.status_code == 409, premature_close.text
+
+    no_relationship = client.post(
+        f"/api/v1/open-loops/{loop['id']}/corroborate-outcome",
+        headers=headers,
+        json={
+            "text": "Attempt corroboration without a lineage assessment",
+            "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
+        },
+    )
+    assert no_relationship.status_code == 409, no_relationship.text
+
+    relationship = create_independent_corroboration(client, headers, source_id, second_source_id)
+    corroborated = client.post(
+        f"/api/v1/open-loops/{loop['id']}/corroborate-outcome",
+        headers=headers,
+        json={
+            "text": "Caregiver reviewed the two separately originated source records",
+            "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
+        },
+    )
+    assert corroborated.status_code == 200, corroborated.text
+    assert corroborated.json()["outcome_status"] == "outcome_verified"
+    assessment = corroborated.json()["outcome_evidence"][-1]
+    assert assessment["source_relationship_id"] == relationship["id"]
+    assert assessment["semantic_grounding_status"] == "not_automatically_verified"
+    assert "does not automatically establish" in assessment["interpretation_limit"]
 
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
@@ -406,7 +455,8 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
     client = TestClient(app)
     _, headers = session(client, "Dependency recipient")
     prerequisite = create_loop(client, headers, "pending_action", title="Complete prerequisite")
-    source_id = create_source_evidence(prerequisite, "Persisted evidence for prerequisite outcome")
+    source_id = create_source_evidence(prerequisite, "First persisted source for prerequisite outcome")
+    second_source_id = create_source_evidence(prerequisite, "Second separately originated source for prerequisite outcome")
     dependent = create_loop(client, headers, "pending_decision", title="Continue dependent work")
 
     edge = client.post(
@@ -423,13 +473,24 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
         json={"text": "The prerequisite outcome was reported", "evidence": [{"kind": "caregiver_report"}]},
     )
     assert reported.status_code == 200, reported.text
-    verified = client.post(
+    attested = client.post(
         f"/api/v1/open-loops/{prerequisite['id']}/verify-outcome",
         headers=headers,
         json={
-            "text": "The prerequisite outcome was checked",
+            "text": "The prerequisite outcome was reviewed by the caregiver",
             "evidence": [{"evidence_id": source_id, "kind": "supporting_record"}],
-            "verification_rule": "The recorded outcome is corroborated by the source record.",
+            "verification_rule": "The recorded outcome is supported by independent source records.",
+        },
+    )
+    assert attested.status_code == 200, attested.text
+    assert attested.json()["outcome_status"] == "outcome_reported"
+    create_independent_corroboration(client, headers, source_id, second_source_id)
+    verified = client.post(
+        f"/api/v1/open-loops/{prerequisite['id']}/corroborate-outcome",
+        headers=headers,
+        json={
+            "text": "Two separately originated source records were reviewed",
+            "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
         },
     )
     assert verified.status_code == 200, verified.text
@@ -482,10 +543,29 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     assert reconciliation_record["semantic_grounding_status"] == "not_automatically_verified"
     assert "do not automatically establish semantic entailment" in reconciliation_record["interpretation_limit"]
 
+    assert reconciled.json()["outcome_status"] == "outcome_reported"
+    second_source_id = create_source_evidence(loop, "Independent second source for contradiction review")
+    blocked_close = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={"text": "Reconciliation alone is not corroboration", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert blocked_close.status_code == 409, blocked_close.text
+    create_independent_corroboration(client, headers, source_id, second_source_id)
+    corroborated = client.post(
+        f"/api/v1/open-loops/{loop['id']}/corroborate-outcome",
+        headers=headers,
+        json={
+            "text": "Independent source lineage reviewed for the reconciled claim",
+            "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
+            "verification_rule": "The reconciled outcome must be supported by independently originated records.",
+        },
+    )
+    assert corroborated.status_code == 200, corroborated.text
     closed = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "The record was reviewed against the reconciliation.", "evidence": [{"kind": "closure_review"}]},
+        json={"text": "The record was reviewed against the corroborated reconciliation.", "evidence": [{"kind": "closure_review"}]},
     )
     assert closed.status_code == 200, closed.text
     assert closed.json()["loop"]["status"] == "closed"
