@@ -1,9 +1,10 @@
 name: Messy-care benchmark gate
 
 on:
-  # Main-only benchmark execution. No pull-request workflow is used.
-  push:
+  pull_request:
     branches: [main]
+  push:
+    branches: [main, feat/messy-care-qualification-current-main-20261030]
   workflow_dispatch:
 
 permissions:
@@ -127,6 +128,87 @@ jobs:
         run: |
           python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
+      - name: Verify persisted care history survives PostgreSQL server restart
+        id: postgres_restart
+        if: steps.postgres_benchmark.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import time
+          from datetime import datetime, timezone
+
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import sessionmaker
+          from app.models.care import Person, Caregiver, CareEvent
+
+          dsn = os.environ["DATABASE_URL"]
+          suffix = os.environ["GITHUB_SHA"][:12]
+          person_id = f"restart-person-{suffix}"
+          caregiver_id = f"restart-caregiver-{suffix}"
+          event_id = f"restart-care-event-{suffix}"
+          engine = create_engine(dsn, pool_pre_ping=True)
+          Session = sessionmaker(bind=engine, expire_on_commit=False)
+
+          with Session() as db:
+              db.add(Person(id=person_id, name="PostgreSQL restart persistence fixture"))
+              db.flush()
+              db.add(Caregiver(
+                  id=caregiver_id,
+                  name="Restart persistence caregiver",
+                  relationship="family",
+                  person_id=person_id,
+              ))
+              db.flush()
+              db.add(CareEvent(
+                  id=event_id,
+                  person_id=person_id,
+                  event_type="mobility",
+                  status="recorded",
+                  occurred_at=datetime(2026, 10, 29, 8, 15, tzinfo=timezone.utc),
+                  title="Persisted care event restart probe",
+                  evidence_ids=["restart-source-" + suffix],
+                  created_by_caregiver_id=caregiver_id,
+              ))
+              db.commit()
+          engine.dispose()
+
+          containers = subprocess.check_output(
+              ["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"],
+              text=True,
+          ).strip().splitlines()
+          if not containers:
+              raise SystemExit("PostgreSQL service container was not found.")
+          subprocess.run(["docker", "restart", containers[0]], check=True)
+
+          last_error = None
+          for _ in range(30):
+              try:
+                  restarted_engine = create_engine(
+                      dsn, pool_pre_ping=True, connect_args={"connect_timeout": 2}
+                  )
+                  RestartedSession = sessionmaker(bind=restarted_engine, expire_on_commit=False)
+                  with RestartedSession() as db:
+                      event = db.query(CareEvent).filter_by(
+                          id=event_id, person_id=person_id
+                      ).one()
+                      assert event.created_by_caregiver_id == caregiver_id
+                      assert event.evidence_ids == ["restart-source-" + suffix]
+                      assert event.title == "Persisted care event restart probe"
+                      caregiver = db.query(Caregiver).filter_by(
+                          id=caregiver_id, person_id=person_id
+                      ).one()
+                      assert caregiver.id == caregiver_id
+                      print("POSTGRES_CARE_EVENT_FRESH_SESSION_AFTER_RESTART=PASS")
+                  restarted_engine.dispose()
+                  break
+              except Exception as error:
+                  last_error = error
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"PostgreSQL care-history restart persistence failed: {last_error}")
+          PY
+
       - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
@@ -164,6 +246,7 @@ jobs:
               )
           PY
           test "${{ steps.postgres_benchmark.outcome }}" = "success"
+          test "${{ steps.postgres_restart.outcome }}" = "success"
 
       - name: Upload PostgreSQL benchmark evidence
         if: always()
