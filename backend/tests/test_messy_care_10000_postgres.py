@@ -108,7 +108,11 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     case_id = history_index * CASES_PER_HISTORY + event_index
                     event_id = f"m10ke{suffix}{case_id:05d}"
                     domain = DOMAINS[(event_index + history_index) % len(DOMAINS)]
-                    reporter_id = caregiver_a_id if event_index % 2 == 0 else caregiver_b_id
+                    reporter_id = (
+                        (caregiver_a_id if event_index < CASES_PER_HISTORY // 2 else caregiver_b_id)
+                        if family == "caregiver_transition"
+                        else (caregiver_a_id if event_index % 2 == 0 else caregiver_b_id)
+                    )
                     # The same source anchor is deliberately reused by paired reports;
                     # separate event IDs and occurrence times must remain reconstructable.
                     source_anchor = f"m10ks{suffix}{case_id:05d}"
@@ -122,6 +126,12 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     # from the database-assigned recorded_at timestamp.
                     if family in {"backdated_observation", "historical_reconstruction"}:
                         occurred_at -= timedelta(days=365)
+                    if family == "late_arriving_evidence":
+                        occurred_at = reference - timedelta(days=10, hours=event_index)
+                    if family == "time_zone_boundary":
+                        occurred_at = (reference - timedelta(days=1)).astimezone(
+                            timezone(timedelta(hours=-8))
+                        )
                     title = f"{family} {domain} event {case_id:05d}"
                     description = (
                         f"Synthetic source report {case_id:05d}; "
@@ -131,9 +141,11 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         id=event_id,
                         person_id=person_id,
                         event_type=domain,
-                        status="recorded",
+                        status=("planned" if family == "planned_not_completed" else "recorded"),
                         occurred_at=occurred_at,
-                        occurred_at_timezone="UTC",
+                        occurred_at_timezone=(
+                            "America/Los_Angeles" if family == "time_zone_boundary" else "UTC"
+                        ),
                         title=title,
                         description=description,
                         evidence_ids=[source_anchor],
@@ -149,17 +161,33 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     evidence_rows.append(Evidence(
                         id=source_anchor,
                         person_id=person_id,
-                        type="caregiver_report",
-                        source_text=f"Original source report {case_id:05d}: {description}",
+                        type=("partial_document" if family == "partial_document" else "caregiver_report"),
+                        source_text=(
+                            f"Partial extract {case_id:05d}: source context unavailable."
+                            if family == "partial_document"
+                            else f"Original source report {case_id:05d}: {description}"
+                        ),
                         uploaded_by_caregiver_id=caregiver_b_id,
                         original_author=f"Reporter {event_index % 2}",
                         reported_by_label=f"Reporter {event_index % 2}",
-                        reported_by_caregiver_id=reporter_id,
+                        reported_by_caregiver_id=(None if family == "incomplete_history" else reporter_id),
                         collected_by_caregiver_id=caregiver_b_id,
                         collected_at=reference + timedelta(minutes=case_id),
                         occurred_at=occurred_at,
-                        reported_at=reference + timedelta(minutes=case_id),
-                        evidence_status="reported",
+                        occurred_at_timezone=(
+                            "America/Los_Angeles" if family == "time_zone_boundary" else "UTC"
+                        ),
+                        reported_at=(
+                            reference - timedelta(days=2)
+                            if family == "late_arriving_evidence"
+                            else reference + timedelta(minutes=case_id)
+                        ),
+                        evidence_status=(
+                            "stale" if family == "stale_observation"
+                            else "partial" if family == "partial_document"
+                            else "planned" if family == "planned_not_completed"
+                            else "reported"
+                        ),
                         source_type="caregiver_report",
                         original_source_reference=f"synthetic://source/{case_id:05d}",
                         source_text_sha256=None,
@@ -180,7 +208,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         source_label=f"Reporter {event_index % 2}",
                         source_text=description,
                         evidence_ids=[source_anchor],
-                        assertion_status="reported",
+                        assertion_status=("planned" if family == "planned_not_completed" else "reported"),
                         observed_at=occurred_at,
                         created_by_caregiver_id=reporter_id,
                     ))
@@ -203,7 +231,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             original_source_reference=f"synthetic://source/{case_id:05d}",
                         ))
 
-                    if family == "conflicting_reports":
+                    if family in {"conflicting_reports", "independent_reporters"}:
                         conflicting_id = f"m10kcf{suffix}{case_id:05d}"
                         assertion_rows.append(CareAssertion(
                             id=conflicting_id,
@@ -335,7 +363,10 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     Evidence.person_id == wanted["person_id"],
                 ).one()
                 assert evidence.uploaded_by_caregiver_id == wanted["uploader_id"]
-                assert evidence.reported_by_caregiver_id == wanted["caregiver_id"]
+                if wanted["family"] == "incomplete_history":
+                    assert evidence.reported_by_caregiver_id is None
+                else:
+                    assert evidence.reported_by_caregiver_id == wanted["caregiver_id"]
                 assert evidence.source_text
                 assert evidence.source_text_sha256
                 claim = reader.query(CareAssertion).filter(
@@ -349,6 +380,18 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert row.recorded_at != row.occurred_at, (
                     f"{row.id}: event time and recorded time were conflated"
                 )
+                if wanted["family"] == "planned_not_completed":
+                    assert row.status == "planned"
+                    assert claim.assertion_status == "planned"
+                if wanted["family"] == "stale_observation":
+                    assert evidence.evidence_status == "stale"
+                if wanted["family"] == "partial_document":
+                    assert evidence.evidence_status == "partial"
+                    assert "context unavailable" in evidence.source_text
+                if wanted["family"] == "late_arriving_evidence":
+                    assert _utc(evidence.reported_at) > _utc(evidence.occurred_at)
+                if wanted["family"] == "time_zone_boundary":
+                    assert evidence.occurred_at_timezone == "America/Los_Angeles"
                 assert f"case:{wanted['case_id']:05d}" in (row.tags or [])
                 assert wanted["family"] in (row.tags or [])
                 by_person[row.person_id].append(row)
