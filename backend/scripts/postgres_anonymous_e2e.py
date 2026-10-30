@@ -316,9 +316,9 @@ def main():
             f"Concurrent observations escaped their explicitly selected mobility thread: {concurrent_captures}",
         )
         require(
-            len(concurrent_capture_event_ids) == 3
+            len(concurrent_capture_event_ids) == 4
             and None not in concurrent_capture_event_ids
-            and len(concurrent_capture_evidence_ids) == 3
+            and len(concurrent_capture_evidence_ids) == 4
             and None not in concurrent_capture_evidence_ids,
             f"Every selected-thread capture must preserve a distinct source/event pair: {concurrent_capture_event_ids}",
         )
