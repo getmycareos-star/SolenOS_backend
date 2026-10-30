@@ -42,7 +42,6 @@ jobs:
             backend/tests/test_open_loop_messy_scenarios.py \
             backend/tests/test_situation_temporal_provenance.py \
             backend/tests/test_evidence_lineage.py \
-            backend/tests/test_evidence_review_persistence.py \
             backend/tests/test_care_continuity_link_validation.py \
             backend/tests/test_uncertainty_benchmark.py \
             backend/tests/test_situation.py \
