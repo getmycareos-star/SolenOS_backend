@@ -127,10 +127,7 @@ def list_question_answer_history(
     rows = engine.db.query(OpenQuestionAnswerEventModel).filter(
         OpenQuestionAnswerEventModel.question_id == question_id,
         OpenQuestionAnswerEventModel.person_id == engine.person_id,
-    ).order_by(
-        OpenQuestionAnswerEventModel.created_at.asc(),
-        OpenQuestionAnswerEventModel.id.asc(),
-    ).all()
+    ).order_by(OpenQuestionAnswerEventModel.answer_version.asc()).all()
     return [{
         "id": row.id,
         "question_id": row.question_id,
@@ -138,6 +135,7 @@ def list_question_answer_history(
         "answer": row.answer,
         "answer_provenance": row.answer_provenance,
         "evidence_ids": list(row.evidence_ids or []),
+        "answer_version": row.answer_version,
         "answered_by_caregiver_id": row.answered_by_caregiver_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     } for row in rows]
