@@ -210,6 +210,37 @@ def main():
             ])
             db.commit()
 
+        relation_payloads = [
+            {
+                "source_type": "situation",
+                "source_id": mobility_thread_id,
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": appetite_thread_id,
+                "provenance": "Caregiver explicitly linked these as related but separate concerns in this PostgreSQL concurrency test.",
+            },
+            {
+                "source_type": "situation",
+                "source_id": appetite_thread_id,
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": mobility_thread_id,
+                "provenance": "Caregiver explicitly linked these as related but separate concerns in this PostgreSQL concurrency test.",
+            },
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            relationship_results = list(pool.map(
+                lambda payload: request(
+                    "POST", "/api/v1/care-continuity/relationships",
+                    body=payload, token=token_a
+                ),
+                relation_payloads,
+            ))
+        require(
+            sorted(status for status, _ in relationship_results) == [201, 409],
+            f"Concurrent reverse-order related-thread links must create exactly one relationship: {relationship_results}",
+        )
+
         appetite_capture = {
             "caregiver_id": caregiver_a,
             "person_id": person_a,
@@ -302,6 +333,13 @@ def main():
             grouped_threads[appetite_thread_id].get("linked_evidence_ids", [])
             == [appetite_result.get("evidence_id")],
             "Hydrated appetite thread incorrectly absorbed mobility evidence",
+        )
+        require(
+            any(link.get("id") == appetite_thread_id
+                for link in grouped_threads[mobility_thread_id].get("relatedSituations", []))
+            and any(link.get("id") == mobility_thread_id
+                    for link in grouped_threads[appetite_thread_id].get("relatedSituations", [])),
+            "Both care threads must expose the explicit relationship while retaining separate evidence",
         )
 
         # Two simultaneous uploads of identical bytes must not both be
