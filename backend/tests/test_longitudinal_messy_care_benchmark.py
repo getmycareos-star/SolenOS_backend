@@ -605,3 +605,70 @@ def test_cross_domain_situation_inputs_keep_source_domains_and_person_isolation(
             assert set(situation.signal_ids or {}).issubset({
                 event.id for event in db.query(CareEvent).filter(CareEvent.person_id == person_a.id).all()
             })
+
+
+def test_multi_source_ingestion_preserves_uploader_reporter_observer_and_dual_time():
+    """Uploader, reporter and collector are separate identities; event and ingest time stay distinct."""
+    with TestingSessionLocal() as db:
+        person, uploader = make_person(db, "attribution-uploader")
+        reporter = Caregiver(
+            id="c-reporter-" + hashlib.sha256(person.id.encode()).hexdigest()[:10],
+            name="Synthetic Reporter",
+            relationship="Family",
+            person_id=person.id,
+        )
+        observer = Caregiver(
+            id="c-observer-" + hashlib.sha256(person.id.encode()).hexdigest()[:10],
+            name="Synthetic Observer",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([reporter, observer])
+        db.flush()
+        token = issue_session(db, person, uploader)
+        db.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/evidence",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person.id,
+            "type": "note",
+            "evidence_kind": "caregiver_report",
+            "epistemic_status": "unverified",
+            "source_text": "Reporter says the person needed two-person assistance at 08:15.",
+            "uploaded_by_caregiver_id": uploader.id,
+            "reported_by_caregiver_id": reporter.id,
+            "reported_by_label": reporter.name,
+            "collected_by_caregiver_id": observer.id,
+            "original_author": "Family shift handover",
+            "occurred_at": "2026-10-28T08:15:00+00:00",
+            "occurred_at_timezone": "Europe/London",
+            "reported_at": "2026-10-29T11:00:00+00:00",
+            "collected_at": "2026-10-29T11:05:00+00:00",
+            "origin_channel": "family_handover",
+        },
+    )
+    assert response.status_code in {200, 201}, response.text
+    payload = response.json()
+    assert payload["uploaded_by_caregiver_id"] == uploader.id
+    assert payload["reported_by_caregiver_id"] == reporter.id
+    assert payload["reported_by_label"] == reporter.name
+    assert payload["collected_by_caregiver_id"] == observer.id
+    assert payload["occurred_at"].startswith("2026-10-28T08:15:00")
+    assert payload["reported_at"].startswith("2026-10-29T11:00:00")
+    assert payload["collected_at"].startswith("2026-10-29T11:05:00")
+
+    # Fresh SQLAlchemy session proves persisted attribution and time provenance,
+    # not merely response serialization from the request object.
+    with TestingSessionLocal() as verify_db:
+        stored = verify_db.query(__import__("app.models.care", fromlist=["Evidence"]).Evidence).filter_by(
+            id=payload["id"], person_id=person.id
+        ).one()
+        assert stored.uploaded_by_caregiver_id == uploader.id
+        assert stored.reported_by_caregiver_id == reporter.id
+        assert stored.collected_by_caregiver_id == observer.id
+        assert stored.original_author == "Family shift handover"
+        assert stored.occurred_at.isoformat().startswith("2026-10-28T08:15:00")
+        assert stored.ingested_at is not None
