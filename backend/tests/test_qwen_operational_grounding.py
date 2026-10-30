@@ -1,6 +1,7 @@
 import pytest
+from sqlalchemy.dialects import postgresql
 
-from app.api.collaboration import _contains_unsupported_operational_claim
+from app.api.collaboration import _contains_unsupported_operational_claim, _medication_day_event_filter
 from app.services.qwen_background_worker import ENABLED_WORKFLOWS, _route_from_text
 
 
@@ -132,3 +133,14 @@ def test_rejects_unsupported_medication_action_even_if_reply_also_mentions_missi
         "No matching care evidence was supplied.",
         [],
     ) is True
+
+
+
+def test_medication_day_retrieval_filter_excludes_unrelated_care_domains():
+    compiled = str(_medication_day_event_filter().compile(dialect=postgresql.dialect()))
+    assert "care_events.event_type ILIKE" in compiled
+    assert "care_events.title ILIKE" in compiled
+    assert "care_events.description ILIKE" in compiled
+    assert "%medication%" in compiled
+    assert "%prescription%" in compiled
+    assert "%dose%" in compiled
