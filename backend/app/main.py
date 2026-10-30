@@ -36,6 +36,8 @@ from app.api.open_loops import router as open_loops_router, open_loop_maintenanc
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.change import Situation as SituationModel
+from app.models.uncertainty import OpenQuestion as OpenQuestionModel
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
 from app.api.identity_security import router as identity_security_router
@@ -563,7 +565,104 @@ def get_situation(
         "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         "time_provenance": event.time_provenance,
         "evidence_ids": event.evidence_ids or [],
+        "situation_id": event.situation_id,
     } for event in events]
+
+    # Rehydrate distinct persisted situation records instead of collapsing the
+    # entire person's evidence timeline into one synthetic active thread.
+    persisted_situations = (
+        db.query(SituationModel)
+        .filter(SituationModel.person_id == person_id)
+        .order_by(SituationModel.created_at.asc(), SituationModel.id.asc())
+        .all()
+    )
+    open_question_rows = (
+        db.query(OpenQuestionModel)
+        .filter(
+            OpenQuestionModel.person_id == person_id,
+            OpenQuestionModel.status == "open",
+        )
+        .order_by(OpenQuestionModel.asked_at.asc(), OpenQuestionModel.id.asc())
+        .all()
+    )
+    evidence_by_id = {row["id"]: row for row in observations}
+    event_by_id = {event.id: event for event in events}
+    situation_ui_rows = []
+    for saved_situation in persisted_situations:
+        signal_ids = set(saved_situation.signal_ids or [])
+        linked_events = [
+            event for event in events
+            if event.situation_id == saved_situation.id or event.id in signal_ids
+        ]
+        linked_evidence_ids = set(
+            evidence_id for evidence_id in signal_ids if evidence_id in evidence_by_id
+        )
+        for event in linked_events:
+            linked_evidence_ids.update(event.evidence_ids or [])
+        linked_questions = [
+            question.question for question in open_question_rows
+            if question.subject_type in set(saved_situation.signal_types or [])
+        ]
+        situation_ui_rows.append({
+            "id": saved_situation.id,
+            "title": saved_situation.title,
+            "status": saved_situation.state.value if saved_situation.state else "active",
+            "riskLevel": "LOW",
+            "documents": [],
+            "openQuestions": linked_questions,
+            "nextActions": [],
+            "risks": [],
+            "responsibilities": [],
+            "contextSummary": saved_situation.description or saved_situation.explanation or "",
+            "updatedAt": (
+                saved_situation.updated_at or saved_situation.created_at
+            ).isoformat() if (saved_situation.updated_at or saved_situation.created_at) else "",
+            "situation_type": saved_situation.situation_type.value if saved_situation.situation_type else None,
+            "temporal_start": saved_situation.temporal_start.isoformat() if saved_situation.temporal_start else None,
+            "temporal_end": saved_situation.temporal_end.isoformat() if saved_situation.temporal_end else None,
+            "attention_candidate": bool(saved_situation.attention_candidate),
+            "follow_up_candidate": bool(saved_situation.follow_up_candidate),
+            "signal_types": list(saved_situation.signal_types or []),
+            "signal_ids": list(saved_situation.signal_ids or []),
+            "linked_event_ids": [event.id for event in linked_events],
+            "linked_evidence_ids": sorted(linked_evidence_ids),
+        })
+
+    # Preserve separate event threads when no persisted situation model has
+    # linked them yet. This is a one-event projection, not an inferred merge.
+    grouped_events = {}
+    for event in events:
+        group_id = event.situation_id or f"event:{event.id}"
+        grouped_events.setdefault(group_id, []).append(event)
+    existing_ui_ids = {item["id"] for item in situation_ui_rows}
+    care_situation_groups = []
+    for group_id, group_events in grouped_events.items():
+        canonical_id = group_id.removeprefix("event:")
+        care_situation_groups.append({
+            "situation_id": canonical_id,
+            "root_event_id": group_events[0].id if group_events else None,
+            "event_ids": [event.id for event in group_events],
+        })
+        if canonical_id in existing_ui_ids:
+            continue
+        latest = group_events[-1]
+        situation_ui_rows.append({
+            "id": canonical_id,
+            "title": (latest.title or "Recorded care observation")[:160],
+            "status": "active",
+            "riskLevel": "LOW",
+            "documents": [],
+            "openQuestions": [],
+            "nextActions": [],
+            "risks": [],
+            "responsibilities": [],
+            "contextSummary": latest.description or "",
+            "updatedAt": latest.occurred_at.isoformat() if latest.occurred_at else "",
+            "linked_event_ids": [event.id for event in group_events],
+            "linked_evidence_ids": sorted({
+                evidence_id for event in group_events for evidence_id in (event.evidence_ids or [])
+            }),
+        })
 
     active_situation = None
     active_turn = None
@@ -603,6 +702,21 @@ def get_situation(
         }
 
     client_care_key = caregiver_id.strip() or care_session_id.strip() or caregiver_scope_id
+    # Keep the latest persisted situation as the focused turn, while the
+    # complete separate situation list remains available to the workspace.
+    if situation_ui_rows:
+        latest_ui = max(
+            situation_ui_rows,
+            key=lambda item: item.get("updatedAt") or "",
+        )
+        if active_situation is not None:
+            active_situation["id"] = latest_ui["id"]
+            active_situation["open_questions"] = list(latest_ui.get("openQuestions") or [])
+            active_situation["synthesis"] = latest_ui.get("contextSummary") or None
+            active_situation["persistence_source"] = "persisted_situation_and_evidence_projection"
+            active_situation["reasoning_state_persisted"] = True
+            active_situation["open_questions_available"] = True
+
     return {
         "ok": True,
         "has_context_root": bool(observations),
@@ -611,8 +725,17 @@ def get_situation(
         "care_recipient_display_name": person.name,
         "total_events": len(events),
         "events": event_payload,
-        "situations": [],
-        "ui_situations": [],
+        "situations": [{
+            "id": item["id"],
+            "title": item["title"],
+            "description": item.get("contextSummary", ""),
+            "state": item.get("status", "active"),
+            "situation_type": item.get("situation_type"),
+            "attention_candidate": item.get("attention_candidate", False),
+            "follow_up_candidate": item.get("follow_up_candidate", False),
+        } for item in situation_ui_rows],
+        "ui_situations": situation_ui_rows,
+        "care_situation_groups": care_situation_groups,
         "context": {
             "caregiver_id": client_care_key,
             "care_recipient_id": person_id,
@@ -624,7 +747,7 @@ def get_situation(
             "soft_invite": {"offered_now": False, "text": None},
             "is_long_absence": False,
             "recent_relevant_changes": [],
-            "important_unresolved": [],
+            "important_unresolved": [question.question for question in open_question_rows],
             "suppress_first_time_ux": bool(observations),
         },
     }
