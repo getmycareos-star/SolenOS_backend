@@ -13,16 +13,25 @@ permissions:
   contents: read
 
 concurrency:
-  group: companion-live-qwen-${{ github.event.pull_request.number || github.ref }}
+  group: companion-live-qwen-${{ github.event.pull_request.number || github.ref }}-${{ matrix.model_role }}
   cancel-in-progress: true
 
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
+    continue-on-error: ${{ matrix.model_role == 'baseline' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - model: qwen2.5:0.5b
+            model_role: baseline
+          - model: qwen3.5:4b
+            model_role: candidate
     env:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
-      OLLAMA_MODEL: qwen3.5:4b
+      OLLAMA_MODEL: ${{ matrix.model }}
       OLLAMA_TIMEOUT_SECONDS: "180"
       OLLAMA_NUM_CTX: "4096"
       OLLAMA_NUM_PREDICT: "256"
@@ -51,10 +60,73 @@ jobs:
           done
           docker logs solenos-live-ollama
           exit 1
-      - name: Download the default-model candidate under test
+      - name: Download model under test
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
-      - name: Run live Companion inference evaluation
-        run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
+      - name: Run live authenticated Companion evaluation and sample model memory
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python -m pytest backend/live_tests/test_companion_live_inference.py -q -s --junitxml=/tmp/live-qwen-results.xml | tee /tmp/live-qwen-output.log &
+          test_pid=$!
+          sampler_pid=""
+          (
+            while kill -0 "$test_pid" 2>/dev/null; do
+              docker stats --no-stream --format '{{.MemUsage}}' solenos-live-ollama 2>/dev/null >> /tmp/ollama-memory-samples.log || true
+              sleep 1
+            done
+          ) &
+          sampler_pid=$!
+          set +e
+          wait "$test_pid"
+          test_exit=$?
+          set -e
+          kill "$sampler_pid" 2>/dev/null || true
+          wait "$sampler_pid" 2>/dev/null || true
+          python - <<'PY'
+          import re
+          import statistics
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          output = Path("/tmp/live-qwen-output.log").read_text() if Path("/tmp/live-qwen-output.log").exists() else ""
+          latencies = [float(value) for value in re.findall(r"QWEN_LIVE_LATENCY_MS=([0-9.]+)", output)]
+          if latencies:
+              ordered = sorted(latencies)
+              p95_index = max(0, min(len(ordered) - 1, int(0.95 * len(ordered) + 0.999) - 1))
+              print(f"QWEN_HTTP_REQUEST_COUNT={len(ordered)}")
+              print(f"QWEN_HTTP_LATENCY_P50_MS={statistics.median(ordered):.1f}")
+              print(f"QWEN_HTTP_LATENCY_P95_MS={ordered[p95_index]:.1f}")
+          else:
+              print("QWEN_HTTP_REQUEST_COUNT=0")
+              print("No authenticated Companion latency samples were captured.")
+          samples = Path("/tmp/ollama-memory-samples.log")
+          if samples.exists():
+              values = []
+              for line in samples.read_text().splitlines():
+                  match = re.search(r"([0-9.]+)\s*(GiB|MiB|GB|MB)", line)
+                  if match:
+                      number = float(match.group(1))
+                      unit = match.group(2)
+                      values.append(number * (1024 if unit in {"GiB", "GB"} else 1))
+              if values:
+                  print(f"OLLAMA_CONTAINER_PEAK_MEMORY_MIB={max(values):.1f}")
+          junit = Path("/tmp/live-qwen-results.xml")
+          if junit.exists():
+              root = ET.parse(junit).getroot()
+              suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+              tests = sum(int(s.attrib.get("tests", 0)) for s in suites)
+              failures = sum(int(s.attrib.get("failures", 0)) for s in suites)
+              errors = sum(int(s.attrib.get("errors", 0)) for s in suites)
+              skipped = sum(int(s.attrib.get("skipped", 0)) for s in suites)
+              executed = tests - skipped
+              passed = executed - failures - errors
+              score = round(100 * passed / executed, 2) if executed else 0.0
+              print(f"QWEN_LIVE_QUALITY_PASSED={passed}")
+              print(f"QWEN_LIVE_QUALITY_EXECUTED={executed}")
+              print(f"QWEN_LIVE_QUALITY_SCORE={score}")
+              print(f"QWEN_LIVE_QUALITY_FAILED={failures + errors}")
+          PY
+          exit "$test_exit"
       - name: Stop isolated Ollama runtime
         if: always()
         run: docker rm -f solenos-live-ollama || true
