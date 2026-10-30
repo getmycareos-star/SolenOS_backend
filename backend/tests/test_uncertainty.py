@@ -2408,20 +2408,20 @@ def test_companion_conversation_is_private_to_its_authenticated_caregiver():
         client = TestClient(app)
         owner = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-a"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-a']}"},
         )
         assert owner.status_code == 200, owner.text
         assert owner.json()["messages"][0]["text"] == "Private caregiver context."
 
         same_record_other_caregiver = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-b"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-b']}"},
         )
         assert same_record_other_caregiver.status_code == 404
 
         different_person = client.get(
             "/api/v1/conversation/private-companion-session",
-            headers={"Authorization": f"Bearer {tokens["companion-private-other-caregiver"]}"},
+            headers={"Authorization": f"Bearer {tokens['companion-private-other-caregiver']}"},
         )
         assert different_person.status_code == 404
     finally:
