@@ -335,6 +335,7 @@ def test_open_question_lifecycle():
         assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
         assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
         assert first_history.json()[0]["evidence_ids"] == [first_evidence_id]
+        assert first_history.json()[0]["answer_version"] == 1
         repeated_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
@@ -386,6 +387,7 @@ def test_open_question_lifecycle():
         assert all(row["person_id"] == "person-5" for row in second_history.json())
         assert second_history.json()[0]["evidence_ids"] == [first_evidence_id]
         assert second_history.json()[1]["evidence_ids"] == [second_evidence_id]
+        assert [row["answer_version"] for row in second_history.json()] == [1, 2]
         assert other_client.get(
             f"/api/v1/uncertainty/questions/{question_id}/answer-history"
         ).status_code == 404
@@ -2182,16 +2184,33 @@ def test_duplicate_open_clarification_question_is_suppressed_but_answered_questi
         assert duplicate.status_code == 422, duplicate.text
         assert "equivalent open clarification question already exists" in duplicate.text
 
+        answer_source = client.post(
+            "/api/v1/evidence",
+            json={
+                "person_id": person.id,
+                "uploaded_by_caregiver_id": caregiver.id,
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": "The reporting caregiver confirms the appointment was attended.",
+            },
+        )
+        assert answer_source.status_code in {200, 201}, answer_source.text
+        answer_evidence_id = answer_source.json()["id"]
         answered = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
                 "status": "answered",
                 "answer": "The caregiver reports that it was attended.",
                 "answer_provenance": "Answered by the reporting caregiver during follow-up.",
+                "evidence_ids": [answer_evidence_id],
             },
         )
         assert answered.status_code == 200, answered.text
         assert answered.json()["status"] == "answered"
+        answer_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert answer_history.status_code == 200, answer_history.text
+        assert answer_history.json()[0]["evidence_ids"] == [answer_evidence_id]
 
         repeated_after_answer = client.post("/api/v1/uncertainty/questions", json=payload)
         assert repeated_after_answer.status_code == 200, repeated_after_answer.text
