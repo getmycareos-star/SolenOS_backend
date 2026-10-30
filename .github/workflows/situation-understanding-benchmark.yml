@@ -1,7 +1,9 @@
 name: Messy-care benchmark gate
 
 on:
-  # Main-only benchmark execution. No pull-request workflow is used.
+  # Mandatory acceptance gate for every proposed change and every main update.
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
@@ -32,22 +34,7 @@ jobs:
         id: benchmark
         continue-on-error: true
         run: |
-          python -m pytest \
-            backend/tests/test_situation_understanding_benchmark.py \
-            backend/tests/test_messy_care_10000_scenarios.py \
-            backend/tests/test_longitudinal_messy_care_benchmark.py \
-            backend/tests/test_longitudinal_change_benchmark.py \
-            backend/tests/test_open_loop_messy_scenarios.py \
-            backend/tests/test_situation_temporal_provenance.py \
-            backend/tests/test_evidence_lineage.py \
-            backend/tests/test_evidence_review_persistence.py \
-            backend/tests/test_care_continuity_link_validation.py \
-            backend/tests/test_uncertainty_benchmark.py \
-            backend/tests/test_situation.py \
-            backend/tests/test_uncertainty.py \
-            backend/tests/test_appointment_workspace.py \
-            backend/tests/test_persisted_capture_review.py \
-            -q -s --junitxml=/tmp/messy-care-contract.xml
+          python -m pytest backend/tests/test_situation_understanding_benchmark.py backend/tests/test_messy_care_10000_scenarios.py backend/tests/test_longitudinal_messy_care_benchmark.py backend/tests/test_longitudinal_change_benchmark.py backend/tests/test_open_loop_messy_scenarios.py backend/tests/test_situation_temporal_provenance.py backend/tests/test_evidence_lineage.py backend/tests/test_evidence_review_persistence.py backend/tests/test_care_continuity_link_validation.py backend/tests/test_uncertainty_benchmark.py backend/tests/test_situation.py backend/tests/test_uncertainty.py backend/tests/test_appointment_workspace.py backend/tests/test_persisted_capture_review.py -q -s --junitxml=/tmp/messy-care-contract.xml
 
       - name: Enforce complete benchmark execution
         if: always()
@@ -134,6 +121,41 @@ jobs:
         continue-on-error: true
         run: |
           python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml
+
+      - name: Verify PostgreSQL records survive server restart
+        if: steps.postgres_benchmark.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import time
+          import psycopg2
+
+          dsn = os.environ["DATABASE_URL"]
+          probe_id = os.environ["GITHUB_SHA"]
+          with psycopg2.connect(dsn) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("CREATE TABLE IF NOT EXISTS messy_care_restart_probe (probe_id text PRIMARY KEY, verified_at timestamptz NOT NULL DEFAULT now())")
+                  cursor.execute("INSERT INTO messy_care_restart_probe (probe_id) VALUES (%s) ON CONFLICT (probe_id) DO UPDATE SET verified_at = now()", (probe_id,))
+          containers = subprocess.check_output(["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"], text=True).strip().splitlines()
+          if not containers:
+              raise SystemExit("PostgreSQL 17 service container not found")
+          subprocess.run(["docker", "restart", containers[0]], check=True)
+          last_error = None
+          for _ in range(30):
+              try:
+                  with psycopg2.connect(dsn, connect_timeout=2) as connection:
+                      with connection.cursor() as cursor:
+                          cursor.execute("SELECT probe_id FROM messy_care_restart_probe WHERE probe_id = %s", (probe_id,))
+                          if cursor.fetchone() == (probe_id,):
+                              print("POSTGRES_RESTART_PERSISTENCE=PASS")
+                              break
+              except Exception as error:
+                  last_error = error
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"PostgreSQL restart persistence failed: {last_error}")
+          PY
 
       - name: Enforce PostgreSQL benchmark execution
         if: always()
