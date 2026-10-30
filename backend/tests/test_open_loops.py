@@ -558,6 +558,7 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
         json={
             "text": "Independent source lineage reviewed for the reconciled claim",
             "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
+            "verification_rule": "The reconciled outcome must be supported by independently originated records.",
         },
     )
     assert corroborated.status_code == 200, corroborated.text
