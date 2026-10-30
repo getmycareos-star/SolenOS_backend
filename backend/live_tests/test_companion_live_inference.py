@@ -305,6 +305,9 @@ def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordinati
             "check her food intake",
             "check what she eats",
             "check lunch and dinner",
+            "check her lunch and dinner",
+            "check their lunch and dinner",
+            "check lunch and dinner portions",
             "report those findings",
             "record what she eats",
         ))
