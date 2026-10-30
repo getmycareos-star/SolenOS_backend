@@ -625,3 +625,152 @@ def test_cross_domain_situation_inputs_keep_source_domains_and_person_isolation(
             assert set(situation.signal_ids or {}).issubset({
                 event.id for event in db.query(CareEvent).filter(CareEvent.person_id == person_a.id).all()
             })
+
+def test_multi_source_ingestion_preserves_uploader_reporter_observer_and_dual_time():
+    """Uploader, reporter and collector are separate identities; event and ingest time stay distinct."""
+    with TestingSessionLocal() as db:
+        person, uploader = make_person(db, "attribution-uploader")
+        reporter = Caregiver(
+            id="c-reporter-" + hashlib.sha256(person.id.encode()).hexdigest()[:10],
+            name="Synthetic Reporter",
+            relationship="Family",
+            person_id=person.id,
+        )
+        observer = Caregiver(
+            id="c-observer-" + hashlib.sha256(person.id.encode()).hexdigest()[:10],
+            name="Synthetic Observer",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([reporter, observer])
+        db.flush()
+        token = issue_session(db, person, uploader)
+        db.commit()
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/evidence",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "person_id": person.id,
+            "type": "note",
+            "evidence_kind": "caregiver_report",
+            "epistemic_status": "unverified",
+            "source_text": "Reporter says the person needed two-person assistance at 08:15.",
+            "uploaded_by_caregiver_id": uploader.id,
+            "reported_by_caregiver_id": reporter.id,
+            "reported_by_label": reporter.name,
+            "collected_by_caregiver_id": observer.id,
+            "original_author": "Family shift handover",
+            "occurred_at": "2026-10-28T08:15:00+00:00",
+            "occurred_at_timezone": "Europe/London",
+            "reported_at": "2026-10-29T11:00:00+00:00",
+            "collected_at": "2026-10-29T11:05:00+00:00",
+            "origin_channel": "family_handover",
+        },
+    )
+    assert response.status_code in {200, 201}, response.text
+    payload = response.json()
+    assert payload["uploaded_by_caregiver_id"] == uploader.id
+    assert payload["reported_by_caregiver_id"] == reporter.id
+    assert payload["reported_by_label"] == reporter.name
+    assert payload["collected_by_caregiver_id"] == observer.id
+    assert payload["occurred_at"].startswith("2026-10-28T08:15:00")
+    assert payload["reported_at"].startswith("2026-10-29T11:00:00")
+    assert payload["collected_at"].startswith("2026-10-29T11:05:00")
+
+    # Fresh SQLAlchemy session proves persisted attribution and time provenance,
+    # not merely response serialization from the request object.
+    with TestingSessionLocal() as verify_db:
+        stored = verify_db.query(__import__("app.models.care", fromlist=["Evidence"]).Evidence).filter_by(
+            id=payload["id"], person_id=person.id
+        ).one()
+        assert stored.uploaded_by_caregiver_id == uploader.id
+        assert stored.reported_by_caregiver_id == reporter.id
+        assert stored.collected_by_caregiver_id == observer.id
+        assert stored.original_author == "Family shift handover"
+        assert stored.occurred_at.isoformat().startswith("2026-10-28T08:15:00")
+        assert stored.ingested_at is not None
+
+
+# One hundred independently labelled adversarial cases. Each family varies
+# timestamps/identities while retaining an explicit expected result; expected
+# counts are labels, never derived from the service under test.
+def _messy_care_scenario_cases():
+    cases = []
+    for variant in range(10):
+        cases.extend([
+            (f"future_excluded_{variant:02d}", "future", variant, 1, 1),
+            (f"same_source_same_occurrence_{variant:02d}", "duplicate", variant, 1, 1),
+            (f"same_source_distinct_occurrences_{variant:02d}", "distinct", variant, 2, 2),
+            (f"stale_plus_current_{variant:02d}", "stale_current", variant, 2, 1),
+            (f"invalidated_excluded_{variant:02d}", "invalidated", variant, 0, 0),
+            (f"cross_person_isolated_{variant:02d}", "cross_person", variant, 1, 1),
+            (f"cross_domain_isolated_{variant:02d}", "cross_domain", variant, 1, 1),
+            (f"unlinked_events_remain_distinct_{variant:02d}", "no_source", variant, 2, 2),
+            (f"42_day_boundary_{variant:02d}", "boundary", variant, 2, 1),
+            (f"late_arrival_stays_historical_{variant:02d}", "late_arrival", variant, 1, 0),
+        ])
+    assert len(cases) == 100
+    return cases
+
+
+@pytest.mark.parametrize(
+    "case_id,kind,variant,expected_total,expected_current",
+    _messy_care_scenario_cases(),
+    ids=lambda value: value if isinstance(value, str) and "_" in value else None,
+)
+def test_100_case_messy_care_temporal_scope_and_deduplication_benchmark(
+    case_id, kind, variant, expected_total, expected_current
+):
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, f"100-case-{case_id}")
+        event_type = "mobility"
+        day = variant + 1
+
+        if kind == "future":
+            add_event(db, person, caregiver, event_type, day, f"observed-{case_id}")
+            add_event(db, person, caregiver, event_type, -1 - variant, f"future-{case_id}")
+        elif kind == "duplicate":
+            source = [f"source-{case_id}"]
+            add_event(db, person, caregiver, event_type, day, f"original-{case_id}", source)
+            add_event(db, person, caregiver, event_type, day, f"copied-{case_id}", source)
+        elif kind == "distinct":
+            source = [f"source-{case_id}"]
+            add_event(db, person, caregiver, event_type, day, f"occurrence-a-{case_id}", source)
+            add_event(db, person, caregiver, event_type, day + 1, f"occurrence-b-{case_id}", source)
+        elif kind == "stale_current":
+            add_event(db, person, caregiver, event_type, 60 + variant, f"stale-{case_id}")
+            add_event(db, person, caregiver, event_type, day, f"current-{case_id}")
+        elif kind == "invalidated":
+            event = add_event(db, person, caregiver, event_type, day, f"invalidated-{case_id}")
+            event.status = "invalidated"
+        elif kind == "cross_person":
+            add_event(db, person, caregiver, event_type, day, f"own-{case_id}")
+            other_person, other_caregiver = make_person(db, f"other-{case_id}")
+            add_event(db, other_person, other_caregiver, event_type, day, f"other-{case_id}")
+        elif kind == "cross_domain":
+            add_event(db, person, caregiver, event_type, day, f"target-{case_id}")
+            add_event(db, person, caregiver, "nutrition", day, f"other-domain-{case_id}")
+        elif kind == "no_source":
+            add_event(db, person, caregiver, event_type, day, f"unlinked-a-{case_id}")
+            add_event(db, person, caregiver, event_type, day, f"unlinked-b-{case_id}")
+        elif kind == "boundary":
+            add_event(db, person, caregiver, event_type, 42, f"boundary-current-{case_id}")
+            add_event(db, person, caregiver, event_type, 43, f"boundary-historical-{case_id}")
+        elif kind == "late_arrival":
+            add_event(db, person, caregiver, event_type, 90 + variant, f"late-arriving-old-event-{case_id}")
+        else:
+            raise AssertionError(f"Unknown benchmark scenario: {kind}")
+
+        db.flush()
+        result = get_longitudinal_event_counts(db, person.id, event_type, None, NOW)
+        assert result["total_events"] == expected_total, (
+            f"{case_id}: expected total={expected_total}, got={result['total_events']}"
+        )
+        assert result["current_window_count"] == expected_current, (
+            f"{case_id}: expected current={expected_current}, got={result['current_window_count']}"
+        )
+        assert result["historical_count"] == expected_total - expected_current
+        assert all(event.person_id == person.id for event in result["all_events"])
+        assert all(event.event_type == event_type for event in result["all_events"])
