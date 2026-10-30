@@ -152,7 +152,7 @@ def build_cases():
             elif family == "no_evidence":
                 evidence = []
             elif family == "explicit_uncertainty":
-                claim = f"It is possible that the care event occurred in case {suffix}."
+                claim = f"Maybe the care event occurred in case {suffix}."
             elif family == "future_timestamp":
                 evidence[0]["observed_at"] = "2026-10-30T13:00:00Z"
                 evidence[0]["temporal_scope"] = "current"
@@ -222,6 +222,8 @@ def test_10000_adversarial_messy_care_scenarios(case):
         assert result["assumptions"][0]["status"] == "unresolved"
     if case["family"] == "unresolved_alternative":
         assert result["alternatives"][0]["status"] == "unresolved"
+    if case["family"] == "explicit_uncertainty":
+        assert result["explicit_uncertainty"] is True
 
 
 def test_10000_case_corpus_is_complete_and_independently_labelled():
