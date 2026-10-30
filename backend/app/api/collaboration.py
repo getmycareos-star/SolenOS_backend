@@ -1035,6 +1035,110 @@ def _trend_uncertainty_response(assessment: dict) -> str:
         f"They are not enough to establish whether {topic} has been {direction}."
     )
 
+
+_CONTRADICTION_QUERY_STOPWORDS = {
+    "a", "about", "agree", "agreed", "are", "as", "at", "be", "been", "being",
+    "did", "do", "does", "doing", "for", "from", "had", "has", "have", "he",
+    "her", "him", "his", "how", "i", "in", "into", "is", "it", "last", "me",
+    "my", "of", "on", "or", "our", "overnight", "person", "record", "records",
+    "reported", "report", "reports", "same", "she", "that", "the", "their",
+    "them", "there", "these", "they", "this", "those", "to", "was", "were",
+    "what", "when", "whether", "which", "who", "why", "with", "you", "your",
+    "happened", "happen", "occurred", "occur", "show", "shows", "say", "says",
+    "tell", "tells", "about", "different", "conflict", "conflicting", "disagree",
+}
+
+
+def _contradictory_event_evidence_response(user_text: str, event_context: list[str]) -> str | None:
+    """Withhold a definitive answer when same-day LCR event reports assert opposite states."""
+    query_terms = [
+        term for term in dict.fromkeys(re.findall(r"[a-z]{3,}", (user_text or "").casefold()))
+        if term not in _CONTRADICTION_QUERY_STOPWORDS
+    ]
+    if not query_terms:
+        return None
+
+    irregular_variants = {
+        "fall": {"fall", "falls", "fell", "fallen"},
+        "fell": {"fall", "falls", "fell", "fallen"},
+        "sleep": {"sleep", "sleeps", "sleeping", "slept"},
+        "slept": {"sleep", "sleeps", "sleeping", "slept"},
+    }
+    negators = {
+        "no", "not", "never", "without", "neither", "didn't", "didnt",
+        "wasn't", "wasnt", "weren't", "werent", "hasn't", "hasnt",
+        "haven't", "havent", "denies", "denied",
+    }
+    grouped: dict[tuple[str, str], dict[str, set[str]]] = {}
+
+    for line in event_context or []:
+        brace = line.find("{")
+        if brace < 0:
+            continue
+        try:
+            record = json.loads(line[brace:])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(record, dict) or not record.get("event_id"):
+            continue
+        status = str(record.get("status") or "").casefold()
+        if status in {"retracted", "deleted", "superseded", "rejected", "cancelled", "canceled"}:
+            continue
+
+        title = str(record.get("title") or "").casefold()
+        description = str(record.get("description") or "").casefold()
+        if not description:
+            continue
+        searchable = f"{title} {description}"
+        raw_date = record.get("occurred_at") or record.get("recorded_at")
+        if not isinstance(raw_date, str) or not raw_date.strip():
+            continue
+        try:
+            event_date = datetime.fromisoformat(raw_date.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            continue
+
+        words = [match.group(0) for match in re.finditer(r"[a-z]+(?:n't)?", description)]
+        if not words:
+            continue
+
+        for term in query_terms:
+            variants = irregular_variants.get(term, {term})
+            if not any(re.search(r"\b" + re.escape(variant) + r"\b", searchable) for variant in variants):
+                continue
+
+            polarities: set[str] = set()
+            for index, word in enumerate(words):
+                if word not in variants:
+                    continue
+                before = words[max(0, index - 4):index]
+                after = words[index + 1:index + 3]
+                negated = any(value in negators for value in before) or any(
+                    value in {"not", "never"} for value in after
+                )
+                polarities.add("negative" if negated else "positive")
+
+            if not polarities:
+                continue
+            bucket = grouped.setdefault((term, event_date), {"positive": set(), "negative": set()})
+            for polarity in polarities:
+                bucket[polarity].add(str(record["event_id"]))
+
+    for (term, _event_date), polarities in grouped.items():
+        positive_ids = polarities["positive"]
+        negative_ids = polarities["negative"]
+        if positive_ids and negative_ids and positive_ids != negative_ids:
+            if term in {"fall", "fell"}:
+                return (
+                    "The reports conflict about whether a fall occurred. One says no fall was observed; "
+                    "another reports a fall. The disagreement is unresolved."
+                )
+            return (
+                f"The available reports conflict about {term}. The disagreement is unresolved; "
+                "please confirm the reports with their original sources."
+            )
+    return None
+
 def _contains_unsupported_operational_claim(
     reply: str,
     source_text: str,
@@ -2103,7 +2207,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             user_text,
             [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
         )
-        medication_change_reply = _medication_change_safety_response(user_text)
+        unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
+        conflict_response = _contradictory_event_evidence_response(user_text, event_context)
         if medication_change_reply:
             # Do not rely on a small model to refuse a requested dose change.
             reply = medication_change_reply
@@ -2112,8 +2217,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # measurement absent from the retrieved authorized sources is withheld
             # deterministically, even if Qwen returns a fabricated numeric value.
             reply = missing_measurement_reply
-        unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
-        if unsupported_trend:
+        elif conflict_response:
+            # A small model must never choose between opposing caregiver reports.
+            reply = conflict_response
+        elif unsupported_trend:
             # When the source set lacks two distinct dated observations, do not
             # let the model restate an old observation as a recent trend or imply
             # direction indirectly. Return the evidence-derived limit directly.
@@ -2182,6 +2289,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if unsupported_trend:
             verdict = "blocked"
             safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
+            ai_generated = False
+        elif conflict_response:
+            verdict = "blocked"
+            safety_note = "Conflicting care-event reports were withheld from a definitive conclusion."
             ai_generated = False
         elif missing_measurement_reply:
             verdict = "blocked"
