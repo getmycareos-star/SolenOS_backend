@@ -637,6 +637,25 @@ def _humanize_model_context_line(line: str) -> str:
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
 
 
+def _needs_follow_up_for_unchecked_meals(user_text: str, reply: str) -> bool:
+    """Require the response to close an explicit lunch/dinner observation gap."""
+    user = (user_text or "").casefold()
+    answer = (reply or "").casefold()
+    meal_gap = re.search(
+        r"\b(?:not checked|have not checked|haven't checked|did not check|didn't check)\b"
+        r".{0,100}\b(?:lunch|dinner|meals?)\b",
+        user,
+    )
+    if not meal_gap:
+        return False
+    targeted_action = re.search(
+        r"\b(?:have you|did you|could you|can you|would you|please|check|record|track|note|"
+        r"observe|ask|confirm|compare)\b.{0,120}\b(?:lunch|dinner|meals?|food intake)\b",
+        answer,
+    )
+    return targeted_action is None
+
+
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     """Use recent dialogue to resolve short/referential follow-ups for retrieval."""
     current = (current_text or "").strip()
@@ -2248,6 +2267,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_care_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
+            or _needs_follow_up_for_unchecked_meals(user_text, reply)
             or (greeting_only and _greeting_reply_needs_revision(reply))
         )
         if invalid_reply and greeting_only:
@@ -2313,6 +2333,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "Do not invent symptoms, causes, diagnoses, medications, appointments, or system actions. "
                             "Keep the care recipient distinct from relatives who provide help or reports. "
                             "For a follow-up, preserve the prior care recipient and topic. "
+                            "Address explicit unchecked observations before discussing possible causes. "
+                            "If the caregiver says lunch or dinner has not been checked, ask whether those meals have been checked or suggest recording them today. "
+                            "Do not substitute speculation or unrelated medication/appointment checks for that observation. "
                             "If a detail is unknown, say it is not recorded and ask one targeted question or give one concrete safe next step. "
                             "Return only a concise caregiver-facing answer."
                         ),
@@ -2339,6 +2362,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
+                    or _needs_follow_up_for_unchecked_meals(user_text, reply)
                 )
                 if not invalid_reply:
                     break

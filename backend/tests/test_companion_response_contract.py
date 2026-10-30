@@ -408,6 +408,24 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     assert query.startswith("What about that?")
 
 
+def test_unchecked_meal_gap_requires_a_meal_specific_follow_up():
+    caregiver_message = (
+        "I have not checked lunch or dinner, and I don't know whether the changes are connected."
+    )
+    unrelated_next_step = (
+        "Check whether there were recent medication or appointment changes."
+    )
+    meal_specific_next_step = (
+        "Please record what she eats for lunch and dinner today."
+    )
+    assert collaboration._needs_follow_up_for_unchecked_meals(
+        caregiver_message, unrelated_next_step
+    )
+    assert not collaboration._needs_follow_up_for_unchecked_meals(
+        caregiver_message, meal_specific_next_step
+    )
+
+
 def test_care_coordination_follow_up_keeps_the_prior_care_subject_in_retrieval():
     prior = [
         SimpleNamespace(
