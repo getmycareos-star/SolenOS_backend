@@ -722,10 +722,14 @@ def get_situation(
         )
         for event in linked_events:
             linked_evidence_ids.update(event.evidence_ids or [])
-        linked_subject_types = set(saved_situation.signal_types or [])
+        # Signal-type similarity is not a thread relationship. Attach an
+        # unresolved question or contradiction only through an explicit
+        # situation subject ID or a shared, same-record evidence reference.
+        # Otherwise it remains care-record-level context, not a guessed merge.
         linked_questions = [
             question.question for question in open_question_rows
-            if question.subject_type in linked_subject_types
+            if question.subject_id == saved_situation.id
+            or bool(set(question.evidence_ids or []) & linked_evidence_ids)
         ]
         linked_conflicts = [
             {
@@ -737,7 +741,8 @@ def get_situation(
                 "winner_selected": False,
             }
             for conflict in unresolved_conflict_rows
-            if conflict.subject_type in linked_subject_types
+            if conflict.subject_id == saved_situation.id
+            or bool(set(conflict.evidence_ids or []) & linked_evidence_ids)
         ]
         ordered_linked_evidence_ids = sorted(
             linked_evidence_ids,
@@ -758,7 +763,8 @@ def get_situation(
                 "evidence_ids": list(gap.evidence_ids or []),
             }
             for gap in open_information_gaps
-            if gap.subject_type in linked_subject_types
+            if gap.subject_id == saved_situation.id
+            or bool(set(gap.evidence_ids or []) & linked_evidence_ids)
         ]
         situation_ui_rows.append({
             "id": saved_situation.id,
