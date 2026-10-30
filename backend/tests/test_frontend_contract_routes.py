@@ -319,7 +319,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
             },
         )
         assert completeness_assessment.status_code == 201, completeness_assessment.text
-        assert completeness_assessment.json()["assessment_status"] == "partial"
+        assert completeness_assessment.json()["status"] == "partial"
 
         assessed_evidence = client.get(f"/api/v1/evidence/{person_id}", headers=auth)
         assert assessed_evidence.status_code == 200, assessed_evidence.text
