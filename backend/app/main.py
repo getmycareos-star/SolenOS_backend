@@ -37,7 +37,12 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Situation as SituationModel
-from app.models.uncertainty import OpenQuestion as OpenQuestionModel
+from app.models.uncertainty import (
+    OpenQuestion as OpenQuestionModel,
+    Contradiction as ContradictionModel,
+    InformationGap as InformationGapModel,
+)
+from app.core.uncertainty_enums import GapLifecycleStatus
 from app.api.anonymous_sessions import router as anonymous_sessions_router
 from app.api.accounts import router as accounts_router
 from app.api.identity_security import router as identity_security_router
@@ -595,6 +600,26 @@ def get_situation(
         .order_by(OpenQuestionModel.asked_at.asc(), OpenQuestionModel.id.asc())
         .all()
     )
+    unresolved_conflict_rows = (
+        db.query(ContradictionModel)
+        .filter(
+            ContradictionModel.person_id == person_id,
+            ContradictionModel.resolution_status.in_(
+                ("unresolved", "reopened", "qualified", "partially_resolved")
+            ),
+        )
+        .order_by(ContradictionModel.created_at.asc(), ContradictionModel.id.asc())
+        .all()
+    )
+    open_information_gaps = (
+        db.query(InformationGapModel)
+        .filter(
+            InformationGapModel.person_id == person_id,
+            InformationGapModel.lifecycle_status == GapLifecycleStatus.OPEN,
+        )
+        .order_by(InformationGapModel.created_at.asc(), InformationGapModel.id.asc())
+        .all()
+    )
     evidence_by_id = {row["id"]: row for row in observations}
     situation_ui_rows = []
     for saved_situation in persisted_situations:
@@ -608,9 +633,34 @@ def get_situation(
         )
         for event in linked_events:
             linked_evidence_ids.update(event.evidence_ids or [])
+        linked_subject_types = set(saved_situation.signal_types or [])
         linked_questions = [
             question.question for question in open_question_rows
-            if question.subject_type in set(saved_situation.signal_types or [])
+            if question.subject_type in linked_subject_types
+        ]
+        linked_conflicts = [
+            {
+                "id": conflict.id,
+                "field": conflict.field,
+                "description": conflict.description,
+                "evidence_ids": list(conflict.evidence_ids or []),
+                "resolution_status": conflict.resolution_status,
+                "winner_selected": False,
+            }
+            for conflict in unresolved_conflict_rows
+            if conflict.subject_type in linked_subject_types
+        ]
+        linked_gaps = [
+            {
+                "id": gap.id,
+                "field": gap.field,
+                "description": gap.description,
+                "gap_reason": gap.gap_reason.value if gap.gap_reason else None,
+                "priority": gap.priority.value if gap.priority else None,
+                "evidence_ids": list(gap.evidence_ids or []),
+            }
+            for gap in open_information_gaps
+            if gap.subject_type in linked_subject_types
         ]
         situation_ui_rows.append({
             "id": saved_situation.id,
@@ -620,6 +670,8 @@ def get_situation(
             "riskLevel": "LOW",
             "documents": [],
             "openQuestions": linked_questions,
+            "conflicts": linked_conflicts,
+            "informationGaps": linked_gaps,
             "nextActions": [],
             "risks": [],
             "responsibilities": [],
@@ -728,6 +780,8 @@ def get_situation(
             active_situation["id"] = latest_ui["id"]
             active_situation["observations"] = situation_observations
             active_situation["open_questions"] = list(latest_ui.get("openQuestions") or [])
+            active_situation["contradictions"] = list(latest_ui.get("conflicts") or [])
+            active_situation["information_gaps"] = list(latest_ui.get("informationGaps") or [])
             active_situation["synthesis"] = latest_ui.get("contextSummary") or None
             active_situation["persistence_source"] = "persisted_situation_and_evidence_projection"
             active_situation["reasoning_state_persisted"] = False
@@ -770,7 +824,17 @@ def get_situation(
             "soft_invite": {"offered_now": False, "text": None},
             "is_long_absence": False,
             "recent_relevant_changes": [],
-            "important_unresolved": [question.question for question in open_question_rows],
+            "important_unresolved": list(dict.fromkeys([
+                *(question.question for question in open_question_rows),
+                *(
+                    f"Conflicting reports: {conflict.description}"
+                    for conflict in unresolved_conflict_rows
+                ),
+                *(
+                    f"Information needed: {gap.field} — {gap.description or (gap.gap_reason.value if gap.gap_reason else 'not documented')}"
+                    for gap in open_information_gaps
+                ),
+            ])),
             "suppress_first_time_ux": bool(observations),
         },
     }
