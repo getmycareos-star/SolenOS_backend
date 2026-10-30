@@ -19,7 +19,7 @@ def _utc_now() -> datetime:
 def _explicit_speaker_statements(source_text: str) -> list[dict]:
     """Extract only source-labelled statements with exact offsets; never infer speakers."""
     header = re.compile(
-        r"(?m)^(?:\[[^\]\r\n]+\]\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}):[ \t]*"
+        r"(?m)^(?:(?P<header_time>\[\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?\])\s*)?(?P<label>[A-Za-z][A-Za-z .'-]{0,40}|\[(?P<bracket_label>[^\]\r\n]{1,40})\]):[ \t]*"
     )
     matches = list(header.finditer(source_text))
     if len(matches) < 2:
@@ -37,11 +37,32 @@ def _explicit_speaker_statements(source_text: str) -> list[dict]:
             continue
         if len(passage) > 8000:
             raise ValueError("A speaker-labelled statement exceeds the supported 8,000-character observation limit")
+        header_time_text = match.group("header_time")
+        occurred_at = None
+        header_context = None
+        if header_time_text:
+            raw_header_time = header_time_text[1:-1].strip()
+            # Only timezone-qualified ISO timestamps become machine times.
+            # Date-only or timezone-free source text is retained verbatim as
+            # context rather than silently assigned a timezone or clock time.
+            if "T" in raw_header_time or " " in raw_header_time:
+                try:
+                    parsed_time = datetime.fromisoformat(raw_header_time.replace("Z", "+00:00"))
+                    if parsed_time.tzinfo is not None:
+                        occurred_at = parsed_time
+                    else:
+                        header_context = f"Source header time text (timezone unspecified): {raw_header_time}"
+                except ValueError:
+                    header_context = f"Source header time text (not normalized): {raw_header_time}"
+            else:
+                header_context = f"Source header date text (time/timezone unspecified): {raw_header_time}"
         statements.append({
-            "speaker_label": match.group("label").strip(),
+            "speaker_label": (match.group("label") or match.group("bracket_label") or "").strip(),
             "source_passage": passage,
             "source_span_start": start,
             "source_span_end": end,
+            "occurred_at": occurred_at,
+            "header_context": header_context,
         })
     return statements
 
@@ -153,7 +174,12 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 subject_label=(person.name or "care recipient")[:160],
                 attribute="reported_statement",
                 value_text=statement["source_passage"],
-                context="Statement extracted from an explicitly speaker-labelled source thread. Speaker label is source text, not verified identity.",
+                context=(
+                    "Statement extracted from an explicitly speaker-labelled source thread. "
+                    "Speaker label is source text, not verified identity."
+                    + (f" {statement['header_context']}" if statement.get("header_context") else "")
+                ),
+                occurred_at=statement.get("occurred_at"),
                 reported_at=_utc_now(),
                 observer_label=statement["speaker_label"],
                 observer_caregiver_id=None,
