@@ -344,7 +344,17 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
             ).hexdigest(),
             uploaded_by_caregiver_id="review-caregiver-a",
         )
-        db.add_all([document_a, document_b, inaccessible])
+        corrupted = Evidence(
+            id="integrity-document-corrupted",
+            person_id="review-person-a",
+            type="document",
+            source_text="A binary fingerprint mismatch must be visible.",
+            source_text_sha256=hashlib.sha256(
+                b"A binary fingerprint mismatch must be visible."
+            ).hexdigest(),
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        db.add_all([document_a, document_b, inaccessible, corrupted])
         db.flush()
         db.add_all([
             EvidenceUpload(
@@ -362,6 +372,14 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
                 content=binary,
                 size_bytes=len(binary),
                 sha256=digest,
+            ),
+            EvidenceUpload(
+                evidence_id=corrupted.id,
+                filename="corrupted.pdf",
+                mime_type="application/pdf",
+                content=binary,
+                size_bytes=len(binary),
+                sha256="0" * 64,
             ),
         ])
         db.commit()
@@ -387,6 +405,13 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
     assert missing_integrity["original_binary_status"] == "missing"
     assert missing_integrity["original_binary_available"] is False
     assert missing_integrity["source_text_integrity_status"] == "match"
+
+    corrupted = client_a.get(
+        "/api/v1/care-continuity/evidence/integrity-document-corrupted/integrity"
+    )
+    assert corrupted.status_code == 200, corrupted.text
+    assert corrupted.json()["original_binary_status"] == "mismatch"
+    assert corrupted.json()["original_binary_available"] is True
 
 
 def test_original_evidence_source_text_and_hash_cannot_be_changed_through_orm(review_records):
