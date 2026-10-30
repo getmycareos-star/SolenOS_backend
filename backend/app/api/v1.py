@@ -410,6 +410,7 @@ def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db
             db.query(EvidenceCompletenessAssessment)
             .filter(
                 EvidenceCompletenessAssessment.person_id == person_id,
+                EvidenceCompletenessAssessment.subject_type == "evidence",
                 EvidenceCompletenessAssessment.subject_id.in_(evidence_ids),
             )
             .order_by(EvidenceCompletenessAssessment.assessed_at.asc(), EvidenceCompletenessAssessment.id.asc())
