@@ -621,6 +621,33 @@ def get_situation(
         .all()
     )
     evidence_by_id = {row["id"]: row for row in observations}
+    source_statement_rows = []
+    if evidence_by_id:
+        source_statement_rows = (
+            db.query(EvidenceObservationModel)
+            .filter(
+                EvidenceObservationModel.person_id == person_id,
+                EvidenceObservationModel.evidence_id.in_(list(evidence_by_id)),
+            )
+            .order_by(EvidenceObservationModel.created_at.asc(), EvidenceObservationModel.id.asc())
+            .all()
+        )
+    source_statements_by_evidence = {}
+    for statement in source_statement_rows:
+        source_statements_by_evidence.setdefault(statement.evidence_id, []).append({
+            "id": statement.id,
+            "evidence_id": statement.evidence_id,
+            "speaker_label": statement.observer_label,
+            "speaker_attribution_status": "explicit" if statement.observer_label else "unknown",
+            "reporter_caregiver_id": statement.created_by_caregiver_id,
+            "observer_caregiver_id": statement.observer_caregiver_id,
+            "source_passage": statement.source_passage,
+            "source_span_start": statement.source_span_start,
+            "source_span_end": statement.source_span_end,
+            "reported_at": statement.reported_at.isoformat() if statement.reported_at else None,
+            "epistemic_status": statement.epistemic_status.value if hasattr(statement.epistemic_status, "value") else statement.epistemic_status,
+            "observation_kind": statement.observation_kind,
+        })
     situation_ui_rows = []
     for saved_situation in persisted_situations:
         signal_ids = set(saved_situation.signal_ids or [])
@@ -650,6 +677,11 @@ def get_situation(
             for conflict in unresolved_conflict_rows
             if conflict.subject_type in linked_subject_types
         ]
+        linked_source_statements = [
+            statement
+            for evidence_id in linked_evidence_ids
+            for statement in source_statements_by_evidence.get(evidence_id, [])
+        ]
         linked_gaps = [
             {
                 "id": gap.id,
@@ -670,6 +702,7 @@ def get_situation(
             "riskLevel": "LOW",
             "documents": [],
             "openQuestions": linked_questions,
+            "sourceStatements": linked_source_statements,
             "conflicts": linked_conflicts,
             "informationGaps": linked_gaps,
             "nextActions": [],
