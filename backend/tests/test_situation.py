@@ -109,8 +109,8 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         person_id = created["person"]["id"]
         caregiver_id = created["caregiver"]["id"]
         source = (
-            "Daughter: Mom fell in the hallway this morning.\n"
-            "Nurse: She was assessed at urgent care.\n"
+            "[2026-10-30T09:15:00Z] Daughter: Mom fell in the hallway this morning.\n"
+            "[Nurse]: She was assessed at urgent care.\n"
             "Daughter: She is afraid to walk to the kitchen now."
         )
         response = client.post(
@@ -166,6 +166,8 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert [item["speaker_label"] for item in source_statements] == ["Daughter", "Nurse", "Daughter"]
         assert all(item["reporter_caregiver_id"] == caregiver_id for item in source_statements)
         assert all(item["speaker_attribution_status"] == "explicit" for item in source_statements)
+        assert source_statements[0]["occurred_at"] is not None
+        assert source_statements[1]["occurred_at"] is None
         assert all(
             source_text[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
             for item in source_statements
