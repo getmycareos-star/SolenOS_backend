@@ -260,6 +260,21 @@ class UncertaintyEngine:
         answer = update_data.get("answer", db_question.answer)
         answer_provenance = update_data.get("answer_provenance", db_question.answer_provenance)
         closed_reason = update_data.get("closed_reason", db_question.closed_reason)
+        answer_evidence_ids = []
+        if new_status == "answered":
+            # An answer is not complete because a caregiver typed text. It must
+            # point to one or more persisted source records in this same care file.
+            if "evidence_ids" not in update_data:
+                raise ValueError("Answering a clarification question requires linked source evidence IDs.")
+            answer_evidence_ids = self._validate_person_evidence(
+                db_question.person_id, update_data.get("evidence_ids")
+            )
+            if not answer_evidence_ids:
+                raise ValueError("Answering a clarification question requires at least one persisted source evidence item.")
+            update_data["evidence_ids"] = list(dict.fromkeys([
+                *(db_question.evidence_ids or []),
+                *answer_evidence_ids,
+            ]))
         if new_status == "answered":
             if not isinstance(answer, str) or not answer.strip():
                 raise ValueError("An answered question requires a non-empty answer.")
@@ -281,6 +296,7 @@ class UncertaintyEngine:
             db_question.status != "answered"
             or answer_text != db_question.answer
             or answer_source != db_question.answer_provenance
+            or answer_evidence_ids != []
         )
         if answer_was_recorded:
             if not self.caregiver_id:
@@ -293,6 +309,7 @@ class UncertaintyEngine:
                 person_id=db_question.person_id,
                 answer=answer_text,
                 answer_provenance=answer_source,
+                evidence_ids=answer_evidence_ids,
                 answered_by_caregiver_id=self.caregiver_id,
             ))
 
