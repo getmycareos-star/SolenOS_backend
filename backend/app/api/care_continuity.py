@@ -15,7 +15,7 @@ import re
 from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, or_, text, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, and_, or_, text, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -3071,7 +3071,16 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 relationship_table.c.source_type == "situation",
                 relationship_table.c.source_id == pair[0],
                 relationship_table.c.target_type == "situation",
-                relationship_table.c.target_id == pair[1],
+                or_(
+                    and_(
+                        relationship_table.c.source_id == pair[0],
+                        relationship_table.c.target_id == pair[1],
+                    ),
+                    and_(
+                        relationship_table.c.source_id == pair[1],
+                        relationship_table.c.target_id == pair[0],
+                    ),
+                ),
             )
         ).scalar_one_or_none()
         data["relationship_version"] = int(latest_version or 0) + 1
