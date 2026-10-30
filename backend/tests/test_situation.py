@@ -263,6 +263,20 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             ])
             db.commit()
 
+        related_link = client.post(
+            "/api/v1/care-continuity/relationships",
+            headers=headers,
+            json={
+                "source_type": "situation",
+                "source_id": "persisted-mobility-thread",
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": "persisted-appetite-thread",
+                "provenance": "Caregiver linked these as related concerns after the recent care transition; they remain separate threads.",
+            },
+        )
+        assert related_link.status_code == 201, related_link.text
+
         # Explicitly resume the mobility thread with a new observation. The
         # appetite thread must remain separate and retain its own evidence.
         resumed = client.post(
@@ -305,6 +319,11 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
+        assert threads["persisted-mobility-thread"]["relatedSituations"][0]["id"] == "persisted-appetite-thread"
+        assert threads["persisted-appetite-thread"]["relatedSituations"][0]["id"] == "persisted-mobility-thread"
+        assert set(threads["persisted-mobility-thread"]["linked_evidence_ids"]).isdisjoint(
+            threads["persisted-appetite-thread"]["linked_evidence_ids"]
+        )
         assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
         assert any(
             item.startswith("Conflicting reports:")
