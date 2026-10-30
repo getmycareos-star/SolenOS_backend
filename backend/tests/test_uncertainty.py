@@ -2477,7 +2477,7 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
 
         client = authorized_client("historical-question-person")
         other_client = authorized_client("historical-question-other")
-        response = client.get(f"/api/v1/uncertainty/questions/{person.id}?status=open")
+        response = client.get(f"/api/v1/uncertainty/questions/historical-question-person?status=open")
         assert response.status_code == 200, response.text
         by_id = {item["id"]: item for item in response.json()}
         assert set(by_id) == {"historical-open-question", "recent-open-question"}
@@ -2485,7 +2485,7 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
         assert by_id["historical-open-question"]["asked_at"].startswith("2024-01-15T09:30:00")
 
         foreign = other_client.get(
-            f"/api/v1/uncertainty/questions/{person.id}?status=open"
+            f"/api/v1/uncertainty/questions/historical-question-person?status=open"
         )
         assert foreign.status_code == 403
     finally:
