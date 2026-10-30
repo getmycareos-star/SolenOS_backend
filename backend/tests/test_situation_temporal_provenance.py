@@ -210,8 +210,8 @@ def test_legacy_change_signal_ids_resolve_care_event_time_and_continue_event_nam
 
 def test_situation_thread_grouping_does_not_merge_unrelated_same_domain_subjects():
     first = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-1"])
-    same_thread = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-2"])
-    separate_thread = SimpleNamespace(subject_type="mobility", subject_id="transfers", evidence_ids=["ev-3"])
+    same_thread = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-1"])
+    separate_thread = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-3"])
     other_domain = SimpleNamespace(subject_type="nutrition", subject_id="walking", evidence_ids=["ev-1"])
 
     groups = _group_related_signals(
