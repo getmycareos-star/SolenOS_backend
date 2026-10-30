@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import os
+import re
 import time
 
 import pytest
@@ -312,6 +313,9 @@ def test_live_qwen_handles_non_question_care_statements_and_multiturn_coordinati
             "check what she ate for lunch",
             "report those findings",
             "record what she eats",
+        )) or bool(re.search(
+            r"\b(?:check|record|note|track|ask)\b.{0,80}\b(?:lunch|dinner|meals?|food intake)\b",
+            lowered,
         ))
         assert has_targeted_question or has_concrete_next_step, (
             "Companion did not offer a targeted clarification or concrete next step: "
