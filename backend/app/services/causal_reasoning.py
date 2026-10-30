@@ -452,8 +452,12 @@ class CausalReasoningEngine:
         hypothesis_id: str,
         role: Optional[EvidenceRole] = None,
     ) -> List[CausalEvidenceModel]:
+        hypothesis = self.get_hypothesis(hypothesis_id)
+        if hypothesis is None:
+            return []
         query = self.db.query(CausalEvidenceModel).filter(
-            CausalEvidenceModel.hypothesis_id == hypothesis_id
+            CausalEvidenceModel.hypothesis_id == hypothesis_id,
+            CausalEvidenceModel.person_id == hypothesis.person_id,
         )
         if role:
             query = query.filter(CausalEvidenceModel.role == role)
@@ -505,16 +509,19 @@ class CausalReasoningEngine:
             return {}
 
         evidence = self.db.query(CausalEvidenceModel).filter(
-            CausalEvidenceModel.hypothesis_id == hypothesis_id
+            CausalEvidenceModel.hypothesis_id == hypothesis_id,
+            CausalEvidenceModel.person_id == hyp.person_id,
         ).all()
 
         alternatives = self.db.query(AlternativeExplanationModel).filter(
             AlternativeExplanationModel.hypothesis_id == hypothesis_id,
+            AlternativeExplanationModel.person_id == hyp.person_id,
             AlternativeExplanationModel.is_active,
         ).all()
 
         confounders = self.db.query(ConfounderModel).filter(
             ConfounderModel.hypothesis_id == hypothesis_id,
+            ConfounderModel.person_id == hyp.person_id,
             ConfounderModel.is_active,
         ).all()
 
