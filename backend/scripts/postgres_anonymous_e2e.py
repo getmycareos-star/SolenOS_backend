@@ -1,4 +1,3 @@
-# CI diagnostic: include the live Uvicorn exception tail when scoped-session isolation fails.
 """Real HTTP + PostgreSQL smoke test for anonymous care continuity.
 
 Runs only against the disposable PostgreSQL database supplied by CI. Starts and
@@ -12,11 +11,16 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app.core.database import SessionLocal
+from app.core.change_enums import SituationType, SituationState
+from app.models.change import Situation as SituationModel
 
 BASE_URL = "http://127.0.0.1:8012"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -41,6 +45,53 @@ def request(method: str, path: str, *, body=None, token: str | None = None):
         except json.JSONDecodeError:
             decoded = payload.decode("utf-8", "replace")
         return exc.code, decoded
+
+
+def upload_request(fields: dict[str, str], filename: str, content: bytes, token: str):
+    boundary = f"solenos-e2e-{os.getpid()}-{time.time_ns()}"
+    chunks = []
+    for name, value in fields.items():
+        chunks.append(
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n".encode()
+        )
+    chunks.append(
+        f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: image/png\r\n\r\n".encode()
+        + content + b"\r\n"
+    )
+    chunks.append(f"--{boundary}--\r\n".encode())
+    req = urllib.request.Request(
+        BASE_URL + "/api/v1/upload",
+        data=b"".join(chunks),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            payload = response.read()
+            return response.status, json.loads(payload) if payload else None
+    except urllib.error.HTTPError as exc:
+        payload = exc.read()
+        try:
+            decoded = json.loads(payload) if payload else None
+        except json.JSONDecodeError:
+            decoded = payload.decode("utf-8", "replace")
+        return exc.code, decoded
+
+
+def download_binary(evidence_id: str, token: str):
+    req = urllib.request.Request(
+        BASE_URL + f"/api/v1/upload/{evidence_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
 
 
 def start_server():
@@ -123,6 +174,262 @@ def main():
         )
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
+
+        # Seed two independent persisted threads, then resume one of them
+        # concurrently. PostgreSQL row locking must append every observation
+        # to the selected thread without moving evidence into its neighbour.
+        mobility_thread_id = str(uuid.uuid4())
+        appetite_thread_id = str(uuid.uuid4())
+        thread_start = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            db.add_all([
+                SituationModel(
+                    id=mobility_thread_id,
+                    person_id=person_a,
+                    situation_type=SituationType.UNKNOWN,
+                    state=SituationState.ACTIVE,
+                    title="PostgreSQL E2E mobility thread",
+                    description="Independent CI-only mobility thread.",
+                    signal_ids=[],
+                    signal_types=["mobility"],
+                    temporal_start=thread_start,
+                    temporal_end=thread_start,
+                ),
+                SituationModel(
+                    id=appetite_thread_id,
+                    person_id=person_a,
+                    situation_type=SituationType.UNKNOWN,
+                    state=SituationState.ACTIVE,
+                    title="PostgreSQL E2E appetite thread",
+                    description="Independent CI-only appetite thread.",
+                    signal_ids=[],
+                    signal_types=["appetite"],
+                    temporal_start=thread_start,
+                    temporal_end=thread_start,
+                ),
+            ])
+            db.commit()
+
+        relation_payloads = [
+            {
+                "source_type": "situation",
+                "source_id": mobility_thread_id,
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": appetite_thread_id,
+                "provenance": "Caregiver explicitly linked these as related but separate concerns in this PostgreSQL concurrency test.",
+            },
+            {
+                "source_type": "situation",
+                "source_id": appetite_thread_id,
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": mobility_thread_id,
+                "provenance": "Caregiver explicitly linked these as related but separate concerns in this PostgreSQL concurrency test.",
+            },
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            relationship_results = list(pool.map(
+                lambda payload: request(
+                    "POST", "/api/v1/care-continuity/relationships",
+                    body=payload, token=token_a
+                ),
+                relation_payloads,
+            ))
+        require(
+            sorted(status for status, _ in relationship_results) == [201, 409],
+            f"Concurrent reverse-order related-thread links must create exactly one relationship: {relationship_results}",
+        )
+
+        appetite_capture = {
+            "caregiver_id": caregiver_a,
+            "person_id": person_a,
+            "target_situation_id": appetite_thread_id,
+            "raw_input": "Daughter: She ate less than half of dinner.",
+            "capture_category": "meal",
+        }
+        status, appetite_result = request(
+            "POST", "/api/situation", body=appetite_capture, token=token_a
+        )
+        require(status == 200, f"Explicit appetite thread recovery failed: {status}: {appetite_result}")
+        require(
+            appetite_result.get("situation_id") == appetite_thread_id,
+            f"Capture did not remain in the explicitly selected appetite thread: {appetite_result}",
+        )
+
+        mobility_payloads = [
+            {
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "target_situation_id": mobility_thread_id,
+                "raw_input": "Daughter: She was unsteady when turning near the kitchen.",
+                "capture_category": "behavior",
+            },
+            {
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "target_situation_id": mobility_thread_id,
+                "raw_input": "Nurse: She needed support when walking to the bathroom.",
+                "capture_category": "behavior",
+            },
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_captures = list(pool.map(
+                lambda payload: request("POST", "/api/situation", body=payload, token=token_a),
+                mobility_payloads,
+            ))
+        require(all(status == 200 for status, _ in concurrent_captures),
+                f"Concurrent selected-thread care captures failed: {concurrent_captures}")
+        speaker_source = (
+            "Daughter: She stumbled near the kitchen this morning.\n"
+            "Nurse: She needed one-person support when standing."
+        )
+        speaker_capture_status, speaker_capture = request(
+            "POST",
+            "/api/situation",
+            body={
+                "caregiver_id": caregiver_a,
+                "person_id": person_a,
+                "target_situation_id": mobility_thread_id,
+                "raw_input": speaker_source,
+            },
+            token=token_a,
+        )
+        require(
+            speaker_capture_status == 200
+            and speaker_capture.get("situation_id") == mobility_thread_id,
+            f"Multi-speaker source capture did not persist to selected thread: {speaker_capture_status}: {speaker_capture}",
+        )
+        concurrent_capture_event_ids = {
+            appetite_result.get("care_event_id"),
+            speaker_capture.get("care_event_id"),
+            *(body.get("care_event_id") for _, body in concurrent_captures),
+        }
+        concurrent_capture_evidence_ids = {
+            appetite_result.get("evidence_id"),
+            speaker_capture.get("evidence_id"),
+            *(body.get("evidence_id") for _, body in concurrent_captures),
+        }
+        require(
+            all(status == 200 and body.get("situation_id") == mobility_thread_id
+                for status, body in concurrent_captures),
+            f"Concurrent observations escaped their explicitly selected mobility thread: {concurrent_captures}",
+        )
+        require(
+            len(concurrent_capture_event_ids) == 4
+            and None not in concurrent_capture_event_ids
+            and len(concurrent_capture_evidence_ids) == 4
+            and None not in concurrent_capture_evidence_ids,
+            f"Each independent capture must preserve a distinct source/event pair: events={concurrent_capture_event_ids}, evidence={concurrent_capture_evidence_ids}",
+        )
+        with SessionLocal() as db:
+            mobility_thread = db.query(SituationModel).filter_by(id=mobility_thread_id).one()
+            appetite_thread = db.query(SituationModel).filter_by(id=appetite_thread_id).one()
+            mobility_evidence_ids = set(mobility_thread.signal_ids or [])
+            appetite_evidence_ids = set(appetite_thread.signal_ids or [])
+            require(
+                mobility_evidence_ids == {
+                    speaker_capture.get("evidence_id"),
+                    *(body.get("evidence_id") for _, body in concurrent_captures),
+                },
+                f"Concurrent updates were lost or misrouted in mobility thread: {mobility_evidence_ids}",
+            )
+            require(
+                appetite_evidence_ids == {appetite_result.get("evidence_id")},
+                f"Unrelated appetite thread was merged with mobility evidence: {appetite_evidence_ids}",
+            )
+        status, grouped_after_capture = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"Multi-thread hydration failed: {status}: {grouped_after_capture}")
+        grouped_threads = {
+            item.get("id"): item for item in grouped_after_capture.get("ui_situations", [])
+        }
+        require(
+            mobility_thread_id in grouped_threads and appetite_thread_id in grouped_threads,
+            f"Hydration did not return both independent threads: {grouped_threads.keys()}",
+        )
+        require(
+            set(grouped_threads[mobility_thread_id].get("linked_evidence_ids", []))
+            == {
+                speaker_capture.get("evidence_id"),
+                *(body.get("evidence_id") for _, body in concurrent_captures),
+            },
+            "Hydrated mobility thread did not retain every concurrent and multi-speaker evidence link",
+        )
+        source_statements = grouped_threads[mobility_thread_id].get("sourceStatements", [])
+        selected_speaker_statements = [
+            statement for statement in source_statements
+            if statement.get("evidence_id") == speaker_capture.get("evidence_id")
+        ]
+        require(
+            [statement.get("speaker_label") for statement in selected_speaker_statements] == ["Daughter", "Nurse"],
+            f"Hydration must preserve both explicit speakers in the selected original source order: {selected_speaker_statements}",
+        )
+        require(
+            all(statement.get("reporter_caregiver_id") == caregiver_a for statement in source_statements),
+            "Authenticated reporter must remain distinct from every source speaker across the selected thread",
+        )
+        require(
+            all(
+                speaker_source[statement["source_span_start"]:statement["source_span_end"]]
+                == statement["source_passage"]
+                for statement in selected_speaker_statements
+            ),
+            "Every selected multi-speaker statement must retain exact original source offsets",
+        )
+        require(
+            len(source_statements) >= len(selected_speaker_statements),
+            "Thread hydration must retain source statements from all linked evidence records",
+        )
+        require(
+            grouped_threads[appetite_thread_id].get("linked_evidence_ids", [])
+            == [appetite_result.get("evidence_id")],
+            "Hydrated appetite thread incorrectly absorbed mobility evidence",
+        )
+        require(
+            any(link.get("id") == appetite_thread_id
+                for link in grouped_threads[mobility_thread_id].get("relatedSituations", []))
+            and any(link.get("id") == mobility_thread_id
+                    for link in grouped_threads[appetite_thread_id].get("relatedSituations", [])),
+            "Both care threads must expose the explicit relationship while retaining separate evidence",
+        )
+
+        # Two simultaneous uploads of identical bytes must not both be
+        # reported as originals. PostgreSQL advisory locking serializes the
+        # per-person fingerprint lookup and insert while preserving both rows.
+        duplicate_blob = b"\x89PNG\r\n\x1a\nSolenOS PostgreSQL duplicate-upload concurrency fixture"
+        upload_fields = {
+            "person_id": person_a,
+            "caregiver_id": caregiver_a,
+            "evidence_type": "care_photo",
+            "extracted_text": "CI-only original binary upload fixture.",
+        }
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_uploads = list(pool.map(
+                lambda _: upload_request(
+                    upload_fields, "concurrent-care-photo.png", duplicate_blob, token_a
+                ),
+                range(2),
+            ))
+        require(all(status == 201 for status, _ in concurrent_uploads),
+                f"Concurrent identical uploads failed: {concurrent_uploads}")
+        upload_bodies = [body for _, body in concurrent_uploads]
+        upload_ids = {body.get("evidence_id") for body in upload_bodies}
+        require(len(upload_ids) == 2 and None not in upload_ids,
+                f"Both original upload records and their provenance must be retained: {upload_bodies}")
+        require(sorted(body.get("duplicate_detected") for body in upload_bodies) == [False, True],
+                f"Concurrent duplicate detection must produce exactly one original and one duplicate: {upload_bodies}")
+        original_upload_id = next(body["evidence_id"] for body in upload_bodies if not body["duplicate_detected"])
+        duplicate_upload_body = next(body for body in upload_bodies if body["duplicate_detected"])
+        require(duplicate_upload_body.get("duplicate_of_evidence_id") == original_upload_id,
+                f"Duplicate must point to the single canonical original: {upload_bodies}")
+        foreign_download_status, foreign_download_body = request(
+            "GET", f"/api/v1/upload/{original_upload_id}", token=token_b
+        )
+        require(
+            foreign_download_status == 403,
+            f"Binary evidence download must enforce care-record isolation: {foreign_download_status}: {foreign_download_body}",
+        )
+
 
         # Professional-input evidence must resolve to a real source row in the
         # same PostgreSQL-backed care record; caregiver prose alone is not proof.
@@ -639,14 +946,14 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
         require(status == 401, f"revoked token must be rejected, got {status}")
         # Revoking one capability must not break another caregiver's valid session.
-        status, independent_read = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
+        status, independent_evidence_read = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
         if status != 200:
             server_log = Path("/tmp/solenos-postgres-e2e-uvicorn.log").read_text(
                 encoding="utf-8", errors="replace"
-            )[-12000:]
+            )[-16000:]
             raise AssertionError(
                 f"valid independent session failed after revocation, got {status}: "
-                f"{independent_read}\\nUvicorn log tail:\\n{server_log}"
+                f"{independent_evidence_read}\nUvicorn log tail:\n{server_log}"
             )
 
         status, cross_write = request(
@@ -1003,8 +1310,37 @@ def main():
         require(status == 404,
                 f"Open Loop isolation failed after restart, got {status}: {cross_person_loop_after_restart}")
 
+        download_status, downloaded_blob = download_binary(original_upload_id, token_a)
+        require(
+            download_status == 200 and downloaded_blob == duplicate_blob,
+            f"Original binary evidence must remain byte-identical and accessible after application restart: status={download_status}, body={downloaded_blob!r}",
+        )
+        duplicate_status, downloaded_duplicate = download_binary(
+            duplicate_upload_body["evidence_id"], token_a
+        )
+        require(
+            duplicate_status == 200 and downloaded_duplicate == duplicate_blob,
+            f"Duplicate binary evidence must remain separately persisted and accessible after restart: status={duplicate_status}, body={downloaded_duplicate!r}",
+        )
+
         status, hydration_after_restart = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration after application restart expected 200, got {status}: {hydration_after_restart}")
+        restarted_event_ids = {
+            event.get("id") for event in hydration_after_restart.get("events", [])
+        }
+        require(
+            concurrent_capture_event_ids.issubset(restarted_event_ids),
+            "Both concurrent care events must survive application restart",
+        )
+        restarted_evidence_ids = {
+            evidence_id
+            for situation in hydration_after_restart.get("ui_situations", [])
+            for evidence_id in situation.get("linked_evidence_ids", [])
+        }
+        require(
+            concurrent_capture_evidence_ids.issubset(restarted_evidence_ids),
+            "Both concurrent source evidence records must survive application restart",
+        )
         observations_after_restart = [
             item.get("raw_text")
             for item in (hydration_after_restart.get("active_care_situation") or {}).get("observations", [])
