@@ -137,6 +137,57 @@ jobs:
             backend/tests/test_longitudinal_messy_care_benchmark.py \
             -q -s --junitxml=/tmp/postgres-longitudinal.xml
 
+      - name: Verify PostgreSQL records survive server restart
+        if: steps.postgres_benchmark.outcome == 'success'
+        run: |
+          python - <<'PY'
+          import os
+          import subprocess
+          import time
+          import psycopg2
+
+          dsn = os.environ["DATABASE_URL"]
+          probe_id = os.environ["GITHUB_SHA"]
+          with psycopg2.connect(dsn) as connection:
+              with connection.cursor() as cursor:
+                  cursor.execute("""
+                      CREATE TABLE IF NOT EXISTS messy_care_restart_probe (
+                          probe_id text PRIMARY KEY,
+                          verified_at timestamptz NOT NULL DEFAULT now()
+                      )
+                  """)
+                  cursor.execute("""
+                      INSERT INTO messy_care_restart_probe (probe_id)
+                      VALUES (%s)
+                      ON CONFLICT (probe_id) DO UPDATE SET verified_at = now()
+                  """, (probe_id,))
+
+          container_id = subprocess.check_output(
+              ["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"],
+              text=True,
+          ).strip().splitlines()[0]
+          subprocess.run(["docker", "restart", container_id], check=True)
+
+          last_error = None
+          for _ in range(30):
+              try:
+                  with psycopg2.connect(dsn, connect_timeout=2) as connection:
+                      with connection.cursor() as cursor:
+                          cursor.execute(
+                              "SELECT probe_id FROM messy_care_restart_probe WHERE probe_id = %s",
+                              (probe_id,),
+                          )
+                          row = cursor.fetchone()
+                          if row and row[0] == probe_id:
+                              print("POSTGRES_RESTART_PERSISTENCE=PASS")
+                              break
+              except Exception as error:
+                  last_error = error
+                  time.sleep(2)
+          else:
+              raise SystemExit(f"PostgreSQL restart persistence failed: {last_error}")
+          PY
+
       - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
