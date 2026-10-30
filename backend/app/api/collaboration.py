@@ -270,6 +270,19 @@ async def upload_evidence(
     # as proof that OCR or review happened on the server.
     bounded_text = extracted_text.strip()[:100_000]
     digest = hashlib.sha256(data).hexdigest()
+    # Exact binary checksum comparison is deterministic duplicate detection.
+    # Keep the new upload and its uploader attribution, but explicitly link the
+    # earlier identical artifact instead of silently deduplicating evidence.
+    duplicate_upload = (
+        db.query(EvidenceUpload)
+        .join(EvidenceModel, EvidenceModel.id == EvidenceUpload.evidence_id)
+        .filter(
+            EvidenceModel.person_id == scoped_person_id,
+            EvidenceUpload.sha256 == digest,
+        )
+        .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
+        .first()
+    )
     evidence = EvidenceModel(
         person_id=scoped_person_id,
         type=evidence_type,
@@ -281,7 +294,15 @@ async def upload_evidence(
             "mime_type": mime_type,
             "size_bytes": len(data),
             "sha256": digest,
+            "duplicate_detected": duplicate_upload is not None,
+            "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
             "text_source": "client_supplied" if bounded_text else "not_available",
+            "source_integrity": {
+                "binary_checksum_verified_at_ingest": True,
+                "original_binary_persisted": True,
+                "text_extraction_available": bool(bounded_text),
+                "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+            },
             "scan_processing": {
                 "client_declared_review_status": review_status,
                 "rotation_degrees": rotation_degrees,
@@ -310,6 +331,14 @@ async def upload_evidence(
         "mime_type": mime_type,
         "sha256": digest,
         "persisted": True,
+        "duplicate_detected": duplicate_upload is not None,
+        "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
+        "source_integrity": {
+            "binary_checksum_verified_at_ingest": True,
+            "original_binary_persisted": True,
+            "text_extraction_available": bool(bounded_text),
+            "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
+        },
     }
 
 
