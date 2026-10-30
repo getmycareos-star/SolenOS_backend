@@ -38,18 +38,84 @@ FIELDS = (
     "night_waking", "pain_report", "appointment_attendance",
     "fluid_intake", "location", "personal_care", "mood_observation",
 )
-PAIRS = (
-    ("given", "not_given"), ("independent", "needs_assistance"),
-    ("ate_full_meal", "ate_few_bites"), ("slept_through", "woke_repeatedly"),
-    ("pain_reported", "pain_denied"), ("attended", "not_attended"),
-    ("adequate_fluids", "low_fluids"), ("at_home", "at_hospital"),
-    ("completed", "not_completed"), ("calm", "agitated"),
-)
+PAIRS_BY_FIELD = {
+    "medication_administration": (
+        ("given", "not_given"), ("administered", "withheld"),
+        ("morning_dose_taken", "morning_dose_missed"), ("evening_dose_taken", "evening_dose_missed"),
+        ("dose_confirmed", "dose_unconfirmed"), ("pill_swallowed", "pill_found_unconsumed"),
+        ("prescribed_schedule_followed", "schedule_not_followed"), ("dose_recorded", "no_record_of_dose"),
+        ("caregiver_observed_administration", "caregiver_did_not_observe_administration"),
+        ("pharmacy_pack_empty", "pharmacy_pack_dose_present"),
+    ),
+    "mobility_support": (
+        ("walked_independently", "needed_hands_on_support"), ("transferred_with_one_helper", "needed_two_helpers"),
+        ("used_walker", "could_not_use_walker"), ("stood_without_help", "needed_help_to_stand"),
+        ("walked_to_bathroom", "could_not_walk_to_bathroom"), ("steady_gait_reported", "unsteady_gait_reported"),
+        ("used_stairs", "did_not_use_stairs"), ("self_transferred", "transfer_assisted"),
+        ("walked_outdoors", "remained_indoors"), ("usual_support_needed", "increased_support_needed"),
+    ),
+    "meal_intake": (
+        ("ate_full_meal", "ate_few_bites"), ("finished_breakfast", "skipped_breakfast"),
+        ("ate_lunch", "refused_lunch"), ("ate_dinner", "refused_dinner"),
+        ("normal_appetite_reported", "reduced_appetite_reported"), ("drank_supplement", "declined_supplement"),
+        ("ate_without_prompting", "needed_repeated_prompting"), ("swallowed_meal", "meal_left_uneaten"),
+        ("ate_solid_food", "only_took_liquids"), ("meal_tolerance_good", "meal_tolerance_poor"),
+    ),
+    "night_waking": (
+        ("slept_through", "woke_repeatedly"), ("one_waking", "multiple_wakings"),
+        ("returned_to_sleep", "could_not_return_to_sleep"), ("no_night_wandering", "night_wandering_reported"),
+        ("usual_sleep_duration", "shortened_sleep_duration"), ("settled_without_help", "needed_reassurance"),
+        ("no_overnight_call", "overnight_call_for_help"), ("quiet_night", "disturbed_night"),
+        ("slept_in_bed", "slept_in_chair"), ("daytime_awake", "awake_most_of_night"),
+    ),
+    "pain_report": (
+        ("pain_reported", "pain_denied"), ("mild_pain", "severe_pain"),
+        ("pain_improved", "pain_worsened"), ("no_pain_at_rest", "pain_at_rest"),
+        ("pain_on_movement", "no_pain_on_movement"), ("headache_reported", "headache_denied"),
+        ("joint_pain_reported", "joint_pain_denied"), ("pain_scale_four", "pain_scale_zero"),
+        ("requested_comfort", "declined_comfort"), ("pain_relief_reported", "no_relief_reported"),
+    ),
+    "appointment_attendance": (
+        ("attended", "not_attended"), ("arrived_on_time", "did_not_arrive"),
+        ("seen_by_specialist", "not_seen_by_specialist"), ("appointment_completed", "appointment_cancelled"),
+        ("transport_arranged", "transport_not_arranged"), ("family_accompanied", "attended_alone"),
+        ("review_occurred", "review_not_confirmed"), ("discharge_given", "no_discharge_record"),
+        ("follow_up_booked", "no_follow_up_booked"), ("clinic_called_back", "no_callback_received"),
+    ),
+    "fluid_intake": (
+        ("adequate_fluids", "low_fluids"), ("drank_two_cups", "drank_half_cup"),
+        ("finished_water", "water_untouched"), ("accepted_drink", "refused_drink"),
+        ("urine_output_reported_normal", "reduced_output_reported"), ("drank_with_meals", "no_drinks_with_meals"),
+        ("needed_prompting_to_drink", "drank_without_prompting"), ("oral_fluids_taken", "oral_fluids_not_taken"),
+        ("fluid_chart_complete", "fluid_chart_incomplete"), ("usual_intake", "below_usual_intake"),
+    ),
+    "location": (
+        ("at_home", "at_hospital"), ("in_bedroom", "in_living_room"),
+        ("in_day_centre", "not_at_day_centre"), ("with_daughter", "with_son"),
+        ("at_clinic", "at_home"), ("in_shared_room", "in_private_room"),
+        ("at_residence", "at_temporary_address"), ("indoors", "outdoors"),
+        ("at_known_location", "location_not_confirmed"), ("returned_home", "return_home_not_confirmed"),
+    ),
+    "personal_care": (
+        ("completed_wash", "wash_not_completed"), ("changed_clothes", "clothes_not_changed"),
+        ("brushed_teeth", "teeth_not_brushed"), ("accepted_bath", "declined_bath"),
+        ("used_toilet", "toileting_assistance_needed"), ("dressed_independently", "dressing_assisted"),
+        ("skin_checked", "skin_check_not_done"), ("hair_washed", "hair_not_washed"),
+        ("personal_care_with_one_prompt", "personal_care_refused"), ("usual_routine_completed", "routine_incomplete"),
+    ),
+    "mood_observation": (
+        ("calm", "agitated"), ("engaged", "withdrawn"),
+        ("appeared_content", "appeared_distressed"), ("recognised_family", "did_not_recognise_family"),
+        ("conversation_coherent", "conversation_disjointed"), ("no_distress_reported", "distress_reported"),
+        ("accepted_reassurance", "reassurance_not_effective"), ("usual_mood", "mood_changed"),
+        ("participated_in_activity", "declined_activity"), ("settled", "restless"),
+    ),
+}
 SCENARIOS = [
     pytest.param(field, first, second, index, id=f"MC-{index:03d}-{field}")
     for index, (field, (first, second)) in enumerate(
-        ((field, PAIRS[(field_index + offset) % len(PAIRS)])
-         for field_index, field in enumerate(FIELDS)
+        ((field, PAIRS_BY_FIELD[field][offset])
+         for field in FIELDS
          for offset in range(10)),
         start=1,
     )
