@@ -98,10 +98,17 @@ def qwen_chat(
     }
     if options:
         bounded_options.update(options)
+    think_setting = os.getenv("OLLAMA_THINK", "false").strip().casefold()
+    think: bool | str = (
+        think_setting == "true" if think_setting in {"true", "false"}
+        else think_setting if think_setting in {"low", "medium", "high"}
+        else False
+    )
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
+        "think": think,
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": bounded_options,
     }
