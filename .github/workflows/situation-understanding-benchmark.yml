@@ -114,7 +114,6 @@ jobs:
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
       DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
-    DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -129,12 +128,16 @@ jobs:
       - name: Install backend and test dependencies
         run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
 
-      - name: Run longitudinal messy-care benchmark against PostgreSQL
+      - name: Apply the reviewed PostgreSQL migration chain
+        run: python -m alembic upgrade head
+        working-directory: backend
+
+      - name: Run PostgreSQL integration before disposable schema tests
         id: postgres_benchmark
         continue-on-error: true
         run: |
-          python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py \
-            backend/tests/test_pattern_postgres_integration.py \
+          python -m pytest backend/tests/test_pattern_postgres_integration.py \
+            backend/tests/test_longitudinal_messy_care_benchmark.py \
             -q -s --junitxml=/tmp/postgres-longitudinal.xml
 
       - name: Enforce PostgreSQL benchmark execution
