@@ -314,7 +314,7 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
     client_a, _ = review_records
     binary = b"%PDF-1.7\\nSolenOS source integrity fixture\\n"
     digest = hashlib.sha256(binary).hexdigest()
-    source_text = "Discharge summary: mobility support required."
+    source_text = "Discharge summary: mobility support required. The patient should use one-person assistance for all transfers and walking during the day."
     text_hash = hashlib.sha256(source_text.encode("utf-8")).hexdigest()
     db = SessionLocal()
     try:
