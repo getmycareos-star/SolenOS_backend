@@ -329,6 +329,16 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # Assistant requests intentionally omit client-selected person IDs;
             # the session remains the authority for any loaded care context.
             target_person_id = scoped_person_id
+        if not target_person_id and path.startswith("/api/v1/upload/"):
+            # Upload downloads address an evidence child ID, not a person ID.
+            # Resolve its owner from the database before enforcing bearer scope;
+            # do not treat the path identifier itself as authorization.
+            evidence_id = path.rsplit("/", 1)[-1]
+            target_person_id = (
+                db.query(Evidence.person_id)
+                .filter(Evidence.id == evidence_id)
+                .scalar()
+            )
         if not target_person_id and (
             path.startswith("/api/v1/evidence/") or path.startswith("/api/v1/events/")
         ):
