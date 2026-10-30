@@ -216,11 +216,19 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
             *(target_situation.signal_ids or []),
             *evidence_ids,
         ]))
+        existing_start = target_situation.temporal_start
+        existing_end = target_situation.temporal_end
+        # SQLite and legacy rows may return naive datetimes even though new
+        # captures are UTC-aware. Normalize the stored side before comparison.
+        if existing_start is not None and existing_start.tzinfo is None:
+            existing_start = existing_start.replace(tzinfo=timezone.utc)
+        if existing_end is not None and existing_end.tzinfo is None:
+            existing_end = existing_end.replace(tzinfo=timezone.utc)
         target_situation.temporal_start = min(
-            value for value in (target_situation.temporal_start, occurred_at) if value is not None
+            value for value in (existing_start, occurred_at) if value is not None
         )
         target_situation.temporal_end = max(
-            value for value in (target_situation.temporal_end, occurred_at) if value is not None
+            value for value in (existing_end, occurred_at) if value is not None
         )
     db.commit()
 
