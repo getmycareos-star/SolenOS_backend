@@ -1,6 +1,6 @@
 """Forward-only repair for legacy claim-assessment and observation columns.
 
-Revision ID: 20261030_02_evidence_schema_repair
+Revision ID: 20261030_02_ev_schema_fix
 Revises: 20261030_01_companion_turn_merge
 
 Earlier revisions could already be stamped as applied when create_all() or an
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261030_02_evidence_schema_repair"
+revision = "20261030_02_ev_schema_fix"
 down_revision = "20261030_01_companion_turn_merge"
 branch_labels = None
 depends_on = None
