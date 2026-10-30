@@ -371,7 +371,13 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             db.add_all(question_rows)
             db.commit()
 
-        # New SQLAlchemy session: no identity-map state from the writer session.
+        # Dispose the writer's connection pool and create a new engine. The next
+        # reads cannot succeed from an ORM identity map or a reused DB connection.
+        engine.dispose()
+        engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+        Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+        # New SQLAlchemy session and new database connections.
         with Session() as reader:
             persisted = reader.query(CareEvent).filter(
                 CareEvent.id.like(f"m10ke{suffix}%")
@@ -422,6 +428,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert claim.source_event_id == row.id
                 assert claim.evidence_ids == [wanted["evidence_id"]]
                 assert claim.created_by_caregiver_id == wanted["caregiver_id"]
+                assert claim.source_label
                 assert row.recorded_at is not None, f"{row.id}: recorded time missing"
                 assert row.recorded_at != row.occurred_at, (
                     f"{row.id}: event time and recorded time were conflated"
