@@ -3062,6 +3062,19 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             )
             db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
         data["source_id"], data["target_id"] = pair
+        # Relationship history is append-only. A database timestamp is not a
+        # reliable version clock (SQLite CURRENT_TIMESTAMP has second precision),
+        # so assign a monotonic per-pair version while holding the pair lock.
+        latest_version = db.execute(
+            select(func.max(relationship_table.c.relationship_version)).where(
+                relationship_table.c.person_id == person_id,
+                relationship_table.c.source_type == "situation",
+                relationship_table.c.source_id == pair[0],
+                relationship_table.c.target_type == "situation",
+                relationship_table.c.target_id == pair[1],
+            )
+        ).scalar_one_or_none()
+        data["relationship_version"] = int(latest_version or 0) + 1
         latest_pair_link = db.execute(
             select(
                 relationship_table.c.id,
