@@ -2449,6 +2449,9 @@ def save_companion_care_report(
     ).first()
     if session is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver attribution is not linked to this care record")
 
     message = db.query(ConversationMessage).filter(
         ConversationMessage.id == message_id,
@@ -2533,7 +2536,7 @@ def save_companion_care_report(
             field="caregiver_reported_statement",
             assertion_kind="caregiver_reported_companion_contribution",
             asserted_value=message.content,
-            source_label="Caregiver report via AI Companion",
+            source_label=f"Caregiver report by {caregiver.name} via AI Companion",
             source_text=json.dumps({
                 "conversation_session_id": session.id,
                 "conversation_message_id": message.id,
