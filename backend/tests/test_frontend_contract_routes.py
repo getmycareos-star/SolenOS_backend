@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.collaboration import CommunityPost, ConversationMessage
+from app.models.collaboration import CommunityPost, ConversationMessage, EvidenceUpload
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
@@ -253,6 +253,10 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert len(listed_uploads) == 2
         assert all(isinstance(item.get("extra_metadata"), dict) for item in listed_uploads)
         assert any(item["extra_metadata"].get("duplicate_detected") is True for item in listed_uploads)
+        assert all(
+            item["extra_metadata"]["source_integrity"]["original_binary_available"] is True
+            for item in listed_uploads
+        )
 
         db = TestingSessionLocal()
         saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
@@ -269,6 +273,23 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert downloaded.status_code == 200
         assert downloaded.content == original
         assert downloaded.headers["content-type"] == "image/png"
+
+        # Simulate a missing blob without deleting its evidence record. The
+        # evidence list must surface the source as inaccessible, not complete.
+        duplicate_evidence_id = duplicate_upload.json()["evidence_id"]
+        db = TestingSessionLocal()
+        try:
+            db.query(EvidenceUpload).filter_by(evidence_id=duplicate_evidence_id).delete()
+            db.commit()
+        finally:
+            db.close()
+        after_missing_blob = client.get(f"/api/v1/evidence/{person_id}", headers=auth)
+        assert after_missing_blob.status_code == 200, after_missing_blob.text
+        missing_record = next(item for item in after_missing_blob.json() if item["id"] == duplicate_evidence_id)
+        assert missing_record["extra_metadata"]["source_integrity"]["original_binary_available"] is False
+        assert missing_record["extra_metadata"]["source_integrity"]["original_binary_status"] == "missing"
+        missing_download = client.get(f"/api/v1/upload/{duplicate_evidence_id}", headers=auth)
+        assert missing_download.status_code == 404, missing_download.text
 
         linked = client.post("/api/situation", headers=auth, json={
             "person_id": person_id,
