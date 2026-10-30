@@ -139,7 +139,9 @@ jobs:
 
           from sqlalchemy import create_engine
           from sqlalchemy.orm import sessionmaker
-          from app.models.care import Person, Caregiver, CareEvent
+          from app.models.care import Person, Caregiver, CareEvent, Evidence, Correction
+          from app.models.care_continuity import CareAssertion
+          from app.models.uncertainty import Contradiction, OpenQuestion
 
           dsn = os.environ["DATABASE_URL"]
           suffix = os.environ["GITHUB_SHA"][:12]
@@ -159,14 +161,86 @@ jobs:
                   person_id=person_id,
               ))
               db.flush()
+              occurred_at = datetime(2026, 10, 29, 8, 15, tzinfo=timezone.utc)
+              source_id = "restart-source-" + suffix
+              assertion_id = "restart-assertion-" + suffix
+              contradiction_id = "restart-conflict-" + suffix
+              correction_id = "restart-correction-" + suffix
+              question_id = "restart-question-" + suffix
+              db.add(Evidence(
+                  id=source_id,
+                  person_id=person_id,
+                  type="caregiver_report",
+                  source_text="Caregiver reports a mobility concern; later correction remains auditable.",
+                  uploaded_by_caregiver_id=caregiver_id,
+                  reported_by_caregiver_id=caregiver_id,
+                  reported_by_label="Daughter",
+                  original_author="Daughter",
+                  collected_by_caregiver_id=caregiver_id,
+                  occurred_at=occurred_at,
+                  reported_at=datetime(2026, 10, 30, 8, 15, tzinfo=timezone.utc),
+                  evidence_status="reported",
+                  source_type="caregiver_report",
+              ))
+              db.flush()
               db.add(CareEvent(
                   id=event_id,
                   person_id=person_id,
                   event_type="mobility",
                   status="recorded",
-                  occurred_at=datetime(2026, 10, 29, 8, 15, tzinfo=timezone.utc),
+                  occurred_at=occurred_at,
                   title="Persisted care event restart probe",
-                  evidence_ids=["restart-source-" + suffix],
+                  evidence_ids=[source_id],
+                  created_by_caregiver_id=caregiver_id,
+              ))
+              db.flush()
+              db.add(CareAssertion(
+                  id=assertion_id,
+                  person_id=person_id,
+                  subject_type="mobility",
+                  subject_id="walking",
+                  field="reported_status",
+                  assertion_kind="event",
+                  asserted_value="reported_present",
+                  source_event_id=event_id,
+                  source_label="Daughter",
+                  source_text="Needed support when walking.",
+                  evidence_ids=[source_id],
+                  assertion_status="reported",
+                  observed_at=occurred_at,
+                  created_by_caregiver_id=caregiver_id,
+              ))
+              db.flush()
+              db.add(Contradiction(
+                  id=contradiction_id,
+                  person_id=person_id,
+                  subject_type="mobility",
+                  subject_id="walking",
+                  field="reported_status",
+                  description="Conflicting accounts remain unresolved after restart.",
+                  matching_candidate_ids=[assertion_id, "independent-counter-claim"],
+                  evidence_ids=[source_id],
+                  source_assertion_ids=[assertion_id, "independent-counter-claim"],
+                  resolution_status="unresolved",
+              ))
+              db.add(Correction(
+                  id=correction_id,
+                  person_id=person_id,
+                  target_type="care_assertion",
+                  target_id=assertion_id,
+                  original_text="reported_present",
+                  corrected_text="report remains unverified pending review",
+                  reason="Caregiver correction retained as a separate lineage record.",
+                  caregiver_id=caregiver_id,
+              ))
+              db.add(OpenQuestion(
+                  id=question_id,
+                  person_id=person_id,
+                  question="Was walking support also needed the following morning?",
+                  subject_type="mobility",
+                  subject_id="walking",
+                  status="open",
+                  evidence_ids=[source_id],
                   created_by_caregiver_id=caregiver_id,
               ))
               db.commit()
@@ -192,13 +266,47 @@ jobs:
                           id=event_id, person_id=person_id
                       ).one()
                       assert event.created_by_caregiver_id == caregiver_id
-                      assert event.evidence_ids == ["restart-source-" + suffix]
+                      assert event.evidence_ids == [source_id]
                       assert event.title == "Persisted care event restart probe"
+                      evidence = db.query(Evidence).filter_by(
+                          id=source_id, person_id=person_id
+                      ).one()
+                      assert evidence.uploaded_by_caregiver_id == caregiver_id
+                      assert evidence.reported_by_caregiver_id == caregiver_id
+                      assert evidence.reported_by_label == "Daughter"
+                      assert evidence.source_text_sha256
+                      assertion = db.query(CareAssertion).filter_by(
+                          id=assertion_id, person_id=person_id
+                      ).one()
+                      assert assertion.source_event_id == event_id
+                      assert assertion.evidence_ids == [source_id]
+                      assert assertion.source_label == "Daughter"
+                      conflict = db.query(Contradiction).filter_by(
+                          id=contradiction_id, person_id=person_id
+                      ).one()
+                      assert conflict.resolution_status == "unresolved"
+                      assert conflict.source_assertion_ids == [
+                          assertion_id, "independent-counter-claim"
+                      ]
+                      correction = db.query(Correction).filter_by(
+                          id=correction_id, person_id=person_id
+                      ).one()
+                      assert correction.original_text == "reported_present"
+                      assert correction.corrected_text == "report remains unverified pending review"
+                      question = db.query(OpenQuestion).filter_by(
+                          id=question_id, person_id=person_id
+                      ).one()
+                      assert question.status == "open"
+                      assert question.question.startswith("Was walking support")
                       caregiver = db.query(Caregiver).filter_by(
                           id=caregiver_id, person_id=person_id
                       ).one()
                       assert caregiver.id == caregiver_id
                       print("POSTGRES_CARE_EVENT_FRESH_SESSION_AFTER_RESTART=PASS")
+                      print("POSTGRES_EVIDENCE_ATTRIBUTION_AFTER_RESTART=PASS")
+                      print("POSTGRES_CONTRADICTION_AFTER_RESTART=PASS")
+                      print("POSTGRES_CORRECTION_LINEAGE_AFTER_RESTART=PASS")
+                      print("POSTGRES_OPEN_QUESTION_AFTER_RESTART=PASS")
                   restarted_engine.dispose()
                   break
               except Exception as error:
