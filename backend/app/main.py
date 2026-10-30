@@ -604,6 +604,7 @@ def get_situation(
         ]
         situation_ui_rows.append({
             "id": saved_situation.id,
+            "persisted_thread": True,
             "title": saved_situation.title,
             "status": saved_situation.state.value if saved_situation.state else "active",
             "riskLevel": "LOW",
@@ -647,6 +648,7 @@ def get_situation(
         latest = group_events[-1]
         situation_ui_rows.append({
             "id": canonical_id,
+            "persisted_thread": False,
             "title": (latest.title or "Recorded care observation")[:160],
             "status": "active",
             "riskLevel": "LOW",
