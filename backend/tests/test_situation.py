@@ -338,6 +338,39 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             },
         )
         assert causal_link.status_code == 422, causal_link.text
+        retract_link = client.post(
+            "/api/v1/care-continuity/relationships",
+            headers=headers,
+            json={
+                "source_type": "situation",
+                "source_id": "persisted-appetite-thread",
+                "relationship_type": "unrelated_to",
+                "target_type": "situation",
+                "target_id": "persisted-mobility-thread",
+                "provenance": "Caregiver corrected the prior relationship and now considers these concerns unrelated.",
+            },
+        )
+        assert retract_link.status_code == 201, retract_link.text
+        after_retraction = client.get("/api/situation", headers=headers)
+        assert after_retraction.status_code == 200, after_retraction.text
+        retracted_threads = {
+            item["id"]: item for item in after_retraction.json()["ui_situations"]
+        }
+        assert retracted_threads["persisted-mobility-thread"]["relatedSituations"] == []
+        assert retracted_threads["persisted-appetite-thread"]["relatedSituations"] == []
+        restore_link = client.post(
+            "/api/v1/care-continuity/relationships",
+            headers=headers,
+            json={
+                "source_type": "situation",
+                "source_id": "persisted-mobility-thread",
+                "relationship_type": "related_to",
+                "target_type": "situation",
+                "target_id": "persisted-appetite-thread",
+                "provenance": "Caregiver restored the explicit non-causal relationship after review.",
+            },
+        )
+        assert restore_link.status_code == 201, restore_link.text
 
         # Explicitly resume the mobility thread with a new observation. The
         # appetite thread must remain separate and retain its own evidence.
