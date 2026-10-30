@@ -1251,12 +1251,12 @@ def _contains_unsupported_operational_claim(
         # to fail closed with HTTP 503. Keep rejecting affirmative medication
         # actions unless their exact action is present in the supplied source.
         safe_medication_boundary_pattern = (
-            r"\b(?:cannot|can.t|unable to|not able to)\\b.{0,100}\\b(?:advise|recommend|confirm|determine|provide)\\b"
-            r"|\b(?:do not|don.t|never|should not|must not)\s+(?:change|adjust|alter|increase|decrease|double|stop|start)\\b.{0,100}\\b(?:medication|medicine|prescription|dosage|dose)\\b"
-            r"|\b(?:medication|medicine|prescription|dosage|dose)\\b.{0,100}\\b(?:should not|must not|cannot|can.t|not to be)\s+(?:changed|adjusted|altered|increased|decreased|doubled|stopped|started)\\b"
-            r"|\b(?:speak|check|confirm|contact|consult|discuss|review)\\b.{0,100}\\b(?:prescriber|clinician|doctor|pharmacist)\\b"
-            r"|\b(?:prescriber|clinician|doctor|pharmacist)\\b.{0,100}\\b(?:confirm|advise|review|discuss)\\b"
-            r"|\b(?:no|not)\s+(?:medication|dose|dosage)\s+(?:change|adjustment|increase|decrease)\\b"
+            r"\b(?:cannot|can.t|unable to|not able to)\b.{0,100}\b(?:advise|recommend|confirm|determine|provide)\b"
+            r"|\b(?:do not|don.t|never|should not|must not)\s+(?:change|adjust|alter|increase|decrease|double|stop|start)\b.{0,100}\b(?:medication|medicine|prescription|dosage|dose)\b"
+            r"|\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:should not|must not|cannot|can.t|not to be)\s+(?:changed|adjusted|altered|increased|decreased|doubled|stopped|started)\b"
+            r"|\b(?:speak|check|confirm|contact|consult|discuss|review)\b.{0,100}\b(?:prescriber|clinician|doctor|pharmacist)\b"
+            r"|\b(?:prescriber|clinician|doctor|pharmacist)\b.{0,100}\b(?:confirm|advise|review|discuss)\b"
+            r"|\b(?:no|not)\s+(?:medication|dose|dosage)\s+(?:change|adjustment|increase|decrease)\b"
         )
         safe_medication_boundary = bool(re.search(safe_medication_boundary_pattern, text))
         if action_matches and not source_supported_action:
@@ -1265,10 +1265,10 @@ def _contains_unsupported_operational_claim(
             for action_match in action_matches:
                 left = max(
                     text.rfind(mark, 0, action_match.start())
-                    for mark in (".", ";", "!", "?", "\\n")
+                    for mark in (".", ";", "!", "?", "\n")
                 ) + 1
                 right_candidates = [
-                    position for mark in (".", ";", "!", "?", "\\n")
+                    position for mark in (".", ";", "!", "?", "\n")
                     if (position := text.find(mark, action_match.end())) >= 0
                 ]
                 right = min(right_candidates) if right_candidates else len(text)
