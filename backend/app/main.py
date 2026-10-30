@@ -40,6 +40,7 @@ from app.models.change import Situation as SituationModel
 from app.models.care_continuity import (
     EvidenceObservation as EvidenceObservationModel,
     CareRecordRelationship,
+    CareAssertion as CareAssertionModel,
 )
 from app.models.uncertainty import (
     OpenQuestion as OpenQuestionModel,
@@ -599,6 +600,12 @@ def get_situation(
         .order_by(SituationModel.created_at.asc(), SituationModel.id.asc())
         .all()
     )
+    care_assertion_rows = (
+        db.query(CareAssertionModel)
+        .filter(CareAssertionModel.person_id == person_id)
+        .all()
+    )
+    assertions_by_id = {assertion.id: assertion for assertion in care_assertion_rows}
     open_question_rows = (
         db.query(OpenQuestionModel)
         .filter(
@@ -726,11 +733,18 @@ def get_situation(
         # unresolved question or contradiction only through an explicit
         # situation subject ID or a shared, same-record evidence reference.
         # Otherwise it remains care-record-level context, not a guessed merge.
-        linked_questions = [
-            question.question for question in open_question_rows
-            if question.subject_id == saved_situation.id
-            or bool(set(question.evidence_ids or []) & linked_evidence_ids)
-        ]
+        linked_questions = []
+        for question in open_question_rows:
+            linked_claim = assertions_by_id.get(question.claim_id) if question.claim_id else None
+            question_evidence_ids = set(question.evidence_ids or [])
+            if linked_claim is not None:
+                question_evidence_ids.update(linked_claim.evidence_ids or [])
+            if (
+                question.subject_id == saved_situation.id
+                or (linked_claim is not None and linked_claim.subject_id == saved_situation.id)
+                or bool(question_evidence_ids & linked_evidence_ids)
+            ):
+                linked_questions.append(question.question)
         linked_conflicts = [
             {
                 "id": conflict.id,
