@@ -226,8 +226,16 @@ class CausalReasoningEngine:
                 if temporal_rel
                 else "Temporal relationship: unknown"
             ]
-            + [f"Confounder: {c.description}" for c in confounders]
-            + [f"Alternative: {a.description}" for a in alternatives],
+            + [
+                "Other event in the same time window (not established as a confounder): "
+                f"{c.description}"
+                for c in confounders
+            ]
+            + [
+                "Possible alternative context (not evidence of causation): "
+                f"{a.description}"
+                for a in alternatives
+            ],
             what_is_uncertain=(
                 "The available information does not establish whether "
                 f"{potential_cause_description} contributed to the {outcome_description}."
@@ -765,7 +773,9 @@ class CausalReasoningEngine:
         if has_strong and has_contradiction:
             return EvidenceStrength.MODERATE, CausalConfidence.CONFLICTING
 
-        if has_contradiction or (has_confounder and has_alternative):
+        # A nearby care event is only contextual candidate information.
+        # It is not contradictory evidence and must not manufacture a conflict.
+        if has_contradiction:
             return EvidenceStrength.WEAK, CausalConfidence.CONFLICTING
 
         if has_confounder or has_alternative:

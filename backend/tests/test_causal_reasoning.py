@@ -199,10 +199,12 @@ def test_confounder_preserves_ambiguity():
         )
 
         assert len(result.confounders) > 0
-        assert result.causal_confidence in (
-            CausalConfidence.CONFLICTING,
-            CausalConfidence.POSSIBLE,
-            CausalConfidence.INSUFFICIENT,
+        # One nearby event may be a possible alternative context, but it
+        # is not contradictory evidence and must not be promoted to a conflict.
+        assert result.causal_confidence == CausalConfidence.PLAUSIBLE
+        assert any(
+            "not established as a confounder" in item
+            for item in result.what_else_is_known
         )
         db.close()
     finally:
