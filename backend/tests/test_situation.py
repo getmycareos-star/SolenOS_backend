@@ -13,7 +13,7 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.care_continuity import EvidenceObservation
 from app.models.change import Situation
-from app.models.uncertainty import OpenQuestion
+from app.models.uncertainty import OpenQuestion, Contradiction
 from app.core.change_enums import SituationType, SituationState
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
@@ -234,6 +234,16 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     subject_id=person_id,
                     status="open",
                 ),
+                Contradiction(
+                    id="unresolved-mobility-conflict",
+                    person_id=person_id,
+                    subject_type="mobility",
+                    subject_id=person_id,
+                    field="walking_stability",
+                    description="Daughter reports unsteadiness; another account says walking was steady.",
+                    resolution_status="unresolved",
+                    evidence_ids=[first_evidence_id],
+                ),
             ])
             db.commit()
 
@@ -276,8 +286,14 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert threads["persisted-mobility-thread"]["openQuestions"] == [
             "Has the unsteadiness also happened indoors?"
         ]
+        assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
+        assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
         assert "Has the unsteadiness also happened indoors?" in body["return_continuity"]["important_unresolved"]
+        assert any(
+            item.startswith("Conflicting reports:")
+            for item in body["return_continuity"]["important_unresolved"]
+        )
     finally:
         teardown_db()
 
