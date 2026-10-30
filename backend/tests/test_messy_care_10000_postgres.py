@@ -1,0 +1,249 @@
+"""10,000 PostgreSQL-backed longitudinal care-record cases.
+
+The corpus contains 1,000 isolated synthetic care histories with ten independently
+labelled event records each. It exercises durable relational persistence, attribution,
+five concurrent care domains, event-time preservation, source lineage, person scoping,
+and fresh-session reconstruction. Existing PostgreSQL contract tests separately cover
+contradiction transitions, correction lineage, open questions, authorization, and
+concurrent writers. This is synthetic engineering evidence, not clinical validation.
+"""
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
+import os
+import uuid
+
+import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
+
+from app.models.care import CareEvent, Caregiver, Person
+
+DATABASE_URL = os.environ.get("SOLENOS_BENCHMARK_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+if DATABASE_URL.startswith("postgresql+psycopg://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")),
+    reason="requires the disposable PostgreSQL benchmark database",
+)
+
+HISTORY_COUNT = 1_000
+CASES_PER_HISTORY = 10
+EXPECTED_CASE_COUNT = HISTORY_COUNT * CASES_PER_HISTORY
+DOMAINS = ("medication", "mobility", "nutrition", "sleep", "appointment")
+FAMILIES = (
+    "conflicting_reports",
+    "late_arriving_evidence",
+    "backdated_observation",
+    "duplicate_source_lineage",
+    "independent_reporters",
+    "unresolved_thread",
+    "incomplete_history",
+    "stale_observation",
+    "planned_not_completed",
+    "correction_followup",
+    "time_zone_boundary",
+    "repeated_occurrence",
+    "cross_domain_near_match",
+    "similar_subject_language",
+    "missing_optional_context",
+    "delayed_recording",
+    "partial_document",
+    "caregiver_transition",
+    "concurrent_care_domains",
+    "historical_reconstruction",
+)
+
+
+def _utc(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction():
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:8]
+    reference = datetime(2026, 10, 30, 12, 0, tzinfo=timezone.utc)
+
+    people = []
+    caregivers = []
+    events = []
+    expected = {}
+
+    try:
+        with Session() as db:
+            for history_index in range(HISTORY_COUNT):
+                compact = f"{suffix}{history_index:04d}"
+                person_id = f"m10kp{compact}"
+                caregiver_a_id = f"m10ka{compact}"
+                caregiver_b_id = f"m10kb{compact}"
+                family = FAMILIES[history_index % len(FAMILIES)]
+                people.append(Person(id=person_id, name=f"Synthetic history {history_index:04d}"))
+                caregivers.extend([
+                    Caregiver(
+                        id=caregiver_a_id,
+                        name=f"Synthetic reporter A {history_index:04d}",
+                        relationship="family",
+                        person_id=person_id,
+                    ),
+                    Caregiver(
+                        id=caregiver_b_id,
+                        name=f"Synthetic reporter B {history_index:04d}",
+                        relationship="family",
+                        person_id=person_id,
+                    ),
+                ])
+
+                for event_index in range(CASES_PER_HISTORY):
+                    case_id = history_index * CASES_PER_HISTORY + event_index
+                    event_id = f"m10ke{suffix}{case_id:05d}"
+                    domain = DOMAINS[(event_index + history_index) % len(DOMAINS)]
+                    reporter_id = caregiver_a_id if event_index % 2 == 0 else caregiver_b_id
+                    # The same source anchor is deliberately reused by paired reports;
+                    # separate event IDs and occurrence times must remain reconstructable.
+                    source_anchor = f"m10ks{suffix}{history_index:04d}{event_index // 2:02d}"
+                    days_ago = (history_index * 37 + event_index * 11) % 730
+                    occurred_at = reference - timedelta(
+                        days=days_ago,
+                        hours=(event_index * 3) % 24,
+                        minutes=(history_index * 7) % 60,
+                    )
+                    # Backdated and delayed cases intentionally separate event time
+                    # from the database-assigned recorded_at timestamp.
+                    if family in {"backdated_observation", "historical_reconstruction"}:
+                        occurred_at -= timedelta(days=365)
+                    title = f"{family} {domain} event {case_id:05d}"
+                    description = (
+                        f"Synthetic source report {case_id:05d}; "
+                        f"history={history_index:04d}; domain={domain}; reporter={event_index % 2}."
+                    )
+                    event = CareEvent(
+                        id=event_id,
+                        person_id=person_id,
+                        event_type=domain,
+                        status="recorded",
+                        occurred_at=occurred_at,
+                        occurred_at_timezone="UTC",
+                        title=title,
+                        description=description,
+                        evidence_ids=[source_anchor],
+                        time_provenance=(
+                            "imported_document"
+                            if event_index % 3 == 0
+                            else "caregiver_observed"
+                        ),
+                        tags=[family, f"case:{case_id:05d}"],
+                        created_by_caregiver_id=reporter_id,
+                    )
+                    events.append(event)
+                    expected[event_id] = {
+                        "person_id": person_id,
+                        "caregiver_id": reporter_id,
+                        "event_type": domain,
+                        "occurred_at": occurred_at,
+                        "evidence_id": source_anchor,
+                        "family": family,
+                        "case_id": case_id,
+                    }
+
+            assert len(people) == HISTORY_COUNT
+            assert len(caregivers) == HISTORY_COUNT * 2
+            assert len(events) == EXPECTED_CASE_COUNT
+            assert len(expected) == EXPECTED_CASE_COUNT
+
+            db.add_all(people)
+            db.flush()
+            db.add_all(caregivers)
+            db.flush()
+            db.add_all(events)
+            db.commit()
+
+        # New SQLAlchemy session: no identity-map state from the writer session.
+        with Session() as reader:
+            persisted = reader.query(CareEvent).filter(
+                CareEvent.id.like(f"m10ke{suffix}%")
+            ).all()
+            assert len(persisted) == EXPECTED_CASE_COUNT, (
+                f"expected {EXPECTED_CASE_COUNT} persisted cases; got {len(persisted)}"
+            )
+
+            by_person = defaultdict(list)
+            family_counts = Counter()
+            for row in persisted:
+                wanted = expected[row.id]
+                assert row.person_id == wanted["person_id"], f"{row.id}: person scope changed"
+                assert row.created_by_caregiver_id == wanted["caregiver_id"], (
+                    f"{row.id}: reporter attribution changed"
+                )
+                assert row.event_type == wanted["event_type"], f"{row.id}: care domain changed"
+                assert _utc(row.occurred_at) == _utc(wanted["occurred_at"]), (
+                    f"{row.id}: event time changed"
+                )
+                assert row.evidence_ids == [wanted["evidence_id"]], (
+                    f"{row.id}: source lineage changed"
+                )
+                assert row.recorded_at is not None, f"{row.id}: recorded time missing"
+                assert row.recorded_at != row.occurred_at, (
+                    f"{row.id}: event time and recorded time were conflated"
+                )
+                assert f"case:{wanted['case_id']:05d}" in (row.tags or [])
+                assert wanted["family"] in (row.tags or [])
+                by_person[row.person_id].append(row)
+                family_counts[wanted["family"]] += 1
+
+            assert len(by_person) == HISTORY_COUNT
+            assert set(family_counts) == set(FAMILIES)
+            assert sum(family_counts.values()) == EXPECTED_CASE_COUNT
+            assert all(count == 50 * CASES_PER_HISTORY for count in family_counts.values())
+
+            # Each history must retain five care domains and both independent
+            # reporter identities. No event from another person may enter its scope.
+            caregiver_owner = {
+                caregiver.id: caregiver.person_id
+                for caregiver in reader.query(Caregiver).filter(
+                    (Caregiver.id.like(f"m10ka{suffix}%"))
+                    | (Caregiver.id.like(f"m10kb{suffix}%"))
+                ).all()
+            }
+            assert len(caregiver_owner) == HISTORY_COUNT * 2
+            for person_id, rows in by_person.items():
+                assert len(rows) == CASES_PER_HISTORY, f"{person_id}: wrong event count"
+                assert {row.event_type for row in rows} == set(DOMAINS)
+                assert len({row.created_by_caregiver_id for row in rows}) == 2
+                assert all(caregiver_owner[row.created_by_caregiver_id] == person_id for row in rows)
+                assert all(row.person_id == person_id for row in rows)
+
+            # Query by one selected history and prove adjacent histories do not leak.
+            selected_person = f"m10kp{suffix}0500"
+            selected = reader.query(CareEvent).filter(
+                CareEvent.person_id == selected_person
+            ).all()
+            assert len(selected) == CASES_PER_HISTORY
+            assert all(row.person_id == selected_person for row in selected)
+
+        print(f"MESSY_CARE_POSTGRES_CASES_DECLARED={EXPECTED_CASE_COUNT}")
+        print(f"MESSY_CARE_POSTGRES_CASES_PERSISTED={len(persisted)}")
+        print(f"MESSY_CARE_POSTGRES_HISTORIES={HISTORY_COUNT}")
+        print(f"MESSY_CARE_POSTGRES_FAMILIES={len(FAMILIES)}")
+        print("MESSY_CARE_POSTGRES_FRESH_SESSION_RETRIEVAL=PASS")
+    finally:
+        with Session() as cleanup:
+            person_ids = [person.id for person in people]
+            if person_ids:
+                cleanup.query(CareEvent).filter(CareEvent.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.execute(
+                    text("DELETE FROM care_state_revisions WHERE person_id = ANY(:person_ids)"),
+                    {"person_ids": person_ids},
+                )
+                cleanup.query(Caregiver).filter(Caregiver.person_id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.query(Person).filter(Person.id.in_(person_ids)).delete(
+                    synchronize_session=False
+                )
+                cleanup.commit()
+        engine.dispose()
