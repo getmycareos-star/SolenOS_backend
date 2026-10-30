@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence
 from app.models.change import Change, Pattern, Situation
 from app.models.uncertainty import (
     Contradiction as ContradictionModel,
@@ -117,19 +117,19 @@ def _form_change_situation(
         signal_types.append(c.subject_type)
     signal_ids = list(set(signal_ids))
     signal_types = list(set(signal_types))
-    # Situation time describes when the underlying care was observed, not
-    # when this analysis happened. Assessment timestamps are only a last-resort
-    # fallback when neither source-event time nor comparison-window bounds exist.
-    source_events = (
-        db.query(CareEvent)
-        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(signal_ids))
+    # Change.evidence_ids are Evidence primary keys, not CareEvent IDs.
+    # Resolve observation time from source evidence; upload and analysis times
+    # are not substitutes for when the care was observed.
+    source_evidence = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id, Evidence.id.in_(signal_ids))
         .all()
         if signal_ids else []
     )
     source_times = [
         observed_at
-        for event in source_events
-        if (observed_at := _ensure_utc(event.occurred_at)) is not None
+        for evidence in source_evidence
+        if (observed_at := _ensure_utc(evidence.occurred_at)) is not None
     ]
     if source_times:
         temporal_start = min(source_times)
@@ -551,17 +551,37 @@ def update_situations(
         return []
     updated = []
     for situation in active_situations:
-        if new_event.id in (situation.signal_ids or []):
+        if new_event.event_type not in (situation.signal_types or []):
             continue
-        if new_event.event_type in (situation.signal_types or []):
-            situation.signal_ids = (situation.signal_ids or []) + [new_event.id]
-            situation.signal_types = list(set((situation.signal_types or []) + [new_event.event_type]))
-            situation.temporal_end = now
-            situation.explanation = (
-                (situation.explanation or "")
-                + f" Updated {now.isoformat()} with new evidence {new_event.id}."
-            )
-            updated.append(situation)
+
+        # Change situations store evidence IDs; pattern situations store event
+        # IDs. Never mix the two identifier namespaces in signal_ids.
+        context_type = (situation.context or {}).get("type")
+        if context_type == "situation_understanding":
+            incoming_ids = list(new_event.evidence_ids or [])
+        elif context_type in {
+            "converged_situation_understanding",
+            "frequency_situation_understanding",
+        }:
+            incoming_ids = [new_event.id]
+        else:
+            # Legacy rows without declared signal semantics cannot be safely
+            # extended. Leave them intact for explicit reconciliation.
+            continue
+
+        existing_ids = list(situation.signal_ids or [])
+        additions = [item for item in incoming_ids if item and item not in existing_ids]
+        if not additions:
+            continue
+
+        situation.signal_ids = existing_ids + additions
+        situation.temporal_end = _ensure_utc(new_event.occurred_at) or situation.temporal_end
+        situation.explanation = (
+            (situation.explanation or "")
+            + f" Updated with event {new_event.id} observed at "
+            f"{situation.temporal_end.isoformat()}."
+        )
+        updated.append(situation)
     if updated:
         db.commit()
     return updated
