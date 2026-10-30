@@ -367,7 +367,36 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         idempotency_key=payload.idempotency_key,
     )
     db.add(occurrence)
-    _audit(db, loop, "created", None, payload.evidence, payload.idempotency_key)
+    try:
+        _audit(db, loop, "created", None, payload.evidence, payload.idempotency_key)
+    except HTTPException as exc:
+        # A concurrent identical create can pass the first occurrence lookup,
+        # then observe the winning request's audit row before its own commit.
+        # _audit correctly refuses a duplicate audit mutation; recover the
+        # already committed occurrence instead of leaking a false 409.
+        db.rollback()
+        if (
+            payload.idempotency_key
+            and exc.status_code == 409
+            and exc.detail == "Idempotency key has already been used for this care record"
+        ):
+            replay = db.query(OpenLoopOccurrence).filter(
+                OpenLoopOccurrence.person_id == person_id,
+                OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
+            ).first()
+            if replay is not None:
+                if replay.source_fingerprint != fingerprint:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Idempotency key was already used for a different Open Loop payload",
+                    )
+                existing = _get_scoped(db, person_id, caregiver_id, replay.loop_id)
+                return {
+                    **_snapshot(existing),
+                    "recurrence_detected": True,
+                    "occurrence_id": replay.id,
+                }
+        raise
     try:
         db.commit()
     except IntegrityError:
