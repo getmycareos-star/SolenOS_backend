@@ -39,6 +39,25 @@ router = APIRouter(tags=["community and companion"])
 logger = logging.getLogger(__name__)
 
 
+_MEDICATION_EVENT_TERMS = (
+    "medication", "medicine", "prescription", "dosage", "dose",
+    "tablet", "pill", "administered", "missed dose", "withheld",
+)
+
+
+def _medication_day_event_filter():
+    """Select only recorded events whose searchable content concerns medication."""
+    predicates = []
+    for term in _MEDICATION_EVENT_TERMS:
+        pattern = f"%{term}%"
+        predicates.extend((
+            CareEvent.event_type.ilike(pattern),
+            CareEvent.title.ilike(pattern),
+            CareEvent.description.ilike(pattern),
+        ))
+    return or_(*predicates)
+
+
 class SharedFileInput(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     mimeType: str = Field(min_length=1, max_length=128)
@@ -1470,6 +1489,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
+        if payload.workflow == "medication_day":
+            # A medication-day response must not be contaminated by unrelated
+            # recent events (falls, sleep, appointments, etc.).
+            events_query = events_query.filter(_medication_day_event_filter())
         if payload.workflow == "two_week_review":
             from datetime import timedelta
             events_query = events_query.filter(
@@ -1479,9 +1502,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             20 if payload.workflow == "two_week_review" else 8
         ).all()
         for event in events:
-            context_lines.append(
-                f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
-            )
+            if payload.workflow == "medication_day":
+                occurred = event.occurred_at.isoformat() if event.occurred_at else "unknown"
+                recorded = event.recorded_at.isoformat() if event.recorded_at else "unknown"
+                context_lines.append(
+                    f"Recorded medication-related care event [{event.id}]: "
+                    f"event_type={event.event_type}; status={event.status}; "
+                    f"event_time={occurred}; recorded_time={recorded}; "
+                    f"reporter_caregiver_id={event.created_by_caregiver_id}; "
+                    f"title={event.title}; description={event.description or 'No additional detail'}. "
+                    "This is a caregiver-reported record, not independent clinical verification."
+                )
+            else:
+                context_lines.append(
+                    f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
+                )
             source_event_ids.append(str(event.id))
 
     appointment_workflows = {
@@ -1626,7 +1661,16 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "open_loops": "Identify only explicitly unresolved questions and follow-ups visible in context. Do not invent tasks, owners, deadlines, assignments or completion states.",
         "two_week_review": "Review only supplied information and recorded events from the last fourteen days. Separate reported changes, stable facts, unresolved questions and unknowns. Never claim causation.",
         "decision_outcome": "Separate the caregiver-reported decision from its reported outcome, including timing and source when available. Do not infer that a decision caused an outcome.",
-        "medication_day": "Organize caregiver-reported medication observations only. Never recommend starting, stopping or changing a medication or dose; refer decisions to a qualified professional.",
+        "medication_day": (
+            "Organize medication-day information without blending unrelated care events. Treat the caregiver's "
+            "current request text as an unverified caregiver report, not as an independently verified medication "
+            "record or prescribed regimen. Attribute each detail to the caregiver report or to a separately identified "
+            "recorded event. Preserve event time, recorded time, reporter and recorded status when available. "
+            "Do not infer a medication name, dose, route, schedule, adherence, administration, or clinical effect "
+            "beyond the exact source wording. If the record has no medication-related event, say so separately from "
+            "what the caregiver has just reported. Surface conflicting reports without choosing a winner. Never "
+            "recommend starting, stopping, skipping or changing a medication or dose; refer decisions to a qualified professional."
+        ),
         "reminders_notifications": "Help interpret supplied reminder and notification information and identify explicitly pending items. Do not create, complete, reschedule or claim delivery of a reminder.",
         "care_coordination": "Organize supplied care responsibilities, availability and unresolved coordination points. Do not assign people, infer consent or claim a handoff was accepted.",
         "companion": "Respond to the caregiver's immediate request using authorized context when provided. Be concise and practical without pretending to have personal experiences or professional authority.",
