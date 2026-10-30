@@ -1,6 +1,7 @@
 import base64
 import json
 import importlib
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 from pypdf import PdfWriter
@@ -257,6 +258,76 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
             item["extra_metadata"]["source_integrity"]["original_binary_available"] is True
             for item in listed_uploads
         )
+        assert all(
+            item["extra_metadata"]["source_integrity"]["freshness_status"] == "not_assessed"
+            and item["extra_metadata"]["source_integrity"]["completeness_status"] == "not_assessed"
+            for item in listed_uploads
+        )
+
+        # Apply explicit, purpose-specific policies to one source. Its old
+        # occurrence time must be reported as historical; missing required
+        # checklist fields must remain visible rather than being called complete.
+        db = TestingSessionLocal()
+        try:
+            saved_evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+            saved_evidence.occurred_at = datetime.now(timezone.utc) - timedelta(days=120)
+            db.commit()
+        finally:
+            db.close()
+
+        freshness_policy = client.post(
+            "/api/v1/care-continuity/evidence-freshness/policies",
+            headers=auth,
+            json={
+                "domain_key": "medication_document",
+                "policy_version": "test-v1",
+                "max_age_days": 30,
+                "historical_after_days": 90,
+                "rationale": "Test-only explicit review boundary for medication documents.",
+            },
+        )
+        assert freshness_policy.status_code == 201, freshness_policy.text
+        freshness_assessment = client.post(
+            "/api/v1/care-continuity/evidence-freshness/assessments",
+            headers=auth,
+            json={"evidence_id": evidence_id, "policy_id": freshness_policy.json()["id"]},
+        )
+        assert freshness_assessment.status_code == 201, freshness_assessment.text
+        assert freshness_assessment.json()["freshness_status"] == "historical"
+
+        completeness_policy = client.post(
+            "/api/v1/care-continuity/evidence-completeness/policies",
+            headers=auth,
+            json={
+                "domain_key": "medication_document",
+                "purpose_key": "medication_review",
+                "policy_version": "test-v1",
+                "required_fields": ["document_date", "author", "patient_identity"],
+                "rationale": "Test-only source coverage checklist for medication review.",
+            },
+        )
+        assert completeness_policy.status_code == 201, completeness_policy.text
+        completeness_assessment = client.post(
+            "/api/v1/care-continuity/evidence-completeness/assessments",
+            headers=auth,
+            json={
+                "policy_id": completeness_policy.json()["id"],
+                "subject_type": "evidence",
+                "subject_id": evidence_id,
+                "rationale": "Only the document date is linked in this fixture.",
+                "field_evidence": {"document_date": [evidence_id]},
+            },
+        )
+        assert completeness_assessment.status_code == 201, completeness_assessment.text
+        assert completeness_assessment.json()["assessment_status"] == "partial"
+
+        assessed_evidence = client.get(f"/api/v1/evidence/{person_id}", headers=auth)
+        assert assessed_evidence.status_code == 200, assessed_evidence.text
+        assessed_record = next(item for item in assessed_evidence.json() if item["id"] == evidence_id)
+        source_integrity = assessed_record["extra_metadata"]["source_integrity"]
+        assert source_integrity["freshness_status"] == "historical"
+        assert source_integrity["completeness_status"] == "partial"
+        assert source_integrity["completeness_assessment"]["missing_fields"] == ["author", "patient_identity"]
 
         db = TestingSessionLocal()
         saved_evidence = db.query(Evidence).filter_by(id=evidence_id).first()
