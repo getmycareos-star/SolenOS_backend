@@ -329,6 +329,18 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         .order_by(EvidenceCompletenessAssessment.assessed_at.desc(), EvidenceCompletenessAssessment.id.desc())
         .first()
     )
+    comparison_rows = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id)
+        .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+        .limit(NEAR_DUPLICATE_MAX_RECORDS + 1)
+        .all()
+    )
+    near_duplicate_assessment = _near_duplicate_candidates(comparison_rows)
+    near_duplicate_groups = [
+        group for group in near_duplicate_assessment["candidate_groups"]
+        if evidence.id in group.get("evidence_ids", [])
+    ]
 
     def iso(value):
         return value.isoformat() if value is not None else None
@@ -351,6 +363,10 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         "duplicate_candidate_status": (
             "candidate_found" if text_duplicate_ids or binary_duplicate_ids else "no_exact_fingerprint_candidate_found"
         ),
+        "near_duplicate_comparison_status": near_duplicate_assessment["status"],
+        "near_duplicate_algorithm_version": near_duplicate_assessment["algorithm_version"],
+        "near_duplicate_candidate_groups": near_duplicate_groups,
+        "near_duplicate_interpretation_limit": near_duplicate_assessment["interpretation_limit"],
         "freshness_status": latest_freshness.freshness_status if latest_freshness else "not_assessed",
         "freshness_assessment_id": latest_freshness.id if latest_freshness else None,
         "completeness_status": latest_completeness.assessment_status if latest_completeness else "not_assessed",
