@@ -656,7 +656,7 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
 def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: Session = Depends(get_db)):
     person_id, caregiver_id = _scope(request, db)
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key)
     if replay is not None:
         return replay
     if not payload.evidence or not (loop.verification_rule or payload.verification_rule):
@@ -674,7 +674,7 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
         "interpretation_limit": "Persisted source linkage verifies record existence and scope; it does not automatically establish semantic entailment, prove which account is true, or establish that an action caused the outcome.",
     }]
     loop.outcome_status = "outcome_reported"
-    _audit(db, loop, "outcome_reported", before, payload.evidence, payload.idempotency_key)
+    _audit(db, loop, "outcome_attested", before, payload.evidence, payload.idempotency_key)
     db.commit()
     db.refresh(loop)
     return _snapshot(loop)
