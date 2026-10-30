@@ -1,6 +1,6 @@
 """Repair evidence supersession columns on partially migrated production databases.
 
-Revision ID: 20261030_02_evidence_supersession_repair
+Revision ID: 20261030_02_ev_supersession_fix
 Revises: 20261030_01_companion_turn_merge
 
 The original migrations created these nullable provenance columns, but the
@@ -12,7 +12,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261030_02_evidence_supersession_repair"
+revision = "20261030_02_ev_supersession_fix"
 down_revision = "20261030_01_companion_turn_merge"
 branch_labels = None
 depends_on = None
