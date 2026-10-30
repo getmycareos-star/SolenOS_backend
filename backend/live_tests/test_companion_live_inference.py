@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import os
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -31,6 +32,17 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+class TimedTestClient(TestClient):
+    """Record wall-clock latency for real authenticated Companion HTTP requests."""
+
+    def post(self, url, *args, **kwargs):
+        started = time.perf_counter()
+        response = super().post(url, *args, **kwargs)
+        if url.rstrip("/").endswith("/conversation/message"):
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            print(f"QWEN_LIVE_LATENCY_MS={elapsed_ms}")
+        return response
 
 
 def override_db():
@@ -88,7 +100,7 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
-    client = TestClient(app)
+    client = TimedTestClient(app)
     try:
         session, older_event_id = _create_synthetic_record(client)
         token = session["access_token"]
