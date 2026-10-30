@@ -355,9 +355,11 @@ async def upload_evidence(
 @router.get("/upload/{evidence_id}")
 def download_evidence(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scope(request, db)
-    evidence = db.query(EvidenceModel).filter_by(id=evidence_id, person_id=person_id).first()
-    if not evidence:
+    evidence = db.query(EvidenceModel).filter_by(id=evidence_id).first()
+    if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
+    if str(evidence.person_id) != str(person_id):
+        raise HTTPException(status_code=403, detail="This evidence belongs to another care record")
     blob = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).first()
     if not blob:
         raise HTTPException(status_code=404, detail="Original upload is unavailable")
