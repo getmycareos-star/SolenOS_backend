@@ -398,6 +398,11 @@ jobs:
               assert d.get("inference_api") == "ollama_native_http"
               assert d.get("hosted_inference_api") is False
               assert d.get("model") == "qwen3.5:4b"
+              assert d.get("inference_ready") is True
+              assert d.get("model_installed") is True
+              assert d.get("model_loaded") is True
+              assert d.get("inference_smoke_test") is True
+              assert isinstance(d.get("inference_latency_ms"), (int, float))
           except Exception:
               raise SystemExit(1)
           PY
