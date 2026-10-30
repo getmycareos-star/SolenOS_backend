@@ -3091,9 +3091,17 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             ).where(
                 relationship_table.c.person_id == person_id,
                 relationship_table.c.source_type == "situation",
-                relationship_table.c.source_id == data["source_id"],
                 relationship_table.c.target_type == "situation",
-                relationship_table.c.target_id == data["target_id"],
+                or_(
+                    and_(
+                        relationship_table.c.source_id == data["source_id"],
+                        relationship_table.c.target_id == data["target_id"],
+                    ),
+                    and_(
+                        relationship_table.c.source_id == data["target_id"],
+                        relationship_table.c.target_id == data["source_id"],
+                    ),
+                ),
             ).order_by(
                 relationship_table.c.created_at.desc(),
                 relationship_table.c.id.desc(),
