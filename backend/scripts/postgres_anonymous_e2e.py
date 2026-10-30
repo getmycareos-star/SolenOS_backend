@@ -11,11 +11,16 @@ import os
 import subprocess
 import sys
 import time
+import uuid
 import urllib.error
 import urllib.request
 from urllib.parse import urlencode
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app.core.database import SessionLocal
+from app.core.change_enums import SituationType, SituationState
+from app.models.change import Situation as SituationModel
 
 BASE_URL = "http://127.0.0.1:8012"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -170,42 +175,133 @@ def main():
         require(status == 201, f"second anonymous session creation expected 201, got {status}: {second}")
         token_b = second["access_token"]
 
-        # Concurrent care captures must each commit their own source and
-        # event rows. A process restart must not collapse them into one
-        # synthetic "active situation" or lose either original report.
-        capture_payloads = [
+        # Seed two independent persisted threads, then resume one of them
+        # concurrently. PostgreSQL row locking must append every observation
+        # to the selected thread without moving evidence into its neighbour.
+        mobility_thread_id = str(uuid.uuid4())
+        appetite_thread_id = str(uuid.uuid4())
+        thread_start = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            db.add_all([
+                SituationModel(
+                    id=mobility_thread_id,
+                    person_id=person_a,
+                    situation_type=SituationType.UNKNOWN,
+                    state=SituationState.ACTIVE,
+                    title="PostgreSQL E2E mobility thread",
+                    description="Independent CI-only mobility thread.",
+                    signal_ids=[],
+                    signal_types=["mobility"],
+                    temporal_start=thread_start,
+                    temporal_end=thread_start,
+                ),
+                SituationModel(
+                    id=appetite_thread_id,
+                    person_id=person_a,
+                    situation_type=SituationType.UNKNOWN,
+                    state=SituationState.ACTIVE,
+                    title="PostgreSQL E2E appetite thread",
+                    description="Independent CI-only appetite thread.",
+                    signal_ids=[],
+                    signal_types=["appetite"],
+                    temporal_start=thread_start,
+                    temporal_end=thread_start,
+                ),
+            ])
+            db.commit()
+
+        appetite_capture = {
+            "caregiver_id": caregiver_a,
+            "person_id": person_a,
+            "target_situation_id": appetite_thread_id,
+            "raw_input": "Daughter: She ate less than half of dinner.",
+            "capture_category": "meal",
+        }
+        status, appetite_result = request(
+            "POST", "/api/situation", body=appetite_capture, token=token_a
+        )
+        require(status == 200, f"Explicit appetite thread recovery failed: {status}: {appetite_result}")
+        require(
+            appetite_result.get("situation_id") == appetite_thread_id,
+            f"Capture did not remain in the explicitly selected appetite thread: {appetite_result}",
+        )
+
+        mobility_payloads = [
             {
                 "caregiver_id": caregiver_a,
                 "person_id": person_a,
-                "raw_input": "Daughter: She ate most of breakfast today.",
-                "capture_category": "meal",
+                "target_situation_id": mobility_thread_id,
+                "raw_input": "Daughter: She was unsteady when turning near the kitchen.",
+                "capture_category": "behavior",
             },
             {
                 "caregiver_id": caregiver_a,
                 "person_id": person_a,
-                "raw_input": "Nurse: She was unsteady when walking this afternoon.",
+                "target_situation_id": mobility_thread_id,
+                "raw_input": "Nurse: She needed support when walking to the bathroom.",
                 "capture_category": "behavior",
             },
         ]
         with ThreadPoolExecutor(max_workers=2) as pool:
             concurrent_captures = list(pool.map(
                 lambda payload: request("POST", "/api/situation", body=payload, token=token_a),
-                capture_payloads,
+                mobility_payloads,
             ))
         require(all(status == 200 for status, _ in concurrent_captures),
-                f"Concurrent care captures failed: {concurrent_captures}")
+                f"Concurrent selected-thread care captures failed: {concurrent_captures}")
         concurrent_capture_event_ids = {
-            body.get("care_event_id") for _, body in concurrent_captures
+            appetite_result.get("care_event_id"),
+            *(body.get("care_event_id") for _, body in concurrent_captures),
         }
         concurrent_capture_evidence_ids = {
-            body.get("evidence_id") for _, body in concurrent_captures
+            appetite_result.get("evidence_id"),
+            *(body.get("evidence_id") for _, body in concurrent_captures),
         }
         require(
-            len(concurrent_capture_event_ids) == 2
+            all(status == 200 and body.get("situation_id") == mobility_thread_id
+                for status, body in concurrent_captures),
+            f"Concurrent observations escaped their explicitly selected mobility thread: {concurrent_captures}",
+        )
+        require(
+            len(concurrent_capture_event_ids) == 3
             and None not in concurrent_capture_event_ids
-            and len(concurrent_capture_evidence_ids) == 2
+            and len(concurrent_capture_evidence_ids) == 3
             and None not in concurrent_capture_evidence_ids,
-            f"Concurrent care capture writes must preserve both distinct evidence/event pairs: {concurrent_captures}",
+            f"Every selected-thread capture must preserve a distinct source/event pair: {concurrent_capture_event_ids}",
+        )
+        with SessionLocal() as db:
+            mobility_thread = db.query(SituationModel).filter_by(id=mobility_thread_id).one()
+            appetite_thread = db.query(SituationModel).filter_by(id=appetite_thread_id).one()
+            mobility_evidence_ids = set(mobility_thread.signal_ids or [])
+            appetite_evidence_ids = set(appetite_thread.signal_ids or [])
+            require(
+                mobility_evidence_ids == {
+                    body.get("evidence_id") for _, body in concurrent_captures
+                },
+                f"Concurrent updates were lost or misrouted in mobility thread: {mobility_evidence_ids}",
+            )
+            require(
+                appetite_evidence_ids == {appetite_result.get("evidence_id")},
+                f"Unrelated appetite thread was merged with mobility evidence: {appetite_evidence_ids}",
+            )
+        status, grouped_after_capture = request("GET", "/api/situation", token=token_a)
+        require(status == 200, f"Multi-thread hydration failed: {status}: {grouped_after_capture}")
+        grouped_threads = {
+            item.get("id"): item for item in grouped_after_capture.get("ui_situations", [])
+        }
+        require(
+            mobility_thread_id in grouped_threads and appetite_thread_id in grouped_threads,
+            f"Hydration did not return both independent threads: {grouped_threads.keys()}",
+        )
+        require(
+            set(grouped_threads[mobility_thread_id].get("linked_evidence_ids", []))
+            == {body.get("evidence_id") for _, body in concurrent_captures},
+            "Hydrated mobility thread did not retain both concurrent evidence links",
+        )
+        require(
+            grouped_threads[appetite_thread_id].get("linked_evidence_ids", [])
+            == [appetite_result.get("evidence_id")],
+            "Hydrated appetite thread incorrectly absorbed mobility evidence",
         )
 
         # Two simultaneous uploads of identical bytes must not both be
@@ -1137,7 +1233,9 @@ def main():
             "Both concurrent care events must survive application restart",
         )
         restarted_evidence_ids = {
-            item.get("id") for item in hydration_after_restart.get("active_care_situation", {}).get("observations", [])
+            evidence_id
+            for situation in hydration_after_restart.get("ui_situations", [])
+            for evidence_id in situation.get("linked_evidence_ids", [])
         }
         require(
             concurrent_capture_evidence_ids.issubset(restarted_evidence_ids),
