@@ -226,7 +226,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         evidence_id = uploaded.json()["evidence_id"]
         assert uploaded.json()["persisted"] is True
         assert uploaded.json()["duplicate_detected"] is False
-        assert uploaded.json()["source_integrity"]["binary_checksum_verified_at_ingest"] is True
+        assert uploaded.json()["source_integrity"]["binary_sha256_computed_at_ingest"] is True
         assert uploaded.json()["source_integrity"]["original_binary_persisted"] is True
 
         duplicate_upload = client.post(
