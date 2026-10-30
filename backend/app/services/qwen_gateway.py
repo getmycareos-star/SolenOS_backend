@@ -6,6 +6,7 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 from __future__ import annotations
 
 import json
+import re
 import os
 import urllib.error
 import urllib.request
@@ -172,6 +173,56 @@ def qwen_chat(
 
 
 
+def _source_sentence_fallback(
+    source_text: str,
+    *,
+    source_event_id: str,
+    source_evidence_id: str | None,
+    existing_quotes: set[str] | None = None,
+) -> list[dict]:
+    """Select exact care-relevant source sentences when the small model omits them.
+
+    This is deterministic source selection, not generated clinical interpretation.
+    The candidates remain review-only and retain the exact original sentence.
+    """
+    care_terms = re.compile(
+        r"\b(?:patient|person|resident|mother|father|she|he|they|caregiver|nurse|doctor|"
+        r"mobility|walk(?:ed|ing)?|fall|fell|sleep|slept|appetite|ate|eating|pain|"
+        r"medication|medicine|dose|blood pressure|oxygen|temperature|wound|discharge|"
+        r"appointment|diagnosis|symptom|breathing|swelling|confusion|memory|agitation|"
+        r"hydration|fluid|urine|bowel|toilet|transfer|support|assistance|dressing|feeding)\b",
+        re.IGNORECASE,
+    )
+    quotes = existing_quotes or set()
+    pieces = re.split(r"(?<=[.!?])\s+|\n+|(?<=:)\s+|(?<=;)\s+", source_text)
+    candidates = []
+    for piece in pieces:
+        sentence = piece.strip().strip("•*-–— \t")
+        if len(sentence) < 12 or len(sentence) > 500 or sentence in quotes:
+            continue
+        # A document-introduction fragment such as "The discharge note states:"
+        # is attribution scaffolding, not a care assertion. Keep the exact
+        # statement following it, but never promote the heading fragment.
+        if re.search(r"\b(?:states|reports|notes|records|documents|indicates)\s*:$", sentence, re.IGNORECASE):
+            continue
+        if not care_terms.search(sentence):
+            continue
+        candidate = {
+            "subject": "Document statement",
+            "observation": sentence,
+            "source_quote": sentence,
+            "review_status": "pending_review",
+            "source_event_id": source_event_id,
+            "extraction_method": "deterministic_verbatim_source_sentence",
+        }
+        if source_evidence_id:
+            candidate["source_evidence_id"] = source_evidence_id
+        candidates.append(candidate)
+        if len(candidates) >= 8:
+            break
+    return candidates
+
+
 def extract_review_candidates(
     source_text: str,
     *,
@@ -187,17 +238,19 @@ def extract_review_candidates(
         {
             "role": "system",
             "content": (
-                "You extract possible caregiver-observed facts from a source, but you are not the authority. "
-                "Return valid JSON only with exactly this shape: "
-                '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
-                '"open_questions":["string"]}. '
-                "Only include observations explicitly supported by the source. Do not infer diagnosis, cause, risk, "
-                "medication changes, or facts not stated. Every source_quote must be copied exactly from the source. "
-                "If there are no supported observations, return an empty observations array. Ask at most three short "
-                "clarifying questions. Never treat greetings or small talk as care observations."
+                "Extract explicit care statements from the supplied document. "
+                "Return JSON only: "
+                '{"observations":[{"subject":"short subject","observation":"plain statement","source_quote":"exact copied sentence"}],'
+                '"open_questions":["short question"]}. '
+                "For every clear care statement, create one candidate. Do not omit a clear statement. "
+                "Copy source_quote character-for-character from the document. "
+                "Do not change numbers, dates, units, names, or spelling. "
+                "Do not add causes, diagnoses, advice, or facts absent from the source. "
+                "If the document has no care statements, return an empty observations array. "
+                "Return at most 8 observations and 3 questions."
             ),
         },
-        {"role": "user", "content": "Source text to review:\n" + bounded_source},
+        {"role": "user", "content": "DOCUMENT TEXT:\n" + bounded_source},
     ]
     # Ollama's native JSON mode avoids fragile prompt-only formatting while
     # keeping source-quote validation as the final authority boundary.
@@ -234,6 +287,7 @@ def extract_review_candidates(
             "source_quote": quote,
             "review_status": "pending_review",
             "source_event_id": source_event_id,
+            "extraction_method": "qwen_verbatim_source_extraction",
         }
         if source_evidence_id:
             candidate["source_evidence_id"] = source_evidence_id
@@ -247,6 +301,22 @@ def extract_review_candidates(
         for question in questions[:3]
         if isinstance(question, str) and question.strip()
     ]
+    if not observations:
+        observations = _source_sentence_fallback(
+            bounded_source,
+            source_event_id=source_event_id,
+            source_evidence_id=source_evidence_id,
+        )
+    else:
+        # Add exact, care-relevant source sentences not already represented by
+        # Qwen. This closes omissions without inventing or paraphrasing evidence.
+        observations.extend(_source_sentence_fallback(
+            bounded_source,
+            source_event_id=source_event_id,
+            source_evidence_id=source_evidence_id,
+            existing_quotes={item["source_quote"] for item in observations},
+        ))
+        observations = observations[:12]
     return {"observations": observations, "open_questions": clean_questions}
 
 

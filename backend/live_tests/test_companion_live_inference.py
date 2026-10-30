@@ -14,7 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence
+from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage
 from app.main import app
 import app.main as main_module
@@ -249,6 +250,86 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         try:
             saved = db.query(ConversationMessage).filter_by(session_id=direct_data["session_id"]).all()
             assert [row.role for row in saved] == ["user", "assistant"] * 6
+        finally:
+            db.close()
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+
+
+
+def test_live_qwen_document_intelligence_promotes_only_caregiver_accepted_source_assertions(monkeypatch):
+    """Exercise the actual Qwen document endpoint and caregiver-to-LCR write path."""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    try:
+        session, _ = _create_synthetic_record(client)
+        token = session["access_token"]
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        headers = {"Authorization": f"Bearer {token}"}
+        source_text = "The discharge note states: Patient walked 20 metres with a frame on 12 October."
+        exact_quote = "Patient walked 20 metres with a frame on 12 October."
+
+        db = TestingSessionLocal()
+        evidence = Evidence(
+            person_id=person_id,
+            type="document",
+            source_text=source_text,
+            original_file_path=None,
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"synthetic-discharge-summary.txt"}',
+            source_type="caregiver_upload",
+            evidence_status="recorded",
+            origin_channel="live_qwen_evaluation",
+        )
+        db.add(evidence)
+        db.commit()
+        evidence_id = evidence.id
+        db.close()
+
+        analysed = client.post(
+            f"/api/v1/documents/{evidence_id}/intelligence",
+            headers=headers,
+        )
+        assert analysed.status_code == 201, analysed.text
+        analysis = analysed.json()
+        assert analysis["review_required"] is True
+        assert analysis["written_to_lcr"] is False
+        assert analysis["source_evidence_id"] == evidence_id
+        candidates = analysis["document_intelligence"]["observations"]
+        assert candidates, "Live Qwen produced no source-grounded candidate for an explicit discharge-summary observation."
+        candidate = candidates[0]
+        assert candidate["source_quote"] in source_text
+        assert candidate["review_status"] == "pending_review"
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+        finally:
+            db.close()
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{analysis['analysis_id']}/review",
+            headers=headers,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        accepted_body = accepted.json()
+        assert accepted_body["written_to_lcr"] is True
+        assert accepted_body["source_record_ref"]["record_type"] == "care_assertion"
+
+        db = TestingSessionLocal()
+        try:
+            assertion = db.query(CareAssertion).filter_by(person_id=person_id).one()
+            assert assertion.assertion_status == "caregiver_reviewed"
+            assert assertion.assertion_kind == "caregiver_reviewed_document_extraction"
+            assert assertion.evidence_ids == [evidence_id]
+            assert candidate["source_quote"] in assertion.source_text
+            assert "caregiver" in assertion.assertion_status
         finally:
             db.close()
     finally:
