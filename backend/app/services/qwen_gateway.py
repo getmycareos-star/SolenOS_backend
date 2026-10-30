@@ -98,6 +98,20 @@ def qwen_chat(
     }
     if options:
         bounded_options.update(options)
+    # Per-workflow options may lower these budgets, but cannot exceed the
+    # deployment's configured resource limits.
+    try:
+        bounded_options["num_ctx"] = max(1024, min(int(bounded_options.get("num_ctx", num_ctx)), num_ctx))
+    except (TypeError, ValueError):
+        bounded_options["num_ctx"] = num_ctx
+    try:
+        bounded_options["num_predict"] = max(1, min(int(bounded_options.get("num_predict", num_predict)), num_predict))
+    except (TypeError, ValueError):
+        bounded_options["num_predict"] = num_predict
+    try:
+        bounded_options["num_thread"] = max(1, min(int(bounded_options.get("num_thread", num_thread)), num_thread))
+    except (TypeError, ValueError):
+        bounded_options["num_thread"] = num_thread
     think_setting = os.getenv("OLLAMA_THINK", "false").strip().casefold()
     think: bool | str = (
         think_setting == "true" if think_setting in {"true", "false"}
