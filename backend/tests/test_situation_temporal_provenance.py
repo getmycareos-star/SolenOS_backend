@@ -248,3 +248,22 @@ def test_thread_grouping_does_not_merge_through_transitive_label_similarity():
     assert len(groups) == 2
     assert any(len(group) == 2 and first in group and bridge in group for group in groups)
     assert any(group == [unrelated] for group in groups)
+
+
+def test_unscoped_subjects_group_only_on_exact_shared_source_ids():
+    from types import SimpleNamespace
+
+    first = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["event-1"])
+    same_source = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["event-1"])
+    unrelated_source = SimpleNamespace(subject_type="mobility", subject_id="", evidence_ids=["event-2"])
+    explicitly_scoped = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["event-1"])
+
+    groups = _group_related_signals(
+        [first, same_source, unrelated_source, explicitly_scoped],
+        "evidence_ids",
+    )
+
+    assert len(groups) == 3
+    assert any(len(group) == 2 and first in group and same_source in group for group in groups)
+    assert any(group == [unrelated_source] for group in groups)
+    assert any(group == [explicitly_scoped] for group in groups)
