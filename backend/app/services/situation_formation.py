@@ -131,8 +131,10 @@ def _signals_are_explicitly_related(
     right_type, right_subject_id = _signal_subject(right)
     if not left_type or left_type != right_type:
         return False
-    if left_subject_id and right_subject_id and left_subject_id == right_subject_id:
-        return True
+    # subject_id may identify the person rather than a distinct care thread.
+    # It is therefore insufficient to merge signals. Require shared source
+    # lineage within the same care domain; explicit relationship records can
+    # support broader links in a separate reconciliation step.
     return bool(
         _signal_source_ids(left, left_source_field)
         & _signal_source_ids(right, right_source_field)
