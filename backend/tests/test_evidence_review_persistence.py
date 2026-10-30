@@ -354,7 +354,17 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
             ).hexdigest(),
             uploaded_by_caregiver_id="review-caregiver-a",
         )
-        db.add_all([document_a, document_b, inaccessible, corrupted])
+        near_duplicate = Evidence(
+            id="integrity-document-near-duplicate",
+            person_id="review-person-a",
+            type="document",
+            source_text="Discharge summary: mobility support required. The patient should use one-person assistance for all transfers and walking during the night.",
+            source_text_sha256=hashlib.sha256(
+                b"Discharge summary: mobility support required. The patient should use one-person assistance for all transfers and walking during the night."
+            ).hexdigest(),
+            uploaded_by_caregiver_id="review-caregiver-a",
+        )
+        db.add_all([document_a, document_b, inaccessible, corrupted, near_duplicate])
         db.flush()
         db.add_all([
             EvidenceUpload(
@@ -396,6 +406,11 @@ def test_source_integrity_detects_missing_binary_and_exact_duplicate_candidates(
     assert integrity["exact_source_text_duplicate_candidate_ids"] == ["integrity-document-b"]
     assert integrity["exact_binary_duplicate_candidate_ids"] == ["integrity-document-b"]
     assert integrity["duplicate_candidate_status"] == "candidate_found"
+    assert integrity["near_duplicate_comparison_status"] == "completed"
+    assert any(
+        group["evidence_ids"] == ["integrity-document-a", "integrity-document-near-duplicate"]
+        for group in integrity["near_duplicate_candidate_groups"]
+    ), "Near-duplicate text must be surfaced as a review candidate, never silently merged"
 
     missing = client_a.get(
         "/api/v1/care-continuity/evidence/integrity-document-missing/integrity"
