@@ -223,7 +223,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                             else "planned" if family == "planned_not_completed"
                             else "reported"
                         ),
-                        source_type="caregiver_report",
+                        source_type=("hospital_document" if family == "partial_document" else "caregiver_report"),
                         original_source_reference=f"synthetic://source/{case_id:05d}",
                         extra_metadata=json.dumps(evidence_metadata, sort_keys=True),
                         source_text_sha256=None,
@@ -342,6 +342,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         "caregiver_id": reporter_id,
                         "uploader_id": caregiver_b_id,
                         "event_type": domain,
+                        "status": ("planned" if family == "planned_not_completed" else "recorded"),
                         "occurred_at": occurred_at,
                         "evidence_id": source_anchor,
                         "assertion_id": assertion_id,
@@ -388,6 +389,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                     f"{row.id}: reporter attribution changed"
                 )
                 assert row.event_type == wanted["event_type"], f"{row.id}: care domain changed"
+                assert row.status == wanted["status"], f"{row.id}: planned/completed status changed"
                 assert _utc(row.occurred_at) == _utc(wanted["occurred_at"]), (
                     f"{row.id}: event time changed"
                 )
@@ -458,6 +460,13 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             assert len(conflict_records) == 100 * CASES_PER_HISTORY
             assert all(row.resolution_status == "unresolved" for row in conflict_records)
             assert all(len(row.source_assertion_ids or []) == 2 for row in conflict_records)
+            for conflict in conflict_records:
+                conflict_claims = reader.query(CareAssertion).filter(
+                    CareAssertion.person_id == conflict.person_id,
+                    CareAssertion.id.in_(conflict.source_assertion_ids),
+                ).all()
+                assert len(conflict_claims) == 2
+                assert len({claim.asserted_value for claim in conflict_claims}) == 2
             correction_records = reader.query(Correction).filter(
                 Correction.id.like(f"m10kcr%{suffix}%")
             ).all()
