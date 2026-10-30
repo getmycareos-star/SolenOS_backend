@@ -248,14 +248,18 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert correction_after_hydration["supersedes_observation_id"] == original_statement["id"]
         assert correction_after_hydration["correction_rationale"]
         assert correction_after_hydration["superseded_by_observation_ids"] == [cross_source_correction_id]
-        cross_source_rows = [
-            item for item in source_statements
-            if item["id"] in {correction_id, cross_source_correction_id}
-        ]
-        assert len(cross_source_rows) == 2
-        assert cross_source_rows[1]["evidence_id"] == later_evidence_id
-        assert cross_source_rows[1]["supersedes_observation_id"] == correction_id
-        assert cross_source_rows[1]["source_passage"] == later_passage
+        later_observations = client.get(
+            f"/api/v1/care-continuity/evidence/{later_evidence_id}/observations",
+            headers=headers,
+        )
+        assert later_observations.status_code == 200, later_observations.text
+        cross_source_row = next(
+            item for item in later_observations.json()
+            if item["id"] == cross_source_correction_id
+        )
+        assert cross_source_row["evidence_id"] == later_evidence_id
+        assert cross_source_row["supersedes_observation_id"] == correction_id
+        assert cross_source_row["source_passage"] == later_passage
         assert all(
             source[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
             for item in source_statements
