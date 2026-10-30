@@ -11,6 +11,8 @@ from app.main import app
 from app.models.care import Person, Caregiver, Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.anonymous_session import AnonymousSession
+from app.models.collaboration import ConversationSession, ConversationMessage
+from app.models.uncertainty import OpenQuestion
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
