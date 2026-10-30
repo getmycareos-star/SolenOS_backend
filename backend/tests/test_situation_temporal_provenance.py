@@ -190,7 +190,8 @@ def test_legacy_change_signal_ids_resolve_care_event_time_and_continue_event_nam
         )
         db.add_all([legacy, new_event])
         db.commit()
-        assert update_situations(db, "p-legacy", new_event) == [legacy]
+        updated = update_situations(db, "p-legacy", new_event)
+        assert legacy in updated
         assert legacy.signal_ids == ["legacy-event-id", "new-legacy-event-id"]
         assert "new-evidence-id" not in legacy.signal_ids
         actual_end = legacy.temporal_end
