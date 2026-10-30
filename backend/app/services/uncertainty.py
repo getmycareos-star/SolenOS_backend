@@ -292,11 +292,23 @@ class UncertaintyEngine:
         now = datetime.now(timezone.utc)
         answer_text = answer.strip() if isinstance(answer, str) else answer
         answer_source = answer_provenance.strip() if isinstance(answer_provenance, str) else answer_provenance
+        latest_answer_event = (
+            self.db.query(OpenQuestionAnswerEventModel)
+            .filter(
+                OpenQuestionAnswerEventModel.question_id == db_question.id,
+                OpenQuestionAnswerEventModel.person_id == db_question.person_id,
+            )
+            .order_by(
+                OpenQuestionAnswerEventModel.created_at.desc(),
+                OpenQuestionAnswerEventModel.id.desc(),
+            )
+            .first()
+        )
         answer_was_recorded = new_status == "answered" and (
             db_question.status != "answered"
             or answer_text != db_question.answer
             or answer_source != db_question.answer_provenance
-            or answer_evidence_ids != []
+            or list(latest_answer_event.evidence_ids or []) != answer_evidence_ids
         )
         if answer_was_recorded:
             if not self.caregiver_id:
