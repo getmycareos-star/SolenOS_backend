@@ -586,7 +586,6 @@ def get_situation(
         .all()
     )
     evidence_by_id = {row["id"]: row for row in observations}
-    event_by_id = {event.id: event for event in events}
     situation_ui_rows = []
     for saved_situation in persisted_situations:
         signal_ids = set(saved_situation.signal_ids or [])
@@ -710,12 +709,23 @@ def get_situation(
             key=lambda item: item.get("updatedAt") or "",
         )
         if active_situation is not None:
+            latest_evidence_ids = set(latest_ui.get("linked_evidence_ids") or [])
+            situation_observations = [
+                item for item in observations if item["id"] in latest_evidence_ids
+            ]
             active_situation["id"] = latest_ui["id"]
+            active_situation["observations"] = situation_observations
             active_situation["open_questions"] = list(latest_ui.get("openQuestions") or [])
             active_situation["synthesis"] = latest_ui.get("contextSummary") or None
             active_situation["persistence_source"] = "persisted_situation_and_evidence_projection"
-            active_situation["reasoning_state_persisted"] = True
+            active_situation["reasoning_state_persisted"] = False
+            active_situation["situation_model_persisted"] = True
             active_situation["open_questions_available"] = True
+            linked_event_ids = latest_ui.get("linked_event_ids") or []
+            active_situation["root_event_id"] = linked_event_ids[0] if linked_event_ids else None
+            if situation_observations:
+                active_situation["opened_at"] = situation_observations[0]["captured_at"]
+                active_situation["updated_at"] = situation_observations[-1]["captured_at"]
 
     return {
         "ok": True,
