@@ -680,6 +680,18 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     return "\n".join([current, *recent]) if recent else current
 
 
+def _conversation_report_context(prior_messages: list) -> str:
+    """Return prior caregiver-authored turns for grounding follow-ups, never assistant claims."""
+    reports = [
+        (message.content or "").strip()[:500]
+        for message in reversed(prior_messages[:6])
+        if getattr(message, "role", None) == "user" and (message.content or "").strip()
+    ]
+    if not reports:
+        return ""
+    return "Earlier caregiver-reported conversation (not persisted Living Care Record evidence):\\n" + "\\n".join(reports)
+
+
 def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
     """Extract only IDs from records actually selected for the model context."""
     identifiers = []
@@ -2235,7 +2247,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
-        validation_source = user_text + "\n" + "\n".join(bounded_context)
+        conversation_report_context = _conversation_report_context(prior_messages)
+        validation_source = "\\n".join(
+            part for part in (user_text, conversation_report_context, "\\n".join(bounded_context)) if part
+        )
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,
             [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],

@@ -426,6 +426,20 @@ def test_unchecked_meal_gap_requires_a_meal_specific_follow_up():
     )
 
 
+def test_conversation_report_context_grounds_follow_up_without_trusting_assistant_claims():
+    prior = [
+        SimpleNamespace(role="user", content="My grandmother ate less breakfast for three mornings."),
+        SimpleNamespace(role="assistant", content="She has an infection and needs antibiotics."),
+        SimpleNamespace(role="user", content="I have not checked lunch or dinner."),
+    ]
+    context = collaboration._conversation_report_context(prior)
+    assert "grandmother ate less breakfast" in context
+    assert "not checked lunch or dinner" in context
+    assert "infection" not in context
+    assert "antibiotics" not in context
+    assert "not persisted Living Care Record evidence" in context
+
+
 def test_care_coordination_follow_up_keeps_the_prior_care_subject_in_retrieval():
     prior = [
         SimpleNamespace(
