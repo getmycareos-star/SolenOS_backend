@@ -638,8 +638,15 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{recovery_session['person']['id']}", token=recovery_token)
         require(status == 401, f"revoked token must be rejected, got {status}")
         # Revoking one capability must not break another caregiver's valid session.
-        status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
-        require(status == 200, f"valid independent session failed after revocation, got {status}")
+        status, independent_read = request("GET", f"/api/v1/evidence/{person_a}", token=token_a)
+        if status != 200:
+            server_log = Path("/tmp/solenos-postgres-e2e-uvicorn.log").read_text(
+                encoding="utf-8", errors="replace"
+            )[-12000:]
+            raise AssertionError(
+                f"valid independent session failed after revocation, got {status}: "
+                f"{independent_read}\\nUvicorn log tail:\\n{server_log}"
+            )
 
         status, cross_write = request(
             "POST",
