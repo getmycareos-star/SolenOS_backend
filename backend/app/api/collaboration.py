@@ -298,7 +298,7 @@ async def upload_evidence(
             "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
             "text_source": "client_supplied" if bounded_text else "not_available",
             "source_integrity": {
-                "binary_checksum_verified_at_ingest": True,
+                "binary_sha256_computed_at_ingest": True,
                 "original_binary_persisted": True,
                 "text_extraction_available": bool(bounded_text),
                 "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
@@ -334,7 +334,7 @@ async def upload_evidence(
         "duplicate_detected": duplicate_upload is not None,
         "duplicate_of_evidence_id": duplicate_upload.evidence_id if duplicate_upload else None,
         "source_integrity": {
-            "binary_checksum_verified_at_ingest": True,
+            "binary_sha256_computed_at_ingest": True,
             "original_binary_persisted": True,
             "text_extraction_available": bool(bounded_text),
             "text_extraction_status": "client_supplied_unverified" if bounded_text else "unavailable",
