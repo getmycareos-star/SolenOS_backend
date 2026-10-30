@@ -11,6 +11,7 @@ import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
+from app.models.care_continuity import EvidenceObservation
 from app.schemas.situation import SituationInput
 from app.services.situation import process_situation_input
 
@@ -92,6 +93,68 @@ def test_post_situation_creates_evidence_and_event():
     finally:
         teardown_db()
 
+
+
+@pytest.mark.session_security
+def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, headers = create_authenticated_session(client, "Speaker Provenance Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        source = (
+            "Daughter: Mom fell in the hallway this morning.\n"
+            "Nurse: She was assessed at urgent care.\n"
+            "Daughter: She is afraid to walk to the kitchen now."
+        )
+        response = client.post(
+            "/api/situation",
+            headers=headers,
+            json={
+                "caregiver_id": caregiver_id,
+                "person_id": person_id,
+                "raw_input": source,
+            },
+        )
+        assert response.status_code == 200, response.text
+        evidence_id = response.json()["evidence_id"]
+        with TestingSessionLocal() as db:
+            evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
+            rows = (
+                db.query(EvidenceObservation)
+                .filter_by(evidence_id=evidence_id, person_id=person_id)
+                .order_by(EvidenceObservation.source_span_start.asc())
+                .all()
+            )
+            assert evidence.source_text == source
+            assert [row.observer_label for row in rows] == ["Daughter", "Nurse", "Daughter"]
+            assert [row.epistemic_status for row in rows] == ["reported", "reported", "reported"]
+            assert all(row.observation_kind == "imported_information" for row in rows)
+            assert all(row.created_by_caregiver_id == caregiver_id for row in rows)
+            assert all(row.observer_caregiver_id is None for row in rows)
+            assert all(
+                evidence.source_text[row.source_span_start:row.source_span_end] == row.source_passage
+                for row in rows
+            )
+            assert [row.source_passage for row in rows] == [
+                "Mom fell in the hallway this morning.",
+                "She was assessed at urgent care.",
+                "She is afraid to walk to the kitchen now.",
+            ]
+
+        listed = client.get(
+            f"/api/v1/care-continuity/evidence/{evidence_id}/observations",
+            headers=headers,
+        )
+        assert listed.status_code == 200, listed.text
+        listed_rows = listed.json()
+        assert len(listed_rows) == 3
+        assert [row["observer_label"] for row in listed_rows] == ["Daughter", "Nurse", "Daughter"]
+    finally:
+        teardown_db()
 
 
 @pytest.mark.session_security
