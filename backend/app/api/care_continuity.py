@@ -3037,7 +3037,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
             raise HTTPException(status_code=422, detail="Situation links must use the non-causal related_to relationship")
         rationale = data.get("provenance")
         if not isinstance(rationale, str) or len(rationale.strip()) < 12:
-            raise HTTPException(status_code=422, detail="Situation links require a caregiver rationale of at least 12 characters")
+            raise HTTPException(status_code=422, detail="Situation links require explicit caregiver relationship provenance of at least 12 characters")
         if data["source_id"] == data["target_id"]:
             raise HTTPException(status_code=422, detail="A situation cannot be related to itself")
         for selected_id in (data["source_id"], data["target_id"]):
