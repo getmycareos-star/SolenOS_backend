@@ -12,6 +12,10 @@ from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 from app.models.anonymous_session import AnonymousSession
 from app.models.collaboration import ConsentRecord, EvidenceUpload
+from app.models.care_continuity import (
+    EvidenceFreshnessAssessment,
+    EvidenceCompletenessAssessment,
+)
 from app.models.care import (
     Person as PersonModel,
     Caregiver as CaregiverModel,
@@ -385,6 +389,35 @@ def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db
     # Evidence.extra_metadata is stored as TEXT for migration compatibility,
     # while the public schema exposes a structured object. Decode it at the
     # boundary instead of leaking a JSON string that fails response validation.
+    evidence_ids = [row.id for row in rows]
+    freshness_by_evidence = {}
+    if evidence_ids:
+        freshness_rows = (
+            db.query(EvidenceFreshnessAssessment)
+            .filter(
+                EvidenceFreshnessAssessment.person_id == person_id,
+                EvidenceFreshnessAssessment.evidence_id.in_(evidence_ids),
+            )
+            .order_by(EvidenceFreshnessAssessment.assessed_at.asc(), EvidenceFreshnessAssessment.id.asc())
+            .all()
+        )
+        for assessment in freshness_rows:
+            freshness_by_evidence[assessment.evidence_id] = assessment
+
+    completeness_by_evidence = {}
+    if evidence_ids:
+        completeness_rows = (
+            db.query(EvidenceCompletenessAssessment)
+            .filter(
+                EvidenceCompletenessAssessment.person_id == person_id,
+                EvidenceCompletenessAssessment.subject_id.in_(evidence_ids),
+            )
+            .order_by(EvidenceCompletenessAssessment.assessed_at.asc(), EvidenceCompletenessAssessment.id.asc())
+            .all()
+        )
+        for assessment in completeness_rows:
+            completeness_by_evidence[assessment.subject_id] = assessment
+
     response = []
     for row in rows:
         item = {
@@ -406,6 +439,7 @@ def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db
         # A document/photo row without its original binary is an inaccessible
         # source, not a complete document record. Report the state explicitly;
         # byte-level integrity is checked by the download endpoint.
+        integrity = dict(item["extra_metadata"].get("source_integrity") or {})
         if item.get("type") in {"document", "medication_photo", "care_photo"}:
             blob_exists = (
                 db.query(EvidenceUpload.evidence_id)
@@ -413,12 +447,41 @@ def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db
                 .first()
                 is not None
             )
-            integrity = dict(item["extra_metadata"].get("source_integrity") or {})
             integrity["original_binary_available"] = blob_exists
             integrity["original_binary_status"] = (
                 "available_unverified_until_download" if blob_exists else "missing"
             )
-            item["extra_metadata"]["source_integrity"] = integrity
+
+        freshness = freshness_by_evidence.get(row.id)
+        integrity["freshness_status"] = freshness.freshness_status if freshness else "not_assessed"
+        if freshness:
+            integrity["freshness_assessment"] = {
+                "assessment_id": freshness.id,
+                "policy_id": freshness.policy_id,
+                "policy_version": freshness.policy_version,
+                "assessed_at": freshness.assessed_at.isoformat(),
+                "source_time": freshness.source_time.isoformat() if freshness.source_time else None,
+                "source_time_kind": freshness.source_time_kind,
+                "age_days": freshness.age_days,
+                "rationale": freshness.rationale,
+            }
+
+        completeness = completeness_by_evidence.get(row.id)
+        integrity["completeness_status"] = completeness.assessment_status if completeness else "not_assessed"
+        if completeness:
+            integrity["completeness_assessment"] = {
+                "assessment_id": completeness.id,
+                "policy_id": completeness.policy_id,
+                "policy_version": completeness.policy_version,
+                "assessed_at": completeness.assessed_at.isoformat(),
+                "required_fields": list(completeness.required_fields or []),
+                "satisfied_fields": list(completeness.satisfied_fields or []),
+                "missing_fields": list(completeness.missing_fields or []),
+                "assessment_basis": completeness.assessment_basis,
+                "semantic_sufficiency": completeness.semantic_sufficiency,
+                "rationale": completeness.rationale,
+            }
+        item["extra_metadata"]["source_integrity"] = integrity
         response.append(item)
     return response
 
