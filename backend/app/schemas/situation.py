@@ -37,6 +37,8 @@ class SituationInput(BaseModel):
     caregiver_id: str
     client_care_key: Optional[str] = None
     person_id: str
+    # Explicitly selected persisted thread to resume; never inferred from prose.
+    target_situation_id: Optional[str] = None
     raw_input: str = ""
     documents: Optional[List[SituationDocument]] = None
     provenance: Optional[SituationProvenance] = None
