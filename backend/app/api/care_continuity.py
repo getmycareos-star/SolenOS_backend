@@ -1162,6 +1162,7 @@ def current_care_projection(
             "status": status,
             "epistemic_status": row.get("epistemic_status") or row.get("epistemic_state") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
             "source_collection": source_name,
+            "source_event_id": row.get("source_event_id"),
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "reported_by_label": str(
