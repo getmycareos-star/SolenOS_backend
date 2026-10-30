@@ -163,6 +163,8 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                         occurred_at = (reference - timedelta(days=1)).astimezone(
                             timezone(timedelta(hours=-8))
                         )
+                    if family == "stale_observation":
+                        evidence_metadata["observed_at"] = occurred_at.isoformat()
                     title = f"{family} {domain} event {case_id:05d}"
                     description = (
                         f"Synthetic source report {case_id:05d}; "
