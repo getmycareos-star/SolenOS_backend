@@ -1215,6 +1215,8 @@ def current_care_projection(
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
         add("decisions", row, "Care decision", 9, require_open=True)
+    for row in (sources.get("decision_outcomes") or {}).get("items", []):
+        add("decision_outcomes", row, "Decision outcome", 9)
 
     def sort_key(item: dict[str, Any]) -> tuple[int, str]:
         return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
