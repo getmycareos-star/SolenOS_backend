@@ -1245,9 +1245,21 @@ def _contains_unsupported_operational_claim(
             )
             for match in action_matches
         )
-        if action_matches and not source_supported_action:
+        # A policy-required refusal is not an unsupported medication fact. Small
+        # models often mention "dose" while explicitly declining to advise a
+        # change; rejecting that safe boundary caused otherwise valid workflows
+        # to fail closed with HTTP 503. Keep rejecting affirmative medication
+        # actions unless their exact action is present in the supplied source.
+        safe_medication_boundary = bool(re.search(
+            r"\b(?:cannot|can.t|unable to)\s+(?:advise|recommend|confirm|determine)\b"
+            r"|\b(?:do not|don.t|never)\s+(?:change|increase|decrease|double|stop|start)\b"
+            r"|\b(?:speak|check|confirm|contact)\b.{0,80}\b(?:prescriber|clinician|doctor|pharmacist)\b"
+            r"|\b(?:prescriber|clinician|doctor|pharmacist)\b.{0,80}\b(?:confirm|advise|review)\b",
+            text,
+        ))
+        if action_matches and not source_supported_action and not safe_medication_boundary:
             return True
-        if not re.search(missing_medication, text) and not source_supported_action:
+        if not re.search(missing_medication, text) and not source_supported_action and not safe_medication_boundary:
             return True
     weekdays = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     source_correction = re.search(
