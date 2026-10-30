@@ -49,6 +49,32 @@ from app.services.qwen_background_worker import qwen_worker_loop
 
 logger = logging.getLogger(__name__)
 
+class LoggingCORSMiddleware(CORSMiddleware):
+    """Log rejected preflight metadata at the CORS boundary, where rejection occurs."""
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method", "").upper() != "OPTIONS":
+            await super().__call__(scope, receive, send)
+            return
+        headers = {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+        }
+
+        async def log_rejection(message):
+            if message.get("type") == "http.response.start" and int(message.get("status", 0)) >= 400:
+                logger.warning(
+                    "Rejected browser preflight path=%s origin=%s requested_method=%s requested_headers=%s status=%s",
+                    scope.get("path", ""),
+                    headers.get("origin", "<missing>"),
+                    headers.get("access-control-request-method", "<missing>"),
+                    headers.get("access-control-request-headers", "<missing>"),
+                    message["status"],
+                )
+            await send(message)
+
+        await super().__call__(scope, receive, log_rejection)
+
 class RequestBodySizeLimitMiddleware:
     # Bound request buffering before FastAPI parses JSON or multipart bodies.
     LIMITS = {
@@ -141,7 +167,7 @@ cors_origins = list(dict.fromkeys([
     ],
 ]))
 app.add_middleware(
-    CORSMiddleware,
+    LoggingCORSMiddleware,
     allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
