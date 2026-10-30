@@ -1236,7 +1236,7 @@ def _contains_unsupported_operational_claim(
         action_matches = list(re.finditer(medication_action, text))
         # Accept an affirmative medication observation only when its ordered
         # action wording is explicitly present in the caregiver's supplied source.
-        source_supported_action = any(
+        source_supported_action = bool(action_matches) and all(
             re.search(
                 r"\b" + r"\s+".join(
                     re.escape(term) for term in re.findall(r"[a-z]+", match.group(0))
