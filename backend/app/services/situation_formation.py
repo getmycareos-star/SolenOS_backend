@@ -117,8 +117,38 @@ def _form_change_situation(
         signal_types.append(c.subject_type)
     signal_ids = list(set(signal_ids))
     signal_types = list(set(signal_types))
-    temporal_start = min(c.created_at for c in changes)
-    temporal_end = max(c.created_at for c in changes)
+    # Situation time describes when the underlying care was observed, not
+    # when this analysis happened. Assessment timestamps are only a last-resort
+    # fallback when neither source-event time nor comparison-window bounds exist.
+    source_events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(signal_ids))
+        .all()
+        if signal_ids else []
+    )
+    source_times = [
+        observed_at
+        for event in source_events
+        if (observed_at := _ensure_utc(event.occurred_at)) is not None
+    ]
+    if source_times:
+        temporal_start = min(source_times)
+        temporal_end = max(source_times)
+    else:
+        comparison_starts = [
+            value for change in changes
+            if (value := _ensure_utc(change.comparison_window_start)) is not None
+        ]
+        comparison_ends = [
+            value for change in changes
+            if (value := _ensure_utc(change.comparison_window_end)) is not None
+        ]
+        assessment_times = [
+            value for change in changes
+            if (value := _ensure_utc(change.created_at)) is not None
+        ]
+        temporal_start = min(comparison_starts or assessment_times or [now])
+        temporal_end = max(comparison_ends or assessment_times or [now])
     increasing = [c for c in changes if c.change_direction == ChangeDirection.INCREASING]
     decreasing = [c for c in changes if c.change_direction == ChangeDirection.DECREASING]
     if len(increasing) > len(decreasing):

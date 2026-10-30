@@ -287,6 +287,93 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         teardown_db()
 
 
+
+def test_situation_temporal_bounds_use_source_event_time_not_assessment_time():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-temporal-bounds", name="Temporal Bounds Person")
+        caregiver = Caregiver(
+            id="caregiver-temporal-bounds",
+            name="Temporal Bounds Caregiver",
+            email="temporal-bounds@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+
+        from app.core.change_enums import (
+            ChangeDirection,
+            ChangeType,
+            SignificanceVerdict,
+        )
+        from app.services.situation_formation import _form_change_situation
+
+        now = datetime.now(timezone.utc)
+        earlier_event_time = now - timedelta(days=21)
+        later_event_time = now - timedelta(days=4)
+        earlier_event = CareEvent(
+            person_id=person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=earlier_event_time,
+            title="Needed help standing",
+            created_by_caregiver_id=caregiver.id,
+        )
+        later_event = CareEvent(
+            person_id=person.id,
+            event_type="mobility",
+            status="recorded",
+            occurred_at=later_event_time,
+            title="Needed help walking",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([earlier_event, later_event])
+        db.flush()
+
+        assessment = Change(
+            person_id=person.id,
+            subject_type="mobility",
+            subject_id="",
+            change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            previous_state="Earlier mobility observations",
+            current_state="More recent mobility assistance reported",
+            comparison_window_start=now - timedelta(days=60),
+            comparison_window_end=now,
+            evidence_ids=[earlier_event.id, later_event.id],
+            explanation="Synthetic regression fixture; not a clinical conclusion.",
+            significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
+            attention_candidate=True,
+            follow_up_candidate=True,
+            created_at=now,
+        )
+        db.add(assessment)
+        db.flush()
+
+        situation = _form_change_situation(
+            db=db,
+            person_id=person.id,
+            changes=[assessment],
+            patterns=[],
+            now=now,
+        )
+        assert situation is not None
+        actual_start = situation.temporal_start
+        actual_end = situation.temporal_end
+        if actual_start.tzinfo is None:
+            actual_start = actual_start.replace(tzinfo=timezone.utc)
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_start == earlier_event_time
+        assert actual_end == later_event_time
+        assert actual_start != now, "analysis time must not replace source-event time"
+        db.close()
+    finally:
+        teardown_db()
+
+
 def test_situation_formation_from_changes():
     setup_db()
     try:
