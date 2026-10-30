@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -703,5 +704,149 @@ def test_api_repeated_relationship_strengthens():
         data = response.json()
         assert data["is_repeatable"] is True
         assert data["repeat_count"] == 3
+    finally:
+        teardown_db()
+
+
+def test_assessment_uses_only_explicit_person_scoped_evidence_and_strength():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        seed_person(db, person_id="causal-owner")
+        db = TestingSessionLocal()
+        db.add_all([
+            Person(id="causal-other", name="Other Person"),
+            Caregiver(
+                id="caregiver-other",
+                name="Other Caregiver",
+                email="other@example.com",
+                relationship="Family",
+                person_id="causal-other",
+            ),
+        ])
+        db.commit()
+        engine = CausalReasoningEngine(db)
+        owner_hypothesis = engine.create_hypothesis(
+            CausalHypothesisCreate(
+                person_id="causal-owner",
+                potential_cause_type="medication",
+                potential_cause_description="Medication was started",
+                outcome_type="dizziness",
+                outcome_description="Dizziness was observed",
+            )
+        )
+        other_hypothesis = engine.create_hypothesis(
+            CausalHypothesisCreate(
+                person_id="causal-other",
+                potential_cause_type="illness",
+                potential_cause_description="Illness was recorded",
+                outcome_type="fall",
+                outcome_description="Fall was observed",
+            )
+        )
+        start = datetime(2026, 10, 1, 9, tzinfo=timezone.utc)
+        outcome = datetime(2026, 10, 2, 9, tzinfo=timezone.utc)
+        strong_support = engine.add_evidence(
+            CausalEvidenceCreate(
+                hypothesis_id=owner_hypothesis.id,
+                person_id="causal-owner",
+                role=EvidenceRole.SUPPORTING,
+                evidence_type=EvidenceType.CLINICIAN_DOCUMENTATION,
+                strength=EvidenceStrength.STRONG,
+                description="Clinician documented a possible contribution",
+                timestamp=start,
+            )
+        )
+        contradictory = engine.add_evidence(
+            CausalEvidenceCreate(
+                hypothesis_id=owner_hypothesis.id,
+                person_id="causal-owner",
+                role=EvidenceRole.CONTRADICTORY,
+                evidence_type=EvidenceType.CORRELATION,
+                strength=EvidenceStrength.WEAK,
+                description="The symptom was also recorded before the change",
+                timestamp=start,
+            )
+        )
+        weak_support = engine.add_evidence(
+            CausalEvidenceCreate(
+                hypothesis_id=owner_hypothesis.id,
+                person_id="causal-owner",
+                role=EvidenceRole.SUPPORTING,
+                evidence_type=EvidenceType.CLINICIAN_DOCUMENTATION,
+                strength=EvidenceStrength.WEAK,
+                description="A weak clinician note",
+                timestamp=start,
+            )
+        )
+        foreign_evidence = engine.add_evidence(
+            CausalEvidenceCreate(
+                hypothesis_id=other_hypothesis.id,
+                person_id="causal-other",
+                role=EvidenceRole.CONTRADICTORY,
+                evidence_type=EvidenceType.CORRELATION,
+                strength=EvidenceStrength.STRONG,
+                description="Evidence belonging to another person",
+                timestamp=start,
+            )
+        )
+
+        base = dict(
+            person_id="causal-owner",
+            potential_cause_type="medication",
+            potential_cause_description="Medication was started",
+            outcome_type="dizziness",
+            outcome_description="Dizziness was observed",
+            cause_time=start,
+            outcome_time=outcome,
+        )
+        supported = engine.assess_relationship(
+            **base, evidence_ids=[strong_support.id]
+        )
+        assert [item.description for item in supported.supporting_evidence] == [
+            "Clinician documented a possible contribution"
+        ]
+        assert supported.contradictory_evidence == []
+        assert supported.causal_confidence == CausalConfidence.SUPPORTED
+        assert supported.evidence_strength == EvidenceStrength.STRONG
+
+        conflicted = engine.assess_relationship(
+            **base, evidence_ids=[strong_support.id, contradictory.id]
+        )
+        assert len(conflicted.supporting_evidence) == 1
+        assert len(conflicted.contradictory_evidence) == 1
+        assert conflicted.causal_confidence == CausalConfidence.CONFLICTING
+
+        weak = engine.assess_relationship(
+            **base, evidence_ids=[weak_support.id]
+        )
+        assert weak.evidence_strength != EvidenceStrength.STRONG
+        assert weak.causal_confidence != CausalConfidence.SUPPORTED
+
+        unrelated = engine.assess_relationship(**base)
+        assert unrelated.supporting_evidence == []
+        assert unrelated.contradictory_evidence == []
+        assert unrelated.causal_confidence == CausalConfidence.INSUFFICIENT
+
+        foreign = engine.assess_relationship(
+            **base, evidence_ids=[foreign_evidence.id]
+        )
+        assert foreign.supporting_evidence == []
+        assert foreign.contradictory_evidence == []
+        assert foreign.quality_gate_passed is False
+        assert any("unavailable for this person" in note for note in foreign.quality_gate_notes)
+
+        with pytest.raises(ValueError, match="must match"):
+            engine.add_evidence(
+                CausalEvidenceCreate(
+                    hypothesis_id=owner_hypothesis.id,
+                    person_id="causal-other",
+                    role=EvidenceRole.SUPPORTING,
+                    evidence_type=EvidenceType.CAREGIVER_OBSERVATION,
+                    strength=EvidenceStrength.WEAK,
+                    description="Cross-person evidence must be rejected",
+                )
+            )
+        db.close()
     finally:
         teardown_db()

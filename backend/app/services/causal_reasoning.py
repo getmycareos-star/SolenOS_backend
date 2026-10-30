@@ -178,6 +178,9 @@ class CausalReasoningEngine:
             person_id, potential_cause_description, outcome_description,
             cause_time, outcome_time, window, evidence_ids,
         )
+        resolved_evidence_ids = [
+            item.id for item in supporting_evidence + contradictory_evidence
+        ]
 
         strength, confidence = self._rank_evidence(
             supporting_evidence, contradictory_evidence, confounders,
@@ -197,9 +200,15 @@ class CausalReasoningEngine:
             contradictory_evidence,
             alternatives,
             confounders,
-            evidence_ids,
+            resolved_evidence_ids,
             cause_time,
         )
+        requested_evidence_ids = list(dict.fromkeys(evidence_ids or []))
+        if len(resolved_evidence_ids) < len(requested_evidence_ids):
+            gate_passed = False
+            gate_notes.append(
+                "One or more supplied evidence IDs were unavailable for this person and were excluded."
+            )
 
         return CausalAnalysisResult(
             person_id=person_id,
@@ -345,6 +354,7 @@ class CausalReasoningEngine:
             self.db.query(CausalEvidenceModel)
             .filter(
                 CausalEvidenceModel.hypothesis_id == db_hyp_id,
+                CausalEvidenceModel.person_id == db_hyp.person_id,
                 CausalEvidenceModel.role == EvidenceRole.SUPPORTING,
             )
             .all()
@@ -353,6 +363,7 @@ class CausalReasoningEngine:
             self.db.query(CausalEvidenceModel)
             .filter(
                 CausalEvidenceModel.hypothesis_id == db_hyp_id,
+                CausalEvidenceModel.person_id == db_hyp.person_id,
                 CausalEvidenceModel.role == EvidenceRole.CONTRADICTORY,
             )
             .all()
@@ -361,6 +372,7 @@ class CausalReasoningEngine:
             self.db.query(ConfounderModel)
             .filter(
                 ConfounderModel.hypothesis_id == db_hyp_id,
+                ConfounderModel.person_id == db_hyp.person_id,
                 ConfounderModel.is_active,
             )
             .all()
@@ -369,6 +381,7 @@ class CausalReasoningEngine:
             self.db.query(AlternativeExplanationModel)
             .filter(
                 AlternativeExplanationModel.hypothesis_id == db_hyp_id,
+                AlternativeExplanationModel.person_id == db_hyp.person_id,
                 AlternativeExplanationModel.is_active,
             )
             .all()
@@ -413,7 +426,19 @@ class CausalReasoningEngine:
     # ------------------------------------------------------------------
     # Evidence management (Sections 6, 7)
     # ------------------------------------------------------------------
+    def _validate_hypothesis_person(self, hypothesis_id: str, person_id: str) -> None:
+        hypothesis = (
+            self.db.query(CausalHypothesisModel)
+            .filter(CausalHypothesisModel.id == hypothesis_id)
+            .first()
+        )
+        if hypothesis is None:
+            raise ValueError("Causal hypothesis does not exist")
+        if hypothesis.person_id != person_id:
+            raise ValueError("Record person_id must match the causal hypothesis person_id")
+
     def add_evidence(self, evidence: CausalEvidenceCreate) -> CausalEvidenceModel:
+        self._validate_hypothesis_person(evidence.hypothesis_id, evidence.person_id)
         db_ev = CausalEvidenceModel(**evidence.model_dump())
         self.db.add(db_ev)
         self.db.commit()
@@ -435,6 +460,7 @@ class CausalReasoningEngine:
     def add_alternative_explanation(
         self, explanation: AlternativeExplanationCreate
     ) -> AlternativeExplanationModel:
+        self._validate_hypothesis_person(explanation.hypothesis_id, explanation.person_id)
         db_alt = AlternativeExplanationModel(**explanation.model_dump())
         self.db.add(db_alt)
         self.db.commit()
@@ -459,6 +485,7 @@ class CausalReasoningEngine:
         return db_alt
 
     def add_confounder(self, confounder: ConfounderCreate) -> ConfounderModel:
+        self._validate_hypothesis_person(confounder.hypothesis_id, confounder.person_id)
         db_conf = ConfounderModel(**confounder.model_dump())
         self.db.add(db_conf)
         self.db.commit()
@@ -675,27 +702,26 @@ class CausalReasoningEngine:
         window: timedelta,
         explicit_evidence_ids: Optional[List[str]],
     ) -> Tuple[List[CausalEvidenceModel], List[CausalEvidenceModel]]:
-        supporting: List[CausalEvidenceModel] = []
-        contradictory: List[CausalEvidenceModel] = []
+        # Evidence must be explicitly linked to this assessment. A broad time
+        # window is not a provenance relationship and must never pull unrelated
+        # contradictory records into a caregiver-facing causal explanation.
+        evidence_ids = list(dict.fromkeys(explicit_evidence_ids or []))
+        if not evidence_ids:
+            return [], []
 
-        if not cause_time or not outcome_time:
-            return supporting, contradictory
-
-        window_start = _ensure_utc(cause_time) - window
-        window_end = _ensure_utc(outcome_time) + window
-
-        contradicting = (
+        evidence = (
             self.db.query(CausalEvidenceModel)
             .filter(
                 CausalEvidenceModel.person_id == person_id,
-                CausalEvidenceModel.role == EvidenceRole.CONTRADICTORY,
-                CausalEvidenceModel.timestamp >= window_start,
-                CausalEvidenceModel.timestamp <= window_end,
+                CausalEvidenceModel.id.in_(evidence_ids),
             )
+            .order_by(CausalEvidenceModel.created_at.asc(), CausalEvidenceModel.id.asc())
             .all()
         )
-        contradictory.extend(contradicting)
-
+        supporting = [item for item in evidence if item.role == EvidenceRole.SUPPORTING]
+        contradictory = [item for item in evidence if item.role == EvidenceRole.CONTRADICTORY]
+        # Neutral evidence remains traceable in the source record but does not
+        # increase or decrease causal support.
         return supporting, contradictory
 
     def _rank_evidence(
@@ -716,7 +742,10 @@ class CausalReasoningEngine:
             EvidenceType.REEVALUATION_CHALLENGE,
         }
 
-        has_strong = any(e.evidence_type in strong_types for e in supporting)
+        has_strong = any(
+            e.evidence_type in strong_types and e.strength == EvidenceStrength.STRONG
+            for e in supporting
+        )
         has_contradiction = len(contradictory) > 0
         has_confounder = len(confounders) > 0
         has_alternative = len(alternatives) > 0

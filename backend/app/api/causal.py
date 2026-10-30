@@ -86,7 +86,10 @@ def reassess_hypothesis(
 def add_evidence(
     evidence: CausalEvidenceCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
-    return engine.add_evidence(evidence)
+    try:
+        return engine.add_evidence(evidence)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.get("/evidence/{hypothesis_id}", response_model=List[CausalEvidence])
@@ -102,7 +105,10 @@ def list_evidence(
 def add_alternative_explanation(
     explanation: AlternativeExplanationCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
-    return engine.add_alternative_explanation(explanation)
+    try:
+        return engine.add_alternative_explanation(explanation)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.patch("/alternatives/{explanation_id}", response_model=AlternativeExplanation)
@@ -121,7 +127,10 @@ def update_alternative_explanation(
 def add_confounder(
     confounder: ConfounderCreate, engine: CausalReasoningEngine = Depends(get_engine)
 ):
-    return engine.add_confounder(confounder)
+    try:
+        return engine.add_confounder(confounder)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.get("/trace/{hypothesis_id}")
