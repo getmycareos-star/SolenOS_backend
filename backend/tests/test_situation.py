@@ -156,6 +156,20 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         listed_rows = listed.json()
         assert len(listed_rows) == 3
         assert [row["observer_label"] for row in listed_rows] == ["Daughter", "Nurse", "Daughter"]
+        hydrated = client.get("/api/situation", headers=headers)
+        assert hydrated.status_code == 200, hydrated.text
+        source_thread = next(
+            item for item in hydrated.json()["ui_situations"]
+            if evidence_id in item.get("linked_evidence_ids", [])
+        )
+        source_statements = source_thread["sourceStatements"]
+        assert [item["speaker_label"] for item in source_statements] == ["Daughter", "Nurse", "Daughter"]
+        assert all(item["reporter_caregiver_id"] == caregiver_id for item in source_statements)
+        assert all(item["speaker_attribution_status"] == "explicit" for item in source_statements)
+        assert all(
+            source_text[item["source_span_start"]:item["source_span_end"]] == item["source_passage"]
+            for item in source_statements
+        )
     finally:
         teardown_db()
 
