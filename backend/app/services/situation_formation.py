@@ -554,16 +554,24 @@ def update_situations(
         if new_event.event_type not in (situation.signal_types or []):
             continue
 
-        # Change situations store evidence IDs; pattern situations store event
-        # IDs. Never mix the two identifier namespaces in signal_ids.
-        context_type = (situation.context or {}).get("type")
+        # Change situations use evidence IDs in signal_ids. Keep the event
+        # identity in a separate context list so an event without an attached
+        # evidence upload can still advance the situation without mixing ID types.
+        context = dict(situation.context or {})
+        context_type = context.get("type")
         if context_type == "situation_understanding":
             incoming_ids = list(new_event.evidence_ids or [])
+            related_event_ids = list(context.get("event_ids") or [])
+            event_reference_added = new_event.id not in related_event_ids
+            if event_reference_added:
+                related_event_ids.append(new_event.id)
+                context["event_ids"] = related_event_ids
         elif context_type in {
             "converged_situation_understanding",
             "frequency_situation_understanding",
         }:
             incoming_ids = [new_event.id]
+            event_reference_added = False
         else:
             # Legacy rows without declared signal semantics cannot be safely
             # extended. Leave them intact for explicit reconciliation.
@@ -571,15 +579,22 @@ def update_situations(
 
         existing_ids = list(situation.signal_ids or [])
         additions = [item for item in incoming_ids if item and item not in existing_ids]
-        if not additions:
+        if not additions and not event_reference_added:
             continue
 
-        situation.signal_ids = existing_ids + additions
-        situation.temporal_end = _ensure_utc(new_event.occurred_at) or situation.temporal_end
+        if additions:
+            situation.signal_ids = existing_ids + additions
+        if context_type == "situation_understanding" and event_reference_added:
+            situation.context = context
+
+        observed_at = _ensure_utc(new_event.occurred_at)
+        current_end = _ensure_utc(situation.temporal_end)
+        if observed_at is not None and (current_end is None or observed_at > current_end):
+            situation.temporal_end = observed_at
         situation.explanation = (
             (situation.explanation or "")
             + f" Updated with event {new_event.id} observed at "
-            f"{situation.temporal_end.isoformat()}."
+            f"{observed_at.isoformat() if observed_at else 'an unknown time'}."
         )
         updated.append(situation)
     if updated:

@@ -63,7 +63,10 @@ def test_change_situation_resolves_evidence_ids_to_observation_time(monkeypatch)
         )
         assert situation.signal_ids == ["evidence-id"]
         assert situation.temporal_start == observed
-        assert situation.temporal_end == observed
+        actual_end = situation.temporal_end
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_end == observed
     finally:
         db.close()
 

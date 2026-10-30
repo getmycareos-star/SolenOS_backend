@@ -330,7 +330,23 @@ def test_situation_temporal_bounds_use_source_event_time_not_assessment_time():
             title="Needed help walking",
             created_by_caregiver_id=caregiver.id,
         )
-        db.add_all([earlier_event, later_event])
+        earlier_evidence = Evidence(
+            id="evidence-temporal-earlier",
+            person_id=person.id,
+            type="note",
+            source_text="Needed help standing.",
+            uploaded_by_caregiver_id=caregiver.id,
+            occurred_at=earlier_event_time,
+        )
+        later_evidence = Evidence(
+            id="evidence-temporal-later",
+            person_id=person.id,
+            type="note",
+            source_text="Needed help walking.",
+            uploaded_by_caregiver_id=caregiver.id,
+            occurred_at=later_event_time,
+        )
+        db.add_all([earlier_event, later_event, earlier_evidence, later_evidence])
         db.flush()
 
         assessment = Change(
@@ -343,7 +359,7 @@ def test_situation_temporal_bounds_use_source_event_time_not_assessment_time():
             current_state="More recent mobility assistance reported",
             comparison_window_start=now - timedelta(days=60),
             comparison_window_end=now,
-            evidence_ids=[earlier_event.id, later_event.id],
+            evidence_ids=[earlier_evidence.id, later_evidence.id],
             explanation="Synthetic regression fixture; not a clinical conclusion.",
             significance_verdict=SignificanceVerdict.MEANINGFUL_CANDIDATE,
             attention_candidate=True,
@@ -628,7 +644,11 @@ def test_situation_update_on_new_event():
         db.commit()
         updated = update_situations(db, person.id, new_event, now)
         assert len(updated) >= 1
-        assert new_event.id in (updated[0].signal_ids or [])
+        if (updated[0].context or {}).get("type") == "situation_understanding":
+            assert new_event.id in (updated[0].context or {}).get("event_ids", [])
+            assert new_event.id not in (updated[0].signal_ids or [])
+        else:
+            assert new_event.id in (updated[0].signal_ids or [])
         db.close()
     finally:
         teardown_db()
