@@ -12,7 +12,7 @@ import json
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -77,6 +77,26 @@ def _analysis_response(analysis: CaptureAnalysis) -> dict:
         "written_to_lcr": False,
         "notice": "Extracted statements are source-grounded review candidates, not verified clinical facts. Only caregiver acceptance promotes a source-linked assertion into the Living Care Record.",
     }
+
+
+@router.get("/intelligence")
+def list_document_intelligence(
+    request: Request,
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """Return persisted document analyses for this authenticated caregiver and person."""
+    person_id, caregiver_id = _identity(request, db)
+    rows = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.caregiver_id == caregiver_id,
+    ).order_by(CaptureAnalysis.created_at.desc()).limit(min(limit * 5, 500)).all()
+    results = [
+        _analysis_response(row)
+        for row in rows
+        if isinstance(row.candidates, dict) and row.candidates.get("kind") == "document_intelligence_v1"
+    ][:limit]
+    return {"items": results, "count": len(results), "identity_scope": "server_session_person_and_caregiver"}
 
 
 @router.post("/{evidence_id}/intelligence", status_code=201)
