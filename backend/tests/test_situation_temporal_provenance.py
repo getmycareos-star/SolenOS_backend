@@ -1,5 +1,6 @@
 """Regressions for typed situation signal IDs and source observation time."""
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -9,7 +10,11 @@ from app.core.database import Base
 from app.core.change_enums import ChangeDirection, ChangeType, SituationState, SituationType
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.change import Change, Situation
-from app.services.situation_formation import _form_change_situation, update_situations
+from app.services.situation_formation import (
+    _form_change_situation,
+    _group_related_signals,
+    update_situations,
+)
 
 
 def make_db():
@@ -200,3 +205,38 @@ def test_legacy_change_signal_ids_resolve_care_event_time_and_continue_event_nam
         assert actual_end == new_observed
     finally:
         db.close()
+
+
+
+def test_situation_thread_grouping_does_not_merge_unrelated_same_domain_subjects():
+    first = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-1"])
+    same_thread = SimpleNamespace(subject_type="mobility", subject_id="walking", evidence_ids=["ev-2"])
+    separate_thread = SimpleNamespace(subject_type="mobility", subject_id="transfers", evidence_ids=["ev-3"])
+    other_domain = SimpleNamespace(subject_type="nutrition", subject_id="walking", evidence_ids=["ev-1"])
+
+    groups = _group_related_signals(
+        [first, same_thread, separate_thread, other_domain],
+        "evidence_ids",
+    )
+
+    assert len(groups) == 3
+    assert any(set(group) == {first, same_thread} for group in groups)
+    assert any(group == [separate_thread] for group in groups)
+    assert any(group == [other_domain] for group in groups)
+
+
+def test_situation_thread_grouping_uses_shared_source_only_within_same_domain():
+    first = SimpleNamespace(subject_type="sleep", subject_id="", event_ids=["event-1"])
+    same_source = SimpleNamespace(subject_type="sleep", subject_id="", event_ids=["event-1", "event-2"])
+    other_source = SimpleNamespace(subject_type="sleep", subject_id="", event_ids=["event-3"])
+    other_domain = SimpleNamespace(subject_type="falls", subject_id="", event_ids=["event-1"])
+
+    groups = _group_related_signals(
+        [first, same_source, other_source, other_domain],
+        "event_ids",
+    )
+
+    assert len(groups) == 3
+    assert any(set(group) == {first, same_source} for group in groups)
+    assert any(group == [other_source] for group in groups)
+    assert any(group == [other_domain] for group in groups)
