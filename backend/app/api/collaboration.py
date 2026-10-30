@@ -1233,7 +1233,21 @@ def _contains_unsupported_operational_claim(
         medication_action = (
             r"\b(?:medication|medicine|prescription|dosage|dose)\b.{0,100}\b(?:changed|increase(?:d)?|decrease(?:d)?|stop(?:ped)?|start(?:ed)?|missed|administered|taken|given|prescribed|recommended)\b"
         )
-        if not re.search(missing_medication, text) or re.search(medication_action, text):
+        action_matches = list(re.finditer(medication_action, text))
+        # Accept an affirmative medication observation only when its ordered
+        # action wording is explicitly present in the caregiver's supplied source.
+        source_supported_action = any(
+            re.search(
+                r"\b" + r"\s+".join(
+                    re.escape(term) for term in re.findall(r"[a-z]+", match.group(0))
+                ) + r"\b",
+                source,
+            )
+            for match in action_matches
+        )
+        if action_matches and not source_supported_action:
+            return True
+        if not re.search(missing_medication, text) and not source_supported_action:
             return True
     weekdays = r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
     source_correction = re.search(

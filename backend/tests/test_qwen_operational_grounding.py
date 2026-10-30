@@ -132,3 +132,15 @@ def test_rejects_unsupported_medication_action_even_if_reply_also_mentions_missi
         "No matching care evidence was supplied.",
         [],
     ) is True
+
+def test_accepts_medication_action_explicitly_reported_by_caregiver():
+    source = "Organize this caregiver report only: prescribed medication was taken with breakfast. Do not infer dose or recommend a change."
+    reply = "The caregiver reports the prescribed medication was taken with breakfast. The dose was not supplied; confirm any medication questions with the prescriber."
+    assert _contains_unsupported_operational_claim(reply, source, []) is False
+
+
+def test_rejects_medication_action_not_reported_by_caregiver():
+    source = "Organize this caregiver report only: prescribed medication was taken with breakfast. Do not infer dose or recommend a change."
+    reply = "The prescribed medication was taken with breakfast and the dose was increased."
+    assert _contains_unsupported_operational_claim(reply, source, []) is True
+
