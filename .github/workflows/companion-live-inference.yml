@@ -83,11 +83,13 @@ jobs:
           kill "$sampler_pid" 2>/dev/null || true
           wait "$sampler_pid" 2>/dev/null || true
           python - <<'PY'
+          import os
           import re
           import statistics
           import xml.etree.ElementTree as ET
           from pathlib import Path
 
+          print("QWEN_MODEL_UNDER_TEST=" + os.environ.get("OLLAMA_MODEL", "unknown"))
           output = Path("/tmp/live-qwen-output.log").read_text() if Path("/tmp/live-qwen-output.log").exists() else ""
           latencies = [float(value) for value in re.findall(r"QWEN_LIVE_LATENCY_MS=([0-9.]+)", output)]
           if latencies:
