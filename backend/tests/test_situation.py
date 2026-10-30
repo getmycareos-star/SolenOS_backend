@@ -346,7 +346,8 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     person_id=person_id,
                     question="Has the unsteadiness also happened indoors?",
                     subject_type="mobility",
-                    subject_id=person_id,
+                    subject_id="persisted-mobility-thread",
+                    evidence_ids=[first_evidence_id],
                     status="open",
                 ),
                 Contradiction(
