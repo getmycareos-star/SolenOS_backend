@@ -5,6 +5,8 @@ import re
 from sqlalchemy.orm import Session
 from app.models.care import Caregiver, Person, Evidence, CareEvent
 from app.models.care_continuity import EvidenceObservation
+from app.models.change import Situation as CareSituationModel
+from app.core.change_enums import SituationState
 from app.schemas.situation import SituationInput, SituationResponse, SituationEvent, SituationDocument
 from app.services.change_detection import detect_event_changes
 from app.services.situation_formation import detect_situations
@@ -58,6 +60,24 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
     # must remain safe when called from another route or internal workflow.
     if caregiver.person_id != person.id:
         raise ValueError("Caregiver is not linked to this person")
+
+    target_situation = None
+    if payload.target_situation_id:
+        # Explicit thread recovery is person-scoped and row-locked. Similarity
+        # never chooses a target thread; a resolved thread cannot be reopened
+        # by a capture request.
+        target_situation = (
+            db.query(CareSituationModel)
+            .filter(
+                CareSituationModel.id == payload.target_situation_id,
+                CareSituationModel.person_id == payload.person_id,
+                CareSituationModel.state == SituationState.ACTIVE,
+            )
+            .with_for_update()
+            .first()
+        )
+        if target_situation is None:
+            raise ValueError("The selected care situation is not an active thread in this care record")
 
     timestamp = payload.timestamp
     if timestamp:
@@ -184,10 +204,24 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         evidence_ids=evidence_ids,
         tags=[f"capture_category:{payload.capture_category}"] if payload.capture_category else [],
         created_by_caregiver_id=payload.caregiver_id,
+        situation_id=target_situation.id if target_situation is not None else None,
     )
     db.add(care_event)
     db.flush()
     event_ids.append(care_event.id)
+    if target_situation is not None:
+        # Append only this capture's evidence to the explicitly selected thread.
+        # Do not merge another active situation or rewrite its prior signals.
+        target_situation.signal_ids = list(dict.fromkeys([
+            *(target_situation.signal_ids or []),
+            *evidence_ids,
+        ]))
+        target_situation.temporal_start = min(
+            value for value in (target_situation.temporal_start, occurred_at) if value is not None
+        )
+        target_situation.temporal_end = max(
+            value for value in (target_situation.temporal_end, occurred_at) if value is not None
+        )
     db.commit()
 
     changes: List = []
@@ -213,8 +247,13 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
                 if parts:
                     what_changed = "; ".join(parts)
 
-        detected = detect_situations(db, payload.person_id, occurred_at)
-        if detected:
+        detected = (
+            [] if target_situation is not None
+            else detect_situations(db, payload.person_id, occurred_at)
+        )
+        if target_situation is not None:
+            situations = [target_situation]
+        elif detected:
             situations = detected
             active_situations = [s for s in detected if s.state.value == "active"]
             if active_situations:
@@ -225,7 +264,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
         care_event.attention_candidate = attention_candidate
         care_event.follow_up_candidate = follow_up_candidate
         care_event.confidence = sig_changes[0].confidence if sig_changes else None
-        if situations:
+        if situations and target_situation is None:
             care_event.situation_id = situations[0].id
         db.commit()
         db.refresh(care_event)
@@ -274,7 +313,7 @@ def process_situation_input(db: Session, payload: SituationInput) -> SituationRe
 
     return SituationResponse(
         ok=True,
-        situation_id=care_event.id,
+        situation_id=care_event.situation_id or care_event.id,
         care_key=payload.client_care_key or payload.caregiver_id,
         person_id=payload.person_id,
         evidence_id=evidence_ids[0],
