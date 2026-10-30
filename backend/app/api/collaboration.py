@@ -645,7 +645,9 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
         r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then)\b",
+        r"this appointment|what was that|and then|what should (?:i|we) ask|what do i ask|"
+        r"what can i ask|what should .* check|what should .* look for|what should .* watch for|"
+        r"what should i tell|what should we tell|how should i tell|what next)\b",
         current.casefold(),
     )
     word_count = len(re.findall(r"[\w']+", current, flags=re.UNICODE))

@@ -408,6 +408,26 @@ def test_referential_follow_up_uses_recent_dialogue_for_retrieval_only():
     assert query.startswith("What about that?")
 
 
+def test_care_coordination_follow_up_keeps_the_prior_care_subject_in_retrieval():
+    prior = [
+        SimpleNamespace(
+            role="user",
+            content="My grandmother has eaten less at breakfast for three mornings. I have not checked lunch or dinner.",
+        ),
+        SimpleNamespace(
+            role="assistant",
+            content="You reported reduced breakfast intake; lunch and dinner remain unchecked.",
+        ),
+    ]
+    query = collaboration._context_query_with_history(
+        "What should I ask my brother to check today?", prior
+    )
+    assert query.startswith("What should I ask my brother to check today?")
+    assert "grandmother" in query.casefold()
+    assert "breakfast" in query.casefold()
+    assert "lunch" in query.casefold()
+
+
 def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval():
     prior = [SimpleNamespace(role="user", content="Has Mum's sleep been getting worse?")]
     query = collaboration._context_query_with_history(
