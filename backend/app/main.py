@@ -630,7 +630,11 @@ def get_situation(
                 EvidenceObservationModel.person_id == person_id,
                 EvidenceObservationModel.evidence_id.in_(list(evidence_by_id)),
             )
-            .order_by(EvidenceObservationModel.recorded_at.asc(), EvidenceObservationModel.id.asc())
+            .order_by(
+                EvidenceObservationModel.source_span_start.asc(),
+                EvidenceObservationModel.recorded_at.asc(),
+                EvidenceObservationModel.id.asc(),
+            )
             .all()
         )
     superseded_by_observation = {}
