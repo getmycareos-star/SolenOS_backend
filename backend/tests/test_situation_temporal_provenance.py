@@ -137,3 +137,66 @@ def test_pattern_situation_update_preserves_event_id_signal_type():
         assert actual_end == observed
     finally:
         db.close()
+
+
+def test_legacy_change_signal_ids_resolve_care_event_time_and_continue_event_namespace(monkeypatch):
+    db = make_db()
+    try:
+        person = Person(id="p-legacy", name="Person")
+        caregiver = Caregiver(
+            id="c-legacy", name="Caregiver", relationship="Family", person_id="p-legacy"
+        )
+        observed = datetime(2026, 10, 7, 9, tzinfo=timezone.utc)
+        legacy_event = CareEvent(
+            id="legacy-event-id", person_id="p-legacy", event_type="observation",
+            status="recorded", occurred_at=observed, title="Legacy observation",
+            evidence_ids=[], created_by_caregiver_id="c-legacy",
+        )
+        change = Change(
+            id="legacy-change-id", person_id="p-legacy", subject_type="observation",
+            subject_id="legacy-event-id", change_type=ChangeType.INCREASE,
+            change_direction=ChangeDirection.INCREASING,
+            evidence_ids=["legacy-event-id"], is_active=True,
+        )
+        db.add_all([person, caregiver, legacy_event, change])
+        db.flush()
+        monkeypatch.setattr(
+            "app.services.situation_formation._build_situation_context",
+            lambda *args, **kwargs: {"type": "situation_understanding"},
+        )
+        monkeypatch.setattr(
+            "app.services.situation_formation._derive_alternatives",
+            lambda *args, **kwargs: [],
+        )
+        situation = _form_change_situation(
+            db, "p-legacy", [change], [],
+            datetime(2026, 10, 30, 12, tzinfo=timezone.utc),
+        )
+        assert situation.temporal_start == observed
+        assert situation.temporal_end == observed
+
+        legacy = Situation(
+            id="s-legacy", person_id="p-legacy", situation_type=SituationType.UNKNOWN,
+            state=SituationState.ACTIVE, title="Legacy", description="Legacy row",
+            signal_ids=["legacy-event-id"], signal_types=["observation"],
+            temporal_start=observed, temporal_end=observed,
+            context={}, is_active=True,
+        )
+        new_observed = datetime(2026, 10, 9, 10, tzinfo=timezone.utc)
+        new_event = CareEvent(
+            id="new-legacy-event-id", person_id="p-legacy", event_type="observation",
+            status="recorded", occurred_at=new_observed, title="New observation",
+            evidence_ids=["new-evidence-id"], created_by_caregiver_id="c-legacy",
+        )
+        db.add_all([legacy, new_event])
+        db.commit()
+        updated = update_situations(db, "p-legacy", new_event)
+        assert legacy in updated
+        assert legacy.signal_ids == ["legacy-event-id", "new-legacy-event-id"]
+        assert "new-evidence-id" not in legacy.signal_ids
+        actual_end = legacy.temporal_end
+        if actual_end.tzinfo is None:
+            actual_end = actual_end.replace(tzinfo=timezone.utc)
+        assert actual_end == new_observed
+    finally:
+        db.close()

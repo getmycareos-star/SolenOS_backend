@@ -117,19 +117,28 @@ def _form_change_situation(
         signal_types.append(c.subject_type)
     signal_ids = list(set(signal_ids))
     signal_types = list(set(signal_types))
-    # Change.evidence_ids are Evidence primary keys, not CareEvent IDs.
-    # Resolve observation time from source evidence; upload and analysis times
-    # are not substitutes for when the care was observed.
+    # Current Change rows carry Evidence IDs; historical rows may carry
+    # CareEvent IDs. Resolve both namespaces within this person's record.
+    # Source observation time takes precedence over assessment/ingestion time.
     source_evidence = (
         db.query(Evidence)
         .filter(Evidence.person_id == person_id, Evidence.id.in_(signal_ids))
         .all()
         if signal_ids else []
     )
+    source_events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(signal_ids))
+        .all()
+        if signal_ids else []
+    )
     source_times = [
         observed_at
-        for evidence in source_evidence
-        if (observed_at := _ensure_utc(evidence.occurred_at)) is not None
+        for observed_at in (
+            [_ensure_utc(item.occurred_at) for item in source_evidence]
+            + [_ensure_utc(item.occurred_at) for item in source_events]
+        )
+        if observed_at is not None
     ]
     if source_times:
         temporal_start = min(source_times)
@@ -559,6 +568,8 @@ def update_situations(
         # evidence upload can still advance the situation without mixing ID types.
         context = dict(situation.context or {})
         context_type = context.get("type")
+        existing_ids = list(situation.signal_ids or [])
+        event_reference_added = False
         if context_type == "situation_understanding":
             incoming_ids = list(new_event.evidence_ids or [])
             related_event_ids = list(context.get("event_ids") or [])
@@ -573,11 +584,29 @@ def update_situations(
             incoming_ids = [new_event.id]
             event_reference_added = False
         else:
-            # Legacy rows without declared signal semantics cannot be safely
-            # extended. Leave them intact for explicit reconciliation.
-            continue
-
-        existing_ids = list(situation.signal_ids or [])
+            # Infer legacy signal namespaces only from persisted records in
+            # this person's care record. If identifiers resolve in both
+            # namespaces, leave the ambiguous situation unchanged.
+            evidence_matches = (
+                db.query(Evidence.id)
+                .filter(Evidence.person_id == person_id, Evidence.id.in_(existing_ids))
+                .all()
+                if existing_ids else []
+            )
+            event_matches = (
+                db.query(CareEvent.id)
+                .filter(CareEvent.person_id == person_id, CareEvent.id.in_(existing_ids))
+                .all()
+                if existing_ids else []
+            )
+            if evidence_matches and event_matches:
+                continue
+            if evidence_matches:
+                incoming_ids = list(new_event.evidence_ids or [])
+            elif event_matches:
+                incoming_ids = [new_event.id]
+            else:
+                continue
         additions = [item for item in incoming_ids if item and item not in existing_ids]
         if not additions and not event_reference_added:
             continue
