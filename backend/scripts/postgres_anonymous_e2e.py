@@ -320,7 +320,7 @@ def main():
             and None not in concurrent_capture_event_ids
             and len(concurrent_capture_evidence_ids) == 4
             and None not in concurrent_capture_evidence_ids,
-            f"Every selected-thread capture must preserve a distinct source/event pair: {concurrent_capture_event_ids}",
+            f"Each independent capture must preserve a distinct source/event pair: events={concurrent_capture_event_ids}, evidence={concurrent_capture_evidence_ids}",
         )
         with SessionLocal() as db:
             mobility_thread = db.query(SituationModel).filter_by(id=mobility_thread_id).one()

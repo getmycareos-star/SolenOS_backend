@@ -397,6 +397,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             },
         )
         assert related_link.status_code == 201, related_link.text
+        assert related_link.json()["relationship_version"] == 1
         duplicate_related_link = client.post(
             "/api/v1/care-continuity/relationships",
             headers=headers,
@@ -436,6 +437,7 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
             },
         )
         assert retract_link.status_code == 201, retract_link.text
+        assert retract_link.json()["relationship_version"] == 2, retract_link.json()
         after_retraction = client.get("/api/situation", headers=headers)
         assert after_retraction.status_code == 200, after_retraction.text
         retracted_threads = {
