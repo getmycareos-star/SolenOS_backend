@@ -237,14 +237,10 @@ def test_thread_grouping_uses_only_explicit_shared_source_ids():
         "event_ids",
     )
 
-    assert len(groups) == 3
-    assert any(
-        len(group) == 3
-        and first in group
-        and same_subject_source in group
-        and other_subject_same_source in group
-        for group in groups
-    )
+    assert len(groups) == 4
+    assert any(len(group) == 2 and first in group and same_subject_source in group for group in groups)
+    assert any(group == [other_subject_same_source] for group in groups)
+    assert any(group == [other_domain_same_source] for group in groups)
     assert any(group == [nearby_but_unrelated] for group in groups)
 
 
