@@ -312,7 +312,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             target_person_id = path_params.get("person_id") or request.query_params.get("person_id") or scoped_person_id
         if (
             path.startswith("/api/v1/community")
-            or path == "/api/v1/upload"
+            or path.startswith("/api/v1/upload")
             or path.startswith("/api/v1/assistant/")
             or path.startswith("/api/v1/reminders")
             or path.startswith("/api/v1/care-continuity")
