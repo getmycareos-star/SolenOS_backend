@@ -407,7 +407,7 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             conflict_records = reader.query(Contradiction).filter(
                 Contradiction.id.like(f"m10kco{suffix}%")
             ).all()
-            assert len(conflict_records) == 50 * CASES_PER_HISTORY
+            assert len(conflict_records) == 100 * CASES_PER_HISTORY
             assert all(row.resolution_status == "unresolved" for row in conflict_records)
             assert all(len(row.source_assertion_ids or []) == 2 for row in conflict_records)
             correction_records = reader.query(Correction).filter(
@@ -442,6 +442,12 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
                 assert len(rows) == CASES_PER_HISTORY, f"{person_id}: wrong event count"
                 assert {row.event_type for row in rows} == set(DOMAINS)
                 assert len({row.created_by_caregiver_id for row in rows}) == 2
+                if "caregiver_transition" in (rows[0].tags or []):
+                    ordered_rows = sorted(rows, key=lambda item: item.id)
+                    first_half = {item.created_by_caregiver_id for item in ordered_rows[:5]}
+                    second_half = {item.created_by_caregiver_id for item in ordered_rows[5:]}
+                    assert len(first_half) == 1 and len(second_half) == 1
+                    assert first_half.isdisjoint(second_half)
                 assert all(caregiver_owner[row.created_by_caregiver_id] == person_id for row in rows)
                 assert all(row.person_id == person_id for row in rows)
 
