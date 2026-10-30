@@ -112,6 +112,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
+      DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
     steps:
       - name: Check out repository
@@ -135,6 +136,20 @@ jobs:
             backend/tests/test_pattern_postgres_integration.py \
             -q -s --junitxml=/tmp/postgres-longitudinal.xml
 
+      - name: Verify PostgreSQL data survives server restart
+        if: steps.postgres_benchmark.outcome == 'success'
+        run: |
+          set -euo pipefail
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS messy_care_restart_probe (probe_id text PRIMARY KEY, verified_at timestamptz NOT NULL DEFAULT now());"
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO messy_care_restart_probe (probe_id) VALUES ('${{ github.sha }}') ON CONFLICT (probe_id) DO UPDATE SET verified_at = now();"
+          container_id="$(docker ps -q --filter 'ancestor=postgres:17' | head -n 1)"
+          test -n "$container_id"
+          docker restart "$container_id"
+          for attempt in $(seq 1 30); do
+            if pg_isready -h localhost -p 5432 -U solenos_benchmark -d solenos_benchmark; then break; fi
+            sleep 2
+          done
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT probe_id, verified_at FROM messy_care_restart_probe WHERE probe_id = '${{ github.sha }}';" | grep -F '${{ github.sha }}'
       - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
