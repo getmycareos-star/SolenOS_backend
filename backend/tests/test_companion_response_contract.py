@@ -62,7 +62,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         captured["options"] = options
         return (
             "The record contains one sleep observation. "
-            "What other recent sleep observations are available?"
+            "That is not enough information to establish whether sleep has been getting worse."
         )
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -443,10 +443,16 @@ def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeyp
     try:
         token, person_id, _ = create_session(client)
 
-        def fail_commit(_session):
-            raise RuntimeError("simulated database commit failure")
+        original_commit = Session.commit
+        commit_calls = {"count": 0}
 
-        monkeypatch.setattr(Session, "commit", fail_commit)
+        def fail_message_pair_commit(session):
+            commit_calls["count"] += 1
+            if commit_calls["count"] == 2:
+                raise RuntimeError("simulated database commit failure")
+            return original_commit(session)
+
+        monkeypatch.setattr(Session, "commit", fail_message_pair_commit)
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
