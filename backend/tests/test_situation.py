@@ -157,6 +157,13 @@ def test_multi_speaker_capture_persists_exact_speaker_and_reporter_provenance():
         assert len(listed_rows) == 3
         assert [row["observer_label"] for row in listed_rows] == ["Daughter", "Nurse", "Daughter"]
 
+        from app.services.situation import _explicit_speaker_statements
+        single_speaker = _explicit_speaker_statements("[Nurse]: The person needed support when standing.")
+        assert len(single_speaker) == 1
+        assert single_speaker[0]["speaker_label"] == "Nurse"
+        assert single_speaker[0]["source_passage"] == "The person needed support when standing."
+        assert _explicit_speaker_statements("The person needed support when standing.") == []
+
         original_statement = listed_rows[0]
         correction = client.post(
             f"/api/v1/care-continuity/evidence/{evidence_id}/observations",
