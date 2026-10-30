@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
-from sqlalchemy import inspect, or_
+from sqlalchemy import inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 
 from app.core.database import get_db
@@ -270,6 +270,16 @@ async def upload_evidence(
     # as proof that OCR or review happened on the server.
     bounded_text = extracted_text.strip()[:100_000]
     digest = hashlib.sha256(data).hexdigest()
+    # Serialize duplicate lookup + insertion for this person/content pair.
+    # Without a transaction-scoped lock, two simultaneous uploads can both
+    # observe no prior row and both incorrectly report themselves as originals.
+    if db.get_bind().dialect.name == "postgresql":
+        lock_key = int.from_bytes(
+            hashlib.sha256(f"{scoped_person_id}:{digest}".encode("utf-8")).digest()[:8],
+            byteorder="big",
+            signed=True,
+        )
+        db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
     # Exact binary checksum comparison is deterministic duplicate detection.
     # Keep the new upload and its uploader attribution, but explicitly link the
     # earlier identical artifact instead of silently deduplicating evidence.
