@@ -2175,7 +2175,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         model_messages.append({
             "role": "user",
             "content": (
-                f"Caregiver question: {user_text}\n\n"
+                f"Caregiver message: {user_text}\n\n"
                 "Relevant authorized care context follows. Use only records relevant to the question. "
                 "Do not describe the context format or list unrelated records. If the context does not answer "
                 "the question, say the information is not recorded.\n"
@@ -2201,7 +2201,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 base,
                 model,
                 model_messages,
-                {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
+                {"temperature": 0.25, "num_predict": 64 if greeting_only else 384},
             )
         except HTTPException:
             raise
@@ -2270,7 +2270,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": 16},
+                        {"temperature": 0.1, "num_predict": 32},
                     )
                 except Exception as exc:
                     raise HTTPException(
