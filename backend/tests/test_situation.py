@@ -350,6 +350,15 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
                     evidence_ids=[first_evidence_id],
                     status="open",
                 ),
+                OpenQuestion(
+                    id="unlinked-mobility-question",
+                    person_id=person_id,
+                    question="Does the unrelated second mobility concern still need review?",
+                    subject_type="mobility",
+                    subject_id="another-mobility-thread",
+                    evidence_ids=[],
+                    status="open",
+                ),
                 Contradiction(
                     id="unresolved-mobility-conflict",
                     person_id=person_id,
@@ -478,6 +487,8 @@ def test_get_situation_rehydrates_distinct_persisted_threads_and_open_questions(
         assert threads["persisted-mobility-thread"]["conflicts"][0]["winner_selected"] is False
         assert threads["persisted-mobility-thread"]["conflicts"][0]["resolution_status"] == "unresolved"
         assert threads["persisted-appetite-thread"]["openQuestions"] == []
+        assert "Does the unrelated second mobility concern still need review?" not in threads["persisted-mobility-thread"]["openQuestions"]
+        assert "Does the unrelated second mobility concern still need review?" in body["return_continuity"]["important_unresolved"]
         assert threads["persisted-mobility-thread"]["relatedSituations"][0]["id"] == "persisted-appetite-thread"
         assert threads["persisted-appetite-thread"]["relatedSituations"][0]["id"] == "persisted-mobility-thread"
         assert set(threads["persisted-mobility-thread"]["linked_evidence_ids"]).isdisjoint(
