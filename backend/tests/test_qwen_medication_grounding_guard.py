@@ -41,3 +41,8 @@ def test_safe_boundary_does_not_mask_separate_unsupported_medication_action():
     reply = "Increase the medication dose tonight. Do not change medication without a prescriber."
     source = "Caregiver asks whether to double the dose tonight."
     assert _contains_unsupported_operational_claim(reply, source, []) is True
+
+def test_unsupported_imperative_medication_instruction_is_blocked():
+    reply = "Increase the medication dose tonight."
+    source = "Caregiver asks whether to double the dose tonight."
+    assert _contains_unsupported_operational_claim(reply, source, []) is True
