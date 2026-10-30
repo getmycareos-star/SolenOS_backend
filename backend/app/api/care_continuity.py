@@ -286,29 +286,49 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
 
     text_duplicate_ids = []
     if stored_hash and integrity_status == "match":
-        text_duplicate_ids = [
-            row[0] for row in db.query(Evidence.id).filter(
+        possible_text_duplicates = (
+            db.query(Evidence)
+            .filter(
                 Evidence.person_id == person_id,
                 Evidence.id != evidence.id,
                 Evidence.source_text_sha256 == stored_hash,
-            ).order_by(Evidence.uploaded_at.asc(), Evidence.id.asc()).all()
-        ]
+            )
+            .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+            .all()
+        )
+        for candidate in possible_text_duplicates:
+            candidate_hash = (
+                hashlib.sha256(candidate.source_text.encode("utf-8")).hexdigest()
+                if candidate.source_text is not None else None
+            )
+            if candidate_hash and candidate.source_text_sha256 and hmac.compare_digest(
+                candidate.source_text_sha256, candidate_hash
+            ) and hmac.compare_digest(stored_hash, candidate_hash):
+                text_duplicate_ids.append(candidate.id)
 
     binary_duplicate_ids = []
     if binary_upload is not None and binary_status == "match":
-        binary_duplicate_ids = [
-            row[0] for row in (
-                db.query(EvidenceUpload.evidence_id)
-                .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
-                .filter(
-                    Evidence.person_id == person_id,
-                    EvidenceUpload.evidence_id != evidence.id,
-                    EvidenceUpload.sha256 == binary_upload.sha256,
-                )
-                .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
-                .all()
+        possible_binary_duplicates = (
+            db.query(EvidenceUpload)
+            .join(Evidence, Evidence.id == EvidenceUpload.evidence_id)
+            .filter(
+                Evidence.person_id == person_id,
+                EvidenceUpload.evidence_id != evidence.id,
+                EvidenceUpload.sha256 == binary_upload.sha256,
             )
-        ]
+            .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
+            .all()
+        )
+        for candidate in possible_binary_duplicates:
+            candidate_content = bytes(candidate.content)
+            candidate_hash = hashlib.sha256(candidate_content).hexdigest()
+            if (
+                len(candidate_content) == candidate.size_bytes
+                and len(candidate_content) == binary_upload.size_bytes
+                and hmac.compare_digest(candidate.sha256, candidate_hash)
+                and hmac.compare_digest(binary_upload.sha256, candidate_hash)
+            ):
+                binary_duplicate_ids.append(candidate.evidence_id)
 
     latest_freshness = (
         db.query(EvidenceFreshnessAssessment)
