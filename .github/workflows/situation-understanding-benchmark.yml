@@ -209,7 +209,7 @@ jobs:
               raise SystemExit(f"PostgreSQL care-history restart persistence failed: {last_error}")
           PY
 
-            - name: Enforce PostgreSQL benchmark execution
+      - name: Enforce PostgreSQL benchmark execution
         if: always()
         run: |
           python - <<'PY'
