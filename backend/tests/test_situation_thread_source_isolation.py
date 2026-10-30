@@ -54,7 +54,7 @@ def test_transitive_grouping_requires_a_chain_of_explicit_source_overlap():
     groups = _group_related_signals([first, bridge, third, unrelated], "evidence_ids")
 
     assert len(groups) == 2
-    assert set(groups[0]) == {first, bridge, third}
+    assert {id(item) for item in groups[0]} == {id(first), id(bridge), id(third)}
     assert groups[1] == [unrelated]
 
 
