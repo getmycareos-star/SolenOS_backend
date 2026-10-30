@@ -112,6 +112,7 @@ jobs:
           --health-retries 12
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
+      DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -131,6 +132,7 @@ jobs:
         continue-on-error: true
         run: |
           python -m pytest backend/tests/test_longitudinal_messy_care_benchmark.py \
+            backend/tests/test_pattern_postgres_integration.py \
             -q -s --junitxml=/tmp/postgres-longitudinal.xml
 
       - name: Enforce PostgreSQL benchmark execution
