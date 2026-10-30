@@ -220,7 +220,7 @@ def test_situation_thread_grouping_does_not_merge_unrelated_same_domain_subjects
     )
 
     assert len(groups) == 3
-    assert any(set(group) == {first, same_thread} for group in groups)
+    assert any(len(group) == 2 and first in group and same_thread in group for group in groups)
     assert any(group == [separate_thread] for group in groups)
     assert any(group == [other_domain] for group in groups)
 
