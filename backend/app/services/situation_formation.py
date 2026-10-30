@@ -53,38 +53,119 @@ def detect_situations(
 
     situations = []
     meaningful_changes = [c for c in all_changes if _is_meaningful(c)]
-    if meaningful_changes:
+
+    # A matching label or nearby timestamp is not identity evidence. Changes
+    # share a thread only when they cite at least one identical source evidence
+    # record within this person-scoped reconciliation.
+    for change_group in _group_related_signals(meaningful_changes, "evidence_ids"):
+        related_event_ids = _event_ids_for_evidence(db, person_id, {
+            source_id
+            for change in change_group
+            for source_id in (change.evidence_ids or [])
+        })
+        related_patterns = [
+            pattern for pattern in all_patterns
+            if related_event_ids.intersection(pattern.event_ids or [])
+        ]
         change_situation = _form_change_situation(
             db=db,
             person_id=person_id,
-            changes=meaningful_changes,
-            patterns=all_patterns,
+            changes=change_group,
+            patterns=related_patterns,
             now=now,
         )
         if change_situation:
             situations.append(change_situation)
-    if len(all_patterns) >= 2:
+
+    # Pattern threads require shared persisted event IDs. Patterns with no
+    # common source event remain separate, regardless of domain or recency.
+    for pattern_group in _group_related_signals(all_patterns, "event_ids"):
+        if len(pattern_group) < 2:
+            continue
+        related_event_ids = {
+            event_id for pattern in pattern_group for event_id in (pattern.event_ids or [])
+        }
+        related_changes = [
+            change for change in all_changes
+            if _event_ids_for_evidence(db, person_id, set(change.evidence_ids or []))
+            .intersection(related_event_ids)
+        ]
         pattern_situation = _form_pattern_situation(
             db=db,
             person_id=person_id,
-            patterns=all_patterns,
-            changes=all_changes,
+            patterns=pattern_group,
+            changes=related_changes,
             now=now,
         )
         if pattern_situation:
             situations.append(pattern_situation)
+
     for pattern in all_patterns:
         if pattern.pattern_type == PatternType.FREQUENCY_INCREASE:
+            pattern_event_ids = set(pattern.event_ids or [])
+            related_changes = [
+                change for change in all_changes
+                if _event_ids_for_evidence(db, person_id, set(change.evidence_ids or []))
+                .intersection(pattern_event_ids)
+            ]
             situation = _form_frequency_situation(
                 db=db,
                 person_id=person_id,
                 pattern=pattern,
-                changes=[c for c in all_changes if c.subject_type == pattern.subject_type],
+                changes=related_changes,
                 now=now,
             )
             if situation:
                 situations.append(situation)
     return situations
+
+
+def _signal_source_ids(item: Any, field: str) -> set[str]:
+    return {
+        str(value) for value in (getattr(item, field, None) or [])
+        if value is not None and str(value)
+    }
+
+
+def _signals_are_explicitly_related(left: Any, right: Any, source_field: str) -> bool:
+    # subject_type is a domain boundary, not proof of shared subject identity.
+    if getattr(left, "subject_type", None) != getattr(right, "subject_type", None):
+        return False
+    return bool(
+        _signal_source_ids(left, source_field)
+        & _signal_source_ids(right, source_field)
+    )
+
+
+def _group_related_signals(items: List[Any], source_field: str) -> List[List[Any]]:
+    """Group only transitively source-linked signals within one care domain."""
+    groups: List[List[Any]] = []
+    for item in items:
+        matching = [
+            index for index, group in enumerate(groups)
+            if any(_signals_are_explicitly_related(item, existing, source_field)
+                   for existing in group)
+        ]
+        if not matching:
+            groups.append([item])
+            continue
+        first = matching[0]
+        groups[first].append(item)
+        for index in reversed(matching[1:]):
+            groups[first].extend(groups.pop(index))
+    return groups
+
+
+def _event_ids_for_evidence(db: Session, person_id: str, evidence_ids: set[str]) -> set[str]:
+    if not evidence_ids:
+        return set()
+    # JSONList is stored as JSON/text depending on dialect; resolve membership
+    # in Python after restricting the query to the authorized person.
+    events = db.query(CareEvent).filter(CareEvent.person_id == person_id).all()
+    return {
+        event.id for event in events
+        if evidence_ids.intersection(str(value) for value in (event.evidence_ids or []))
+    }
 
 
 def _is_meaningful(change: Change) -> bool:
