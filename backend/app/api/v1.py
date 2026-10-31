@@ -710,7 +710,16 @@ def list_insights(person_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/corrections", response_model=CorrectionSchema)
-def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db)):
+def create_correction(
+    correction: CorrectionCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    # Correction writes are person- and caregiver-scoped by the server-issued
+    # bearer capability; caller-supplied IDs are never an authorization source.
+    _require_session_scope(
+        request, db, correction.person_id, correction.caregiver_id
+    )
     _require_person_and_linked_caregiver(db, correction.person_id, correction.caregiver_id)
     db_correction = CorrectionModel(**correction.model_dump())
     db.add(db_correction)
@@ -749,7 +758,12 @@ def create_correction(correction: CorrectionCreate, db: Session = Depends(get_db
 
 
 @router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
-def list_corrections(person_id: str, db: Session = Depends(get_db)):
+def list_corrections(
+    person_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _require_session_scope(request, db, person_id)
     return (
         db.query(CorrectionModel)
         .filter(CorrectionModel.person_id == person_id)
