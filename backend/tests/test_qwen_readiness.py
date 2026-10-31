@@ -138,3 +138,57 @@ def test_companion_fails_closed_with_explicit_machine_readable_unavailable_reaso
         assert "temporarily unavailable" in exc.detail["message"]
     else:
         raise AssertionError("Companion must fail closed when Qwen readiness fails")
+
+
+
+def test_inference_telemetry_records_metadata_without_prompt_or_reply(monkeypatch, caplog):
+    from fastapi import HTTPException
+    import logging
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"message":{"content":"synthetic secret reply"}}'
+
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    caplog.set_level(logging.INFO, logger=qwen_gateway.__name__)
+
+    answer = qwen_gateway.qwen_chat([{"role": "user", "content": "synthetic secret prompt"}])
+    assert answer == "synthetic secret reply"
+    output = "\n".join(record.getMessage() for record in caplog.records)
+    assert '"event":"qwen_inference"' in output
+    assert '"model":"qwen2.5:0.5b"' in output
+    assert '"duration_ms":' in output
+    assert '"timeout_seconds":20.0' in output
+    assert "synthetic secret prompt" not in output
+    assert "synthetic secret reply" not in output
+
+
+def test_inference_timeout_is_classified_and_logged_without_content(monkeypatch, caplog):
+    from fastapi import HTTPException
+    import logging
+
+    def timeout(*args, **kwargs):
+        raise TimeoutError("synthetic timeout detail")
+
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", timeout)
+    caplog.set_level(logging.INFO, logger=qwen_gateway.__name__)
+
+    try:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "synthetic secret prompt"}])
+    except HTTPException as exc:
+        assert exc.status_code == 504
+        assert exc.detail["code"] == "inference_timeout"
+    else:
+        raise AssertionError("Timeout must be returned as a structured inference failure")
+
+    output = "\n".join(record.getMessage() for record in caplog.records)
+    assert '"timed_out":true' in output
+    assert '"failure_reason":"socket_timeout"' in output
+    assert "synthetic secret prompt" not in output
+    assert "synthetic timeout detail" not in output
