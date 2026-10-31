@@ -1402,6 +1402,15 @@ def qwen_assistant_status():
     }
 
 
+@router.get("/assistant/installation")
+def qwen_assistant_installation():
+    # Inventory only: this endpoint never spends inference time or claims readiness.
+    return {
+        **qwen_runtime_status(),
+        "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
+    }
+
+
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
     # Performs a bounded real inference; API/DB readiness remains independent.
