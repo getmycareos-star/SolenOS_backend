@@ -132,6 +132,87 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 assert evidence["reported_by_label"] == f"Family caregiver {index % 7}"
                 counts["evidence"] += 1
 
+                # A second, separately attributed account supplies an actual
+                # competing source. Its reporter identity is deliberately
+                # unverified; the benchmark must not invent a linked caregiver.
+                counter_text = (
+                    f"Second family account {label} reports that walking "
+                    "support was not needed during the same earlier visit."
+                )
+                counter_response = client.post(
+                    "/api/v1/evidence",
+                    headers=headers,
+                    json={
+                        "person_id": person_id,
+                        "type": "caregiver_report",
+                        "evidence_kind": "caregiver_report",
+                        "epistemic_status": "disputed",
+                        "source_text": counter_text,
+                        "uploaded_by_caregiver_id": caregiver_id,
+                        "reported_by_label": "Second family account; identity unverified",
+                        "original_author": "Second family account; identity unverified",
+                        "collected_by_caregiver_id": caregiver_id,
+                        "occurred_at": occurred_at.isoformat(),
+                        "reported_at": reported_at.isoformat(),
+                        "collected_at": reported_at.isoformat(),
+                        "evidence_status": "reported",
+                        "source_type": "caregiver_report",
+                        "time_provenance": "caregiver_recollection",
+                        "ingestion_key": f"journey:{label}:counter-source",
+                    },
+                )
+                assert counter_response.status_code == 200, (
+                    f"journey={index} counter-evidence: "
+                    f"{counter_response.status_code} {counter_response.text}"
+                )
+                counter_evidence = counter_response.json()
+                counter_evidence_id = counter_evidence["id"]
+                assert counter_evidence["reported_by_caregiver_id"] is None
+                assert counter_evidence["reported_by_label"] == (
+                    "Second family account; identity unverified"
+                )
+                counts["evidence"] += 1
+
+                # Create source-span-grounded observations. The subject
+                # (care recipient), observer/reporter label, and uploader are
+                # separate fields; an unknown reporter identity stays unknown.
+                observation_ids = []
+                for source_id, passage, observer_label, value_text in (
+                    (evidence_id, source_text, f"Family caregiver {index % 7}",
+                     "Walking support was reported as needed."),
+                    (counter_evidence_id, counter_text,
+                     "Second family account; identity unverified",
+                     "Walking support was reported as not needed."),
+                ):
+                    start = passage.index("walking")
+                    observation_response = client.post(
+                        f"/api/v1/care-continuity/evidence/{source_id}/observations",
+                        headers=headers,
+                        json={
+                            "observation_kind": "caregiver_report",
+                            "epistemic_status": "reported",
+                            "subject_label": "Care recipient",
+                            "attribute": "mobility_support",
+                            "value_text": value_text,
+                            "context": "Source-attributed account; not a verified clinical fact.",
+                            "observer_label": observer_label,
+                            "source_passage": passage[start:],
+                            "source_span_start": start,
+                            "source_span_end": len(passage),
+                            "extraction_method": "caregiver_entered",
+                            "extraction_version": "1",
+                            "reported_at": reported_at.isoformat(),
+                        },
+                    )
+                    assert observation_response.status_code == 201, (
+                        f"journey={index} observation: "
+                        f"{observation_response.status_code} {observation_response.text}"
+                    )
+                    observation = observation_response.json()
+                    assert observation["subject_label"] == "Care recipient"
+                    assert observation["observer_label"] == observer_label
+                    observation_ids.append(observation["id"])
+
                 event_response = client.post(
                     "/api/v1/events",
                     headers=headers,
@@ -142,7 +223,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                         "occurred_at": occurred_at.isoformat(),
                         "title": f"Mobility support reported {label}",
                         "description": source_text,
-                        "evidence_ids": [evidence_id],
+                        "evidence_ids": [evidence_id, counter_evidence_id],
                         "time_provenance": "source_observed_at",
                         "created_by_caregiver_id": caregiver_id,
                         "tags": ["synthetic_benchmark", "delayed_evidence"],
@@ -173,9 +254,9 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                         "event_id": event_id,
                         "context_key": f"journey:{label}:mobility",
                         "effective_from": occurred_at.isoformat(),
-                        "matching_candidate_ids": [evidence_id],
+                        "matching_candidate_ids": observation_ids,
                         "resolution_status": "unresolved",
-                        "evidence_ids": [evidence_id],
+                        "evidence_ids": [evidence_id, counter_evidence_id],
                     },
                 )
                 assert conflict_response.status_code == 200, (
@@ -223,6 +304,22 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 assert len(matching_evidence) == 1
                 assert matching_evidence[0]["source_text"] == source_text
                 assert matching_evidence[0]["reported_by_caregiver_id"] == caregiver_id
+                assert any(row["id"] == counter_evidence_id for row in evidence_read.json())
+
+                for source_id, expected_observer in (
+                    (evidence_id, f"Family caregiver {index % 7}"),
+                    (counter_evidence_id, "Second family account; identity unverified"),
+                ):
+                    observations_read = client.get(
+                        f"/api/v1/care-continuity/evidence/{source_id}/observations",
+                        headers=headers,
+                    )
+                    assert observations_read.status_code == 200, observations_read.text
+                    assert any(
+                        row["observer_label"] == expected_observer
+                        and row["subject_label"] == "Care recipient"
+                        for row in observations_read.json()
+                    )
 
                 events_read = client.get(
                     f"/api/v1/events/{person_id}", headers=headers
@@ -272,6 +369,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 lcr_evidence = source_sets.get("evidence", {}).get("items", [])
                 lcr_events = source_sets.get("events", {}).get("items", [])
                 assert any(row.get("id") == evidence_id for row in lcr_evidence)
+                assert any(row.get("id") == counter_evidence_id for row in lcr_evidence)
                 assert any(row.get("id") == event_id for row in lcr_events)
                 counts["lcr_reads"] += 1
 
