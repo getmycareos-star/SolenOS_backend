@@ -72,6 +72,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
         "events": 0,
         "contradictions": 0,
         "corrections": 0,
+        "historical_reconstructions": 0,
         "lcr_reads": 0,
         "foreign_denials": 0,
     }
@@ -295,6 +296,74 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 assert correction["original_text"] == source_text
                 counts["corrections"] += 1
 
+                # The public change-set workflow must append both the
+                # per-target revision and the shared CareStateRevision envelope
+                # consumed by historical as-of reconstruction.
+                change_set_response = client.post(
+                    "/api/v1/care-continuity/record-change-sets",
+                    headers=headers,
+                    json={
+                        "operation": "caregiver_correction",
+                        "reason": "Record a versioned correction to the event narrative.",
+                    },
+                )
+                assert change_set_response.status_code == 201, (
+                    f"journey={index} change set: "
+                    f"{change_set_response.status_code} {change_set_response.text}"
+                )
+                change_set_id = change_set_response.json()["id"]
+                before_state = {
+                    "title": event["title"],
+                    "description": source_text,
+                    "occurred_at": occurred_at.isoformat(),
+                    "evidence_ids": [evidence_id, counter_evidence_id],
+                }
+                after_state = {
+                    "title": event["title"],
+                    "description": (
+                        "Caregiver clarification: the two accounts conflict; "
+                        "retain both reports without resolving the disagreement."
+                    ),
+                    "occurred_at": occurred_at.isoformat(),
+                    "evidence_ids": [evidence_id, counter_evidence_id],
+                }
+                change_item_response = client.post(
+                    "/api/v1/care-continuity/record-change-items",
+                    headers=headers,
+                    json={
+                        "change_set_id": change_set_id,
+                        "target_type": "care_event",
+                        "target_id": event_id,
+                        "operation": "update",
+                        "before_value": before_state,
+                        "after_value": after_state,
+                        "evidence_ids": [evidence_id, counter_evidence_id],
+                    },
+                )
+                assert change_item_response.status_code == 201, (
+                    f"journey={index} change item: "
+                    f"{change_item_response.status_code} {change_item_response.text}"
+                )
+                as_of = datetime.now(UTC) + timedelta(minutes=1)
+                reconstructed_response = client.get(
+                    f"/api/v1/care-continuity/state-revisions/care_event/{event_id}/as-of",
+                    headers=headers,
+                    params={"as_of": as_of.isoformat()},
+                )
+                assert reconstructed_response.status_code == 200, (
+                    f"journey={index} as-of reconstruction: "
+                    f"{reconstructed_response.status_code} {reconstructed_response.text}"
+                )
+                reconstructed = reconstructed_response.json()
+                assert reconstructed["target_type"] == "care_event"
+                assert reconstructed["target_id"] == event_id
+                assert reconstructed["historical_state_source"] == "persisted_care_state_revision"
+                assert reconstructed["state"]["description"] == after_state["description"]
+                assert set(reconstructed["evidence_ids"]) == {
+                    evidence_id, counter_evidence_id
+                }
+                counts["historical_reconstructions"] += 1
+
                 # Each read is a new HTTP request and therefore a new DB session.
                 evidence_read = client.get(
                     f"/api/v1/evidence/{person_id}", headers=headers
@@ -387,7 +456,13 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                         f"journey={index} foreign read {path}: "
                         f"{denied.status_code} {denied.text}"
                     )
-                counts["foreign_denials"] += 4
+                historical_denied = client.get(
+                    f"/api/v1/care-continuity/state-revisions/care_event/{event_id}/as-of",
+                    headers=attacker_headers,
+                    params={"as_of": (datetime.now(UTC) + timedelta(minutes=1)).isoformat()},
+                )
+                assert historical_denied.status_code == 404, historical_denied.text
+                counts["foreign_denials"] += 5
                 counts["sessions"] += 1
 
         expected = JOURNEY_COUNT
@@ -398,15 +473,17 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
             "events": expected,
             "contradictions": expected,
             "corrections": expected,
+            "historical_reconstructions": expected,
             "lcr_reads": expected,
-            "foreign_denials": expected * 4,
+            "foreign_denials": expected * 5,
         }, counts
 
         for key, value in counts.items():
             print(f"CAPTURE_TO_LCR_{key.upper()}={value}")
         print(f"CAPTURE_TO_LCR_JOURNEYS_EXECUTED={JOURNEY_COUNT}")
         print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 7}")
-        print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 4}")
+        print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 5}")
+        print("CAPTURE_TO_LCR_HISTORICAL_RECONSTRUCTION=PASS")
         print("CAPTURE_TO_LCR_ATTRIBUTION=PASS")
         print("CAPTURE_TO_LCR_OBSERVER_SUBJECT_ATTRIBUTION=PASS")
         print("CAPTURE_TO_LCR_CONTRADICTIONS_PRESERVED=PASS")
