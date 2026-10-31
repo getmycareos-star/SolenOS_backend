@@ -130,21 +130,33 @@ def test_handoff_create_accept_acknowledge_revoke_persists_and_audits():
     accept_required_consent(owner["person"]["id"], recipient_id)
     owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     recipient_headers = {"Authorization": f"Bearer {recipient_token}"}
+    create_headers = {**owner_headers, "X-Request-ID": "ci-handoff-create-idempotency-0001"}
+    create_payload = {
+        "person_id": owner["person"]["id"],
+        "recipient_caregiver_ids": [recipient_id],
+        "scope": ["lcr_summary", "open_loops"],
+    }
 
-    created = client.post(
-        "/api/v1/handoffs",
-        headers=owner_headers,
-        json={
-            "person_id": owner["person"]["id"],
-            "recipient_caregiver_ids": [recipient_id],
-            "scope": ["lcr_summary", "open_loops"],
-        },
-    )
+    created = client.post("/api/v1/handoffs", headers=create_headers, json=create_payload)
     assert created.status_code == 201, created.text
     handoff = created.json()
     assert handoff["status"] == "pending"
     assert handoff["scope"] == ["lcr_summary", "open_loops"]
     assert handoff["recipients"][0]["status"] == "pending"
+
+    # Simulate retry after the original create committed but its HTTP response
+    # was lost. The same request ID must return the original handoff.
+    replayed = client.post("/api/v1/handoffs", headers=create_headers, json=create_payload)
+    assert replayed.status_code == 201, replayed.text
+    assert replayed.json()["id"] == handoff["id"]
+
+    # A request ID cannot be repurposed for a different handoff payload.
+    conflicting_replay = client.post(
+        "/api/v1/handoffs",
+        headers=create_headers,
+        json={**create_payload, "scope": ["appointments"]},
+    )
+    assert conflicting_replay.status_code == 409, conflicting_replay.text
 
     # Summary references must resolve to real records belonging to this person.
     from app.models.care import CareEvent, Evidence
