@@ -462,7 +462,24 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                     params={"as_of": (datetime.now(UTC) + timedelta(minutes=1)).isoformat()},
                 )
                 assert historical_denied.status_code == 404, historical_denied.text
-                counts["foreign_denials"] += 5
+                foreign_correction_write = client.post(
+                    "/api/v1/corrections",
+                    headers=attacker_headers,
+                    json={
+                        "person_id": person_id,
+                        "target_type": "evidence",
+                        "target_id": evidence_id,
+                        "original_text": source_text,
+                        "corrected_text": "Unauthorized correction must not persist.",
+                        "reason": "Cross-person write isolation probe.",
+                        "caregiver_id": caregiver_id,
+                    },
+                )
+                assert foreign_correction_write.status_code == 403, (
+                    f"journey={index} foreign correction write: "
+                    f"{foreign_correction_write.status_code} {foreign_correction_write.text}"
+                )
+                counts["foreign_denials"] += 6
                 counts["sessions"] += 1
 
         expected = JOURNEY_COUNT
@@ -475,14 +492,14 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
             "corrections": expected,
             "historical_reconstructions": expected,
             "lcr_reads": expected,
-            "foreign_denials": expected * 5,
+            "foreign_denials": expected * 6,
         }, counts
 
         for key, value in counts.items():
             print(f"CAPTURE_TO_LCR_{key.upper()}={value}")
         print(f"CAPTURE_TO_LCR_JOURNEYS_EXECUTED={JOURNEY_COUNT}")
         print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 8}")
-        print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 5}")
+        print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 6}")
         print("CAPTURE_TO_LCR_HISTORICAL_RECONSTRUCTION=PASS")
         print("CAPTURE_TO_LCR_ATTRIBUTION=PASS")
         print("CAPTURE_TO_LCR_OBSERVER_SUBJECT_ATTRIBUTION=PASS")
@@ -491,6 +508,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
         print("CAPTURE_TO_LCR_DELAYED_EVIDENCE_TIME=PASS")
         print("CAPTURE_TO_LCR_LCR_RETRIEVAL=PASS")
         print("CAPTURE_TO_LCR_ACCESS_ISOLATION=PASS")
+        print("CAPTURE_TO_LCR_FOREIGN_WRITE_DENIALS=PASS")
     finally:
         app.dependency_overrides.clear()
         main_module.SessionLocal = original_session_local
