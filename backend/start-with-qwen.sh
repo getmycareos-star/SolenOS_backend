@@ -35,8 +35,14 @@ done
 # immediately; no network download is allowed to block caregiver workflows.
 if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
   (
-    if ! ollama list 2>/dev/null | grep -q 'qwen2.5:0.5b'; then
-      ollama pull qwen2.5:0.5b || echo "Optional Qwen model pull failed; core APIs remain available." >&2
+    # Pull exactly the model configured for the API gateway. A hard-coded
+    # tag here can leave OLLAMA_MODEL pointing at a different, absent model,
+    # producing repeated Companion 503s despite a healthy Ollama sidecar.
+    if ! ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | grep -Fqx -- "$OLLAMA_MODEL"; then
+      echo "Pulling configured Qwen model: $OLLAMA_MODEL"
+      ollama pull "$OLLAMA_MODEL" || echo "Optional Qwen model pull failed for $OLLAMA_MODEL; core APIs remain available." >&2
+    else
+      echo "Configured Qwen model already installed: $OLLAMA_MODEL"
     fi
   ) >/tmp/qwen-model-pull.log 2>&1 &
 fi
