@@ -3493,6 +3493,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         raise
     except Exception as exc:
         db.rollback()
+        logger.exception("Care-continuity write failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=422, detail=f"Care-continuity record could not be saved ({type(exc).__name__}); check linked IDs and field types") from exc
 
 
