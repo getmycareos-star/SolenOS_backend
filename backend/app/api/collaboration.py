@@ -7,6 +7,7 @@ import math
 import os
 import re
 import secrets
+import time
 import uuid
 import urllib.error
 import urllib.request
@@ -2040,6 +2041,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
+        retrieval_started = time.perf_counter()
         # Retrieve a bounded but broader care history. All queries are server-scoped
         # to the bearer session's person; the request body never selects another record.
         recent_events = (
@@ -2450,12 +2452,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
                 "Generate the wording for this exact message; do not reuse a stored response."
             )
+        retrieval_ms = (time.perf_counter() - retrieval_started) * 1000
+        logger.info(
+            "companion_retrieval_profile duration_ms=%.2f events=%d assertions=%d "
+            "appointments=%d evidence=%d shared_lcr_records=%d context_chars=%d",
+            retrieval_ms,
+            len(source_event_ids),
+            len(source_assertion_ids),
+            len(source_appointment_ids),
+            len(source_evidence_ids),
+            len(source_lcr_context_ids),
+            context_chars,
+        )
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
         # waiting for the local model. Conversation persistence starts afterward.
         db.rollback()
         base, model = _ollama_url()
+        inference_started = time.perf_counter()
         try:
             reply = await asyncio.to_thread(
                 _ollama_chat,
@@ -2464,13 +2479,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 model_messages,
                 {"temperature": 0.25, "num_predict": 32 if greeting_only else 192},
             )
-        except HTTPException:
+        except HTTPException as exc:
+            logger.info(
+                "companion_inference_profile duration_ms=%.2f outcome=failed status_code=%d",
+                (time.perf_counter() - inference_started) * 1000,
+                exc.status_code,
+            )
             raise
         except Exception as exc:
+            logger.info(
+                "companion_inference_profile duration_ms=%.2f outcome=failed status_code=503",
+                (time.perf_counter() - inference_started) * 1000,
+            )
             raise HTTPException(
                 status_code=503,
                 detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
             ) from exc
+        logger.info(
+            "companion_inference_profile duration_ms=%.2f outcome=succeeded status_code=200",
+            (time.perf_counter() - inference_started) * 1000,
+        )
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         missing_measurement_reply = _missing_requested_measurement_response(
             user_text,
