@@ -112,6 +112,10 @@ def qwen_chat(
     payload = {
         "model": model,
         "messages": messages,
+        # Qwen 3.5 defaults to a separate thinking channel. Caregiver-facing
+        # assistance and extraction need a bounded user-visible answer; without
+        # this flag, thinking can consume num_predict before content is emitted.
+        "think": False,
         "stream": False,
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": bounded_options,
