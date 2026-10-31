@@ -686,6 +686,13 @@ def test_evidence_id_filter_is_bounded_deduplicated_and_person_scoped():
     assert all(item["person_id"] == owner["person"]["id"] for item in filtered.json())
     assert "Other person's private evidence" not in filtered.text
 
+    too_many = client.get(
+        path,
+        params=[("ids", f"untrusted-id-{index}") for index in range(101)],
+        headers=headers,
+    )
+    assert too_many.status_code == 422, too_many.text
+
     # An explicitly empty filter must not degrade into an unfiltered history read.
     empty = client.get(path, params={"ids": ""}, headers=headers)
     assert empty.status_code == 200, empty.text
