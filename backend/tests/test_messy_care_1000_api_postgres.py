@@ -616,3 +616,155 @@ def test_postgres_open_question_answer_versions_and_historical_unresolved_retrie
         app.dependency_overrides.clear()
         main_module.SessionLocal = original_session_local
         engine.dispose()
+
+
+def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time():
+    """Late-arriving event facts do not rewrite what the record contained earlier."""
+    import json
+    from datetime import datetime, timezone
+    from app.models.care_continuity import CareStateRevision
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:10]
+    person_id = f"asofp{suffix}"
+    caregiver_id = f"asofc{suffix}"
+    token = f"asof-token-{suffix}"
+    target_id = f"mobility-claim-{suffix}"
+    first_recorded = datetime(2026, 10, 20, 10, 0, tzinfo=timezone.utc)
+    late_recorded = datetime(2026, 10, 30, 10, 0, tzinfo=timezone.utc)
+    event_time = datetime(2026, 10, 15, 7, 30, tzinfo=timezone.utc)
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    original_session_local = main_module.SessionLocal
+    app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = Session
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Synthetic as-of reconstruction person"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="As-of caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            db.add(AnonymousSession(
+                id=f"asofs{suffix}", person_id=person_id,
+                caregiver_id=caregiver_id,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
+            ))
+            db.flush()
+            # The event occurred on Oct 15, but was not recorded until Oct 30.
+            # On Oct 20, the record therefore still contained only revision one.
+            db.add_all([
+                CareStateRevision(
+                    id=f"asof-r1-{suffix}", person_id=person_id,
+                    target_type="care_assertions", target_id=target_id,
+                    revision_number=1, change_kind="created",
+                    before_state=None,
+                    after_state=json.dumps({
+                        "asserted_value": "no mobility report recorded",
+                        "event_time": None,
+                        "record_time": first_recorded.isoformat(),
+                    }),
+                    evidence_ids=[], changed_by_caregiver_id=caregiver_id,
+                    changed_at=first_recorded,
+                ),
+                CareStateRevision(
+                    id=f"asof-r2-{suffix}", person_id=person_id,
+                    target_type="care_assertions", target_id=target_id,
+                    revision_number=2, change_kind="updated",
+                    before_state=json.dumps({"asserted_value": "no mobility report recorded"}),
+                    after_state=json.dumps({
+                        "asserted_value": "caregiver later reported walking support was needed",
+                        "event_time": event_time.isoformat(),
+                        "record_time": late_recorded.isoformat(),
+                        "late_arrival": True,
+                    }),
+                    evidence_ids=[], changed_by_caregiver_id=caregiver_id,
+                    changed_at=late_recorded,
+                ),
+            ])
+            db.commit()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            earlier = client.get(
+                f"/api/v1/care-continuity/state-revisions/care_assertions/{target_id}/as-of",
+                headers=headers,
+                params={"as_of": "2026-10-25T10:00:00+00:00"},
+            )
+            assert earlier.status_code == 200, earlier.text
+            earlier_body = earlier.json()
+            assert earlier_body["revision_number"] == 1
+            assert earlier_body["state"]["asserted_value"] == "no mobility report recorded"
+
+            later = client.get(
+                f"/api/v1/care-continuity/state-revisions/care_assertions/{target_id}/as-of",
+                headers=headers,
+                params={"as_of": "2026-10-31T10:00:00+00:00"},
+            )
+            assert later.status_code == 200, later.text
+            later_body = later.json()
+            assert later_body["revision_number"] == 2
+            assert later_body["state"]["event_time"] == event_time.isoformat()
+            assert later_body["state"]["record_time"] == late_recorded.isoformat()
+            assert later_body["recorded_change_at"].startswith("2026-10-30")
+
+            # Equivalent instant expressed with a different UTC offset must
+            # select the same revision.
+            offset_query = client.get(
+                f"/api/v1/care-continuity/state-revisions/care_assertions/{target_id}/as-of",
+                headers=headers,
+                params={"as_of": "2026-10-25T11:00:00+01:00"},
+            )
+            assert offset_query.status_code == 200, offset_query.text
+            assert offset_query.json()["revision_number"] == 1
+
+            # The bounded record-wide projection must use the same recorded-time
+            # boundary and must not expose another person's revisions.
+            projection = client.get(
+                "/api/v1/care-continuity/state-reconstruction/as-of",
+                headers=headers,
+                params={"as_of": "2026-10-25T10:00:00Z"},
+            )
+            assert projection.status_code == 200, projection.text
+            projected = {
+                (item["target_type"], item["target_id"]): item
+                for item in projection.json()["items"]
+            }
+            assert ("care_assertions", target_id) in projected
+            assert projected[("care_assertions", target_id)]["revision_number"] == 1
+
+            denied = client.get(
+                f"/api/v1/care-continuity/state-revisions/care_assertions/{target_id}/as-of",
+                headers={"Authorization": f"Bearer invalid-{token}"},
+                params={"as_of": "2026-10-31T10:00:00Z"},
+            )
+            assert denied.status_code in {401, 403}, denied.text
+
+        with Session() as db:
+            versions = db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+                CareStateRevision.target_id == target_id,
+            ).order_by(CareStateRevision.revision_number.asc()).all()
+            assert [row.revision_number for row in versions] == [1, 2]
+            assert versions[0].changed_at == first_recorded
+            assert versions[1].changed_at == late_recorded
+
+        print("MESSY_CARE_POSTGRES_AS_OF_BEFORE_LATE_ARRIVAL=PASS")
+        print("MESSY_CARE_POSTGRES_AS_OF_AFTER_LATE_ARRIVAL=PASS")
+        print("MESSY_CARE_POSTGRES_EVENT_TIME_RECORD_TIME_DISTINCT=PASS")
+        print("MESSY_CARE_POSTGRES_AS_OF_OFFSET_NORMALIZATION=PASS")
+        print("MESSY_CARE_POSTGRES_AS_OF_PERSON_ISOLATION=PASS")
+    finally:
+        app.dependency_overrides.clear()
+        main_module.SessionLocal = original_session_local
+        engine.dispose()
