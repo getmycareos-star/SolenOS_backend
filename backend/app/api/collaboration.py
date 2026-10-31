@@ -540,10 +540,30 @@ def _ollama_url() -> tuple[str, str]:
     return base, model
 
 
+def _ensure_companion_available() -> None:
+    """Fail closed before any caregiver-facing workflow invokes Qwen."""
+    readiness = qwen_readiness_status()
+    if readiness.get("available"):
+        return
+    reason = readiness.get("failure_reason") or readiness.get("state") or "model_not_ready"
+    logger.warning(json.dumps({
+        "event": "companion_unavailable",
+        "model": readiness.get("model"),
+        "failure_reason": reason,
+        "error_category": readiness.get("error_category", "model_not_ready"),
+    }, separators=(",", ":")))
+    raise HTTPException(status_code=503, detail={
+        "code": "companion_ai_unavailable",
+        "message": "AI Companion is temporarily unavailable. Your care record remains accessible. Try again later.",
+        "reason": reason,
+    })
+
+
 def _ollama_chat(
     base: str, model: str, messages: list[dict], options: dict | None = None
 ) -> str:
     # All SolenOS workflows use the same local/private Qwen gateway.
+    _ensure_companion_available()
     return qwen_chat(messages, options=options)
 
 
