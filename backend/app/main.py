@@ -222,6 +222,8 @@ PUBLIC_V1_ENDPOINTS = {
     # Infrastructure-only status exposes no care data and permits health checks
     # without creating a synthetic caregiver/person record.
     ("/api/v1/assistant/status", "GET"),
+    ("/api/v1/assistant/readiness", "GET"),
+    ("/api/v1/assistant/evaluate-production", "POST"),
     ("/api/v1/time/now", "GET"),
     ("/api/v1/time/ago", "POST"),
     ("/api/v1/time/until", "POST"),
