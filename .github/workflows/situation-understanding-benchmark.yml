@@ -133,19 +133,19 @@ jobs:
         if: always()
         run: |
           test -f /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_FULL_API_LIFECYCLES_EXECUTED=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_EVIDENCE_RECORDS=20000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_OBSERVATIONS=20000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_CORRECTIONS=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_UNRESOLVED_CONTRADICTIONS=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_CONFLICTS=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTIONS=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION_GROUPS=1000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION_CHECKS=10000" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTION=PASS" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION=PASS" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_EVENT_REPORTED_RECORDED_TIME=PASS" /tmp/postgres-messy-care.log
-          grep -Fx "MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION=PASS" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_FULL_API_LIFECYCLES_EXECUTED=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_EVIDENCE_RECORDS=20000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_OBSERVATIONS=20000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_CORRECTIONS=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_UNRESOLVED_CONTRADICTIONS=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_CONFLICTS=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTIONS=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION_GROUPS=1000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION_CHECKS=10000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTION=PASS" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION=PASS" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_EVENT_REPORTED_RECORDED_TIME=PASS" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION=PASS" /tmp/postgres-messy-care.log
 
       - name: Verify persisted care history survives PostgreSQL server restart
         id: postgres_restart
