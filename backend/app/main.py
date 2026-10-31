@@ -311,6 +311,12 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # trusting a caller-supplied caregiver ID or treating the public feed as anonymous.
         if path.startswith("/api/v1/accounts") or path.startswith("/api/v1/identity") or path == "/api/v1/sessions/revoke":
             target_person_id = scoped_person_id
+        # Conversation history is authorized by both the bearer-scoped identity
+        # and the route-level session ownership query. Requiring a client-supplied
+        # person_id query for this GET made the frontend's legitimate restore call
+        # fail closed even though the session ID itself is checked against scope.
+        if path.startswith("/api/v1/conversation/") and method == "GET":
+            target_person_id = scoped_person_id
         if path.startswith("/api/v1/change/"):
             # Change endpoints validate their own requested person scope using
             # the same bearer session. If this middleware cannot resolve a
