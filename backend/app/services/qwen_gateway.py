@@ -326,7 +326,7 @@ def qwen_readiness_status(force: bool = False) -> dict:
         else:
             probe_answer = qwen_chat(
                 [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
-                timeout=min(timeout, 12.0),
+                timeout=min(timeout, 60.0),
                 options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
             )
             if probe_answer.strip().upper() != "READY":
