@@ -66,7 +66,7 @@ jobs:
               raise SystemExit("Railway did not deploy this exact commit with the configured model installed within 30 minutes.")
 
           readiness_request = urllib.request.Request(base + "/api/v1/assistant/readiness", headers={"Accept": "application/json"})
-          with urllib.request.urlopen(readiness_request, timeout=20) as response:
+          with urllib.request.urlopen(readiness_request, timeout=75) as response:
               readiness = json.loads(response.read().decode("utf-8"))
           print(json.dumps({
               "deployment_commit": readiness.get("deployment_commit"),
