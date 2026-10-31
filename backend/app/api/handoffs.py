@@ -7,7 +7,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
-from sqlalchemy import MetaData, Table, inspect, select
+from sqlalchemy import MetaData, Table, inspect, select, text
 
 from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
@@ -276,6 +276,44 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
     if {r.id for r in recipients} != set(payload.recipient_caregiver_ids):
         raise HTTPException(status_code=404, detail="One or more recipients are not linked to this care record")
 
+    # The client supplies a stable request ID so a lost HTTP response can be
+    # retried without creating duplicate handoffs or recipient notifications.
+    request_id = (request.headers.get("x-request-id") or "").strip() or None
+    if request_id and len(request_id) > 128:
+        raise HTTPException(status_code=422, detail="Handoff request ID must be 128 characters or fewer")
+
+    canonical_request = {
+        "person_id": person_id,
+        "created_by": caregiver_id,
+        "recipient_caregiver_ids": sorted(payload.recipient_caregiver_ids),
+        "scope": sorted(payload.scope),
+        "expires_at": _aware(payload.expires_at).isoformat() if payload.expires_at else None,
+    }
+    request_fingerprint = hashlib.sha256(
+        json.dumps(canonical_request, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    if request_id:
+        # Serialize retries with the same key on PostgreSQL before looking up
+        # the original create. SQLite tests exercise the same sequential contract.
+        if db.get_bind().dialect.name == "postgresql":
+            lock_key = int.from_bytes(
+                hashlib.sha256(f"handoff:{person_id}:{caregiver_id}:{request_id}".encode("utf-8")).digest()[:8],
+                byteorder="big",
+                signed=True,
+            )
+            db.execute(text("SELECT pg_advisory_xact_lock(:lock_key)"), {"lock_key": lock_key})
+        existing = db.query(HandoffRecord).filter(
+            HandoffRecord.person_id == person_id,
+            HandoffRecord.created_by == caregiver_id,
+            HandoffRecord.request_id == request_id,
+        ).first()
+        if existing is not None:
+            existing_fingerprint = (existing.record_metadata or {}).get("request_fingerprint")
+            if existing_fingerprint != request_fingerprint:
+                raise HTTPException(status_code=409, detail="This handoff request ID was already used for a different request")
+            return _view(db, existing)
+
     now = datetime.now(timezone.utc)
     expires_at = _aware(payload.expires_at) if payload.expires_at else now + timedelta(days=7)
     if expires_at <= now or expires_at > now + timedelta(days=30):
@@ -284,8 +322,8 @@ def create_handoff(payload: HandoffCreate, request: Request, db: Session = Depen
         id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
         person_id=person_id, caregiver_id=caregiver_id, created_by=caregiver_id,
         handoff_status="pending", scope_snapshot=list(payload.scope), created_at=now,
-        expires_at=expires_at, policy_version=POLICY_VERSION,
-        record_metadata={"scope_version": 1},
+        expires_at=expires_at, request_id=request_id, policy_version=POLICY_VERSION,
+        record_metadata={"scope_version": 1, "request_fingerprint": request_fingerprint},
     )
     db.add(handoff)
     db.flush()
