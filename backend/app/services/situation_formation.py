@@ -164,7 +164,8 @@ def _event_ids_for_evidence(db: Session, person_id: str, evidence_ids: set[str])
     events = db.query(CareEvent).filter(CareEvent.person_id == person_id).all()
     return {
         event.id for event in events
-        if evidence_ids.intersection(str(value) for value in (event.evidence_ids or []))
+        if event.id in evidence_ids
+        or evidence_ids.intersection(str(value) for value in (event.evidence_ids or []))
     }
 
 
