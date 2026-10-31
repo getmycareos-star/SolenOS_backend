@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -37,11 +38,14 @@ def test_request_metrics_logs_route_template_and_never_query_or_care_content(cap
     start = next(item for item in sent if item["type"] == "http.response.start")
     headers = dict(start["headers"])
     assert headers[b"x-request-id"]
+    assert re.fullmatch(rb"app;dur=\d+(?:\.\d+)?", headers[b"server-timing"])
     record = next(item for item in caplog.records if item.getMessage().startswith("solenos_http_request "))
     payload = json.loads(record.getMessage().split(" ", 1)[1])
     assert payload["route"] == "/api/v1/evidence/{person_id}"
     assert payload["status_code"] == 503
     assert payload["outcome"] == "server_error"
+    assert payload["db_query_count"] == 0
+    assert payload["db_query_total_ms"] == 0
     rendered = record.getMessage()
     for forbidden in ("person-secret-123", "private_note", "do-not-log", "secret-token", "private care text"):
         assert forbidden not in rendered
