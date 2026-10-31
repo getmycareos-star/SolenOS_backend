@@ -112,6 +112,10 @@ def qwen_chat(
     payload = {
         "model": model,
         "messages": messages,
+        # Qwen 3.5 defaults to a separate thinking channel. Caregiver-facing
+        # assistance and extraction need a bounded user-visible answer; without
+        # this flag, thinking can consume num_predict before content is emitted.
+        "think": False,
         "stream": False,
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": bounded_options,
@@ -322,7 +326,7 @@ def qwen_readiness_status(force: bool = False) -> dict:
         else:
             probe_answer = qwen_chat(
                 [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
-                timeout=min(timeout, 12.0),
+                timeout=min(timeout, 60.0),
                 options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
             )
             if probe_answer.strip().upper() != "READY":

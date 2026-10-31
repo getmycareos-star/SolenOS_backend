@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.qwen_readiness
+
 import json
 from contextlib import contextmanager
 
@@ -50,7 +54,7 @@ def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
     assert result["available"] is True
     assert result["state"] == "ready"
     assert len(calls) == 1
-    assert calls[0][1]["timeout"] <= 12.0
+    assert calls[0][1]["timeout"] <= 60.0
 
 
 def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
