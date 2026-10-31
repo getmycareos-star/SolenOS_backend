@@ -481,7 +481,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
         for key, value in counts.items():
             print(f"CAPTURE_TO_LCR_{key.upper()}={value}")
         print(f"CAPTURE_TO_LCR_JOURNEYS_EXECUTED={JOURNEY_COUNT}")
-        print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 7}")
+        print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 8}")
         print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 5}")
         print("CAPTURE_TO_LCR_HISTORICAL_RECONSTRUCTION=PASS")
         print("CAPTURE_TO_LCR_ATTRIBUTION=PASS")
