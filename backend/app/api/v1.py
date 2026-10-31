@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -378,14 +378,20 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
 
 
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
-def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db)):
+def list_evidence(
+    person_id: str,
+    request: Request,
+    ids: Optional[List[str]] = Query(default=None),
+    db: Session = Depends(get_db),
+):
     _require_session_scope(request, db, person_id)
-    rows = (
-        db.query(EvidenceModel)
-        .filter(EvidenceModel.person_id == person_id)
-        .order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc())
-        .all()
-    )
+    query = db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
+    if ids is not None:
+        cleaned_ids = [value.strip() for value in ids if isinstance(value, str) and value.strip()]
+        if len(ids) > 200 or len(cleaned_ids) != len(ids) or len(cleaned_ids) != len(set(cleaned_ids)):
+            raise HTTPException(status_code=422, detail="Evidence ID filters must contain at most 200 unique nonblank IDs")
+        query = query.filter(EvidenceModel.id.in_(cleaned_ids)) if cleaned_ids else query.filter(EvidenceModel.id == "__no_evidence_ids_requested__")
+    rows = query.order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc()).all()
     # Evidence.extra_metadata is stored as TEXT for migration compatibility,
     # while the public schema exposes a structured object. Decode it at the
     # boundary instead of leaking a JSON string that fails response validation.
