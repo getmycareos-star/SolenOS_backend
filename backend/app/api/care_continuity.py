@@ -1166,6 +1166,36 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
+    # Also append the common state-revision envelope consumed by the as-of
+    # reconstruction API. Per-target revision tables alone are not sufficient
+    # for the aggregate historical projection to reconstruct this change.
+    state_revisions = _table(db, "care_state_revisions")
+    state_latest = db.execute(
+        select(func.max(state_revisions.c.revision_number)).where(
+            state_revisions.c.person_id == person_id,
+            state_revisions.c.target_type == target_type,
+            state_revisions.c.target_id == target_id,
+        )
+    ).scalar_one_or_none()
+    operation = str(data.get("operation") or "").strip().casefold()
+    change_kind = (
+        "created" if operation in {"create", "created", "add", "added"}
+        else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
+        else "updated"
+    )
+    db.add(CareStateRevision(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        target_type=target_type,
+        target_id=target_id,
+        revision_number=int(state_latest or 0) + 1,
+        change_kind=change_kind,
+        before_state=data.get("before_value"),
+        after_state=data.get("after_value"),
+        evidence_ids=data.get("evidence_ids") or [],
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
 
 
 @router.get("/context")
