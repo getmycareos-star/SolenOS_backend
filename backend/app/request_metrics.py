@@ -14,6 +14,8 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 logger = logging.getLogger("solenos.http")
+# Root logging may be WARNING in production; retain successful request events too.
+logger.setLevel(logging.INFO)
 
 
 class RequestMetricsMiddleware:

@@ -83,3 +83,27 @@ def test_event_evidence_projection_index_preserves_links_in_linear_pass():
         "evidence-1": ["event-a"],
         "evidence-2": ["event-a", "event-b"],
     }
+
+
+def test_request_metrics_emits_successful_requests_at_info_level(caplog):
+    async def downstream(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    middleware = RequestMetricsMiddleware(downstream)
+    scope = {"type": "http", "method": "GET", "path": "/health", "headers": [], "route": SimpleNamespace(path="/health")}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        pass
+
+    with caplog.at_level(logging.INFO, logger="solenos.http"):
+        asyncio.run(middleware(scope, receive, send))
+
+    record = next(item for item in caplog.records if item.getMessage().startswith("solenos_http_request "))
+    payload = json.loads(record.getMessage().split(" ", 1)[1])
+    assert record.levelno == logging.INFO
+    assert payload["status_code"] == 200
+    assert payload["outcome"] == "success"
