@@ -2,8 +2,8 @@
 """Invoke the synthetic-only evaluation against the deployed SolenOS Qwen runtime.
 
 Required environment:
-  SOLENOS_PRODUCTION_API_BASE_URL  Base URL of the deployed backend.
-  SOLENOS_QWEN_EVAL_TOKEN          Bearer token configured on that backend.
+  GITHUB_TOKEN                    Workflow token with actions:read permission.
+  GITHUB_RUN_ID                    Current GitHub Actions run identifier.
 """
 from __future__ import annotations
 
@@ -15,15 +15,16 @@ import urllib.request
 
 
 def main() -> int:
-    base = os.getenv("SOLENOS_PRODUCTION_API_BASE_URL", "").strip().rstrip("/")
-    token = os.getenv("SOLENOS_QWEN_EVAL_TOKEN", "").strip()
-    if not base or not token:
-        print("Missing SOLENOS_PRODUCTION_API_BASE_URL or SOLENOS_QWEN_EVAL_TOKEN.", file=sys.stderr)
+    base = os.getenv("SOLENOS_PRODUCTION_API_BASE_URL", "https://solenosbackend-production.up.railway.app").strip().rstrip("/")
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    run_id = os.getenv("GITHUB_RUN_ID", "").strip()
+    if not base or not token or not run_id:
+        print("Missing production API URL, GITHUB_TOKEN or GITHUB_RUN_ID.", file=sys.stderr)
         return 2
     request = urllib.request.Request(
         base + "/api/v1/assistant/evaluate-production",
         data=b"{}",
-        headers={"Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Authorization": "Bearer " + token, "X-GitHub-Run-ID": run_id, "Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
     try:
