@@ -113,6 +113,7 @@ def test_production_evaluation_has_five_independent_synthetic_acceptance_criteri
 def test_readiness_and_production_evaluation_are_public_to_session_middleware_only():
     from app.main import PUBLIC_V1_ENDPOINTS
 
+    assert ("/api/v1/assistant/installation", "GET") in PUBLIC_V1_ENDPOINTS
     assert ("/api/v1/assistant/readiness", "GET") in PUBLIC_V1_ENDPOINTS
     assert ("/api/v1/assistant/evaluate-production", "POST") in PUBLIC_V1_ENDPOINTS
 
