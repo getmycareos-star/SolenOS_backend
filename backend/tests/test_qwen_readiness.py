@@ -72,3 +72,46 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
     assert result["available"] is False
     assert result["state"] == "model_not_installed"
     assert result["failure_reason"] == "configured_model_missing"
+
+
+
+def test_assistant_status_does_not_claim_operational_when_only_inventory_is_available(monkeypatch):
+    from app.api import collaboration
+
+    monkeypatch.setattr(collaboration, "qwen_runtime_status", lambda: {
+        "available": True,
+        "installation": {"state": "installed"},
+    })
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
+        "available": False,
+        "state": "unavailable",
+        "failure_reason": "inference_timeout",
+    })
+
+    status = collaboration.qwen_assistant_status()
+    assert status["available"] is False
+    assert status["operational"] is False
+    assert status["installation"]["state"] == "installed"
+    assert status["readiness"]["failure_reason"] == "inference_timeout"
+
+
+def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
+    from app.api.collaboration import _production_qwen_evaluation_cases
+
+    cases = _production_qwen_evaluation_cases()
+    assert {case["criterion"] for case in cases} == {
+        "contradiction_preservation",
+        "reporter_attribution",
+        "event_chronology",
+        "uncertainty",
+        "medication_safety",
+    }
+    assert len(cases) == 5
+    assert all("Synthetic record:" in case["context"] for case in cases)
+
+
+def test_readiness_and_production_evaluation_are_public_to_session_middleware_only():
+    from app.main import PUBLIC_V1_ENDPOINTS
+
+    assert ("/api/v1/assistant/readiness", "GET") in PUBLIC_V1_ENDPOINTS
+    assert ("/api/v1/assistant/evaluate-production", "POST") in PUBLIC_V1_ENDPOINTS
