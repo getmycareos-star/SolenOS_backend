@@ -115,3 +115,26 @@ def test_readiness_and_production_evaluation_are_public_to_session_middleware_on
 
     assert ("/api/v1/assistant/readiness", "GET") in PUBLIC_V1_ENDPOINTS
     assert ("/api/v1/assistant/evaluate-production", "POST") in PUBLIC_V1_ENDPOINTS
+
+
+
+def test_companion_fails_closed_with_explicit_machine_readable_unavailable_reason(monkeypatch):
+    from fastapi import HTTPException
+    from app.api import collaboration
+
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
+        "available": False,
+        "state": "unavailable",
+        "model": "qwen2.5:0.5b",
+        "failure_reason": "inference_timeout",
+        "error_category": "inference_timeout",
+    })
+    try:
+        collaboration._ensure_companion_available()
+    except HTTPException as exc:
+        assert exc.status_code == 503
+        assert exc.detail["code"] == "companion_ai_unavailable"
+        assert exc.detail["reason"] == "inference_timeout"
+        assert "temporarily unavailable" in exc.detail["message"]
+    else:
+        raise AssertionError("Companion must fail closed when Qwen readiness fails")
