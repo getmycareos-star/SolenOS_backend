@@ -27,7 +27,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.care_continuity import CareAssertion, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
-from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status, qwen_readiness_status
+from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status
 from app.services.lcr_context import build_lcr_context
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
@@ -1961,24 +1961,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
-def _ensure_companion_available() -> None:
-    readiness = qwen_readiness_status()
-    if readiness.get("available"):
-        return
-    reason = readiness.get("failure_reason") or readiness.get("state") or "model_not_ready"
-    logger.warning(json.dumps({
-        "event": "companion_unavailable",
-        "model": readiness.get("model"),
-        "failure_reason": reason,
-        "error_category": readiness.get("error_category", "model_not_ready"),
-    }, separators=(",", ":")))
-    raise HTTPException(status_code=503, detail={
-        "code": "companion_ai_unavailable",
-        "message": "AI Companion is temporarily unavailable. Your care record remains accessible. Try again later.",
-        "reason": reason,
-    })
-
-
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -2026,11 +2008,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         re.IGNORECASE,
     )
     emergency = bool(emergency_pattern.search(user_text))
-    if not emergency:
-        # qwen_readiness_status performs bounded network I/O. Run it outside the
-        # ASGI event loop so a slow/unreachable model cannot stall unrelated API
-        # requests (including care-record hydration).
-        await asyncio.to_thread(_ensure_companion_available)
+    # Do not run a second inference as a preflight. The actual Companion
+    # inference below is authoritative and already executes in a worker thread.
+    # A short readiness probe here duplicated model work, could reject slow but
+    # valid models, and could saturate the shared runtime under concurrent chats.
     evidence_ids: list[str] = []
     source_context: list[str] = []
     event_context: list[str] = []

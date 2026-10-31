@@ -42,7 +42,8 @@ def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 503
-    assert "model is not installed" in error.value.detail
+    assert error.value.detail["code"] == "model_not_installed"
+    assert error.value.detail["reason"] == "configured_model_missing"
 
 
 def test_qwen_gateway_distinguishes_connection_failure(monkeypatch):
@@ -55,7 +56,7 @@ def test_qwen_gateway_distinguishes_connection_failure(monkeypatch):
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 503
-    assert "unavailable" in error.value.detail
+    assert error.value.detail["code"] == "runtime_unreachable"
 
 
 def test_qwen_gateway_distinguishes_timeout(monkeypatch):
@@ -68,7 +69,8 @@ def test_qwen_gateway_distinguishes_timeout(monkeypatch):
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 504
-    assert "timed out" in error.value.detail
+    assert error.value.detail["code"] == "inference_timeout"
+    assert error.value.detail["reason"] == "socket_timeout"
 
 
 def test_qwen_gateway_rejects_malformed_response_json(monkeypatch):
@@ -81,7 +83,7 @@ def test_qwen_gateway_rejects_malformed_response_json(monkeypatch):
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 502
-    assert "invalid response" in error.value.detail
+    assert error.value.detail["code"] == "invalid_upstream_response"
 
 
 def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
@@ -93,5 +95,5 @@ def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
     )
     with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
-    assert error.value.status_code == 503
-    assert "no usable response" in error.value.detail
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "empty_model_response"
