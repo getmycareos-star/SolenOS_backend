@@ -1921,6 +1921,24 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
 
 
+def _ensure_companion_available() -> None:
+    readiness = qwen_readiness_status()
+    if readiness.get("available"):
+        return
+    reason = readiness.get("failure_reason") or readiness.get("state") or "model_not_ready"
+    logger.warning(json.dumps({
+        "event": "companion_unavailable",
+        "model": readiness.get("model"),
+        "failure_reason": reason,
+        "error_category": readiness.get("error_category", "model_not_ready"),
+    }, separators=(",", ":")))
+    raise HTTPException(status_code=503, detail={
+        "code": "companion_ai_unavailable",
+        "message": "AI Companion is temporarily unavailable. Your care record remains accessible. Try again later.",
+        "reason": reason,
+    })
+
+
 @router.post("/conversation/message")
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; chat never writes care facts."""
@@ -1969,20 +1987,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     )
     emergency = bool(emergency_pattern.search(user_text))
     if not emergency:
-        readiness = qwen_readiness_status()
-        if not readiness.get("available"):
-            reason = readiness.get("failure_reason") or readiness.get("state") or "model_not_ready"
-            logger.warning(json.dumps({
-                "event": "companion_unavailable",
-                "model": readiness.get("model"),
-                "failure_reason": reason,
-                "error_category": readiness.get("error_category", "model_not_ready"),
-            }, separators=(",", ":")))
-            raise HTTPException(status_code=503, detail={
-                "code": "companion_ai_unavailable",
-                "message": "AI Companion is temporarily unavailable. Your care record remains accessible. Try again later.",
-                "reason": reason,
-            })
+        _ensure_companion_available()
     evidence_ids: list[str] = []
     source_context: list[str] = []
     event_context: list[str] = []
