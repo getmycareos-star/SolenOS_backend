@@ -36,4 +36,5 @@ target-version = "py311"
 [tool.pytest.ini_options]
 markers = [
   "session_security: tests that exercise the real anonymous-session authorization middleware",
+  "qwen_readiness: tests that exercise the real Qwen installation and inference-readiness gate",
 ]
