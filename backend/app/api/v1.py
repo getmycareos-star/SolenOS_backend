@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -378,14 +378,31 @@ def create_evidence(evidence: EvidenceCreate, request: Request, db: Session = De
 
 
 @router.get("/evidence/{person_id}", response_model=List[EvidenceSchema])
-def list_evidence(person_id: str, request: Request, db: Session = Depends(get_db)):
+def list_evidence(
+    person_id: str,
+    request: Request,
+    ids: Optional[List[str]] = Query(default=None),
+    db: Session = Depends(get_db),
+):
     _require_session_scope(request, db, person_id)
-    rows = (
-        db.query(EvidenceModel)
-        .filter(EvidenceModel.person_id == person_id)
-        .order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc())
-        .all()
-    )
+
+    query = db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
+    if ids is not None:
+        # An explicit filter is always bounded and never falls back to the
+        # full evidence collection. Empty/blank filters mean no rows.
+        requested_ids = list(dict.fromkeys(value.strip() for value in ids if value and value.strip()))
+        if len(requested_ids) > 100:
+            raise HTTPException(status_code=422, detail="At most 100 evidence IDs may be requested at once")
+        if not requested_ids:
+            return []
+        query = query.filter(EvidenceModel.id.in_(requested_ids))
+
+    rows = query.order_by(EvidenceModel.uploaded_at.asc(), EvidenceModel.id.asc()).all()
+    if ids is not None:
+        returned_ids = {row.id for row in rows}
+        if returned_ids != set(requested_ids):
+            # Do not reveal whether an unknown ID exists under another person.
+            raise HTTPException(status_code=404, detail="One or more evidence items were not found in this care record")
     # Evidence.extra_metadata is stored as TEXT for migration compatibility,
     # while the public schema exposes a structured object. Decode it at the
     # boundary instead of leaking a JSON string that fails response validation.

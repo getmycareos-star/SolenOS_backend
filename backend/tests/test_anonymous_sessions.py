@@ -647,3 +647,76 @@ def test_change_reassessment_persists_results_from_real_care_events_and_is_idemp
     finally:
         db.close()
 
+
+
+def _create_scoped_evidence(client, session, text):
+    response = client.post(
+        "/api/v1/evidence",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "person_id": session["person"]["id"],
+            "uploaded_by_caregiver_id": session["caregiver"]["id"],
+            "type": "document",
+            "evidence_kind": "documented_record",
+            "epistemic_status": "unverified",
+            "source_text": text,
+        },
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_evidence_id_filter_is_bounded_deduplicated_and_person_scoped():
+    client = TestClient(app)
+    owner = create_session(client, "Evidence filter owner")
+    other = create_session(client, "Evidence filter other person")
+    first = _create_scoped_evidence(client, owner, "Owner evidence one")
+    second = _create_scoped_evidence(client, owner, "Owner evidence two")
+    private = _create_scoped_evidence(client, other, "Other person's private evidence")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    path = f"/api/v1/evidence/{owner['person']['id']}"
+
+    filtered = client.get(
+        path,
+        params=[("ids", first["id"]), ("ids", first["id"]), ("ids", second["id"])],
+        headers=headers,
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert [item["id"] for item in filtered.json()] == [first["id"], second["id"]]
+    assert all(item["person_id"] == owner["person"]["id"] for item in filtered.json())
+    assert "Other person's private evidence" not in filtered.text
+
+    too_many = client.get(
+        path,
+        params=[("ids", f"untrusted-id-{index}") for index in range(101)],
+        headers=headers,
+    )
+    assert too_many.status_code == 422, too_many.text
+
+    # An explicitly empty filter must not degrade into an unfiltered history read.
+    empty = client.get(path, params={"ids": ""}, headers=headers)
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == []
+
+    # A valid ID belonging to another person is indistinguishable from a missing
+    # ID; the endpoint does not disclose the existence of cross-person evidence.
+    cross_person_id = client.get(
+        path,
+        params={"ids": private["id"]},
+        headers=headers,
+    )
+    assert cross_person_id.status_code == 404, cross_person_id.text
+    assert "Other person's private evidence" not in cross_person_id.text
+
+    # The bearer session still controls the person path even when an ID filter is supplied.
+    wrong_session = client.get(
+        f"/api/v1/evidence/{owner['person']['id']}",
+        params={"ids": first["id"]},
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert wrong_session.status_code == 403, wrong_session.text
+
+    # Legacy unfiltered reads remain compatible for existing clients.
+    legacy = client.get(path, headers=headers)
+    assert legacy.status_code == 200, legacy.text
+    assert {item["id"] for item in legacy.json()} >= {first["id"], second["id"]}
