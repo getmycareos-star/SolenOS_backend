@@ -1,0 +1,30 @@
+name: Deployed Qwen production acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployed-qwen-production-acceptance
+  cancel-in-progress: false
+
+jobs:
+  production-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOLENOS_PRODUCTION_API_BASE_URL: ${{ secrets.SOLENOS_PRODUCTION_API_BASE_URL }}
+      SOLENOS_QWEN_EVAL_TOKEN: ${{ secrets.SOLENOS_QWEN_EVAL_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify required production credentials are configured
+        run: |
+          test -n "$SOLENOS_PRODUCTION_API_BASE_URL"
+          test -n "$SOLENOS_QWEN_EVAL_TOKEN"
+      - name: Run acceptance tests against deployed model
+        run: python backend/scripts/run_production_qwen_evaluation.py
