@@ -75,7 +75,13 @@ def qwen_chat(
     response_format: dict | str | None = None,
     options: dict | None = None,
 ) -> str:
-    base, model, configured_timeout = get_ollama_config()
+    started = time.monotonic()
+    try:
+        base, model, configured_timeout = get_ollama_config()
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        _log_inference_result(os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
+        raise
     # Keep inference memory bounded for Railway deployments. The 1.5B model's
     # default context window can allocate a large KV cache and destabilize the
     # same container that hosts FastAPI. Every workflow uses the shared gateway,
@@ -314,12 +320,15 @@ def qwen_readiness_status(force: bool = False) -> dict:
         if model not in names:
             result = {"available": False, "state": "model_not_installed", "model": model, "installation": installation, "failure_reason": "configured_model_missing"}
         else:
-            qwen_chat(
+            probe_answer = qwen_chat(
                 [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
                 timeout=min(timeout, 12.0),
                 options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
             )
-            result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
+            if probe_answer.strip().upper() != "READY":
+                result = {"available": False, "state": "unavailable", "model": model, "installation": installation, "failure_reason": "readiness_probe_mismatch", "error_category": "invalid_model_response"}
+            else:
+                result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {"reason": "readiness_inference_failed"}
         result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
@@ -330,36 +339,22 @@ def qwen_readiness_status(force: bool = False) -> dict:
 
 
 def qwen_runtime_status() -> dict:
-    """Confirm the configured model is actually served by the local Ollama runtime."""
-    base, model, timeout = get_ollama_config()
-    request = urllib.request.Request(
-        base + "/api/tags",
-        headers={"Accept": "application/json"},
-        method="GET",
-    )
+    """Return machine-readable installation state and current model inventory status."""
+    installation = qwen_installation_status()
     try:
+        base, model, timeout = get_ollama_config()
+        request = urllib.request.Request(base + "/api/tags", headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(request, timeout=min(timeout, 10.0)) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        models = payload.get("models")
+        if not isinstance(models, list):
+            return {"available": False, "installation": installation, "error_category": "invalid_model_inventory", "failure_reason": "ollama_tags_missing_models"}
+        names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
+        if model not in names:
+            return {"available": False, "installation": installation, "model": model, "error_category": "model_not_installed", "failure_reason": "configured_model_missing"}
+        return {"available": True, "installation": installation, "model": model, "provider": "local_ollama", "inference_api": "ollama_native_http", "hosted_inference_api": False, "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service"}
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen runtime is not responding.",
-        ) from exc
-    models = payload.get("models")
-    if not isinstance(models, list):
-        raise HTTPException(status_code=503, detail="Ollama returned an invalid model inventory.")
-    names = [str(item.get("name", "")) for item in models if isinstance(item, dict)]
-    if model not in names:
-        raise HTTPException(
-            status_code=503,
-            detail="The configured Qwen model is not installed in the local runtime.",
-        )
-    return {
-        "available": True,
-        "installation": qwen_installation_status(),
-        "model": model,
-        "provider": "local_ollama",
-        "inference_api": "ollama_native_http",
-        "hosted_inference_api": False,
-        "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service",
-    }
+        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}
