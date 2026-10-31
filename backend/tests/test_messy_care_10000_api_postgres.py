@@ -1,14 +1,12 @@
-"""10,000 end-to-end PostgreSQL uncertainty-analysis API journeys.
+"""10,000 PostgreSQL-backed uncertainty-analysis API journeys.
 
-Each labelled scenario crosses the real FastAPI route, bearer-session authorization,
-SQLAlchemy persistence, and a second HTTP retrieval request. No handler or database
-mock is used. The corpus tests missing-evidence behavior only; it is not clinical
-accuracy validation and does not replace the 10,000-record persistence corpus.
+Every case crosses the real FastAPI route, server-issued bearer-session
+authorization, PostgreSQL persistence, and a subsequent HTTP retrieval request.
+The corpus qualifies missing-evidence handling only; it is not clinical
+accuracy validation or a substitute for full capture-to-LCR qualification.
 """
-import hashlib
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,8 +16,6 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import get_db
 from app.main import app
 import app.main as main_module
-from app.models.anonymous_session import AnonymousSession
-from app.models.care import Caregiver, Person
 
 DATABASE_URL = os.getenv("SOLENOS_BENCHMARK_DATABASE_URL") or os.getenv("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgresql+psycopg://"):
@@ -31,16 +27,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 SCENARIO_COUNT = 10_000
+DOMAINS = ("appointment", "medication", "mobility", "nutrition", "sleep")
 
 
 def test_10000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
-    suffix = uuid.uuid4().hex[:10]
-    person_id = f"api10kp{suffix}"
-    caregiver_id = f"api10kc{suffix}"
-    token = f"api10k-token-{suffix}"
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
 
     def override_get_db():
         db = Session()
@@ -52,27 +44,24 @@ def test_10000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
     original_session_local = main_module.SessionLocal
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = Session
-    try:
-        with Session() as db:
-            db.add(Person(id=person_id, name="Synthetic API benchmark person"))
-            db.flush()
-            db.add(Caregiver(
-                id=caregiver_id,
-                name="Synthetic API benchmark caregiver",
-                relationship="family",
-                person_id=person_id,
-            ))
-            db.add(AnonymousSession(
-                id=f"api10ks{suffix}",
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                token_hash=token_hash,
-                expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
-            ))
-            db.commit()
+    suffix = uuid.uuid4().hex[:10]
 
-        headers = {"Authorization": f"Bearer {token}"}
+    try:
         with TestClient(app) as client:
+            # Use the production session-bootstrap route so all relational
+            # identities and FK dependencies are created by the real code path.
+            created_response = client.post(
+                "/api/v1/sessions/anonymous",
+                json={
+                    "name": f"Synthetic API benchmark person {suffix}",
+                    "caregiver_name": f"Synthetic API benchmark caregiver {suffix}",
+                },
+            )
+            assert created_response.status_code == 201, created_response.text
+            created = created_response.json()
+            person_id = created["person"]["id"]
+            headers = {"Authorization": f"Bearer {created['access_token']}"}
+
             for index in range(SCENARIO_COUNT):
                 subject_id = f"api-thread-{index:05d}"
                 response = client.post(
@@ -80,7 +69,7 @@ def test_10000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                     headers=headers,
                     json={
                         "person_id": person_id,
-                        "subject_type": ("appointment", "medication", "mobility", "nutrition", "sleep")[index % 5],
+                        "subject_type": DOMAINS[index % len(DOMAINS)],
                         "subject_id": subject_id,
                         "field": "current_status",
                         "claim": f"Independently labelled missing-status scenario {index:05d}.",
@@ -113,27 +102,16 @@ def test_10000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                     assert row["epistemic_state"] == "unknown"
                     assert row.get("confidence") is None
 
-            # A second identity cannot read the benchmark person's assessment set.
-            other_person_id = f"api10ko{suffix}"
-            other_caregiver_id = f"api10kd{suffix}"
-            other_token = f"api10k-other-{suffix}"
-            with Session() as db:
-                db.add(Person(id=other_person_id, name="Isolated synthetic person"))
-                db.flush()
-                db.add(Caregiver(
-                    id=other_caregiver_id,
-                    name="Isolated synthetic caregiver",
-                    relationship="family",
-                    person_id=other_person_id,
-                ))
-                db.add(AnonymousSession(
-                    id=f"api10ko-session-{suffix}",
-                    person_id=other_person_id,
-                    caregiver_id=other_caregiver_id,
-                    token_hash=hashlib.sha256(other_token.encode()).hexdigest(),
-                    expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
-                ))
-                db.commit()
+            # A second server-issued identity cannot read the first person's records.
+            other_response = client.post(
+                "/api/v1/sessions/anonymous",
+                json={
+                    "name": f"Isolated synthetic person {suffix}",
+                    "caregiver_name": f"Isolated synthetic caregiver {suffix}",
+                },
+            )
+            assert other_response.status_code == 201, other_response.text
+            other_token = other_response.json()["access_token"]
             denied = client.get(
                 f"/api/v1/uncertainty/assessments/{person_id}",
                 headers={"Authorization": f"Bearer {other_token}"},
