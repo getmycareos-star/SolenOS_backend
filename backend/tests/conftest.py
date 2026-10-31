@@ -30,3 +30,25 @@ def legacy_route_tests_without_session_middleware(request):
     finally:
         app.user_middleware = original_middleware
         app.middleware_stack = None
+@pytest.fixture(autouse=True)
+def companion_model_ready_for_route_tests(request, monkeypatch):
+    """Keep route-contract tests independent from the live model runtime.
+
+    Real readiness behavior is covered separately in test_qwen_readiness.py.
+    Companion route tests mock model replies and should not make network calls.
+    """
+    if request.node.get_closest_marker("qwen_readiness"):
+        return
+
+    from app.api import collaboration
+
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_readiness_status",
+        lambda *args, **kwargs: {
+            "available": True,
+            "state": "ready",
+            "model": "test-model",
+            "failure_reason": None,
+        },
+    )
