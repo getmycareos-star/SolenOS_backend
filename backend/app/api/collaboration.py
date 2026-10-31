@@ -547,22 +547,6 @@ def _ollama_chat(
     return qwen_chat(messages, options=options)
 
 
-def _ensure_companion_available() -> dict:
-    """Fail closed when real Companion inference is not currently ready."""
-    readiness = qwen_readiness_status()
-    if readiness.get("available"):
-        return readiness
-    reason = str(readiness.get("failure_reason") or readiness.get("error_category") or "inference_unavailable")
-    raise HTTPException(
-        status_code=503,
-        detail={
-            "code": "companion_ai_unavailable",
-            "reason": reason,
-            "message": "SolenOS AI Companion is temporarily unavailable. Your care record remains available.",
-        },
-    )
-
-
 _CONTEXT_STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "was", "were", "are",
     "has", "have", "had", "you", "your", "about", "what", "when", "where",
