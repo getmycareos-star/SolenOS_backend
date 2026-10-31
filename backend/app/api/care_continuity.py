@@ -1190,8 +1190,14 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         target_id=target_id,
         revision_number=int(state_latest or 0) + 1,
         change_kind=change_kind,
-        before_state=data.get("before_value"),
-        after_state=data.get("after_value"),
+        before_state=(
+            json.dumps(data.get("before_value"), sort_keys=True, default=str)
+            if data.get("before_value") is not None else None
+        ),
+        after_state=(
+            json.dumps(data.get("after_value"), sort_keys=True, default=str)
+            if data.get("after_value") is not None else None
+        ),
         evidence_ids=data.get("evidence_ids") or [],
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
