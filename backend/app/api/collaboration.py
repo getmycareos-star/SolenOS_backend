@@ -1413,9 +1413,11 @@ def qwen_assistant_installation():
 
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
-    # Performs a bounded real inference; API/DB readiness remains independent.
+    # Performs a bounded real inference when the cached probe is stale. Reusing
+    # the gateway cache prevents health polling from serially running 12-second
+    # CPU inference probes and competing with actual Companion requests.
     return {
-        **qwen_readiness_status(force=True),
+        **qwen_readiness_status(),
         "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
     }
 
