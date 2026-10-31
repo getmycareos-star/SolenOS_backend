@@ -71,14 +71,19 @@ if [[ "$OLLAMA_READY" == "1" ]]; then
       write_qwen_state "installed"
     else
       write_qwen_state "downloading"
-      if ollama pull "$OLLAMA_MODEL"; then
+      if timeout "${OLLAMA_PULL_TIMEOUT_SECONDS:-1800}" ollama pull "$OLLAMA_MODEL"; then
         if ollama show "$OLLAMA_MODEL" >/dev/null 2>&1; then
           write_qwen_state "installed"
         else
           write_qwen_state "failed" "model_missing_after_successful_pull"
         fi
       else
-        write_qwen_state "failed" "ollama_pull_failed"
+        pull_exit_code=$?
+        if [[ "$pull_exit_code" == "124" ]]; then
+          write_qwen_state "failed" "ollama_pull_timeout"
+        else
+          write_qwen_state "failed" "ollama_pull_failed"
+        fi
       fi
     fi
   ) >/tmp/qwen-model-pull.log 2>&1 &
