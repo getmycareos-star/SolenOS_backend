@@ -430,3 +430,189 @@ def test_100_real_api_care_history_lifecycles_preserve_corrections_conflicts_and
         app.dependency_overrides.clear()
         main_module.SessionLocal = original_session_local
         engine.dispose()
+
+
+def test_postgres_open_question_answer_versions_and_historical_unresolved_retrieval():
+    """Answer revisions remain append-only; old unresolved questions remain queryable."""
+    from app.models.care import Evidence
+    from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:10]
+    person_id = f"qhistp{suffix}"
+    caregiver_id = f"qhistc{suffix}"
+    token = f"qhist-token-{suffix}"
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    original_session_local = main_module.SessionLocal
+    app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = Session
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Synthetic question history person"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Question history caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            db.add(AnonymousSession(
+                id=f"qhists{suffix}", person_id=person_id,
+                caregiver_id=caregiver_id,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
+            ))
+            db.commit()
+
+        headers = {"Authorization": f"Bearer {token}"}
+        with TestClient(app) as client:
+            evidence_ids = []
+            for index in range(2):
+                response = client.post(
+                    "/api/v1/evidence",
+                    headers=headers,
+                    json={
+                        "person_id": person_id,
+                        "type": "note",
+                        "evidence_kind": "caregiver_report",
+                        "epistemic_status": "unverified",
+                        "source_text": f"Question answer source {index}: mobility status recorded.",
+                        "uploaded_by_caregiver_id": caregiver_id,
+                        "reported_by_caregiver_id": caregiver_id,
+                        "reported_by_label": "Question history caregiver",
+                        "occurred_at": f"2026-10-{20 + index:02d}T08:00:00+00:00",
+                        "reported_at": f"2026-10-{21 + index:02d}T09:00:00+00:00",
+                        "origin_channel": "family_handover",
+                    },
+                )
+                assert response.status_code in {200, 201}, response.text
+                evidence_ids.append(response.json()["id"])
+
+            question_response = client.post(
+                "/api/v1/uncertainty/questions",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "question": "Was walking support required on the earlier shift?",
+                    "subject_type": "mobility",
+                    "subject_id": "historical-mobility",
+                    "status": "open",
+                    "evidence_ids": evidence_ids[:1],
+                    "created_by_caregiver_id": caregiver_id,
+                },
+            )
+            assert question_response.status_code == 200, question_response.text
+            question_id = question_response.json()["id"]
+
+            first_answer = client.patch(
+                f"/api/v1/uncertainty/questions/{question_id}",
+                headers=headers,
+                json={
+                    "status": "answered",
+                    "answer": "The first source says support was required.",
+                    "answer_provenance": "Initial review of source one.",
+                    "evidence_ids": [evidence_ids[0]],
+                },
+            )
+            assert first_answer.status_code == 200, first_answer.text
+
+            revised_answer = client.patch(
+                f"/api/v1/uncertainty/questions/{question_id}",
+                headers=headers,
+                json={
+                    "status": "answered",
+                    "answer": "The second source qualifies the first report; support remains unconfirmed.",
+                    "answer_provenance": "Revised after reviewing the later source.",
+                    "evidence_ids": [evidence_ids[1]],
+                },
+            )
+            assert revised_answer.status_code == 200, revised_answer.text
+
+            # Create older unresolved questions and verify the unfiltered history
+            # endpoint returns them rather than only the latest item.
+            historical_ids = []
+            for index in range(50):
+                response = client.post(
+                    "/api/v1/uncertainty/questions",
+                    headers=headers,
+                    json={
+                        "person_id": person_id,
+                        "question": f"Historical unresolved mobility question {index:02d}?",
+                        "subject_type": "mobility",
+                        "subject_id": f"historical-thread-{index:02d}",
+                        "status": "open",
+                        "evidence_ids": [evidence_ids[0]],
+                        "created_by_caregiver_id": caregiver_id,
+                    },
+                )
+                assert response.status_code == 200, (
+                    f"historical question={index}: {response.status_code} {response.text}"
+                )
+                historical_ids.append(response.json()["id"])
+
+            history = client.get(
+                f"/api/v1/uncertainty/questions/{question_id}/answer-history",
+                headers=headers,
+            )
+            assert history.status_code == 200, history.text
+            versions = history.json()
+            assert [row["answer_version"] for row in versions] == [1, 2]
+            assert versions[0]["answer"] == "The first source says support was required."
+            assert versions[1]["answer"] == (
+                "The second source qualifies the first report; support remains unconfirmed."
+            )
+            assert versions[0]["evidence_ids"] == [evidence_ids[0]]
+            assert versions[1]["evidence_ids"] == [evidence_ids[1]]
+
+            all_questions = client.get(
+                f"/api/v1/uncertainty/questions/{person_id}",
+                headers=headers,
+            )
+            assert all_questions.status_code == 200, all_questions.text
+            question_rows = {row["id"]: row for row in all_questions.json()}
+            assert question_id in question_rows
+            assert question_rows[question_id]["status"] == "answered"
+            assert set(historical_ids).issubset(question_rows)
+            assert all(question_rows[item]["status"] == "open" for item in historical_ids)
+
+            # Another person must not be able to retrieve this question or its
+            # answer history through the same session-bound API.
+            denied = client.get(
+                f"/api/v1/uncertainty/questions/other-person-{suffix}",
+                headers=headers,
+            )
+            assert denied.status_code == 403, denied.text
+            hidden_history = client.get(
+                f"/api/v1/uncertainty/questions/{question_id}/answer-history",
+                headers={"Authorization": f"Bearer invalid-{token}"},
+            )
+            assert hidden_history.status_code in {401, 403}, hidden_history.text
+
+        with Session() as db:
+            assert db.query(OpenQuestion).filter(
+                OpenQuestion.person_id == person_id
+            ).count() == 51
+            events = db.query(OpenQuestionAnswerEvent).filter(
+                OpenQuestionAnswerEvent.person_id == person_id,
+                OpenQuestionAnswerEvent.question_id == question_id,
+            ).order_by(OpenQuestionAnswerEvent.answer_version.asc()).all()
+            assert len(events) == 2
+            assert [event.answer_version for event in events] == [1, 2]
+            assert events[0].evidence_ids == [evidence_ids[0]]
+            assert events[1].evidence_ids == [evidence_ids[1]]
+
+        print("MESSY_CARE_POSTGRES_QUESTION_ANSWER_VERSIONS=2")
+        print("MESSY_CARE_POSTGRES_HISTORICAL_OPEN_QUESTIONS=50")
+        print("MESSY_CARE_POSTGRES_QUESTION_HISTORY_FRESH_SESSION=PASS")
+        print("MESSY_CARE_POSTGRES_QUESTION_HISTORY_AUTHORIZATION=PASS")
+    finally:
+        app.dependency_overrides.clear()
+        main_module.SessionLocal = original_session_local
+        engine.dispose()
