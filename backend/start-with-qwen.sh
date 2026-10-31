@@ -21,9 +21,39 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Bound the sidecar startup wait. Do not block FastAPI on optional inference.
+# Publish atomic, machine-readable model installation state for the API.
+write_install_state() {
+  local state="$1"
+  local reason="${2:-}"
+  QWEN_INSTALL_STATE="$state" QWEN_INSTALL_MODEL="$OLLAMA_MODEL" QWEN_INSTALL_FAILURE="$reason" \
+    python - <<'PY'
+import json
+import os
+from datetime import datetime, timezone
+
+path = os.environ.get("QWEN_INSTALL_STATE_FILE", "/tmp/qwen-installation-status.json")
+payload = {
+    "state": os.environ["QWEN_INSTALL_STATE"],
+    "model": os.environ["QWEN_INSTALL_MODEL"],
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+    "failure_reason": os.environ.get("QWEN_INSTALL_FAILURE") or None,
+}
+temporary = path + ".tmp"
+with open(temporary, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, separators=(",", ":"))
+    handle.flush()
+    os.fsync(handle.fileno())
+os.replace(temporary, path)
+PY
+}
+
+# Bound sidecar startup without blocking the core caregiver API.
+OLLAMA_READY=false
 for attempt in $(seq 1 10); do
-  if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then break; fi
+  if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    OLLAMA_READY=true
+    break
+  fi
   if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
     echo "Optional Ollama sidecar did not start; starting core APIs without it." >&2
     break
@@ -31,20 +61,26 @@ for attempt in $(seq 1 10); do
   sleep 1
 done
 
-# Attempt a background model pull only when Ollama is ready. The API starts
-# immediately; no network download is allowed to block caregiver workflows.
-if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+if [[ "$OLLAMA_READY" == "true" ]]; then
   (
-    # Pull exactly the model configured for the API gateway. A hard-coded
-    # tag here can leave OLLAMA_MODEL pointing at a different, absent model,
-    # producing repeated Companion 503s despite a healthy Ollama sidecar.
-    if ! ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | grep -Fqx -- "$OLLAMA_MODEL"; then
-      echo "Pulling configured Qwen model: $OLLAMA_MODEL"
-      ollama pull "$OLLAMA_MODEL" || echo "Optional Qwen model pull failed for $OLLAMA_MODEL; core APIs remain available." >&2
-    else
+    # The configured model, not a hard-coded tag, is the source of truth.
+    if ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | grep -Fqx -- "$OLLAMA_MODEL"; then
       echo "Configured Qwen model already installed: $OLLAMA_MODEL"
+      write_install_state "installed"
+    else
+      echo "Pulling configured Qwen model: $OLLAMA_MODEL"
+      write_install_state "downloading"
+      if ollama pull "$OLLAMA_MODEL" && ollama list 2>/dev/null | awk 'NR > 1 { print $1 }' | grep -Fqx -- "$OLLAMA_MODEL"; then
+        write_install_state "installed"
+        echo "Configured Qwen model installed: $OLLAMA_MODEL"
+      else
+        write_install_state "failed" "ollama_pull_failed"
+        echo "Optional Qwen model pull failed for $OLLAMA_MODEL; core APIs remain available." >&2
+      fi
     fi
   ) >/tmp/qwen-model-pull.log 2>&1 &
+else
+  write_install_state "failed" "ollama_sidecar_unavailable"
 fi
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8080}" &
