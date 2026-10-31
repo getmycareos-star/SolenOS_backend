@@ -124,7 +124,11 @@ def _signals_share_source(
     right_domain = str(getattr(right, "subject_type", "") or "").strip().casefold()
     left_subject = str(getattr(left, "subject_id", "") or "").strip()
     right_subject = str(getattr(right, "subject_id", "") or "").strip()
-    if not left_domain or left_domain != right_domain or left_subject != right_subject:
+    if (
+        not left_domain
+        or left_domain != right_domain
+        or left_subject != right_subject
+    ):
         return False
     return bool(
         _signal_source_ids(left, left_source_field)
