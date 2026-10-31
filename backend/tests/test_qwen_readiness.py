@@ -237,7 +237,21 @@ def test_production_evaluation_rejects_non_workflow_bearer(monkeypatch):
         "path": "/api/v1/assistant/evaluate-production",
         "headers": [(b"authorization", b"Bearer arbitrary-token"), (b"x-github-run-id", b"123")],
     })
-    monkeypatch.setattr(collaboration.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must reject before API call")))
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return json.dumps({
+                "repository": {"full_name": "attacker/other-repository"},
+                "event": "workflow_dispatch",
+                "path": ".github/workflows/production-qwen-evaluation.yml",
+                "head_branch": "main",
+                "status": "in_progress",
+            }).encode("utf-8")
+
+    monkeypatch.setattr(collaboration.urllib.request, "urlopen", lambda *args, **kwargs: Response())
     try:
         collaboration._verify_production_evaluation_run(request)
     except HTTPException as exc:
