@@ -375,6 +375,28 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                 conflict_id = conflict_response.json()["id"]
                 assert conflict_response.json()["resolution_status"] == "unresolved"
 
+                # The current-care projection reads care_conflicts, while the
+                # uncertainty API stores contradictions in a separate table.
+                # Link the LCR conflict directly to both source observations.
+                lcr_conflict_response = client.post(
+                    "/api/v1/care-continuity/conflicts",
+                    headers=headers,
+                    json={
+                        "conflict_type": "conflicting_caregiver_reports",
+                        "status": "unresolved",
+                        "claim_refs": [original_observation_id, correction_observation_id],
+                        "description": (
+                            "Two caregiver source observations disagree about "
+                            "the same mobility event; neither is silently selected."
+                        ),
+                    },
+                )
+                assert lcr_conflict_response.status_code == 201, (
+                    f"journey={journey_index} LCR conflict: "
+                    f"{lcr_conflict_response.status_code} {lcr_conflict_response.text}"
+                )
+                lcr_conflict_id = lcr_conflict_response.json()["id"]
+
                 # This is the caregiver-facing LCR projection, not a direct table
                 # read. Each journey is checked immediately while its ten-case
                 # person partition keeps the newest correction inside the
@@ -391,11 +413,11 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                 projection_items = projection_response.json()["items"]
                 conflict_item = next(
                     (item for item in projection_items
-                     if item["source_collection"] == "conflicts" and item["id"] == conflict_id),
+                     if item["source_collection"] == "conflicts" and item["id"] == lcr_conflict_id),
                     None,
                 )
                 assert conflict_item is not None, f"journey={journey_index}: contradiction missing from LCR projection"
-                assert set(conflict_item["evidence_ids"]) == {first_evidence_id, correction_evidence_id}
+                assert set(conflict_item["claim_refs"]) == {original_observation_id, correction_observation_id}
 
                 correction_item = next(
                     (item for item in projection_items
@@ -430,6 +452,7 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                     "original_observation_id": original_observation_id,
                     "correction_observation_id": correction_observation_id,
                     "conflict_id": conflict_id,
+                    "lcr_conflict_id": lcr_conflict_id,
                 })
 
                 # A new SQLAlchemy session reads all ten journeys for this
