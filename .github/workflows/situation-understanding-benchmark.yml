@@ -126,7 +126,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_1000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml 2>&1 | tee /tmp/postgres-messy-care.log
+          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml 2>&1 | tee /tmp/postgres-messy-care.log
 
       - name: Verify persisted care history survives PostgreSQL server restart
         id: postgres_restart
@@ -344,6 +344,10 @@ jobs:
               "MESSY_CARE_POSTGRES_HISTORIES=1000",
               "MESSY_CARE_POSTGRES_FAMILIES=20",
               "MESSY_CARE_POSTGRES_FRESH_SESSION_RETRIEVAL=PASS",
+              "MESSY_CARE_POSTGRES_API_SCENARIOS_EXECUTED=10000",
+              "MESSY_CARE_POSTGRES_API_ASSESSMENTS_RETRIEVED=10000",
+              "MESSY_CARE_POSTGRES_API_FRESH_HTTP_SESSION=PASS",
+              "MESSY_CARE_POSTGRES_API_CROSS_PERSON_ISOLATION=PASS",
           )
           missing = [marker for marker in required_markers if marker not in log]
           print(f"POSTGRES_MESSY_CARE_REQUIRED_MARKERS_MISSING={len(missing)}")
