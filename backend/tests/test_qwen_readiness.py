@@ -119,26 +119,16 @@ def test_readiness_and_production_evaluation_are_public_to_session_middleware_on
 
 
 
-def test_companion_fails_closed_with_explicit_machine_readable_unavailable_reason(monkeypatch):
-    from fastapi import HTTPException
+def test_companion_uses_one_authoritative_inference_without_a_readiness_preflight():
+    import inspect
     from app.api import collaboration
 
-    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda: {
-        "available": False,
-        "state": "unavailable",
-        "model": "qwen2.5:0.5b",
-        "failure_reason": "inference_timeout",
-        "error_category": "inference_timeout",
-    })
-    try:
-        collaboration._ensure_companion_available()
-    except HTTPException as exc:
-        assert exc.status_code == 503
-        assert exc.detail["code"] == "companion_ai_unavailable"
-        assert exc.detail["reason"] == "inference_timeout"
-        assert "temporarily unavailable" in exc.detail["message"]
-    else:
-        raise AssertionError("Companion must fail closed when Qwen readiness fails")
+    source = inspect.getsource(collaboration.companion_message)
+    # Companion no longer runs a separate readiness inference before the real
+    # response. The real inference failure/persistence contract is exercised in
+    # test_companion_response_contract.py.
+    assert "qwen_readiness_status" not in source
+    assert "Companion inference is unavailable. No reply was saved" in source
 
 
 
