@@ -27,7 +27,7 @@ This contract is the primary engineering gate for care-history correctness. A gr
 
 ## Release gate
 
-- Run the complete benchmark on every pull request to `main` and every push to `main`.
+- Run the complete benchmark on every push to `main` and by manual workflow dispatch. Pull-request and feature-branch runs are intentionally excluded; qualification is performed against the canonical `main` commit.
 - PostgreSQL 17 is mandatory for the persistence job.
 - Zero skipped cases, zero failures, zero errors, nonzero executed tests.
 - Retain JUnit artifacts and report exact commit SHA.
