@@ -1,6 +1,8 @@
 import hashlib
 import io
 import uuid
+import logging
+import time
 from datetime import datetime, timezone
 from pathlib import PurePath
 
@@ -12,6 +14,7 @@ from app.core.database import get_db
 from app.models.anonymous_session import AnonymousSession
 
 router = APIRouter(tags=["document extraction"])
+logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_PDF_PAGES = 100
 TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".xml", ".yaml", ".yml"}
@@ -41,11 +44,15 @@ async def extract_document(
     )
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+    upload_started = time.perf_counter()
     filename = PurePath(file.filename or "upload").name.replace("\r", "").replace("\n", "").strip()[:255] or "upload"
     suffix = PurePath(filename).suffix.lower()
     content_type = (file.content_type or "").split(";", 1)[0].strip().lower()
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     await file.close()
+    upload_read_ms = (time.perf_counter() - upload_started) * 1000
+    extraction_started = time.perf_counter()
+    page_count = 0
 
     if not data:
         raise HTTPException(status_code=422, detail="The uploaded file is empty")
@@ -57,7 +64,8 @@ async def extract_document(
         source = "pdf_text"
         try:
             reader = PdfReader(io.BytesIO(data), strict=True)
-            if len(reader.pages) > MAX_PDF_PAGES:
+            page_count = len(reader.pages)
+            if page_count > MAX_PDF_PAGES:
                 raise HTTPException(status_code=413, detail="PDFs are limited to 100 pages")
             extracted = "\n".join((page.extract_text() or "") for page in reader.pages).strip()
         except HTTPException:
@@ -85,6 +93,19 @@ async def extract_document(
     if not extracted:
         raise HTTPException(status_code=422, detail="The file contains no readable text")
 
+    extraction_ms = (time.perf_counter() - extraction_started) * 1000
+    logger.info(
+        "document_extraction_profile source=%s bytes=%d page_count=%d "
+        "extracted_chars=%d upload_read_ms=%.2f extraction_ms=%.2f "
+        "total_ms=%.2f outcome=success",
+        source,
+        len(data),
+        page_count,
+        len(extracted),
+        upload_read_ms,
+        extraction_ms,
+        (time.perf_counter() - upload_started) * 1000,
+    )
     document_id = f"doc_{uuid.uuid4().hex}"
     return {
         "ok": True,
