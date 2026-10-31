@@ -973,7 +973,9 @@ def test_companion_rejects_unrequested_saba_in_any_reply_without_saving(monkeypa
             json={"person_id": person_id, "text": "Help me prepare questions for the appointment."},
         )
         assert response.status_code == 503, response.text
-        assert "clear" in response.json()["detail"].lower()
+        detail = response.json()["detail"]
+        message = detail if isinstance(detail, str) else detail.get("message", "")
+        assert "clear" in message.lower()
 
         db = TestingSessionLocal()
         assert db.query(ConversationMessage).count() == 0
