@@ -31,6 +31,7 @@ from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
 from app.core.config import get_settings
+from app.core.latency import LatencyTimingMiddleware
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
 from app.models.anonymous_session import AnonymousSession
@@ -161,6 +162,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 
+# Expose server-side time-to-response-headers without recording request paths,
+# authorization data, or care-record content. Browser clients can correlate this
+# with their own end-to-end Performance API measurements.
+app.add_middleware(LatencyTimingMiddleware)
+
 # CORS is configurable per deployment. The Netlify production site is the
 # default; additional origins must be explicitly listed in CORS_ORIGINS.
 # This is an origin allowlist, not a wildcard. Comma-separated values are
@@ -184,6 +190,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
+    expose_headers=["Server-Timing", "X-Response-Time-Ms"],
 )
 
 app.add_middleware(RequestBodySizeLimitMiddleware)
