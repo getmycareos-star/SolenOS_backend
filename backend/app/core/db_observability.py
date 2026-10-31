@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from time import perf_counter
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import event
@@ -15,6 +16,7 @@ from sqlalchemy import event
 _request_metrics: ContextVar[dict[str, Any] | None] = ContextVar(
     "solenos_db_request_metrics", default=None
 )
+_pool_lock = Lock()
 
 
 def begin_request_metrics() -> tuple[Any, dict[str, Any]]:
@@ -61,6 +63,7 @@ def install_sqlalchemy_observability(target_engine: Any) -> None:
     if getattr(target_engine, "_solenos_db_timing_installed", False):
         return
     setattr(target_engine, "_solenos_db_timing_installed", True)
+    setattr(target_engine, "_solenos_pool_checked_out_count", 0)
 
     @event.listens_for(target_engine, "before_cursor_execute")
     def _before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
@@ -83,12 +86,11 @@ def install_sqlalchemy_observability(target_engine: Any) -> None:
     @event.listens_for(target_engine, "checkout")
     def _pool_checkout(dbapi_connection, connection_record, connection_proxy):
         metrics = _request_metrics.get()
+        with _pool_lock:
+            checked_out = int(getattr(target_engine, "_solenos_pool_checked_out_count", 0)) + 1
+            setattr(target_engine, "_solenos_pool_checked_out_count", checked_out)
         if metrics is not None:
             metrics["pool_checkouts"] += 1
-            try:
-                checked_out = int(target_engine.pool.checkedout())
-            except (AttributeError, TypeError, ValueError, NotImplementedError):
-                checked_out = 0
             metrics["pool_peak_checked_out"] = max(
                 metrics["pool_peak_checked_out"], checked_out
             )
@@ -96,6 +98,11 @@ def install_sqlalchemy_observability(target_engine: Any) -> None:
     @event.listens_for(target_engine, "checkin")
     def _pool_checkin(dbapi_connection, connection_record):
         metrics = _request_metrics.get()
+        with _pool_lock:
+            checked_out = max(
+                0, int(getattr(target_engine, "_solenos_pool_checked_out_count", 0)) - 1
+            )
+            setattr(target_engine, "_solenos_pool_checked_out_count", checked_out)
         if metrics is not None:
             metrics["pool_checkins"] += 1
 
@@ -112,7 +119,7 @@ def pool_snapshot(target_engine: Any) -> dict[str, int | None]:
             return None
 
     return {
-        "checked_out": read("checkedout"),
+        "checked_out": read("checkedout") if read("checkedout") is not None else int(getattr(target_engine, "_solenos_pool_checked_out_count", 0)),
         "pool_size": read("size"),
         "overflow": read("overflow"),
     }
