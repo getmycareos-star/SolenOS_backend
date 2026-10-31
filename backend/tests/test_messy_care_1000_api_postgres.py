@@ -62,6 +62,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                 relationship="family",
                 person_id=person_id,
             ))
+            db.flush()
             db.add(AnonymousSession(
                 id=f"api10ks{suffix}",
                 person_id=person_id,
@@ -126,6 +127,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                     relationship="family",
                     person_id=other_person_id,
                 ))
+                db.flush()
                 db.add(AnonymousSession(
                     id=f"api10ko-session-{suffix}",
                     person_id=other_person_id,
