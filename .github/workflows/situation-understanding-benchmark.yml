@@ -125,7 +125,7 @@ jobs:
         id: postgres_benchmark
         continue-on-error: true
         run: |
-          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
+          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_1000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
       - name: Verify persisted care history survives PostgreSQL server restart
         id: postgres_restart
