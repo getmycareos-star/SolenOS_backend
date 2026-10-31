@@ -68,6 +68,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
     counts = {
         "sessions": 0,
         "evidence": 0,
+        "observations": 0,
         "events": 0,
         "contradictions": 0,
         "corrections": 0,
@@ -212,6 +213,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                     assert observation["subject_label"] == "Care recipient"
                     assert observation["observer_label"] == observer_label
                     observation_ids.append(observation["id"])
+                    counts["observations"] += 1
 
                 event_response = client.post(
                     "/api/v1/events",
@@ -391,7 +393,8 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
         expected = JOURNEY_COUNT
         assert counts == {
             "sessions": expected,
-            "evidence": expected,
+            "evidence": expected * 2,
+            "observations": expected * 2,
             "events": expected,
             "contradictions": expected,
             "corrections": expected,
@@ -402,9 +405,10 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
         for key, value in counts.items():
             print(f"CAPTURE_TO_LCR_{key.upper()}={value}")
         print(f"CAPTURE_TO_LCR_JOURNEYS_EXECUTED={JOURNEY_COUNT}")
-        print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 5}")
+        print(f"CAPTURE_TO_LCR_FRESH_HTTP_READS={JOURNEY_COUNT * 7}")
         print(f"CAPTURE_TO_LCR_CROSS_PERSON_DENIALS={JOURNEY_COUNT * 4}")
         print("CAPTURE_TO_LCR_ATTRIBUTION=PASS")
+        print("CAPTURE_TO_LCR_OBSERVER_SUBJECT_ATTRIBUTION=PASS")
         print("CAPTURE_TO_LCR_CONTRADICTIONS_PRESERVED=PASS")
         print("CAPTURE_TO_LCR_CORRECTION_LINEAGE=PASS")
         print("CAPTURE_TO_LCR_DELAYED_EVIDENCE_TIME=PASS")
