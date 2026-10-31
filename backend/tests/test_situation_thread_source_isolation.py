@@ -65,3 +65,28 @@ def test_missing_source_ids_never_merge_from_subject_or_time_like_labels():
     groups = _group_related_signals([first, second], "evidence_ids")
 
     assert groups == [[first], [second]]
+
+
+
+def test_legacy_direct_care_event_source_id_resolves_to_its_own_event():
+    from app.services.situation_formation import _event_ids_for_evidence
+
+    event = SimpleNamespace(id="event-legacy-1", evidence_ids=["evidence-1"])
+
+    class Query:
+        def filter(self, *conditions):
+            return self
+
+        def all(self):
+            return [event]
+
+    class FakeDB:
+        def query(self, model):
+            return Query()
+
+    assert _event_ids_for_evidence(FakeDB(), "person-1", {"event-legacy-1"}) == {
+        "event-legacy-1"
+    }
+    assert _event_ids_for_evidence(FakeDB(), "person-1", {"evidence-1"}) == {
+        "event-legacy-1"
+    }
