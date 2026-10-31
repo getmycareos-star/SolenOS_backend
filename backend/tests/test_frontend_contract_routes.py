@@ -247,6 +247,34 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
 
         evidence_list = client.get(f"/api/v1/evidence/{person_id}", headers=auth)
         assert evidence_list.status_code == 200, evidence_list.text
+        filtered_evidence = client.get(
+            f"/api/v1/evidence/{person_id}",
+            headers=auth,
+            params=[("ids", evidence_id), ("ids", duplicate_upload.json()["evidence_id"])],
+        )
+        assert filtered_evidence.status_code == 200, filtered_evidence.text
+        assert {item["id"] for item in filtered_evidence.json()} == {
+            evidence_id, duplicate_upload.json()["evidence_id"]
+        }
+        empty_filtered_evidence = client.get(
+            f"/api/v1/evidence/{person_id}",
+            headers=auth,
+            params={"ids": "not-a-recorded-evidence-id"},
+        )
+        assert empty_filtered_evidence.status_code == 200
+        assert empty_filtered_evidence.json() == []
+        duplicate_filter = client.get(
+            f"/api/v1/evidence/{person_id}",
+            headers=auth,
+            params=[("ids", evidence_id), ("ids", evidence_id)],
+        )
+        assert duplicate_filter.status_code == 422, duplicate_filter.text
+        cross_person_filter = client.get(
+            f"/api/v1/evidence/{person_id}",
+            headers={"Authorization": f"Bearer {other_token}"},
+            params={"ids": evidence_id},
+        )
+        assert cross_person_filter.status_code == 403, cross_person_filter.text
         listed_uploads = [
             item for item in evidence_list.json()
             if item["id"] in {evidence_id, duplicate_upload.json()["evidence_id"]}
