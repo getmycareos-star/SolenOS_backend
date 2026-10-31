@@ -86,7 +86,7 @@ jobs:
   postgres-longitudinal-integration:
     name: PostgreSQL longitudinal persistence benchmark
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     services:
       postgres:
         image: postgres:17
@@ -127,7 +127,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
+          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_capture_to_lcr_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
       - name: Verify persisted care history survives PostgreSQL server restart
         id: postgres_restart
@@ -357,6 +357,13 @@ jobs:
               "MESSY_CARE_POSTGRES_API_ASSESSMENTS_RETRIEVED=10000",
               "MESSY_CARE_POSTGRES_API_FRESH_HTTP_SESSION=PASS",
               "MESSY_CARE_POSTGRES_API_CROSS_PERSON_ISOLATION=PASS",
+              "CAPTURE_TO_LCR_JOURNEYS_EXECUTED=10000",
+              "CAPTURE_TO_LCR_ATTRIBUTION=PASS",
+              "CAPTURE_TO_LCR_CONTRADICTIONS_PRESERVED=PASS",
+              "CAPTURE_TO_LCR_CORRECTION_LINEAGE=PASS",
+              "CAPTURE_TO_LCR_DELAYED_EVIDENCE_TIME=PASS",
+              "CAPTURE_TO_LCR_LCR_RETRIEVAL=PASS",
+              "CAPTURE_TO_LCR_ACCESS_ISOLATION=PASS",
           )
           missing = [marker for marker in required_markers if marker not in log]
           print(f"POSTGRES_MESSY_CARE_REQUIRED_MARKERS_MISSING={len(missing)}")
