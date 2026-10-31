@@ -17,6 +17,8 @@ from app.models.care_continuity import CareAssertion
 
 pytestmark = pytest.mark.session_security
 
+_original_qwen_readiness_status = collaboration.qwen_readiness_status
+
 engine = create_engine(
     "sqlite:///:memory:",
     connect_args={"check_same_thread": False},
@@ -55,11 +57,13 @@ def setup_function():
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
+    collaboration.qwen_readiness_status = lambda force=False: {"available": True, "state": "ready", "model": "qwen-test", "installation": {"state": "installed"}, "failure_reason": None}
 
 
 def teardown_function():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
+    collaboration.qwen_readiness_status = _original_qwen_readiness_status
     Base.metadata.drop_all(bind=engine)
 
 
