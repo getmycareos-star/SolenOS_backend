@@ -132,6 +132,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 assert evidence["uploaded_by_caregiver_id"] == caregiver_id
                 assert evidence["reported_by_caregiver_id"] == caregiver_id
                 assert evidence["reported_by_label"] == f"Family caregiver {index % 7}"
+                assert datetime.fromisoformat(evidence["reported_at"]) > datetime.fromisoformat(evidence["occurred_at"])
                 counts["evidence"] += 1
 
                 # A second, separately attributed account supplies an actual
@@ -240,6 +241,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 event_id = event["id"]
                 assert event["occurred_at"].startswith(occurred_at.isoformat()[:19])
                 assert event["recorded_at"] is not None
+                assert datetime.fromisoformat(event["recorded_at"]) > datetime.fromisoformat(event["occurred_at"])
                 counts["events"] += 1
 
                 conflict_response = client.post(
@@ -404,6 +406,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                     occurred_at.isoformat()[:19]
                 )
                 assert matching_events[0]["recorded_at"] is not None
+                assert datetime.fromisoformat(matching_events[0]["recorded_at"]) > datetime.fromisoformat(matching_events[0]["occurred_at"])
 
                 conflicts_read = client.get(
                     f"/api/v1/uncertainty/contradictions/{person_id}",
