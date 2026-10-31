@@ -18,7 +18,8 @@ def main() -> int:
     base = os.getenv("SOLENOS_PRODUCTION_API_BASE_URL", "https://solenosbackend-production.up.railway.app").strip().rstrip("/")
     token = os.getenv("GITHUB_TOKEN", "").strip()
     run_id = os.getenv("GITHUB_RUN_ID", "").strip()
-    if not base or not token or not run_id:
+    expected_commit = os.getenv("EXPECTED_DEPLOYMENT_COMMIT", "").strip()
+    if not base or not token or not run_id or not expected_commit:
         print("Missing production API URL, GITHUB_TOKEN or GITHUB_RUN_ID.", file=sys.stderr)
         return 2
     request = urllib.request.Request(
@@ -39,6 +40,9 @@ def main() -> int:
         return 1
 
     print(json.dumps(payload, indent=2))
+    if payload.get("deployment_commit") != expected_commit:
+        print("Production evaluation response is not from the expected deployed commit.", file=sys.stderr)
+        return 1
     expected = {
         "contradiction_preservation",
         "reporter_attribution",
