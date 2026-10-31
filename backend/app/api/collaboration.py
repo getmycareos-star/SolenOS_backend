@@ -1449,15 +1449,42 @@ def _production_qwen_evaluation_cases() -> list[dict]:
     ]
 
 
+def _verify_production_evaluation_run(request: Request) -> None:
+    """Accept only an in-progress manual workflow from this repository's main branch."""
+    supplied_token = request.headers.get("authorization", "")
+    scheme, _, token = supplied_token.partition(" ")
+    run_id = request.headers.get("x-github-run-id", "").strip()
+    if scheme.casefold() != "bearer" or not token or not run_id.isdigit():
+        raise HTTPException(status_code=404, detail="Not found")
+    github_request = urllib.request.Request(
+        "https://api.github.com/repos/getmycareos-star/SolenOS_backend/actions/runs/" + run_id,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": "Bearer " + token,
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(github_request, timeout=8.0) as response:
+            run = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        raise HTTPException(status_code=403, detail="Production evaluation workflow could not be authenticated.") from exc
+    repository = (run.get("repository") or {}).get("full_name")
+    if not (
+        repository == "getmycareos-star/SolenOS_backend"
+        and run.get("event") == "workflow_dispatch"
+        and run.get("path") == ".github/workflows/production-qwen-evaluation.yml"
+        and run.get("head_branch") == "main"
+        and run.get("status") == "in_progress"
+    ):
+        raise HTTPException(status_code=403, detail="Only the in-progress production evaluation workflow on main is authorised.")
+
+
 @router.post("/assistant/evaluate-production")
 def evaluate_deployed_qwen(request: Request):
     """Run synthetic-only acceptance probes against the currently deployed local model."""
-    configured_token = os.getenv("SOLENOS_QWEN_EVAL_TOKEN", "").strip()
-    supplied_token = request.headers.get("authorization", "")
-    scheme, _, supplied = supplied_token.partition(" ")
-    if not configured_token or scheme.casefold() != "bearer" or not secrets.compare_digest(supplied, configured_token):
-        raise HTTPException(status_code=404, detail="Not found")
-
+    _verify_production_evaluation_run(request)
     readiness = qwen_readiness_status(force=True)
     if not readiness.get("available"):
         raise HTTPException(status_code=503, detail={
