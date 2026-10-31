@@ -125,6 +125,7 @@ jobs:
         id: postgres_benchmark
         continue-on-error: true
         run: |
+          set -o pipefail
           python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_1000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
       - name: Verify persisted care history survives PostgreSQL server restart
@@ -246,12 +247,20 @@ jobs:
               db.commit()
           engine.dispose()
 
-          containers = subprocess.check_output(
-              ["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"],
+          container_rows = subprocess.check_output(
+              ["docker", "ps", "-a", "--format", "{{.ID}} {{.Image}}"],
               text=True,
           ).strip().splitlines()
+          containers = [
+              row.split(maxsplit=1)[0]
+              for row in container_rows
+              if len(row.split(maxsplit=1)) == 2 and "postgres" in row.split(maxsplit=1)[1].lower()
+          ]
           if not containers:
-              raise SystemExit("PostgreSQL service container was not found.")
+              raise SystemExit(
+                  "PostgreSQL service container was not found; "
+                  f"visible containers: {container_rows}"
+              )
           subprocess.run(["docker", "restart", containers[0]], check=True)
 
           last_error = None
