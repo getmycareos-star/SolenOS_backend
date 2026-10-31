@@ -4,6 +4,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.core.config import get_settings
 from app.core.database_config import configure_database_url, is_railway_runtime
+from app.core.db_observability import install_sqlalchemy_observability
 
 settings = get_settings()
 RAILWAY_RUNTIME = is_railway_runtime()
@@ -12,6 +13,7 @@ database_url = configure_database_url(settings.database_url, railway_runtime=RAI
 # SQLite-only connection arguments must not leak into PostgreSQL.
 connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
 engine = create_engine(database_url, connect_args=connect_args, pool_pre_ping=True)
+install_sqlalchemy_observability(engine)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
