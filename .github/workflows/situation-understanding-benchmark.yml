@@ -1,7 +1,8 @@
 name: Messy-care benchmark gate
 
 on:
-  # Qualification runs on main only; no pull-request or feature-branch execution.
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
   workflow_dispatch:
