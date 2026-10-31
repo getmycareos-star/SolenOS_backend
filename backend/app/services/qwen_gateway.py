@@ -6,12 +6,17 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
+_READINESS_CACHE: dict[str, object] = {"checked_at": 0.0, "result": None}
 
 
 def get_ollama_config() -> tuple[str, str, float]:
@@ -114,10 +119,15 @@ def qwen_chat(
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         method="POST",
     )
+    started = time.monotonic()
+    failure_category = None
+    failure_reason = None
     try:
         with urllib.request.urlopen(request, timeout=timeout or configured_timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
+        failure_category = "upstream_http_error"
+        failure_reason = f"http_{exc.code}"
         # Ollama uses HTTP 404 for an absent model. Preserve this actionable
         # operational distinction without exposing upstream response contents.
         if exc.code == 404:
@@ -129,45 +139,44 @@ def qwen_chat(
                 marker in str(upstream_error).casefold()
                 for marker in ("not found", "not installed", "does not exist")
             ):
+                failure_category = "model_not_installed"
+                failure_reason = "configured_model_missing"
+                _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
                 raise HTTPException(
                     status_code=503,
-                    detail="SolenOS local Qwen model is not installed; no model response was generated.",
+                    detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
                 ) from exc
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(
             status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
+            detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
         ) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="SolenOS local Qwen returned an invalid response; no model response was generated.",
-        ) from exc
+        failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except TimeoutError as exc:
-        raise HTTPException(
-            status_code=504,
-            detail="SolenOS local Qwen timed out; no model response was generated.",
-        ) from exc
+        failure_category, failure_reason = "inference_timeout", "socket_timeout"
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=504, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except urllib.error.URLError as exc:
         if isinstance(getattr(exc, "reason", None), TimeoutError):
-            raise HTTPException(
-                status_code=504,
-                detail="SolenOS local Qwen timed out; no model response was generated.",
-            ) from exc
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
+            failure_category, failure_reason = "inference_timeout", "url_timeout"
+            _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+            raise HTTPException(status_code=504, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
+        failure_category, failure_reason = "runtime_unreachable", type(getattr(exc, "reason", exc)).__name__
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (ValueError, OSError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen is unavailable; no model response was generated.",
-        ) from exc
+        failure_category, failure_reason = "runtime_error", type(exc).__name__
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     content = result.get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
-        raise HTTPException(
-            status_code=503,
-            detail="SolenOS local Qwen returned no usable response.",
-        )
+        failure_category, failure_reason = "empty_model_response", "missing_message_content"
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    _log_inference_result(model, started, timeout or configured_timeout, None, None)
     return content.strip()
 
 
@@ -251,6 +260,75 @@ def extract_review_candidates(
 
 
 
+def _log_inference_result(model: str, started: float, timeout: float, error_category: str | None, failure_reason: str | None) -> None:
+    """Emit metadata only. Never include prompts, replies, identifiers, or care content."""
+    elapsed_ms = round((time.monotonic() - started) * 1000)
+    logger.info(json.dumps({
+        "event": "qwen_inference",
+        "model": model,
+        "duration_ms": elapsed_ms,
+        "timeout_seconds": timeout,
+        "timed_out": error_category == "inference_timeout",
+        "upstream_error_category": error_category,
+        "failure_reason": failure_reason,
+        "outcome": "failed" if error_category else "succeeded",
+    }, separators=(",", ":")))
+
+
+def qwen_installation_status() -> dict:
+    """Read the atomic startup state file without exposing host paths or log contents."""
+    state_path = os.getenv("QWEN_INSTALL_STATE_FILE", "/tmp/qwen-installation-status.json")
+    try:
+        with open(state_path, "r", encoding="utf-8") as handle:
+            state = json.load(handle)
+        status = state.get("state")
+        if status not in {"not_started", "downloading", "installed", "failed"}:
+            raise ValueError("invalid_state")
+        return {
+            "state": status,
+            "model": str(state.get("model") or get_ollama_config()[1]),
+            "updated_at": state.get("updated_at"),
+            "failure_reason": state.get("failure_reason") if status == "failed" else None,
+        }
+    except FileNotFoundError:
+        return {"state": "not_started", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "updated_at": None, "failure_reason": None}
+    except Exception:
+        logger.exception("Could not read Qwen installation state")
+        return {"state": "failed", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "updated_at": None, "failure_reason": "state_file_unreadable"}
+
+
+def qwen_readiness_status(force: bool = False) -> dict:
+    """Require both installed-model inventory and a bounded real inference."""
+    now = time.monotonic()
+    cached_at = float(_READINESS_CACHE.get("checked_at") or 0.0)
+    cached = _READINESS_CACHE.get("result")
+    if not force and cached and now - cached_at < 15.0:
+        return dict(cached)
+    installation = qwen_installation_status()
+    try:
+        base, model, timeout = get_ollama_config()
+        request = urllib.request.Request(base + "/api/tags", headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(request, timeout=min(timeout, 5.0)) as response:
+            inventory = json.loads(response.read().decode("utf-8"))
+        names = [str(item.get("name", "")) for item in inventory.get("models", []) if isinstance(item, dict)]
+        if model not in names:
+            result = {"available": False, "state": "model_not_installed", "model": model, "installation": installation, "failure_reason": "configured_model_missing"}
+        else:
+            qwen_chat(
+                [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
+                timeout=min(timeout, 12.0),
+                options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
+            )
+            result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {"reason": "readiness_inference_failed"}
+        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
+    except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
+        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "installation": installation, "failure_reason": type(exc).__name__, "error_category": "runtime_unreachable"}
+    _READINESS_CACHE.update({"checked_at": now, "result": result})
+    return dict(result)
+
+
 def qwen_runtime_status() -> dict:
     """Confirm the configured model is actually served by the local Ollama runtime."""
     base, model, timeout = get_ollama_config()
@@ -278,6 +356,7 @@ def qwen_runtime_status() -> dict:
         )
     return {
         "available": True,
+        "installation": qwen_installation_status(),
         "model": model,
         "provider": "local_ollama",
         "inference_api": "ollama_native_http",
