@@ -192,3 +192,55 @@ def test_inference_timeout_is_classified_and_logged_without_content(monkeypatch,
     assert '"failure_reason":"socket_timeout"' in output
     assert "synthetic secret prompt" not in output
     assert "synthetic timeout detail" not in output
+
+
+
+def test_production_evaluation_accepts_only_the_active_main_branch_manual_workflow(monkeypatch):
+    from starlette.requests import Request
+    from app.api import collaboration
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return json.dumps({
+                "repository": {"full_name": "getmycareos-star/SolenOS_backend"},
+                "event": "workflow_dispatch",
+                "path": ".github/workflows/production-qwen-evaluation.yml",
+                "head_branch": "main",
+                "status": "in_progress",
+            }).encode("utf-8")
+
+    monkeypatch.setattr(collaboration.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/assistant/evaluate-production",
+        "headers": [
+            (b"authorization", b"Bearer ephemeral-github-token"),
+            (b"x-github-run-id", b"123456"),
+        ],
+    })
+    collaboration._verify_production_evaluation_run(request)
+
+
+def test_production_evaluation_rejects_non_workflow_bearer(monkeypatch):
+    from fastapi import HTTPException
+    from starlette.requests import Request
+    from app.api import collaboration
+
+    request = Request({
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/assistant/evaluate-production",
+        "headers": [(b"authorization", b"Bearer arbitrary-token"), (b"x-github-run-id", b"123")],
+    })
+    monkeypatch.setattr(collaboration.urllib.request, "urlopen", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must reject before API call")))
+    try:
+        collaboration._verify_production_evaluation_run(request)
+    except HTTPException as exc:
+        assert exc.status_code == 403
+    else:
+        raise AssertionError("Unauthorised production evaluation request must be rejected")
