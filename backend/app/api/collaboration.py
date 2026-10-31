@@ -1391,8 +1391,15 @@ def claim_share_intake(share_id: str, db: Session = Depends(get_db)):
 
 @router.get("/assistant/status")
 def qwen_assistant_status():
-    # Inventory status is deliberately distinct from inference readiness.
-    return qwen_runtime_status()
+    # Existing consumers receive operational truth, never inventory-only optimism.
+    inventory = qwen_runtime_status()
+    readiness = qwen_readiness_status()
+    return {
+        **inventory,
+        "available": bool(readiness.get("available")),
+        "operational": bool(readiness.get("available")),
+        "readiness": readiness,
+    }
 
 
 @router.get("/assistant/readiness")
