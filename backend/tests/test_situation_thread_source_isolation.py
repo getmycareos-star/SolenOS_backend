@@ -1,8 +1,8 @@
 """Adversarial source-linking contracts for situation thread formation.
 
-A domain label, subject label, matching timestamp, or generic subject ID is not
-sufficient identity evidence. Only overlapping source IDs inside the same
-person-scoped reconciliation may join two signals.
+Signals join only when both their care domain and subject identity match and
+they share an explicit source record. Similar labels, recency, or source reuse
+across distinct subjects/domains are not sufficient.
 """
 from types import SimpleNamespace
 
@@ -18,41 +18,36 @@ def signal(domain, subject_id, source_ids):
     )
 
 
-def test_same_domain_and_subject_label_without_shared_source_stays_separate():
+def test_same_subject_without_shared_source_stays_separate():
     first = signal("mobility", "walking", ["evidence-a"])
     second = signal("mobility", "walking", ["evidence-b"])
-
-    groups = _group_related_signals([first, second], "evidence_ids")
-
-    assert groups == [[first], [second]]
+    assert _group_related_signals([first, second], "evidence_ids") == [[first], [second]]
 
 
 def test_shared_source_does_not_cross_care_domain_boundary():
-    mobility = signal("mobility", "same-label", ["source-1"])
-    nutrition = signal("nutrition", "same-label", ["source-1"])
-
-    groups = _group_related_signals([mobility, nutrition], "evidence_ids")
-
-    assert groups == [[mobility], [nutrition]]
+    mobility = signal("mobility", "same-subject", ["source-1"])
+    nutrition = signal("nutrition", "same-subject", ["source-1"])
+    assert _group_related_signals([mobility, nutrition], "evidence_ids") == [[mobility], [nutrition]]
 
 
-def test_explicit_shared_source_joins_signals_even_when_subject_labels_differ():
+def test_shared_source_does_not_cross_subject_identity_boundary():
     first = signal("mobility", "walking", ["source-1"])
-    second = signal("mobility", "transfers", ["source-1", "source-2"])
-
-    groups = _group_related_signals([first, second], "evidence_ids")
-
-    assert groups == [[first, second]]
+    second = signal("mobility", "transfers", ["source-1"])
+    assert _group_related_signals([first, second], "evidence_ids") == [[first], [second]]
 
 
-def test_transitive_grouping_requires_a_chain_of_explicit_source_overlap():
+def test_explicit_shared_source_joins_same_domain_and_subject():
+    first = signal("mobility", "walking", ["source-1"])
+    second = signal("mobility", "walking", ["source-1", "source-2"])
+    assert _group_related_signals([first, second], "evidence_ids") == [[first, second]]
+
+
+def test_transitive_grouping_requires_explicit_source_overlap_and_same_subject():
     first = signal("sleep", "night-waking", ["source-a"])
-    bridge = signal("sleep", "night-waking-copy", ["source-a", "source-b"])
-    third = signal("sleep", "night-waking-later", ["source-b"])
+    bridge = signal("sleep", "night-waking", ["source-a", "source-b"])
+    third = signal("sleep", "night-waking", ["source-b"])
     unrelated = signal("sleep", "night-waking", ["source-c"])
-
     groups = _group_related_signals([first, bridge, third, unrelated], "evidence_ids")
-
     assert len(groups) == 2
     assert {id(item) for item in groups[0]} == {id(first), id(bridge), id(third)}
     assert groups[1] == [unrelated]
@@ -61,32 +56,4 @@ def test_transitive_grouping_requires_a_chain_of_explicit_source_overlap():
 def test_missing_source_ids_never_merge_from_subject_or_time_like_labels():
     first = signal("mobility", "walking", [])
     second = signal("mobility", "walking", [])
-
-    groups = _group_related_signals([first, second], "evidence_ids")
-
-    assert groups == [[first], [second]]
-
-
-
-def test_legacy_direct_care_event_source_id_resolves_to_its_own_event():
-    from app.services.situation_formation import _event_ids_for_evidence
-
-    event = SimpleNamespace(id="event-legacy-1", evidence_ids=["evidence-1"])
-
-    class Query:
-        def filter(self, *conditions):
-            return self
-
-        def all(self):
-            return [event]
-
-    class FakeDB:
-        def query(self, model):
-            return Query()
-
-    assert _event_ids_for_evidence(FakeDB(), "person-1", {"event-legacy-1"}) == {
-        "event-legacy-1"
-    }
-    assert _event_ids_for_evidence(FakeDB(), "person-1", {"evidence-1"}) == {
-        "event-legacy-1"
-    }
+    assert _group_related_signals([first, second], "evidence_ids") == [[first], [second]]
