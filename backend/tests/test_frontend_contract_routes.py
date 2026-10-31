@@ -17,6 +17,7 @@ from app.models.collaboration import CommunityPost, ConversationMessage, Evidenc
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 
 main_module = importlib.import_module("app.main")
+collaboration = importlib.import_module("app.api.collaboration")
 app = main_module.app
 engine = create_engine(
     "sqlite:///:memory:",
@@ -59,6 +60,7 @@ def setup_client(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", lambda force=False: {"available": True, "state": "ready", "model": "qwen-test", "installation": {"state": "installed"}, "failure_reason": None})
     client = TestClient(app)
     first = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Family caregiver"})
     second = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Other caregiver"})
