@@ -126,7 +126,8 @@ jobs:
         id: postgres_benchmark
         continue-on-error: true
         run: |
-          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
+          set -o pipefail
+          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml 2>&1 | tee /tmp/postgres-messy-care.log
 
       - name: Enforce PostgreSQL benchmark execution
         if: always()
