@@ -149,7 +149,7 @@ jobs:
 
           with open("production-observation.jsonl", "w", encoding="utf-8") as stream:
               for record in records:
-                  stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\\n")
+                  stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
           if failures:
               raise SystemExit("Production endpoint probes failed: " + ", ".join(failures))
           PY
