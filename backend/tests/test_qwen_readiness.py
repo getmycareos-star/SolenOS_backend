@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.qwen_readiness
+
 import json
 from contextlib import contextmanager
 
