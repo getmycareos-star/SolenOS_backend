@@ -92,3 +92,72 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
+
+      - name: Capture privacy-safe endpoint observation
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import time
+          import urllib.error
+          import urllib.request
+          from datetime import datetime, timezone
+
+          base = "https://solenosbackend-production.up.railway.app"
+          probes = [
+              ("health", "GET", "/health", 200, None),
+              ("readiness", "GET", "/ready", 200, None),
+              ("openapi", "GET", "/openapi.json", 200, None),
+              ("situation_auth_boundary", "GET", "/api/situation", 401, None),
+              ("companion_auth_boundary", "POST", "/api/v1/conversation/message", 401, b"{}"),
+          ]
+          records = []
+          failures = []
+          for name, method, path, expected, body in probes:
+              request = urllib.request.Request(
+                  base + path,
+                  data=body,
+                  headers={"Content-Type": "application/json"} if body else {},
+                  method=method,
+              )
+              started = time.monotonic()
+              actual = None
+              error_category = None
+              try:
+                  with urllib.request.urlopen(request, timeout=25) as response:
+                      actual = response.status
+              except urllib.error.HTTPError as exc:
+                  actual = exc.code
+              except Exception as exc:
+                  error_category = type(exc).__name__
+              duration_ms = round((time.monotonic() - started) * 1000, 3)
+              record = {
+                  "observed_at": datetime.now(timezone.utc).isoformat(),
+                  "probe": name,
+                  "method": method,
+                  "route": path,
+                  "expected_status": expected,
+                  "actual_status": actual,
+                  "duration_ms": duration_ms,
+                  "outcome": "pass" if actual == expected and error_category is None else "fail",
+                  "error_category": error_category,
+              }
+              records.append(record)
+              print(json.dumps(record, separators=(",", ":"), sort_keys=True))
+              if record["outcome"] != "pass":
+                  failures.append(name)
+
+          with open("production-observation.jsonl", "w", encoding="utf-8") as stream:
+              for record in records:
+                  stream.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\\n")
+          if failures:
+              raise SystemExit("Production endpoint probes failed: " + ", ".join(failures))
+          PY
+      - name: Retain production observation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solenos-production-observation-${{ github.run_id }}
+          path: production-observation.jsonl
+          if-no-files-found: ignore
+          retention-days: 90

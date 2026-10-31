@@ -33,6 +33,7 @@ from app.services.lcr_context import build_lcr_context, format_lcr_context_for_p
 from app.core.config import get_settings
 from app.core.database import Base, database_schema_differences, get_db, SessionLocal
 from app.api.open_loops import router as open_loops_router, open_loop_maintenance_loop
+from app.request_metrics import RequestMetricsMiddleware
 from app.models.anonymous_session import AnonymousSession
 from app.models.interaction_session import InteractionSession
 from app.models.care import Person, Caregiver, Evidence, CareEvent
@@ -509,6 +510,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
 situation_router = APIRouter()
 
 
+def _index_event_ids_by_evidence(events) -> dict[str, list[str]]:
+    """Index event links once so care-record hydration does not scan every event per evidence row."""
+    indexed: dict[str, list[str]] = {}
+    for event in events:
+        for evidence_id in event.evidence_ids or []:
+            indexed.setdefault(str(evidence_id), []).append(str(event.id))
+    return indexed
+
+
 @situation_router.get("/situation")
 def get_situation(
     request: Request,
@@ -567,12 +577,14 @@ def get_situation(
         evidence.id: index
         for index, evidence in enumerate(evidence_rows)
     }
+    # Build the evidence-to-event index once. The previous per-evidence scan
+    # traversed every event, making returning-caregiver hydration O(E × V).
+    # This keeps the same exact links while making the projection O(E + V).
+    event_ids_by_evidence = _index_event_ids_by_evidence(events)
+
     observations = []
     for evidence in evidence_rows:
-        linked_event_ids = [
-            event.id for event in events
-            if evidence.id in (event.evidence_ids or [])
-        ]
+        linked_event_ids = event_ids_by_evidence.get(str(evidence.id), [])
         observations.append({
             "id": evidence.id,
             "raw_text": evidence.source_text,
@@ -1330,6 +1342,9 @@ async def post_situation(
 
 
 app.include_router(situation_router, prefix="/api")
+
+# Install outermost so auth failures, routing failures and normal responses are all measured.
+app.add_middleware(RequestMetricsMiddleware)
 
 
 @app.get("/health")

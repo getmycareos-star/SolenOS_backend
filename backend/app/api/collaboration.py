@@ -2027,7 +2027,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     )
     emergency = bool(emergency_pattern.search(user_text))
     if not emergency:
-        _ensure_companion_available()
+        # qwen_readiness_status performs bounded network I/O. Run it outside the
+        # ASGI event loop so a slow/unreachable model cannot stall unrelated API
+        # requests (including care-record hydration).
+        await asyncio.to_thread(_ensure_companion_available)
     evidence_ids: list[str] = []
     source_context: list[str] = []
     event_context: list[str] = []
