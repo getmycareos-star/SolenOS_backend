@@ -19,10 +19,10 @@ concurrency:
 jobs:
   live-qwen-evaluation:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     env:
       OLLAMA_BASE_URL: http://127.0.0.1:11434
-      OLLAMA_MODEL: qwen2.5:0.5b
+      OLLAMA_MODEL: qwen3.5:4b
       OLLAMA_TIMEOUT_SECONDS: "180"
       OLLAMA_NUM_CTX: "1024"
       OLLAMA_NUM_PREDICT: "96"
@@ -51,7 +51,7 @@ jobs:
           done
           docker logs solenos-live-ollama
           exit 1
-      - name: Download the default-model candidate under test
+      - name: Download the configured production model under test
         run: docker exec solenos-live-ollama ollama pull "$OLLAMA_MODEL"
       - name: Run live Companion inference evaluation
         run: python -m pytest backend/live_tests/test_companion_live_inference.py -q -s
