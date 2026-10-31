@@ -33,7 +33,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Wait for Railway to deploy this exact commit and pass real model readiness
+      - name: Wait for Railway to deploy this exact commit and finish model installation
         run: |
           python - <<'PY'
           import json
@@ -44,26 +44,38 @@ jobs:
 
           base = os.environ["SOLENOS_PRODUCTION_API_BASE_URL"].rstrip("/")
           expected = os.environ["EXPECTED_DEPLOYMENT_COMMIT"]
-          url = base + "/api/v1/assistant/readiness"
+          url = base + "/api/v1/assistant/installation"
           for attempt in range(90):
               request = urllib.request.Request(url, headers={"Accept": "application/json"})
               try:
                   with urllib.request.urlopen(request, timeout=12) as response:
                       status = json.loads(response.read().decode("utf-8"))
-                  if status.get("deployment_commit") == expected and status.get("available") is True:
+                  installation = status.get("installation") or {}
+                  if status.get("deployment_commit") == expected and status.get("available") is True and installation.get("state") == "installed":
                       print(json.dumps({
                           "deployment_commit": status.get("deployment_commit"),
                           "model": status.get("model"),
-                          "installation": status.get("installation"),
-                          "state": status.get("state"),
+                          "installation": installation,
                       }, indent=2))
                       break
-                  print(f"Waiting for exact deployment/readiness: attempt={attempt + 1}, commit={status.get('deployment_commit')}, available={status.get('available')}")
+                  print(f"Waiting for exact deployment/model installation: attempt={attempt + 1}, commit={status.get('deployment_commit')}, available={status.get('available')}, installation={installation.get('state')}")
               except (urllib.error.URLError, TimeoutError, ValueError) as exc:
-                  print(f"Production readiness endpoint not ready: {type(exc).__name__}")
+                  print(f"Production installation endpoint not ready: {type(exc).__name__}")
               time.sleep(10)
           else:
-              raise SystemExit("Railway did not deploy this exact commit with a ready Qwen model within 15 minutes.")
+              raise SystemExit("Railway did not deploy this exact commit with the configured model installed within 15 minutes.")
+
+          readiness_request = urllib.request.Request(base + "/api/v1/assistant/readiness", headers={"Accept": "application/json"})
+          with urllib.request.urlopen(readiness_request, timeout=20) as response:
+              readiness = json.loads(response.read().decode("utf-8"))
+          print(json.dumps({
+              "deployment_commit": readiness.get("deployment_commit"),
+              "model": readiness.get("model"),
+              "available": readiness.get("available"),
+              "failure_reason": readiness.get("failure_reason"),
+          }, indent=2))
+          if readiness.get("deployment_commit") != expected or readiness.get("available") is not True:
+              raise SystemExit("Installed model failed the bounded production inference-readiness probe.")
           PY
       - name: Run acceptance tests against deployed model
         run: python backend/scripts/run_production_qwen_evaluation.py
