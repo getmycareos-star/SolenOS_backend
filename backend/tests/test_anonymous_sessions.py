@@ -682,7 +682,8 @@ def test_evidence_id_filter_is_bounded_deduplicated_and_person_scoped():
         headers=headers,
     )
     assert filtered.status_code == 200, filtered.text
-    assert [item["id"] for item in filtered.json()] == [first["id"], second["id"]]
+    assert {item["id"] for item in filtered.json()} == {first["id"], second["id"]}
+    assert len(filtered.json()) == 2, "duplicate requested IDs must not duplicate returned evidence"
     assert all(item["person_id"] == owner["person"]["id"] for item in filtered.json())
     assert "Other person's private evidence" not in filtered.text
 
