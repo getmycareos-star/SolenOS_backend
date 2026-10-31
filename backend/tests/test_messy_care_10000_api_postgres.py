@@ -408,6 +408,18 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                 assert correction_item["supersedes_observation_id"] == original_observation_id
                 assert correction_item["correction_rationale"]
 
+                # Every journey independently attempts a cross-person read
+                # using another caregiver's server-issued session.
+                other_person_index = (person_index + 1) % LIFECYCLE_PERSON_COUNT
+                denied = client.get(
+                    f"/api/v1/evidence/{person_id}",
+                    headers={"Authorization": f"Bearer {tokens[other_person_index]}"},
+                )
+                assert denied.status_code == 403, (
+                    f"journey={journey_index} cross-person isolation: "
+                    f"{denied.status_code} {denied.text}"
+                )
+
                 expected_by_person[person_index].append({
                     "journey_index": journey_index,
                     "event_time": event_time,
@@ -474,19 +486,6 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                                 item["first_evidence_id"], item["correction_evidence_id"]
                             }
 
-                    # A different person's caregiver session must not read
-                    # this person's evidence. This is an authorization boundary,
-                    # not an assertion about role permissions within one family.
-                    other_person_index = (person_index + 1) % LIFECYCLE_PERSON_COUNT
-                    denied = client.get(
-                        f"/api/v1/evidence/{person_id}",
-                        headers={"Authorization": f"Bearer {tokens[other_person_index]}"},
-                    )
-                    assert denied.status_code == 403, (
-                        f"cross-person isolation person={person_index}: "
-                        f"{denied.status_code} {denied.text}"
-                    )
-
         print(f"MESSY_CARE_POSTGRES_FULL_API_LIFECYCLES_EXECUTED={LIFECYCLE_COUNT}")
         print(f"MESSY_CARE_POSTGRES_LIFECYCLE_PERSONS={LIFECYCLE_PERSON_COUNT}")
         print(f"MESSY_CARE_POSTGRES_LIFECYCLE_EVIDENCE_RECORDS={LIFECYCLE_COUNT * 2}")
@@ -495,7 +494,7 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
         print(f"MESSY_CARE_POSTGRES_LIFECYCLE_UNRESOLVED_CONTRADICTIONS={LIFECYCLE_COUNT}")
         print(f"MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTIONS={LIFECYCLE_COUNT}")
         print(f"MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION_GROUPS={LIFECYCLE_PERSON_COUNT}")
-        print(f"MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION_CHECKS={LIFECYCLE_PERSON_COUNT}")
+        print(f"MESSY_CARE_POSTGRES_LIFECYCLE_CROSS_PERSON_ISOLATION_CHECKS={LIFECYCLE_COUNT}")
         print("MESSY_CARE_POSTGRES_LIFECYCLE_LCR_PROJECTION=PASS")
         print("MESSY_CARE_POSTGRES_LIFECYCLE_FRESH_SESSION=PASS")
         print("MESSY_CARE_POSTGRES_LIFECYCLE_EVENT_REPORTED_RECORDED_TIME=PASS")
