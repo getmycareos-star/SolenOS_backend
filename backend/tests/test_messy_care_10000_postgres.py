@@ -527,11 +527,11 @@ def test_10000_postgres_longitudinal_cases_survive_fresh_session_reconstruction(
             assert len(selected) == CASES_PER_HISTORY
             assert all(row.person_id == selected_person for row in selected)
 
-        print(f"MESSY_CARE_POSTGRES_CASES_DECLARED={EXPECTED_CASE_COUNT}")
-        print(f"MESSY_CARE_POSTGRES_CASES_PERSISTED={len(persisted)}")
-        print(f"MESSY_CARE_POSTGRES_HISTORIES={HISTORY_COUNT}")
-        print(f"MESSY_CARE_POSTGRES_FAMILIES={len(FAMILIES)}")
-        print("MESSY_CARE_POSTGRES_FRESH_SESSION_RETRIEVAL=PASS")
+        print(f"\nMESSY_CARE_POSTGRES_CASES_DECLARED={EXPECTED_CASE_COUNT}")
+        print(f"\nMESSY_CARE_POSTGRES_CASES_PERSISTED={len(persisted)}")
+        print(f"\nMESSY_CARE_POSTGRES_HISTORIES={HISTORY_COUNT}")
+        print(f"\nMESSY_CARE_POSTGRES_FAMILIES={len(FAMILIES)}")
+        print("\nMESSY_CARE_POSTGRES_FRESH_SESSION_RETRIEVAL=PASS")
     finally:
         with Session() as cleanup:
             person_ids = [person.id for person in people]
