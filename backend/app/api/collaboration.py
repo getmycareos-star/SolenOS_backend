@@ -1405,7 +1405,10 @@ def qwen_assistant_status():
 @router.get("/assistant/readiness")
 def qwen_assistant_readiness():
     # Performs a bounded real inference; API/DB readiness remains independent.
-    return qwen_readiness_status(force=True)
+    return {
+        **qwen_readiness_status(force=True),
+        "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
+    }
 
 
 def _production_qwen_evaluation_cases() -> list[dict]:
@@ -1473,7 +1476,7 @@ def _verify_production_evaluation_run(request: Request) -> None:
     repository = (run.get("repository") or {}).get("full_name")
     if not (
         repository == "getmycareos-star/SolenOS_backend"
-        and run.get("event") == "workflow_dispatch"
+        and run.get("event") in {"workflow_dispatch", "push"}
         and run.get("path") == ".github/workflows/production-qwen-evaluation.yml"
         and run.get("head_branch") == "main"
         and run.get("status") == "in_progress"
@@ -1544,6 +1547,7 @@ def evaluate_deployed_qwen(request: Request):
 
     return {
         "model": readiness.get("model"),
+        "deployment_commit": os.getenv("RAILWAY_GIT_COMMIT_SHA"),
         "runtime": "deployed_railway_ollama",
         "synthetic_only": True,
         "care_record_accessed": False,
