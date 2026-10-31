@@ -366,6 +366,7 @@ jobs:
               "CAPTURE_TO_LCR_DELAYED_EVIDENCE_TIME=PASS",
               "CAPTURE_TO_LCR_LCR_RETRIEVAL=PASS",
               "CAPTURE_TO_LCR_ACCESS_ISOLATION=PASS",
+              "CAPTURE_TO_LCR_FOREIGN_WRITE_DENIALS=PASS",
           )
           missing = [marker for marker in required_markers if marker not in log]
           print(f"POSTGRES_MESSY_CARE_REQUIRED_MARKERS_MISSING={len(missing)}")
