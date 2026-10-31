@@ -419,6 +419,9 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 ]
                 assert len(matching_conflicts) == 1
                 assert matching_conflicts[0]["resolution_status"] == "unresolved"
+                assert set(matching_conflicts[0]["evidence_ids"]) == {
+                    evidence_id, counter_evidence_id
+                }
 
                 corrections_read = client.get(
                     f"/api/v1/corrections/{person_id}", headers=headers
@@ -430,6 +433,7 @@ def test_10000_complete_caregiver_capture_to_lcr_journeys():
                 ]
                 assert len(matching_corrections) == 1
                 assert matching_corrections[0]["original_text"] == source_text
+                assert matching_corrections[0]["corrected_text"] != source_text
 
                 lcr_response = client.get(
                     "/api/v1/care-continuity/context?limit_per_source=50",
