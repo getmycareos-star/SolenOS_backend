@@ -259,3 +259,19 @@ def test_production_evaluation_rejects_non_workflow_bearer(monkeypatch):
         assert exc.status_code == 403
     else:
         raise AssertionError("Unauthorised production evaluation request must be rejected")
+
+
+def test_readiness_endpoint_uses_cached_probe_instead_of_forcing_each_request(monkeypatch):
+    from app.api import collaboration
+
+    calls = []
+
+    def readiness(force=False):
+        calls.append(force)
+        return {"available": False, "state": "unavailable", "failure_reason": "inference_timeout"}
+
+    monkeypatch.setattr(collaboration, "qwen_readiness_status", readiness)
+    result = collaboration.qwen_assistant_readiness()
+
+    assert result["failure_reason"] == "inference_timeout"
+    assert calls == [False]
