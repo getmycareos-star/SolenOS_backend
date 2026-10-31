@@ -1183,7 +1183,7 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
         else "updated"
     )
-    db.add(CareStateRevision(
+    db.execute(insert(state_revisions).values(
         id=str(uuid.uuid4()),
         person_id=person_id,
         target_type=target_type,
@@ -1198,7 +1198,7 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
             json.dumps(data.get("after_value"), sort_keys=True, default=str)
             if data.get("after_value") is not None else None
         ),
-        evidence_ids=data.get("evidence_ids") or [],
+        evidence_ids=json.dumps(data.get("evidence_ids") or []),
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
