@@ -1,4 +1,4 @@
-"""1,000 end-to-end PostgreSQL uncertainty-analysis API journeys.
+"""10,000 end-to-end PostgreSQL uncertainty-analysis API journeys.
 
 Each labelled scenario crosses the real FastAPI route, bearer-session authorization,
 SQLAlchemy persistence, and a second HTTP retrieval request. No handler or database
@@ -30,10 +30,10 @@ pytestmark = pytest.mark.skipif(
     reason="requires disposable PostgreSQL benchmark database",
 )
 
-SCENARIO_COUNT = 1_000
+SCENARIO_COUNT = 10_000
 
 
-def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
+def test_10000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex[:10]
@@ -74,7 +74,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
         headers = {"Authorization": f"Bearer {token}"}
         with TestClient(app) as client:
             for index in range(SCENARIO_COUNT):
-                subject_id = f"api-thread-{index:04d}"
+                subject_id = f"api-thread-{index:05d}"
                 response = client.post(
                     "/api/v1/uncertainty/analyze",
                     headers=headers,
@@ -83,7 +83,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
                         "subject_type": ("appointment", "medication", "mobility", "nutrition", "sleep")[index % 5],
                         "subject_id": subject_id,
                         "field": "current_status",
-                        "claim": f"Independently labelled missing-status scenario {index:04d}.",
+                        "claim": f"Independently labelled missing-status scenario {index:05d}.",
                         "task": "recommendation",
                         "evidence_ids": [],
                         "required_fields": ["current_status"],
@@ -105,7 +105,7 @@ def test_1000_real_api_scenarios_persist_and_retrieve_unknown_care_threads():
             assert listed.status_code == 200, listed.text
             rows = listed.json()
             actual_subjects = {row["subject_id"] for row in rows}
-            expected_subjects = {f"api-thread-{index:04d}" for index in range(SCENARIO_COUNT)}
+            expected_subjects = {f"api-thread-{index:05d}" for index in range(SCENARIO_COUNT)}
             assert expected_subjects <= actual_subjects
             assert len(expected_subjects & actual_subjects) == SCENARIO_COUNT
             for row in rows:
