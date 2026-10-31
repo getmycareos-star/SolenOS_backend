@@ -1,6 +1,14 @@
 name: Deployed Qwen production acceptance
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/app/services/qwen_gateway.py"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/main.py"
+      - "start-with-qwen.sh"
+      - ".github/workflows/production-qwen-evaluation.yml"
   workflow_dispatch:
 
 permissions:
@@ -14,19 +22,48 @@ concurrency:
 jobs:
   production-acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_RUN_ID: ${{ github.run_id }}
+      EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
       SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Verify workflow identity is available
+      - name: Wait for Railway to deploy this exact commit and pass real model readiness
         run: |
-          test -n "$GITHUB_TOKEN"
-          test -n "$GITHUB_RUN_ID"
+          python - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.error
+          import urllib.request
+
+          base = os.environ["SOLENOS_PRODUCTION_API_BASE_URL"].rstrip("/")
+          expected = os.environ["EXPECTED_DEPLOYMENT_COMMIT"]
+          url = base + "/api/v1/assistant/readiness"
+          for attempt in range(90):
+              request = urllib.request.Request(url, headers={"Accept": "application/json"})
+              try:
+                  with urllib.request.urlopen(request, timeout=12) as response:
+                      status = json.loads(response.read().decode("utf-8"))
+                  if status.get("deployment_commit") == expected and status.get("available") is True:
+                      print(json.dumps({
+                          "deployment_commit": status.get("deployment_commit"),
+                          "model": status.get("model"),
+                          "installation": status.get("installation"),
+                          "state": status.get("state"),
+                      }, indent=2))
+                      break
+                  print(f"Waiting for exact deployment/readiness: attempt={attempt + 1}, commit={status.get('deployment_commit')}, available={status.get('available')}")
+              except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                  print(f"Production readiness endpoint not ready: {type(exc).__name__}")
+              time.sleep(10)
+          else:
+              raise SystemExit("Railway did not deploy this exact commit with a ready Qwen model within 15 minutes.")
+          PY
       - name: Run acceptance tests against deployed model
         run: python backend/scripts/run_production_qwen_evaluation.py
