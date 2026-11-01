@@ -18,7 +18,7 @@ permissions:
 
 concurrency:
   group: deployed-qwen-production-acceptance
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   production-acceptance:
@@ -30,6 +30,8 @@ jobs:
           SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
