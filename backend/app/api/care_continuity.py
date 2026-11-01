@@ -937,7 +937,7 @@ WRITABLE = {
     "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
     "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
     "record-change-sets": {"care_record_id", "operation", "status", "reason", "provenance_id"},
-    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "provenance_id"},
+    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "evidence_ids", "provenance_id"},
     "corrections": {"care_record_id", "target_type", "target_id", "original_value", "corrected_value", "correction_reason", "status", "provenance_id", "effective_at"},
     "amendments": {"care_record_id", "amendment_type", "reason", "status", "provenance_id"},
     "amendment-items": {"amendment_id", "target_type", "target_id", "field_name", "before_value", "after_value"},
@@ -1170,8 +1170,15 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
     # target-specific change into that shared revision envelope in the same
     # transaction, so every recorded change is historically reconstructable.
     raw_evidence_ids = data.get("evidence_ids") or []
+    # The reflected legacy table stores JSONList values as TEXT. The generic
+    # write path serializes the request list before invoking this helper.
+    if isinstance(raw_evidence_ids, str):
+        try:
+            raw_evidence_ids = json.loads(raw_evidence_ids)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array") from exc
     if not isinstance(raw_evidence_ids, list):
-        raise HTTPException(status_code=422, detail="evidence_ids must be a list")
+        raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
     state_latest = db.query(func.max(CareStateRevision.revision_number)).filter(
         CareStateRevision.person_id == person_id,
         CareStateRevision.target_type == target_type,
