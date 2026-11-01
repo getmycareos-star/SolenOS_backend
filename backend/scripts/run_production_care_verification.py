@@ -82,23 +82,24 @@ def main() -> int:
             }, ensure_ascii=False)
         )
 
-    status, readiness = call("GET", "/api/v1/assistant/readiness", timeout=20)
-    readiness = require(status, 200, readiness, "Qwen inference readiness")
-    if (
-        readiness.get("available") is not True
-        or readiness.get("model") != model
-        or readiness.get("deployment_commit") != deployment_commit
-    ):
-        raise RuntimeError(
-            "Bounded real-inference readiness failed or disagrees with installed model: "
-            + json.dumps({
-                "available": readiness.get("available"),
-                "model": readiness.get("model"),
-                "deployment_commit": readiness.get("deployment_commit"),
-                "failure_reason": readiness.get("failure_reason"),
-                "error_category": readiness.get("error_category"),
-            }, ensure_ascii=False)
-        )
+    readiness_status, readiness = call("GET", "/api/v1/assistant/readiness", timeout=20)
+    readiness_ok = (
+        readiness_status == 200
+        and readiness.get("available") is True
+        and readiness.get("model") == model
+        and readiness.get("deployment_commit") == deployment_commit
+    )
+    readiness_failure = None if readiness_ok else {
+        "http_status": readiness_status,
+        "available": readiness.get("available"),
+        "model": readiness.get("model"),
+        "deployment_commit": readiness.get("deployment_commit"),
+        "failure_reason": readiness.get("failure_reason"),
+        "error_category": readiness.get("error_category"),
+    }
+    # Do not let a failed 12-second readiness probe suppress the real Companion
+    # request. Record the probe result, then make one separately timed request
+    # through the authenticated caregiver route without changing server timeouts.
 
     run_tag = f"synthetic-production-verification-{RUN_ID}-{uuid.uuid4().hex[:8]}"
     first_token = None
@@ -238,6 +239,21 @@ def main() -> int:
             timeout=60,
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000)
+        if status != 200:
+            print(json.dumps({
+                "production_deployment_commit": deployment_commit,
+                "qwen_model": model,
+                "qwen_installation_state": installation.get("state"),
+                "qwen_readiness": "PASS" if readiness_ok else "FAIL",
+                "qwen_readiness_failure": readiness_failure,
+                "authenticated_companion_http_status": status,
+                "companion_inference_duration_ms": elapsed_ms,
+                "companion_error_response": companion,
+            }, indent=2, ensure_ascii=False), file=sys.stderr)
+            raise RuntimeError(
+                "Authenticated Companion inference failed: "
+                + json.dumps(companion, ensure_ascii=False)[:3000]
+            )
         companion = require(status, 200, companion, "Authenticated Companion inference")
         reply = companion.get("reply")
         if (
@@ -264,7 +280,8 @@ def main() -> int:
             "production_deployment_commit": deployment_commit,
             "qwen_model": model,
             "qwen_installation_state": installation.get("state"),
-            "qwen_readiness": "PASS",
+            "qwen_readiness": "PASS" if readiness_ok else "FAIL",
+            "qwen_readiness_failure": readiness_failure,
             "synthetic_evidence_write": "PASS",
             "fresh_session_retrieval": "PASS",
             "old_token_revocation": "PASS",
@@ -278,7 +295,7 @@ def main() -> int:
             "synthetic_evidence_id": evidence_id,
             "synthetic_record_retained_for_audit": True,
         }, indent=2, ensure_ascii=False))
-        return 0
+        return 0 if readiness_ok else 1
     finally:
         # Revocation preserves the labelled synthetic audit fixture and its evidence.
         for token in (active_token, second_token):
