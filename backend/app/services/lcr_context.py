@@ -12,7 +12,7 @@ from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import MetaData, Table, desc, inspect, or_, select
+from sqlalchemy import Enum as SAEnum, MetaData, String, Table, cast, desc, inspect, or_, select
 from sqlalchemy.orm import Session
 
 
@@ -235,6 +235,31 @@ SEARCH_FIELDS = {
     "appointments": ["title", "status", "description"],
 }
 
+def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
+    """Build safe lexical predicates for reflected text and enum columns.
+
+    PostgreSQL ENUM values do not support ILIKE directly. Cast enum labels to
+    VARCHAR before applying the same bounded, parameterized lexical search.
+    Non-text, non-enum fields are deliberately excluded.
+    """
+    predicates = []
+    for name in SEARCH_FIELDS.get(source_name, []):
+        if name not in table.c:
+            continue
+        column = table.c[name]
+        if isinstance(column.type, SAEnum):
+            searchable_column = cast(column, String)
+        elif isinstance(column.type, String):
+            searchable_column = column
+        else:
+            continue
+        predicates.extend(
+            searchable_column.ilike(f"%{term}%")
+            for term in terms
+        )
+    return predicates
+
+
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "topic", "perspective_text",
@@ -341,16 +366,10 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
         if source_name == "uncertainty_assessments" and "is_active" in table.c:
             statement = statement.where(table.c.is_active.is_(True))
-        search_columns = [
-            table.c[name] for name in SEARCH_FIELDS.get(source_name, [])
-            if name in table.c
-        ]
-        if terms and search_columns:
-            statement = statement.where(or_(*[
-                column.ilike(f"%{term}%")
-                for column in search_columns
-                for term in terms
-            ]))
+        if terms:
+            search_predicates = _text_search_predicates(table, source_name, terms)
+            if search_predicates:
+                statement = statement.where(or_(*search_predicates))
         order_field = next((name for name in spec["order"] if name in table.c), None)
         if order_field:
             statement = statement.order_by(desc(table.c[order_field]))
