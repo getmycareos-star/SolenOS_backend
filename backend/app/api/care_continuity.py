@@ -1172,21 +1172,21 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
     raw_evidence_ids = data.get("evidence_ids") or []
     if not isinstance(raw_evidence_ids, list):
         raise HTTPException(status_code=422, detail="evidence_ids must be a list")
-    state_revisions = _table(db, "care_state_revisions")
-    state_latest = db.execute(
-        select(func.max(state_revisions.c.revision_number)).where(
-            state_revisions.c.person_id == person_id,
-            state_revisions.c.target_type == target_type,
-            state_revisions.c.target_id == target_id,
-        )
-    ).scalar_one_or_none()
+    state_latest = db.query(func.max(CareStateRevision.revision_number)).filter(
+        CareStateRevision.person_id == person_id,
+        CareStateRevision.target_type == target_type,
+        CareStateRevision.target_id == target_id,
+    ).scalar()
     operation = str(data.get("operation") or "").strip().casefold()
     change_kind = (
         "created" if operation in {"create", "created", "add", "added"}
         else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
         else "updated"
     )
-    db.execute(insert(state_revisions).values(
+    # Use the ORM model so its JSONList TypeDecorator serializes correctly on
+    # both SQLite regression tests and PostgreSQL production databases. Reflected
+    # SQL tables lose that custom binder and cannot safely bind a Python list.
+    db.add(CareStateRevision(
         id=str(uuid.uuid4()),
         person_id=person_id,
         target_type=target_type,
