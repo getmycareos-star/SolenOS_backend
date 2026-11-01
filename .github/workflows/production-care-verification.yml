@@ -1,0 +1,35 @@
+name: Production Qwen and care persistence verification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/scripts/run_production_care_verification.py"
+      - ".github/workflows/production-care-verification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solenos-production-care-verification
+  cancel-in-progress: false
+
+jobs:
+  production-verification:
+    name: Verify installed Qwen, Companion, persistence and isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify production model installation and authenticated care lifecycle
+        run: python backend/scripts/run_production_care_verification.py
