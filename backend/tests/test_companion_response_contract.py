@@ -124,10 +124,10 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         # exposed to the model as user-facing context.
         assert event_id not in user_payload
         assert "slept poorly last night" in user_payload
-        assert "Event date: 2026-10-25T20:00:00" in user_payload
-        assert "Reported date: 2026-10-26T08:15:00" in user_payload
-        assert "Collected date: 2026-10-26T08:20:00" in user_payload
-        assert "Reported by: Daughter" in user_payload
+        assert "event date: 2026-10-25T20:00:00" in user_payload
+        assert "reported date: 2026-10-26T08:15:00" in user_payload
+        assert "collected date: 2026-10-26T08:20:00" in user_payload
+        assert "reported by: Daughter" in user_payload
         assert captured["options"]["num_predict"] > 32
 
         db = TestingSessionLocal()
