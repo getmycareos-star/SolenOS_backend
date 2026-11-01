@@ -97,3 +97,23 @@ def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
         qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
     assert error.value.status_code == 502
     assert error.value.detail["code"] == "empty_model_response"
+
+
+def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: ("http://ollama.internal", "qwen3.5:4b", 2.0),
+    )
+
+    def capture_request(request, **kwargs):
+        captured.update(json.loads(request.data.decode("utf-8")))
+        return FakeResponse(json.dumps({"message": {"content": "The synthetic record is unverified."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+    answer = qwen_gateway.qwen_chat([{"role": "user", "content": "Summarize the synthetic record."}])
+
+    assert answer == "The synthetic record is unverified."
+    assert captured["model"] == "qwen3.5:4b"
+    assert captured["think"] is False
