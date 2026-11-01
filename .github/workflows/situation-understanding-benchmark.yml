@@ -133,6 +133,9 @@ jobs:
         if: always()
         run: |
           test -f /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_API_IDENTITIES_BOOTSTRAPPED=1000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_API_ADDITIONAL_CAREGIVERS_CREATED=2000" /tmp/postgres-messy-care.log
+          grep -F "MESSY_CARE_POSTGRES_API_IDENTITY_BOOTSTRAP=PASS" /tmp/postgres-messy-care.log
           grep -F "MESSY_CARE_POSTGRES_FULL_API_LIFECYCLES_EXECUTED=10000" /tmp/postgres-messy-care.log
           grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_EVIDENCE_RECORDS=20000" /tmp/postgres-messy-care.log
           grep -F "MESSY_CARE_POSTGRES_LIFECYCLE_OBSERVATIONS=20000" /tmp/postgres-messy-care.log
