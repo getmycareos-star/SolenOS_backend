@@ -68,18 +68,34 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
     try:
         token, person_id, caregiver_id = create_session(client)
         db = TestingSessionLocal()
+        event_time = datetime(2026, 10, 25, 20, 0, tzinfo=timezone.utc)
+        report_time = datetime(2026, 10, 26, 8, 15, tzinfo=timezone.utc)
         event = CareEvent(
             person_id=person_id,
             event_type="observation",
             status="recorded",
-            occurred_at=__import__("datetime").datetime(2026, 10, 25, 20, 0),
+            occurred_at=event_time,
             title="Sleep observation",
             description="Caregiver reported that the person slept poorly last night.",
             evidence_ids=[],
             created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
         )
-        db.add(event)
+        evidence = Evidence(
+            id="companion-time-evidence",
+            person_id=person_id,
+            type="note",
+            source_text="Caregiver reported a synthetic sleep observation.",
+            uploaded_by_caregiver_id=caregiver_id,
+            occurred_at=event_time,
+            occurred_at_timezone="UTC",
+            reported_at=report_time,
+            collected_at=report_time + timedelta(minutes=5),
+            reported_by_label="Daughter",
+            original_author="Daughter",
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([event, evidence])
         db.commit()
         event_id = event.id
         db.close()
@@ -108,6 +124,10 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         # exposed to the model as user-facing context.
         assert event_id not in user_payload
         assert "slept poorly last night" in user_payload
+        assert "Event date: 2026-10-25T20:00:00+00:00" in user_payload
+        assert "Reported date: 2026-10-26T08:15:00+00:00" in user_payload
+        assert "Collected date: 2026-10-26T08:20:00+00:00" in user_payload
+        assert "Reported by: Daughter" in user_payload
         assert captured["options"]["num_predict"] > 32
 
         db = TestingSessionLocal()
