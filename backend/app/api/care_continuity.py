@@ -1166,6 +1166,48 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
+    # Aggregate as-of reconstruction reads care_state_revisions. Mirror this
+    # target-specific change into that shared revision envelope in the same
+    # transaction, so every recorded change is historically reconstructable.
+    raw_evidence_ids = data.get("evidence_ids") or []
+    if not isinstance(raw_evidence_ids, list):
+        raise HTTPException(status_code=422, detail="evidence_ids must be a list")
+    state_revisions = _table(db, "care_state_revisions")
+    state_latest = db.execute(
+        select(func.max(state_revisions.c.revision_number)).where(
+            state_revisions.c.person_id == person_id,
+            state_revisions.c.target_type == target_type,
+            state_revisions.c.target_id == target_id,
+        )
+    ).scalar_one_or_none()
+    operation = str(data.get("operation") or "").strip().casefold()
+    change_kind = (
+        "created" if operation in {"create", "created", "add", "added"}
+        else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
+        else "updated"
+    )
+    db.execute(insert(state_revisions).values(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        target_type=target_type,
+        target_id=target_id,
+        revision_number=int(state_latest or 0) + 1,
+        change_kind=change_kind,
+        before_state=(
+            json.dumps(data.get("before_value"), sort_keys=True, default=str)
+            if data.get("before_value") is not None else None
+        ),
+        after_state=(
+            json.dumps(data.get("after_value"), sort_keys=True, default=str)
+            if data.get("after_value") is not None else None
+        ),
+        evidence_ids=[
+            str(value).strip() for value in raw_evidence_ids
+            if isinstance(value, (str, int)) and str(value).strip()
+        ],
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
 
 
 @router.get("/context")
