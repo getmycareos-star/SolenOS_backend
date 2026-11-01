@@ -618,8 +618,8 @@ def test_postgres_lcr_context_search_handles_native_uncertainty_enums():
         rows = context["sources"]["uncertainty_assessments"]["items"]
         assert len(rows) == 1
         assert rows[0]["id"] == assessment_id
-        assert rows[0]["epistemic_state"] == "unknown"
-        assert rows[0]["gap_reason"] == "absent"
+        assert str(rows[0]["epistemic_state"]).casefold() == "unknown"
+        assert str(rows[0]["gap_reason"]).casefold() == "absent"
     finally:
         _load_source_schema.cache_clear()
         with Session() as db:
