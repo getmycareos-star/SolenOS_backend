@@ -199,6 +199,7 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
 
                 reporter_response = client.post(
                     "/api/v1/caregivers",
+                    headers={"Authorization": f"Bearer {token}"},
                     json={
                         "name": f"Reporter {person_index:04d}",
                         "relationship": "Family",
@@ -212,6 +213,7 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                 )
                 observer_response = client.post(
                     "/api/v1/caregivers",
+                    headers={"Authorization": f"Bearer {token}"},
                     json={
                         "name": f"Observer {person_index:04d}",
                         "relationship": "Family",
