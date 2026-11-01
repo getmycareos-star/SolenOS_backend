@@ -627,6 +627,11 @@ def test_postgres_lcr_context_search_handles_native_uncertainty_enums():
                 UncertaintyAssessment.id == assessment_id,
                 UncertaintyAssessment.person_id == person_id,
             ).delete(synchronize_session=False)
+            # Person creation also emits a durable care-state revision. Remove this
+            # test-owned dependent row before deleting the person (the FK is RESTRICT).
+            db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+            ).delete(synchronize_session=False)
             db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
             db.commit()
         engine.dispose()
