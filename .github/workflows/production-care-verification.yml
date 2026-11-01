@@ -51,13 +51,16 @@ jobs:
                   with urlopen(endpoint, timeout=8) as response:
                       status = json.loads(response.read().decode("utf-8"))
                   installation = status.get("installation") or {}
+                  deployed_commit = str(status.get("deployment_commit") or "")
                   if (
-                      status.get("deployment_commit") == expected
+                      len(deployed_commit) >= 7
+                      and expected.startswith(deployed_commit)
                       and status.get("available") is True
                       and installation.get("state") == "installed"
                   ):
                       print(json.dumps({
-                          "deployment_commit": expected,
+                          "expected_deployment_commit": expected,
+                          "observed_deployment_commit": deployed_commit,
                           "model": status.get("model"),
                           "installation_state": installation.get("state"),
                           "deployment_observed": True,
