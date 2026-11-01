@@ -27,13 +27,17 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
       GITHUB_RUN_ID: ${{ github.run_id }}
-      EXPECTED_DEPLOYMENT_COMMIT: ${{ github.sha }}
-      SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
+          SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Identify the deployed production-code commit
+        run: |
+          expected=$(git log -1 --format=%H HEAD -- backend/app/services/qwen_gateway.py backend/app/api/collaboration.py backend/app/main.py start-with-qwen.sh)
+          test -n "$expected"
+          echo "EXPECTED_DEPLOYMENT_COMMIT=$expected" >> "$GITHUB_ENV"
       - name: Wait for Railway to deploy this exact commit and finish model installation
         run: |
           python - <<'PY'
