@@ -127,7 +127,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python -m pytest backend/tests/test_lcr_context_enum_search.py backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
+          python -m pytest backend/tests/test_lcr_context_enum_search.py backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_capture_to_lcr_10000_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
       - name: Enforce complete 10,000-journey capture-to-LCR evidence
         if: always()
@@ -378,6 +378,16 @@ jobs:
               "MESSY_CARE_POSTGRES_API_ASSESSMENTS_RETRIEVED=10000",
               "MESSY_CARE_POSTGRES_API_FRESH_HTTP_SESSION=PASS",
               "MESSY_CARE_POSTGRES_API_CROSS_PERSON_ISOLATION=PASS",
+              "CAPTURE_TO_LCR_JOURNEYS_EXECUTED=10000",
+              "CAPTURE_TO_LCR_ATTRIBUTION=PASS",
+              "CAPTURE_TO_LCR_OBSERVER_SUBJECT_ATTRIBUTION=PASS",
+              "CAPTURE_TO_LCR_CONTRADICTIONS_PRESERVED=PASS",
+              "CAPTURE_TO_LCR_CORRECTION_LINEAGE=PASS",
+              "CAPTURE_TO_LCR_HISTORICAL_RECONSTRUCTION=PASS",
+              "CAPTURE_TO_LCR_DELAYED_EVIDENCE_TIME=PASS",
+              "CAPTURE_TO_LCR_LCR_RETRIEVAL=PASS",
+              "CAPTURE_TO_LCR_ACCESS_ISOLATION=PASS",
+              "CAPTURE_TO_LCR_FOREIGN_WRITE_DENIALS=PASS",
           )
           missing = [marker for marker in required_markers if marker not in log]
           print(f"POSTGRES_MESSY_CARE_REQUIRED_MARKERS_MISSING={len(missing)}")
