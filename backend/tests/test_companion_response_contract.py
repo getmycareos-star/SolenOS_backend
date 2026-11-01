@@ -109,7 +109,7 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
         data = response.json()
         assert data["ai_generated"] is False
         assert data["guard_verdict"] == "blocked"
-        assert "only one dated sleep observation" in data["reply"]
+        assert "two separate days" in data["reply"]
         assert "not enough to establish" in data["reply"]
         assert data["written_to_lcr"] is False
         assert data["persistence"] == "conversation_only"
