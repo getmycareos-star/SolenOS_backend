@@ -144,11 +144,9 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
     12-item projection can still expose the newest correction on every pass.
     A fresh SQLAlchemy session verifies every row after each ten-journey group.
     """
-    import hashlib
     from datetime import datetime, timedelta, timezone
 
-    from app.models.anonymous_session import AnonymousSession
-    from app.models.care import Caregiver, Evidence, Person
+    from app.models.care import Evidence
     from app.models.care_continuity import EvidenceObservation
     from app.models.uncertainty import Contradiction
 
@@ -177,50 +175,60 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
         return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
     try:
-        # Identity fixtures are synthetic and isolated. All care evidence,
-        # observations, corrections, contradictions and projections below use
-        # the real application HTTP routes and bearer-session authorization.
-        people = []
-        caregivers = []
-        sessions = []
-        for person_index in range(LIFECYCLE_PERSON_COUNT):
-            person_id = f"lcr10kp-{suffix}-{person_index:04d}"
-            uploader_id = f"lcr10ku-{suffix}-{person_index:04d}"
-            reporter_id = f"lcr10kr-{suffix}-{person_index:04d}"
-            observer_id = f"lcr10ko-{suffix}-{person_index:04d}"
-            token = f"lcr10k-token-{suffix}-{person_index:04d}"
-            person_ids.append(person_id)
-            caregiver_ids[person_index] = {
-                "uploader": uploader_id,
-                "reporter": reporter_id,
-                "observer": observer_id,
-            }
-            tokens[person_index] = token
-            people.append(Person(id=person_id, name=f"Synthetic LCR benchmark person {person_index:04d}"))
-            caregivers.extend([
-                Caregiver(id=uploader_id, name=f"Uploader {person_index:04d}", relationship="family", person_id=person_id),
-                Caregiver(id=reporter_id, name=f"Reporter {person_index:04d}", relationship="family", person_id=person_id),
-                Caregiver(id=observer_id, name=f"Observer {person_index:04d}", relationship="family", person_id=person_id),
-            ])
-
-        with Session() as db:
-            db.add_all(people)
-            db.flush()
-            db.add_all(caregivers)
-            db.flush()
-            for person_index, person_id in enumerate(person_ids):
-                token = tokens[person_index]
-                sessions.append(AnonymousSession(
-                    id=f"lcr10ks-{suffix}-{person_index:04d}",
-                    person_id=person_id,
-                    caregiver_id=caregiver_ids[person_index]["uploader"],
-                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
-                    expires_at=now + timedelta(hours=8),
-                ))
-            db.add_all(sessions)
-            db.commit()
-
+        # Every person and bearer capability is created by the actual
+        # anonymous-session bootstrap endpoint. Additional independent reporter
+        # and observer identities are created through the caregiver API.
         with TestClient(app) as client:
+            for person_index in range(LIFECYCLE_PERSON_COUNT):
+                bootstrap = client.post(
+                    "/api/v1/sessions/anonymous",
+                    json={
+                        "name": f"Synthetic LCR benchmark person {suffix}-{person_index:04d}",
+                        "caregiver_name": f"Uploader {person_index:04d}",
+                    },
+                )
+                assert bootstrap.status_code == 201, (
+                    f"identity={person_index} bootstrap: {bootstrap.status_code} {bootstrap.text}"
+                )
+                identity = bootstrap.json()
+                person_id = identity["person"]["id"]
+                uploader_id = identity["caregiver"]["id"]
+                token = identity["access_token"]
+                person_ids.append(person_id)
+                tokens[person_index] = token
+
+                reporter_response = client.post(
+                    "/api/v1/caregivers",
+                    json={
+                        "name": f"Reporter {person_index:04d}",
+                        "relationship": "Family",
+                        "person_id": person_id,
+                        "timezone": "UTC",
+                    },
+                )
+                assert reporter_response.status_code == 200, (
+                    f"identity={person_index} reporter: "
+                    f"{reporter_response.status_code} {reporter_response.text}"
+                )
+                observer_response = client.post(
+                    "/api/v1/caregivers",
+                    json={
+                        "name": f"Observer {person_index:04d}",
+                        "relationship": "Family",
+                        "person_id": person_id,
+                        "timezone": "UTC",
+                    },
+                )
+                assert observer_response.status_code == 200, (
+                    f"identity={person_index} observer: "
+                    f"{observer_response.status_code} {observer_response.text}"
+                )
+                caregiver_ids[person_index] = {
+                    "uploader": uploader_id,
+                    "reporter": reporter_response.json()["id"],
+                    "observer": observer_response.json()["id"],
+                }
+
             for journey_index in range(LIFECYCLE_COUNT):
                 person_index = journey_index // LIFECYCLES_PER_PERSON
                 local_index = journey_index % LIFECYCLES_PER_PERSON
@@ -509,6 +517,9 @@ def test_10000_real_api_care_to_lcr_lifecycles_preserve_provenance_and_isolation
                                 item["first_evidence_id"], item["correction_evidence_id"]
                             }
 
+        print(f"\nMESSY_CARE_POSTGRES_API_IDENTITIES_BOOTSTRAPPED={LIFECYCLE_PERSON_COUNT}")
+        print(f"\nMESSY_CARE_POSTGRES_API_ADDITIONAL_CAREGIVERS_CREATED={LIFECYCLE_PERSON_COUNT * 2}")
+        print("\nMESSY_CARE_POSTGRES_API_IDENTITY_BOOTSTRAP=PASS")
         print(f"\nMESSY_CARE_POSTGRES_FULL_API_LIFECYCLES_EXECUTED={LIFECYCLE_COUNT}")
         print(f"\nMESSY_CARE_POSTGRES_LIFECYCLE_PERSONS={LIFECYCLE_PERSON_COUNT}")
         print(f"\nMESSY_CARE_POSTGRES_LIFECYCLE_EVIDENCE_RECORDS={LIFECYCLE_COUNT * 2}")
