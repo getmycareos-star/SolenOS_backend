@@ -116,6 +116,12 @@ def qwen_chat(
         "keep_alive": os.getenv("OLLAMA_KEEP_ALIVE", "30m"),
         "options": bounded_options,
     }
+    # Qwen 3.x models expose a separate reasoning channel. On CPU-constrained
+    # Railway, that channel can consume the generation budget without producing
+    # user-visible message.content. Companion requires an answer, not a hidden
+    # reasoning trace, so explicitly disable thinking for Qwen 3.x only.
+    if model.casefold().startswith("qwen3"):
+        payload["think"] = False
     if response_format is not None:
         payload["format"] = response_format
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
