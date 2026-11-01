@@ -8,6 +8,7 @@ on:
       - "backend/app/api/collaboration.py"
       - "backend/app/main.py"
       - "start-with-qwen.sh"
+      - "backend/scripts/run_production_qwen_evaluation.py"
       - ".github/workflows/production-qwen-evaluation.yml"
   workflow_dispatch:
 
