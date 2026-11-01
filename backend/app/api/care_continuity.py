@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
-from app.models.care import Evidence, Caregiver, CareEvent
+from app.models.care import Evidence, Caregiver, CareEvent, Person
 from app.models.collaboration import EvidenceUpload
 from app.models.change import Situation as SituationModel
 from app.models.observation_coverage import ObservationCoverage
@@ -1141,6 +1141,11 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
     if spec is None:
         raise HTTPException(status_code=422, detail="This target type does not have an LCR revision schema")
     revision_table_name, target_column = spec
+    # Serialize revision-number allocation for this care recipient. Both the
+    # target-specific history and aggregate as-of history must advance together;
+    # locking the person row prevents concurrent writers from allocating the
+    # same revision number for the same target.
+    db.query(Person.id).filter(Person.id == person_id).with_for_update().one()
     revision_table = _table(db, revision_table_name)
     target_id = data.get("target_id")
     latest = db.execute(
