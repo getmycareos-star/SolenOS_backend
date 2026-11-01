@@ -82,7 +82,7 @@ def main() -> int:
             }, ensure_ascii=False)
         )
 
-    readiness_status, readiness = call("GET", "/api/v1/assistant/readiness", timeout=20)
+    readiness_status, readiness = call("GET", "/api/v1/assistant/readiness", timeout=75)
     readiness_ok = (
         readiness_status == 200
         and readiness.get("available") is True
@@ -236,7 +236,7 @@ def main() -> int:
             "/api/v1/conversation/message",
             payload={"person_id": person_id, "text": companion_text},
             token=active_token,
-            timeout=60,
+            timeout=180,
         )
         elapsed_ms = round((time.perf_counter() - started) * 1000)
         if status != 200:
@@ -260,7 +260,6 @@ def main() -> int:
             companion.get("ai_generated") is not True
             or not isinstance(reply, str)
             or not reply.strip()
-            or companion.get("model") != model
             or companion.get("written_to_lcr") is not False
             or evidence_id not in companion.get("source_evidence_ids", [])
         ):

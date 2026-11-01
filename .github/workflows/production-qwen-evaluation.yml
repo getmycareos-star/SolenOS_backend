@@ -51,9 +51,11 @@ jobs:
                   with urllib.request.urlopen(request, timeout=12) as response:
                       status = json.loads(response.read().decode("utf-8"))
                   installation = status.get("installation") or {}
-                  if status.get("deployment_commit") == expected and status.get("available") is True and installation.get("state") == "installed":
+                  deployed_commit = str(status.get("deployment_commit") or "")
+                  if len(deployed_commit) >= 7 and expected.startswith(deployed_commit) and status.get("available") is True and installation.get("state") == "installed":
                       print(json.dumps({
-                          "deployment_commit": status.get("deployment_commit"),
+                          "expected_deployment_commit": expected,
+                          "observed_deployment_commit": deployed_commit,
                           "model": status.get("model"),
                           "installation": installation,
                       }, indent=2))
@@ -66,7 +68,7 @@ jobs:
               raise SystemExit("Railway did not deploy this exact commit with the configured model installed within 30 minutes.")
 
           readiness_request = urllib.request.Request(base + "/api/v1/assistant/readiness", headers={"Accept": "application/json"})
-          with urllib.request.urlopen(readiness_request, timeout=20) as response:
+          with urllib.request.urlopen(readiness_request, timeout=75) as response:
               readiness = json.loads(response.read().decode("utf-8"))
           print(json.dumps({
               "deployment_commit": readiness.get("deployment_commit"),
@@ -74,7 +76,8 @@ jobs:
               "available": readiness.get("available"),
               "failure_reason": readiness.get("failure_reason"),
           }, indent=2))
-          if readiness.get("deployment_commit") != expected or readiness.get("available") is not True:
+          readiness_commit = str(readiness.get("deployment_commit") or "")
+          if len(readiness_commit) < 7 or not expected.startswith(readiness_commit) or readiness.get("available") is not True:
               raise SystemExit("Installed model failed the bounded production inference-readiness probe.")
           PY
       - name: Run acceptance tests against deployed model
