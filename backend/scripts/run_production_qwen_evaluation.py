@@ -40,7 +40,8 @@ def main() -> int:
         return 1
 
     print(json.dumps(payload, indent=2))
-    if payload.get("deployment_commit") != expected_commit:
+    observed_commit = str(payload.get("deployment_commit") or "")
+    if len(observed_commit) < 7 or not expected_commit.startswith(observed_commit):
         print("Production evaluation response is not from the expected deployed commit.", file=sys.stderr)
         return 1
     expected = {
