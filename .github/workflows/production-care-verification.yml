@@ -6,6 +6,9 @@ on:
     paths:
       - "backend/scripts/run_production_care_verification.py"
       - "backend/app/services/lcr_context.py"
+      - "backend/app/services/qwen_gateway.py"
+      - "backend/app/api/collaboration.py"
+      - "start-with-qwen.sh"
       - ".github/workflows/production-care-verification.yml"
   workflow_dispatch:
 
