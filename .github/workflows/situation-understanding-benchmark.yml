@@ -127,7 +127,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          python -m pytest backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
+          python -m pytest backend/tests/test_lcr_context_enum_search.py backend/tests/test_pattern_postgres_integration.py backend/tests/test_messy_care_10000_postgres.py backend/tests/test_messy_care_10000_api_postgres.py backend/tests/test_longitudinal_messy_care_benchmark.py -q -s --junitxml=/tmp/postgres-longitudinal.xml | tee /tmp/postgres-messy-care.log
 
       - name: Enforce complete 10,000-journey capture-to-LCR evidence
         if: always()
