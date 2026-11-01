@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "backend/scripts/run_production_care_verification.py"
+      - "backend/app/services/lcr_context.py"
       - ".github/workflows/production-care-verification.yml"
   workflow_dispatch:
 
@@ -19,17 +20,60 @@ jobs:
   production-verification:
     name: Verify installed Qwen, Companion, persistence and isolation
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     env:
       SOLENOS_PRODUCTION_API_BASE_URL: https://solenosbackend-production.up.railway.app
     steps:
       - name: Check out main
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Wait for the latest backend source commit to reach production
+        run: |
+          expected_commit="$(git log -1 --format=%H -- backend/app)"
+          echo "Expected deployed application commit: ${expected_commit}"
+          python - "${expected_commit}" <<'PY'
+          import json
+          import sys
+          import time
+          from urllib.request import urlopen
+
+          expected = sys.argv[1]
+          endpoint = "https://solenosbackend-production.up.railway.app/api/v1/assistant/installation"
+          for attempt in range(60):
+              try:
+                  with urlopen(endpoint, timeout=8) as response:
+                      status = json.loads(response.read().decode("utf-8"))
+                  installation = status.get("installation") or {}
+                  if (
+                      status.get("deployment_commit") == expected
+                      and status.get("available") is True
+                      and installation.get("state") == "installed"
+                  ):
+                      print(json.dumps({
+                          "deployment_commit": expected,
+                          "model": status.get("model"),
+                          "installation_state": installation.get("state"),
+                          "deployment_observed": True,
+                      }))
+                      raise SystemExit(0)
+                  print(json.dumps({
+                      "attempt": attempt + 1,
+                      "deployment_commit": status.get("deployment_commit"),
+                      "available": status.get("available"),
+                      "installation_state": installation.get("state"),
+                  }))
+              except Exception as exc:
+                  print(f"Production deployment not ready yet: {type(exc).__name__}: {exc}")
+              time.sleep(10)
+          raise SystemExit("Timed out waiting for the exact backend source commit and installed model.")
+          PY
 
       - name: Verify production model installation and authenticated care lifecycle
         run: python backend/scripts/run_production_care_verification.py
