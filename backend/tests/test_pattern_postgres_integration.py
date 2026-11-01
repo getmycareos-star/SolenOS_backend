@@ -573,3 +573,66 @@ def test_postgres_attribution_temporal_correction_threads_and_question_history_s
         # would violate the very integrity contract this test verifies. Keep this
         # uniquely suffixed fixture in the ephemeral database and dispose the engine.
         engine.dispose()
+
+
+def test_postgres_lcr_context_search_handles_native_uncertainty_enums():
+    """The shared LCR lexical search must cast PostgreSQL enum values before ILIKE."""
+    from app.core.uncertainty_enums import EpistemicState, GapReason
+    from app.models.uncertainty import UncertaintyAssessment
+    from app.services.lcr_context import _load_source_schema, build_lcr_context
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"lcr-enum-search-person-{suffix}"
+    assessment_id = f"lcr-enum-search-assessment-{suffix}"
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="PostgreSQL LCR enum-search fixture"))
+            db.flush()
+            db.add(UncertaintyAssessment(
+                id=assessment_id,
+                person_id=person_id,
+                subject_type="mobility",
+                subject_id="walking",
+                field="reported_status",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.ABSENT,
+                known_value="No verified status is documented.",
+                context=[],
+                evidence_ids=[],
+                is_active=True,
+            ))
+            db.commit()
+
+        # Reflect the migrated PostgreSQL enum types, not a SQLite approximation.
+        _load_source_schema.cache_clear()
+        with Session() as db:
+            context = build_lcr_context(
+                db,
+                person_id,
+                limit_per_source=10,
+                query="unknown absent",
+            )
+
+        rows = context["sources"]["uncertainty_assessments"]["items"]
+        assert len(rows) == 1
+        assert rows[0]["id"] == assessment_id
+        assert str(rows[0]["epistemic_state"]).casefold() == "unknown"
+        assert str(rows[0]["gap_reason"]).casefold() == "absent"
+    finally:
+        _load_source_schema.cache_clear()
+        with Session() as db:
+            db.query(UncertaintyAssessment).filter(
+                UncertaintyAssessment.id == assessment_id,
+                UncertaintyAssessment.person_id == person_id,
+            ).delete(synchronize_session=False)
+            # Person creation also emits a durable care-state revision. Remove this
+            # test-owned dependent row before deleting the person (the FK is RESTRICT).
+            db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id,
+            ).delete(synchronize_session=False)
+            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()

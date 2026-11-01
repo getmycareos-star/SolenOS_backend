@@ -11,7 +11,7 @@ def test_uncertainty_assessment_enum_is_cast_before_ilike():
         "uncertainty_assessments",
         metadata,
         Column("epistemic_state", SAEnum("known", "uncertain", "missing", name="epistemicstate")),
-        Column("gap_reason", Text),
+        Column("gap_reason", SAEnum("absent", "not_provided", name="gapreason")),
         Column("confidence", Float),
     )
 
@@ -19,7 +19,7 @@ def test_uncertainty_assessment_enum_is_cast_before_ilike():
     compiled = str(or_(*predicates).compile(dialect=postgresql.dialect()))
 
     assert "CAST(uncertainty_assessments.epistemic_state AS VARCHAR) ILIKE" in compiled
-    assert "uncertainty_assessments.gap_reason ILIKE" in compiled
+    assert "CAST(uncertainty_assessments.gap_reason AS VARCHAR) ILIKE" in compiled
     assert "confidence" not in compiled
 
 
