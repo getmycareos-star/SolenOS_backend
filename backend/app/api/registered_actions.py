@@ -179,6 +179,8 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         Action.suggestion_id == payload.suggestion_id,
     ).first()
     if existing:
+        if existing.registration_request_sha256 != fingerprint:
+            raise HTTPException(status_code=409, detail="This LCR suggestion is already registered with a different approved payload")
         return existing
     existing = db.query(Action).filter(
         Action.person_id == scoped_person_id,
@@ -249,6 +251,8 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
             Action.suggestion_id == payload.suggestion_id,
         ).first()
         if existing:
+            if existing.registration_request_sha256 != fingerprint:
+                raise HTTPException(status_code=409, detail="This LCR suggestion is already registered with a different approved payload")
             return existing
         existing = db.query(Action).filter(
             Action.person_id == scoped_person_id,
