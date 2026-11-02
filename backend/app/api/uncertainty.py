@@ -192,22 +192,47 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
     reconciliation_status = "not_run_decision_not_accepted"
     now = datetime.now(timezone.utc)
     if review.decision == "accepted":
-        if not question.claim_id:
-            raise HTTPException(status_code=422, detail="Acceptance requires a source-linked care assertion")
-        source_claim = engine.db.query(CareAssertion).filter(
-            CareAssertion.id == question.claim_id,
-            CareAssertion.person_id == engine.person_id,
-        ).with_for_update().first()
-        if source_claim is None or source_claim.subject_type != question.subject_type or source_claim.subject_id != question.subject_id:
-            raise HTTPException(status_code=409, detail="The linked source claim is unavailable or outside the question subject scope")
-        if source_claim.assertion_kind == "current_state" and review.review_after_days is None:
+        if question.status != "answered":
+            raise HTTPException(status_code=409, detail="Only a currently submitted answer can be accepted")
+        linked_gap_ids = set()
+        for context_item in question.context or []:
+            if not isinstance(context_item, dict):
+                continue
+            source_kind = str(context_item.get("source_kind") or context_item.get("kind") or "").strip().lower()
+            explicit_gap_id = context_item.get("information_gap_id")
+            source_id = context_item.get("source_id")
+            if isinstance(explicit_gap_id, str) and explicit_gap_id.strip():
+                linked_gap_ids.add(explicit_gap_id.strip())
+            elif source_kind in {"information_gap", "missing_information", "gap"} and isinstance(source_id, str) and source_id.strip():
+                linked_gap_ids.add(source_id.strip())
+        source_claim = None
+        if question.claim_id:
+            source_claim = engine.db.query(CareAssertion).filter(
+                CareAssertion.id == question.claim_id,
+                CareAssertion.person_id == engine.person_id,
+            ).with_for_update().first()
+            if source_claim is None or source_claim.subject_type != question.subject_type or source_claim.subject_id != question.subject_id:
+                raise HTTPException(status_code=409, detail="The linked source claim is unavailable or outside the question subject scope")
+        linked_gap = None
+        if len(linked_gap_ids) == 1:
+            linked_gap = engine.db.query(InformationGapModel).filter(
+                InformationGapModel.id == next(iter(linked_gap_ids)),
+                InformationGapModel.person_id == engine.person_id,
+                InformationGapModel.subject_type == question.subject_type,
+                InformationGapModel.subject_id == question.subject_id,
+            ).with_for_update().first()
+        if source_claim is None and linked_gap is None:
+            raise HTTPException(status_code=422, detail="Acceptance requires a linked same-person care assertion or an explicitly linked information gap")
+        field_name = source_claim.field if source_claim is not None else linked_gap.field
+        assertion_kind = source_claim.assertion_kind if source_claim is not None else "current_state"
+        if assertion_kind == "current_state" and review.review_after_days is None:
             raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires a caregiver-selected review window")
         resulting_assertion = CareAssertion(
             person_id=engine.person_id,
-            subject_type=source_claim.subject_type,
-            subject_id=source_claim.subject_id,
-            field=source_claim.field,
-            assertion_kind=source_claim.assertion_kind,
+            subject_type=question.subject_type,
+            subject_id=question.subject_id,
+            field=field_name,
+            assertion_kind=assertion_kind,
             asserted_value=answer_event.answer,
             source_label="Caregiver clarification response",
             source_text=answer_event.answer,
@@ -218,32 +243,15 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
             updated_by_caregiver_id=engine.caregiver_id,
         )
         engine.db.add(resulting_assertion)
-        # Resolve only a gap explicitly referenced by this question's persisted context.
-        # Never infer a gap link from a shared subject label alone.
-        linked_gap_ids = set()
-        for context_item in question.context or []:
-            if not isinstance(context_item, dict):
-                continue
-            source_kind = str(context_item.get("source_kind") or context_item.get("kind") or "").strip().lower()
-            source_id = context_item.get("source_id") or context_item.get("information_gap_id")
-            if source_kind in {"information_gap", "missing_information", "gap"} and isinstance(source_id, str) and source_id.strip():
-                linked_gap_ids.add(source_id.strip())
-        if len(linked_gap_ids) == 1:
-            linked_gap = engine.db.query(InformationGapModel).filter(
-                InformationGapModel.id == next(iter(linked_gap_ids)),
-                InformationGapModel.person_id == engine.person_id,
-                InformationGapModel.subject_type == source_claim.subject_type,
-                InformationGapModel.subject_id == source_claim.subject_id,
-                InformationGapModel.field == source_claim.field,
-            ).with_for_update().first()
-            if linked_gap is not None and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}:
-                linked_gap.lifecycle_status = GapLifecycleStatus.RESOLVED
-                linked_gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
-                linked_gap.resolution_date = now
-                linked_gap.resolution_notes = review.rationale.strip()
-                linked_gap.evidence_ids = list(dict.fromkeys([*(linked_gap.evidence_ids or []), *evidence_ids]))
-                linked_gap.updated_by_caregiver_id = engine.caregiver_id
-                resulting_gap_ids.append(linked_gap.id)
+        # Resolve only an explicitly linked, same-subject, same-field information gap.
+        if linked_gap is not None and linked_gap.field == field_name and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}:
+            linked_gap.lifecycle_status = GapLifecycleStatus.RESOLVED
+            linked_gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
+            linked_gap.resolution_date = now
+            linked_gap.resolution_notes = review.rationale.strip()
+            linked_gap.evidence_ids = list(dict.fromkeys([*(linked_gap.evidence_ids or []), *evidence_ids]))
+            linked_gap.updated_by_caregiver_id = engine.caregiver_id
+            resulting_gap_ids.append(linked_gap.id)
         question.status = "closed"
         question.closed_at = now
         question.closed_reason = review.rationale.strip()
