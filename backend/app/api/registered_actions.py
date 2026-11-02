@@ -204,7 +204,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     if existing:
         if existing.registration_request_sha256 != fingerprint:
             raise HTTPException(status_code=409, detail="This approval key was already used for a different action")
-        return existing
+        return _with_linked_reminder(db, existing)
 
     now = datetime.now(timezone.utc)
     action = Action(
@@ -263,7 +263,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         if existing:
             if existing.registration_request_sha256 != fingerprint:
                 raise HTTPException(status_code=409, detail="This LCR suggestion is already registered with a different approved payload")
-            return existing
+            return _with_linked_reminder(db, existing)
         existing = db.query(Action).filter(
             Action.person_id == scoped_person_id,
             Action.action_identity_key == identity_key,
