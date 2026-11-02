@@ -95,6 +95,7 @@ class OpenQuestionReviewEvent(Base):
     rationale = Column(Text, nullable=False)
     reviewer_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     claim_assessment_id = Column(String, ForeignKey("evidence_claim_assessments.id"), nullable=True)
+    resulting_claim_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
