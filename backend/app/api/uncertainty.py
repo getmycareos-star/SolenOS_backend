@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
-from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel, OpenQuestionReviewEvent as OpenQuestionReviewEventModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -21,11 +21,11 @@ from app.schemas.uncertainty import (
 )
 from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
-from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
+from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse, OpenQuestionReviewCreate, OpenQuestionReviewResponse
 from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
-from app.models.care_continuity import EvidenceClaimDependency, CareAssertion
+from app.models.care_continuity import EvidenceClaimDependency, EvidenceClaimAssessment, CareAssertion
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -139,6 +139,163 @@ def list_question_answer_history(
         "answered_by_caregiver_id": row.answered_by_caregiver_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     } for row in rows]
+
+
+@router.post(
+    "/questions/{question_id}/reviews",
+    response_model=OpenQuestionReviewResponse,
+)
+def review_question_answer(
+    question_id: str,
+    review: OpenQuestionReviewCreate,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    """Append a scoped decision for the latest answer; accepted reports enter LCR as unverified assertions."""
+    if not engine.person_id or not engine.caregiver_id:
+        raise HTTPException(status_code=403, detail="A session-bound caregiver reviewer is required")
+
+    question = engine._target_query(OpenQuestionModel, question_id).with_for_update().first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Clarification question not found")
+    if question.status != "answered":
+        raise HTTPException(status_code=409, detail="Only a submitted answer can be reviewed")
+
+    answer_event = (
+        engine.db.query(OpenQuestionAnswerEventModel)
+        .filter(
+            OpenQuestionAnswerEventModel.question_id == question.id,
+            OpenQuestionAnswerEventModel.person_id == engine.person_id,
+        )
+        .order_by(OpenQuestionAnswerEventModel.answer_version.desc())
+        .first()
+    )
+    if answer_event is None:
+        raise HTTPException(status_code=409, detail="No persisted answer event is available to review")
+
+    existing = engine.db.query(OpenQuestionReviewEventModel).filter(
+        OpenQuestionReviewEventModel.question_id == question.id,
+        OpenQuestionReviewEventModel.answer_version == answer_event.answer_version,
+    ).first()
+    if existing:
+        if existing.decision == review.decision and existing.rationale == review.rationale.strip():
+            return existing
+        raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another decision")
+
+    resulting_claim = None
+    claim_assessment = None
+    if review.decision == "accepted":
+        if not question.claim_id:
+            raise HTTPException(status_code=422, detail="This clarification has no linked care claim; it cannot be reconciled into the LCR until a reviewer links the correct claim")
+        source_claim = engine.db.query(CareAssertion).filter(
+            CareAssertion.id == question.claim_id,
+            CareAssertion.person_id == engine.person_id,
+            CareAssertion.subject_type == question.subject_type,
+            CareAssertion.subject_id == question.subject_id,
+        ).first()
+        if source_claim is None:
+            raise HTTPException(status_code=409, detail="The linked care claim is no longer available in this care record")
+        evidence_ids = list(answer_event.evidence_ids or [])
+        if not evidence_ids:
+            raise HTTPException(status_code=422, detail="An accepted clarification requires persisted supporting evidence")
+        evidence_rows = engine.db.query(Evidence).filter(
+            Evidence.person_id == engine.person_id,
+            Evidence.id.in_(evidence_ids),
+        ).all()
+        evidence_by_id = {row.id: row for row in evidence_rows}
+        if set(evidence_by_id) != set(evidence_ids):
+            raise HTTPException(status_code=409, detail="One or more answer evidence records are no longer available in this care record")
+
+        # Acceptance means the submitted report is admitted to the LCR as a
+        # source-attributed assertion. It does NOT mean the reported value is verified.
+        resulting_claim = CareAssertion(
+            person_id=engine.person_id,
+            subject_type=source_claim.subject_type,
+            subject_id=source_claim.subject_id,
+            field=source_claim.field,
+            assertion_kind=source_claim.assertion_kind,
+            asserted_value=answer_event.answer,
+            source_label="Reviewed caregiver clarification",
+            source_text=answer_event.answer,
+            evidence_ids=evidence_ids,
+            assertion_status="reported",
+            created_by_caregiver_id=answer_event.answered_by_caregiver_id,
+        )
+        engine.db.add(resulting_claim)
+        engine.db.flush()
+
+        latest_assessment = engine.db.query(EvidenceClaimAssessment).filter(
+            EvidenceClaimAssessment.person_id == engine.person_id,
+            EvidenceClaimAssessment.claim_id == resulting_claim.id,
+        ).order_by(EvidenceClaimAssessment.claim_version.desc()).first()
+        claim_assessment = EvidenceClaimAssessment(
+            person_id=engine.person_id,
+            claim_id=resulting_claim.id,
+            claim_version=(latest_assessment.claim_version + 1) if latest_assessment else 1,
+            status="unverified",
+            rationale="Clarification review accepted the caregiver's attributed report into the LCR. This records admissibility as a report, not factual or clinical verification.",
+            policy_version="claim-assessment-v1",
+            evidence_links=[
+                {"evidence_id": evidence_id, "relationship": "neutral", "source_passage": None,
+                 "scope_note": "Linked as the caregiver-reported source for this clarification; not independently verified."}
+                for evidence_id in evidence_ids
+            ],
+            reviewed_by_caregiver_id=engine.caregiver_id,
+        )
+        engine.db.add(claim_assessment)
+        engine.db.flush()
+
+        # Preserve the connection to the original claim without replacing it.
+        engine.db.add(EvidenceClaimDependency(
+            person_id=engine.person_id,
+            claim_id=resulting_claim.id,
+            depends_on_claim_id=source_claim.id,
+            dependency_type="contextualizes",
+            rationale="This source-attributed assertion was created from the reviewed clarification answer and retains the original question's linked claim as context.",
+            created_by_caregiver_id=engine.caregiver_id,
+        ))
+
+    event = OpenQuestionReviewEventModel(
+        question_id=question.id,
+        person_id=engine.person_id,
+        answer_event_id=answer_event.id,
+        answer_version=answer_event.answer_version,
+        decision=review.decision,
+        rationale=review.rationale.strip(),
+        reviewer_caregiver_id=engine.caregiver_id,
+        claim_assessment_id=claim_assessment.id if claim_assessment else None,
+        resulting_claim_id=resulting_claim.id if resulting_claim else None,
+    )
+    try:
+        engine.db.add(event)
+        engine.db.commit()
+        engine.db.refresh(event)
+        return event
+    except Exception as exc:
+        engine.db.rollback()
+        if "uq_open_question_review_answer_version" in str(exc):
+            raise HTTPException(status_code=409, detail="This answer version was reviewed concurrently; reload its review history") from exc
+        raise
+
+
+@router.get(
+    "/questions/{question_id}/review-history",
+    response_model=List[OpenQuestionReviewResponse],
+)
+def list_question_review_history(
+    question_id: str,
+    engine: UncertaintyEngine = Depends(get_engine),
+):
+    question = engine._target_query(OpenQuestionModel, question_id).first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Clarification question not found")
+    rows = engine.db.query(OpenQuestionReviewEventModel).filter(
+        OpenQuestionReviewEventModel.question_id == question_id,
+        OpenQuestionReviewEventModel.person_id == engine.person_id,
+    ).order_by(
+        OpenQuestionReviewEventModel.answer_version.asc(),
+        OpenQuestionReviewEventModel.created_at.asc(),
+    ).all()
+    return rows
 
 
 @router.post("/contradictions", response_model=Contradiction)
