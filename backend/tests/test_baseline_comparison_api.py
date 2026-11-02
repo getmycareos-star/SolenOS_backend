@@ -1,0 +1,116 @@
+from datetime import datetime, timedelta, timezone
+import hashlib
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
+import app.main as main_module
+from app.main import app
+from app.models.anonymous_session import AnonymousSession
+from app.models.care import CareEvent, Caregiver, Person
+from app.models.change import Baseline
+from app.core.change_enums import BaselineConfidence, BaselineType
+
+
+engine = create_engine(
+    "sqlite:///:memory:",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, expire_on_commit=False)
+
+
+def override_get_db():
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def _session(db, person, caregiver):
+    token = f"baseline-comparison-{person.id}"
+    db.add(AnonymousSession(
+        id=f"session-{person.id}",
+        person_id=person.id,
+        caregiver_id=caregiver.id,
+        token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    ))
+    return token
+
+
+def test_baseline_comparison_returns_only_same_person_linked_source_records():
+    Base.metadata.create_all(bind=engine)
+    main_module.SessionLocal = TestingSessionLocal
+    app.dependency_overrides[get_db] = override_get_db
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="baseline-person-a", name="Person A")
+        caregiver = Caregiver(
+            id="baseline-caregiver-a", name="Caregiver A",
+            email="baseline-a@example.com", relationship="Family", person_id=person.id,
+        )
+        other_person = Person(id="baseline-person-b", name="Person B")
+        other_caregiver = Caregiver(
+            id="baseline-caregiver-b", name="Caregiver B",
+            email="baseline-b@example.com", relationship="Family", person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
+        db.flush()
+        token = _session(db, person, caregiver)
+        other_token = _session(db, other_person, other_caregiver)
+        event = CareEvent(
+            id="baseline-event-a", person_id=person.id, event_type="sleep",
+            status="recorded", occurred_at=datetime.now(timezone.utc) - timedelta(days=90),
+            title="Usual sleep observation", description="Reported usual bedtime",
+            created_by_caregiver_id=caregiver.id,
+        )
+        other_event = CareEvent(
+            id="baseline-event-b", person_id=other_person.id, event_type="sleep",
+            status="recorded", occurred_at=datetime.now(timezone.utc) - timedelta(days=90),
+            title="Other person's private observation",
+            created_by_caregiver_id=other_caregiver.id,
+        )
+        db.add_all([event, other_event])
+        db.flush()
+        baseline = Baseline(
+            id="baseline-a", person_id=person.id, subject_type="sleep", subject_id="",
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=datetime.now(timezone.utc) - timedelta(days=120),
+            window_end=datetime.now(timezone.utc) - timedelta(days=60),
+            event_count=1, confidence=BaselineConfidence.LOW, is_stable=False,
+            coverage_status="unknown", history_completeness="complete",
+            analysis_version="test", documentation_bias_flag=True,
+            evidence_ids=[event.id], is_active=True,
+        )
+        db.add(baseline)
+        db.commit()
+
+        client = TestClient(app)
+        response = client.get(
+            f"/change/baselines/{person.id}/comparison",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["person_id"] == person.id
+        assert payload["read_only"] is True
+        assert [item["id"] for item in payload["baselines"]] == ["baseline-a"]
+        assert [item["id"] for item in payload["events"]] == ["baseline-event-a"]
+        assert payload["events"][0]["created_by_caregiver_id"] == caregiver.id
+        assert "baseline-event-b" not in {item["id"] for item in payload["events"]}
+
+        forbidden = client.get(
+            f"/change/baselines/{person.id}/comparison",
+            headers={"Authorization": f"Bearer {other_token}"},
+        )
+        assert forbidden.status_code == 403
+    finally:
+        db.close()
+        app.dependency_overrides.clear()
+        main_module.SessionLocal = DefaultSessionLocal
+        Base.metadata.drop_all(bind=engine)
