@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, Index, event
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint, event
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Session
 import uuid
@@ -168,6 +168,7 @@ class ClarificationReviewEvent(Base):
     __table_args__ = (
         Index("ix_clarification_review_question_version", "question_id", "answer_version"),
         Index("ix_clarification_review_person_created", "person_id", "created_at"),
+        UniqueConstraint("answer_event_id", name="uq_clarification_review_answer_event"),
     )
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
