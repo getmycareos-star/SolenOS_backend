@@ -10,7 +10,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Person, Evidence
 from app.models.change import Baseline
 from app.core.change_enums import BaselineConfidence, BaselineType
 
@@ -63,11 +63,17 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         db.flush()
         token = _session(db, person, caregiver)
         other_token = _session(db, other_person, other_caregiver)
+        source = Evidence(
+            id="baseline-source-a", person_id=person.id, type="caregiver_note",
+            source_text="The caregiver reports a usual bedtime around 9 pm.",
+            uploaded_by_caregiver_id=caregiver.id, reported_by_label="Family caregiver",
+            source_type="caregiver_report",
+        )
         event = CareEvent(
             id="baseline-event-a", person_id=person.id, event_type="sleep",
             status="recorded", occurred_at=datetime.now(timezone.utc) - timedelta(days=90),
             title="Usual sleep observation", description="Reported usual bedtime",
-            created_by_caregiver_id=caregiver.id,
+            created_by_caregiver_id=caregiver.id, evidence_ids=["baseline-source-a"],
         )
         other_event = CareEvent(
             id="baseline-event-b", person_id=other_person.id, event_type="sleep",
@@ -75,7 +81,7 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
             title="Other person's private observation",
             created_by_caregiver_id=other_caregiver.id,
         )
-        db.add_all([event, other_event])
+        db.add_all([source, event, other_event])
         db.flush()
         baseline = Baseline(
             id="baseline-a", person_id=person.id, subject_type="sleep", subject_id="",
@@ -102,6 +108,9 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         assert [item["id"] for item in payload["baselines"]] == ["baseline-a"]
         assert [item["id"] for item in payload["events"]] == ["baseline-event-a"]
         assert payload["events"][0]["created_by_caregiver_id"] == caregiver.id
+        assert [item["id"] for item in payload["source_evidence"]] == ["baseline-source-a"]
+        assert payload["source_evidence"][0]["source_text"].startswith("The caregiver reports")
+        assert payload["source_evidence"][0]["reported_by_label"] == "Family caregiver"
         assert "baseline-event-b" not in {item["id"] for item in payload["events"]}
 
         forbidden = client.get(
