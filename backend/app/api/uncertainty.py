@@ -213,6 +213,8 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
             ).with_for_update().first()
             if source_claim is None or source_claim.subject_type != question.subject_type or source_claim.subject_id != question.subject_id:
                 raise HTTPException(status_code=409, detail="The linked source claim is unavailable or outside the question subject scope")
+            if source_claim.assertion_status in {"retracted", "superseded"}:
+                raise HTTPException(status_code=409, detail="Retracted or superseded source claims cannot receive accepted clarification updates")
         linked_gap = None
         if len(linked_gap_ids) == 1:
             linked_gap = engine.db.query(InformationGapModel).filter(
