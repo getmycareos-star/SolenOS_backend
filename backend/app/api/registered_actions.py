@@ -127,6 +127,8 @@ class RegisteredActionRead(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     version: int
+    linked_reminder_due_at: Optional[datetime] = None
+    linked_reminder_status: Optional[str] = None
 
 
 def _audit(db: Session, action: Action, actor_id: str, old: Optional[str], new: str,
@@ -269,6 +271,9 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
             return existing
         raise HTTPException(status_code=409, detail="Action registration conflicted with an existing record")
     db.refresh(action)
+    linked = db.query(CareReminder).filter(CareReminder.action_id == action.id).first()
+    action.linked_reminder_due_at = linked.due_at if linked else None
+    action.linked_reminder_status = linked.status if linked else None
     return action
 
 
@@ -277,10 +282,18 @@ def list_registered_actions(person_id: str, request: Request, db: Session = Depe
     scoped_person_id, _ = _session_scope(request, db)
     if person_id != scoped_person_id:
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
-    return db.query(Action).filter(
+    rows = db.query(Action, CareReminder.due_at, CareReminder.status).outerjoin(
+        CareReminder, CareReminder.action_id == Action.id
+    ).filter(
         Action.person_id == scoped_person_id,
         Action.status.in_(REGISTERED_STATUSES),
     ).order_by(Action.created_at.desc(), Action.id.asc()).all()
+    actions = []
+    for action, reminder_due_at, reminder_status in rows:
+        action.linked_reminder_due_at = reminder_due_at
+        action.linked_reminder_status = reminder_status
+        actions.append(action)
+    return actions
 
 
 @router.get("/registered-actions/{action_id}/history")
@@ -357,4 +370,7 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
         db.rollback()
         raise HTTPException(status_code=409, detail="Action was changed concurrently; refresh before retrying")
     db.refresh(action)
+    linked = db.query(CareReminder).filter(CareReminder.action_id == action.id).first()
+    action.linked_reminder_due_at = linked.due_at if linked else None
+    action.linked_reminder_status = linked.status if linked else None
     return action
