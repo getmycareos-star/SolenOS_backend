@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Evidence, Correction
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
@@ -22,7 +22,6 @@ from app.schemas.change import (
 from app.services.change_detection import detect_event_changes, detect_assertion_changes, detect_numeric_observation_changes
 from app.services.situation_formation import detect_situations, update_situations
 from app.services.explanation import explain_situation
-from app.models.care import Evidence
 from app.models.observation_coverage import ObservationCoverage
 from app.schemas.observation_coverage import (
     ObservationCoverageCreate, ObservationCoverageRecord, CoverageAssessment,
@@ -155,6 +154,17 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
         .all()
         if original_evidence_ids else []
     )
+    correction_target_ids = source_ids | original_evidence_ids
+    corrections = (
+        db.query(Correction)
+        .filter(
+            Correction.person_id == person_id,
+            Correction.target_id.in_(correction_target_ids),
+        )
+        .order_by(Correction.created_at.asc(), Correction.id.asc())
+        .all()
+        if correction_target_ids else []
+    )
     return {
         "person_id": person_id,
         "as_of": datetime.now(timezone.utc),
@@ -222,9 +232,24 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
                 "reported_at": row.reported_at,
                 "source_type": row.source_type,
                 "original_source_reference": row.original_source_reference,
+                "parent_evidence_id": row.parent_evidence_id,
+                "ingested_at": row.ingested_at,
                 "evidence_status": row.evidence_status,
             }
             for row in source_evidence
+        ],
+        "corrections": [
+            {
+                "id": row.id,
+                "target_type": row.target_type,
+                "target_id": row.target_id,
+                "original_text": row.original_text,
+                "corrected_text": row.corrected_text,
+                "reason": row.reason,
+                "caregiver_id": row.caregiver_id,
+                "created_at": row.created_at,
+            }
+            for row in corrections
         ],
         "events": [
             {
