@@ -396,3 +396,42 @@ def test_readiness_rejects_incomplete_schema():
     finally:
         app.dependency_overrides.clear()
         incomplete_engine.dispose()
+
+
+def test_quick_daily_checkin_persists_uncertainty_without_inference():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Caregiver is unsure about: Sleep. No status is inferred for these areas.",
+                "quick_check_in": {
+                    "schema_version": 1,
+                    "kind": "uncertain",
+                    "selected_areas": ["sleep"],
+                    "scope": "selected_areas_only",
+                    "caregiver_reported_at": "2026-11-03T00:00:00+01:00",
+                    "epistemic_status": "caregiver_reported",
+                    "idempotency_key": "daily-checkin-uncertain-001",
+                    "note": None,
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
+        detail = json.loads(event.description)
+        assert detail["quick_check_in"]["kind"] == "uncertain"
+        assert detail["quick_check_in"]["selected_areas"] == ["sleep"]
+        assert "No status is inferred" in detail["notes"]
+        db.close()
+    finally:
+        teardown_db()
