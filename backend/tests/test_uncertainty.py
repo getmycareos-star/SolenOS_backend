@@ -2637,6 +2637,8 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             resulting = db.query(CareAssertion).filter(CareAssertion.id == accepted_data["resulting_assertion_id"]).one()
             assert resulting.person_id == person.id
             assert resulting.assertion_status == "accepted"
+            assert resulting.created_by_caregiver_id == caregiver.id
+            assert resulting.updated_by_caregiver_id == caregiver.id
             assert resulting.asserted_value == "The caregiver reports that the scheduled visit was attended."
             assert resulting.evidence_ids == [evidence_id]
             audit = db.query(ClarificationReviewEvent).filter(ClarificationReviewEvent.id == accepted_data["id"]).one()
