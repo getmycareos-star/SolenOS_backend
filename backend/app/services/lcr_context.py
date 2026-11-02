@@ -327,6 +327,13 @@ def _load_source_schema(bind: Any, connection: Any) -> tuple[frozenset[str], Met
         _SOURCE_SCHEMA_CACHE[bind] = result
         return result
 
+
+def has_source_table(db: Session, table_name: str) -> bool:
+    """Check source-table availability using the active session connection."""
+    available_tables, _metadata = _load_source_schema(db.get_bind(), db.connection())
+    return table_name in available_tables
+
+
 def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20, query: str | None = None) -> dict[str, Any]:
     """Return a bounded, person-scoped LCR projection and explicit schema coverage.
 
