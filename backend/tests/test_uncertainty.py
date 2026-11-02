@@ -2707,10 +2707,10 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             "subject_type": "care_routine",
             "subject_id": "evening-routine",
             "field": "attendance",
-            "epistemic_state": "unknown",
-            "gap_reason": "not_documented",
+            "epistemic_state": "conflicting",
+            "gap_reason": "conflicting",
             "priority": "high",
-            "description": "Evening visit attendance has not been established.",
+            "description": "Caregiver reports conflict about evening visit attendance.",
         })
         assert gap_only.status_code == 200, gap_only.text
         gap_only_id = gap_only.json()["id"]
@@ -2738,7 +2738,9 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             "review_after_days": 30,
         })
         assert gap_only_accept.status_code == 201, gap_only_accept.text
-        assert gap_only_accept.json()["resulting_gap_ids"] == [gap_only_id]
+        assert gap_only_accept.json()["resulting_gap_ids"] == []
+        remaining_gaps = client.get(f"/api/v1/uncertainty/gaps/{person.id}").json()
+        assert next(item for item in remaining_gaps if item["id"] == gap_only_id)["lifecycle_status"] == "open"
     finally:
         teardown_db()
         Base.metadata.drop_all(bind=engine)
