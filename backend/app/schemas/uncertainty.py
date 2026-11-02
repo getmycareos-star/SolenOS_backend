@@ -287,6 +287,7 @@ class ClarificationReviewResponse(BaseModel):
     rationale: str
     reviewed_by_caregiver_id: str
     resulting_assertion_id: Optional[str] = None
+    resulting_assessment_id: Optional[str] = None
     reconciliation_status: str
     evidence_review_ids: List[str] = Field(default_factory=list)
     resulting_gap_ids: List[str] = Field(default_factory=list)
