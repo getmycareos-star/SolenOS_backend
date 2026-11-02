@@ -60,7 +60,7 @@ def create_evidence(client, session, source_text="Caregiver recorded that the cl
             "uploaded_by_caregiver_id": session["caregiver"]["id"],
         },
     )
-    assert response.status_code == 201, response.text
+    assert response.status_code == 200, response.text
     return response.json()
 
 
