@@ -268,3 +268,27 @@ class ClaimDependency(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ClarificationReviewCreate(BaseModel):
+    answer_version: int = Field(..., ge=1)
+    decision: Literal["accepted", "rejected", "needs_more_information"]
+    rationale: str = Field(..., min_length=3, max_length=4000)
+    review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
+
+
+class ClarificationReviewResponse(BaseModel):
+    id: str
+    question_id: str
+    answer_event_id: str
+    answer_version: int
+    person_id: str
+    decision: str
+    rationale: str
+    reviewed_by_caregiver_id: str
+    resulting_assertion_id: Optional[str] = None
+    reconciliation_status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
