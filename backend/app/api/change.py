@@ -119,9 +119,11 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
         db.query(Change)
         .filter(Change.person_id == person_id)
         .order_by(Change.created_at.desc(), Change.id.asc())
-        .limit(200)
+        .limit(201)
         .all()
     )
+    changes_truncated = len(relevant_changes) > 200
+    relevant_changes = relevant_changes[:200]
     source_ids = {
         evidence_id
         for row in baselines
@@ -190,6 +192,7 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
             }
             for row in baselines
         ],
+        "changes_truncated": changes_truncated,
         "changes": [
             {
                 "id": row.id,
