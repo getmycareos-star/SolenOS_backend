@@ -147,6 +147,7 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
     )
     return {
         "person_id": person_id,
+        "as_of": datetime.now(timezone.utc),
         "baselines": [
             {
                 "id": row.id,
