@@ -2646,6 +2646,10 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             assert audit.answer_version == answer_version
             assert audit.resulting_assertion_id == resulting.id
             assert db.query(OpenQuestionAnswerEvent).filter(OpenQuestionAnswerEvent.question_id == question_id).count() == 1
+            audit.rationale = "attempted audit tampering"
+            with pytest.raises(ValueError, match="append-only"):
+                db.commit()
+            db.rollback()
         finally:
             db.close()
 
