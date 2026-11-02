@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
-from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel, ClarificationReviewEvent as ClarificationReviewEventModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -18,6 +19,8 @@ from app.schemas.uncertainty import (
     UncertaintyAssessment,
     EpistemicView,
     SubjectUncertaintySummary,
+    ClarificationReviewCreate,
+    ClarificationReviewResponse,
 )
 from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
@@ -25,7 +28,8 @@ from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnaly
 from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
 from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
 from app.api.care_delta import _scoped_identity
-from app.models.care_continuity import EvidenceClaimDependency, CareAssertion
+from app.models.care_continuity import EvidenceClaimDependency, CareAssertion, EvidenceReviewRecord
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
