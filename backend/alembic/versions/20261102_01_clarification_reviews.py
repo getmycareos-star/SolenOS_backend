@@ -31,7 +31,7 @@ def upgrade() -> None:
             sa.Column("reviewed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("resulting_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True),
             sa.Column("reconciliation_status", sa.String(length=32), nullable=False),
-            sa.Column("evidence_review_ids", sa.JSON(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column("evidence_review_ids", sa.Text(), nullable=False, server_default=sa.text("'[]'")),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("answer_event_id", name="uq_clarification_review_answer_event"),
         )
@@ -44,6 +44,8 @@ def upgrade() -> None:
         op.create_index("ix_clarification_review_events_person_id", "clarification_review_events", ["person_id"])
     if "ix_clarification_review_person_created" not in indexes:
         op.create_index("ix_clarification_review_person_created", "clarification_review_events", ["person_id", "created_at"])
+    if "ix_clarification_review_question_version" not in indexes:
+        op.create_index("ix_clarification_review_question_version", "clarification_review_events", ["question_id", "answer_version"])
 
     if bind.dialect.name == "postgresql":
         op.execute("""
