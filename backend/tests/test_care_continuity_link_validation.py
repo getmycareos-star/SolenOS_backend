@@ -151,3 +151,9 @@ def test_evidence_source_relationship_review_decision_requires_same_person_link(
         )
     assert exc.value.status_code == 404
     assert "not found in this care record" in str(exc.value.detail)
+
+
+def test_evidence_source_relationships_is_exposed_as_a_read_resource():
+    from app.api.care_continuity import RESOURCES
+
+    assert RESOURCES["evidence-source-relationships"] == "evidence_source_relationships"
