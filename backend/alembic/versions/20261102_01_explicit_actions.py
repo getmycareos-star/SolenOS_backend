@@ -26,12 +26,18 @@ def _add_column_if_missing(bind, table_name, column):
 
 
 def _ensure_unique_constraint(bind, table_name, name, columns):
-    existing = {
+    # Unique indexes enforce the same invariant and are supported by both
+    # PostgreSQL and SQLite; ALTER TABLE ADD CONSTRAINT is not portable to SQLite.
+    existing_constraints = {
         item.get("name")
         for item in inspect(bind).get_unique_constraints(table_name)
     }
-    if name not in existing:
-        op.create_unique_constraint(name, table_name, columns)
+    existing_indexes = {
+        item.get("name")
+        for item in inspect(bind).get_indexes(table_name)
+    }
+    if name not in existing_constraints and name not in existing_indexes:
+        op.create_index(name, table_name, columns, unique=True)
 
 
 def _ensure_index(bind, table_name, name, columns, unique=False):
