@@ -113,18 +113,15 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
         .order_by(Baseline.subject_type.asc(), Baseline.subject_id.asc(), Baseline.created_at.desc())
         .all()
     )
-    changes = (
+    # Include active current-domain assessments even when no baseline exists.
+    # Bound the read projection while retaining the full durable history elsewhere.
+    relevant_changes = (
         db.query(Change)
         .filter(Change.person_id == person_id)
-        .order_by(Change.created_at.desc())
+        .order_by(Change.created_at.desc(), Change.id.asc())
+        .limit(200)
         .all()
     )
-    baseline_keys = {(row.subject_type, row.subject_id) for row in baselines}
-    relevant_changes = [
-        row for row in changes
-        if (row.subject_type, row.subject_id) in baseline_keys
-        or row.baseline_id in {baseline.id for baseline in baselines}
-    ]
     source_ids = {
         evidence_id
         for row in baselines
@@ -205,6 +202,9 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
                 "change_direction": row.change_direction.value if row.change_direction else None,
                 "confidence": row.confidence,
                 "confirmation_status": row.confirmation_status,
+                "attention_candidate": bool(row.attention_candidate),
+                "follow_up_candidate": bool(row.follow_up_candidate),
+                "significance_verdict": row.significance_verdict.value if row.significance_verdict else None,
                 "comparison_window_start": row.comparison_window_start,
                 "comparison_window_end": row.comparison_window_end,
                 "persistence_days": row.persistence_days,
