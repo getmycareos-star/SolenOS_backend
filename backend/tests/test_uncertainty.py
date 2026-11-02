@@ -2582,6 +2582,12 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assert len(history.json()) == 1
         assert other_client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history").status_code == 404
 
+        # The accepted clarification must be retrievable through the existing
+        # person-scoped care-continuity assertion source used by LCR projections.
+        assertions = client.get("/api/v1/care-continuity/assertions/review-person-1")
+        assert assertions.status_code == 200, assertions.text
+        assert any(item["id"] == review["resulting_claim_id"] for item in assertions.json())
+
         db = TestingSessionLocal()
         try:
             resulting = db.query(CareAssertion).filter(CareAssertion.id == review["resulting_claim_id"]).one()
