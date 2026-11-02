@@ -301,7 +301,7 @@ jobs:
                   "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='clarification_review_events'"
               )
               clarification_columns = {row[0] for row in cur.fetchall()}
-              clarification_required = {"id", "question_id", "answer_event_id", "answer_version", "person_id", "decision", "rationale", "reviewed_by_caregiver_id", "resulting_assertion_id", "reconciliation_status", "evidence_review_ids", "resulting_gap_ids", "created_at"}
+              clarification_required = {"id", "question_id", "answer_event_id", "answer_version", "person_id", "decision", "rationale", "reviewed_by_caregiver_id", "resulting_assertion_id", "resulting_assessment_id", "reconciliation_status", "evidence_review_ids", "resulting_gap_ids", "created_at"}
               if clarification_required - clarification_columns:
                   raise SystemExit(f"clarification_review_events missing columns: {sorted(clarification_required - clarification_columns)}")
               cur.execute("SELECT 1 FROM pg_trigger WHERE tgname='trg_clarification_review_events_immutable' AND NOT tgisinternal")
