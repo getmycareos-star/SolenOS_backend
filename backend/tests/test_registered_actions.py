@@ -468,3 +468,44 @@ def test_deferring_action_reschedules_its_linked_reminder_and_requires_new_date(
     assert len(reminders.json()) == 1
     assert reminders.json()[0]["status"] == "open"
     assert reminders.json()[0]["due_at"].startswith(new_due_at[:16])
+
+
+
+def test_direct_medication_change_is_blocked_but_contacting_clinician_is_allowed():
+    client = TestClient(app)
+    session = create_session(client, "Medication safety recipient")
+    evidence = create_evidence(client, session, "The caregiver wants to clarify a medication concern with the prescribing clinician.")
+
+    blocked_payload = approval_payload(
+        evidence["id"],
+        idempotency_key="medication-change-block-key-004",
+        suggestion_id="medication-change-block-suggestion-004",
+        title="Increase medication dosage to 10 mg",
+    )
+    blocked = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=blocked_payload,
+    )
+    assert blocked.status_code == 422, blocked.text
+    assert "Direct medication changes cannot be registered" in blocked.text
+
+    allowed_payload = approval_payload(
+        evidence["id"],
+        idempotency_key="clinician-call-approval-key-005",
+        suggestion_id="clinician-call-suggestion-005",
+        title="Call the prescribing clinician to discuss the medication concern",
+    )
+    allowed = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=allowed_payload,
+    )
+    assert allowed.status_code == 201, allowed.text
+    assert allowed.json()["status"] == "approved"
+
+    listed = client.get(
+        f"/api/v1/registered-actions/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert len(listed.json()) == 1
