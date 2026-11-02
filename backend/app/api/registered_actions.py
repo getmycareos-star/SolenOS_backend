@@ -120,6 +120,7 @@ class RegisteredActionRead(BaseModel):
     modality: str
     deadline: Optional[datetime] = None
     created_by_caregiver_id: str
+    responsible_caregiver_id: Optional[str] = None
     approved_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     deferred_until: Optional[datetime] = None
@@ -222,6 +223,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         requires_confirmation=False,
         risk_tier="moderate",
         created_by_caregiver_id=caregiver_id,
+        responsible_caregiver_id=caregiver_id,
         version=1,
     )
     db.add(action)
