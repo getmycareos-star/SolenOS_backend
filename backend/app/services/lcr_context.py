@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, datetime
-from functools import lru_cache
 from typing import Any
 from threading import RLock
 from weakref import WeakKeyDictionary
