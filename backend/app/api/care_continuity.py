@@ -956,7 +956,7 @@ WRITABLE = {
 
 def _table(db: Session, name: str) -> Table:
     try:
-        return Table(name, MetaData(), autoload_with=db.get_bind())
+        return Table(name, MetaData(), autoload_with=db.connection())
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
 
