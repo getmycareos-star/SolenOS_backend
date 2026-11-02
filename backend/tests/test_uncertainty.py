@@ -2559,9 +2559,16 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         })
         assert answered.status_code == 200, answered.text
 
+        missing_review_window = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
+            "decision": "accepted",
+            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+        })
+        assert missing_review_window.status_code == 422, missing_review_window.text
+
         accepted = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
             "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+            "review_after_days": 30,
         })
         assert accepted.status_code == 200, accepted.text
         review = accepted.json()
@@ -2573,6 +2580,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         repeated = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
             "decision": "accepted",
             "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+            "review_after_days": 30,
         })
         assert repeated.status_code == 200
         assert repeated.json()["id"] == review["id"]
@@ -2594,6 +2602,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             assert resulting.person_id == "review-person-1"
             assert resulting.asserted_value == "The caregiver reports that the appointment was attended on 12 October."
             assert resulting.assertion_status == "reported"
+            assert resulting.review_after_days == 30
             assert resulting.created_by_caregiver_id == "review-caregiver-1"
 
             assessment = db.query(EvidenceClaimAssessment).filter(EvidenceClaimAssessment.id == review["claim_assessment_id"]).one()
