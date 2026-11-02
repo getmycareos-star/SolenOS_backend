@@ -11,8 +11,8 @@ import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Person, Evidence, Correction
-from app.models.change import Baseline
-from app.core.change_enums import BaselineConfidence, BaselineType
+from app.models.change import Baseline, Change
+from app.core.change_enums import BaselineConfidence, BaselineType, ChangeType
 
 
 engine = create_engine(
@@ -81,7 +81,20 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
             title="Other person's private observation",
             created_by_caregiver_id=other_caregiver.id,
         )
-        db.add_all([source, event, other_event])
+        current_event = CareEvent(
+            id="current-mobility-event", person_id=person.id, event_type="mobility",
+            status="recorded", occurred_at=datetime.now(timezone.utc) - timedelta(days=2),
+            title="Recent mobility observation", created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([source, event, other_event, current_event])
+        db.flush()
+        db.add(Change(
+            id="current-mobility-change", person_id=person.id, subject_type="mobility",
+            subject_id="", change_type=ChangeType.INCREASE,
+            previous_state="Earlier mobility record", current_state="More support recorded",
+            evidence_ids=[current_event.id], confirmation_status="awaiting_confirmation",
+            is_active=True, attention_candidate=True,
+        ))
         db.flush()
         baseline = Baseline(
             id="baseline-a", person_id=person.id, subject_type="sleep", subject_id="",
@@ -113,7 +126,11 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         assert payload["person_id"] == person.id
         assert payload["read_only"] is True
         assert [item["id"] for item in payload["baselines"]] == ["baseline-a"]
-        assert [item["id"] for item in payload["events"]] == ["baseline-event-a"]
+        assert "current-mobility-change" in {item["id"] for item in payload["changes"]}
+        mobility_change = next(item for item in payload["changes"] if item["id"] == "current-mobility-change")
+        assert mobility_change["attention_candidate"] is True
+        assert "current-mobility-event" in {item["id"] for item in payload["events"]}
+        assert [item["id"] for item in payload["events"] if item["id"] == "baseline-event-a"] == ["baseline-event-a"]
         assert payload["events"][0]["created_by_caregiver_id"] == caregiver.id
         assert [item["id"] for item in payload["source_evidence"]] == ["baseline-source-a"]
         assert payload["source_evidence"][0]["source_text"].startswith("The caregiver reports")
