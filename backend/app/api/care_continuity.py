@@ -1807,6 +1807,8 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "review_at": item.get("review_at") if source == "open_loop_records" else None,
                 "deadline_source": item.get("deadline_source") if source == "open_loop_records" else None,
                 "consequence_of_delay": item.get("consequence_of_delay") if source == "open_loop_records" else None,
+                "request_text": item.get("request_text") if source == "open_loop_records" else None,
+                "verification_rule": item.get("verification_rule") if source == "open_loop_records" else None,
                 "outcome_status": item.get("outcome_status") if source == "open_loop_records" else None,
                 "closure_result": item.get("closure_result") if source == "open_loop_records" else None,
             })
