@@ -13,6 +13,7 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.alter_column("actions", "extraction_confidence", existing_type=sa.Float(), nullable=True)
     op.add_column("actions", sa.Column("registration_key", sa.String(length=128), nullable=True))
     op.add_column("actions", sa.Column("suggestion_id", sa.String(length=160), nullable=True))
     op.add_column("actions", sa.Column("action_identity_key", sa.String(length=64), nullable=True))
