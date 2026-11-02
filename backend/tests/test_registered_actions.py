@@ -316,6 +316,13 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
     assert reminders.status_code == 200, reminders.text
     assert len(reminders.json()) == 1
     assert reminders.json()[0]["action_id"] == created.json()["id"]
+    action_list = client.get(
+        f"/api/v1/registered-actions/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert action_list.status_code == 200, action_list.text
+    assert action_list.json()[0]["linked_reminder_status"] == "open"
+    assert action_list.json()[0]["linked_reminder_due_at"]
 
     completed = client.patch(
         f"/api/v1/registered-actions/{created.json()['id']}/status",
@@ -334,6 +341,11 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
     assert refreshed_reminders.status_code == 200, refreshed_reminders.text
     assert refreshed_reminders.json()[0]["status"] == "completed"
     assert refreshed_reminders.json()[0]["completed_by_caregiver_id"] == session["caregiver"]["id"]
+    completed_actions = client.get(
+        f"/api/v1/registered-actions/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert completed_actions.json()[0]["linked_reminder_status"] == "completed"
 
     from app.models.reminder import CareReminder
     db = TestSessionLocal()
