@@ -182,6 +182,7 @@ class ClarificationReviewEvent(Base):
     resulting_assertion_id = Column(String, ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True)
     reconciliation_status = Column(String(32), nullable=False)
     evidence_review_ids = Column(JSONList, nullable=False, default=list)
+    resulting_gap_ids = Column(JSONList, nullable=False, default=list)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
