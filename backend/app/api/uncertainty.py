@@ -256,7 +256,7 @@ def review_question_answer(
             person_id=engine.person_id,
             claim_id=resulting_claim.id,
             depends_on_claim_id=source_claim.id,
-            dependency_type="contextualizes",
+            dependency_type="qualifies",
             rationale="This source-attributed assertion was created from the reviewed clarification answer and retains the original question's linked claim as context.",
             created_by_caregiver_id=engine.caregiver_id,
         ))
