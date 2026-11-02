@@ -9,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
 import app.api.open_loops as open_loop_api
+from app.api.care_continuity import _build_situation_understanding_assessment
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
@@ -633,3 +634,36 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     assert closed.status_code == 200, closed.text
     assert closed.json()["loop"]["status"] == "closed"
 
+
+
+def test_situation_assessment_preserves_saved_deferral_and_review_context_per_person():
+    client = TestClient(app)
+    first, first_headers = session(client, "Deferred assessment recipient")
+    second, second_headers = session(client, "Separate assessment recipient")
+    review_at = "2026-11-05T10:00:00+00:00"
+    deferred = create_loop(
+        client,
+        first_headers,
+        "follow_up",
+        title="Wait for the recorded appointment",
+        deferred_reason="The family recorded that this follow-up is deferred until the appointment.",
+        review_at=review_at,
+        request_text="Ask the clinic to confirm the appointment time.",
+        verification_rule="The appointment time is confirmed in a saved clinic message.",
+    )
+
+    with TestSessionLocal() as db:
+        first_assessment = _build_situation_understanding_assessment(db, first["person"]["id"])
+        second_assessment = _build_situation_understanding_assessment(db, second["person"]["id"])
+
+    saved = next(
+        item for item in first_assessment["open_loops"]["items"]
+        if item["id"] == deferred["id"] and item["source"] == "open_loop_records"
+    )
+    assert saved["deferred_reason"] == "The family recorded that this follow-up is deferred until the appointment."
+    assert saved["review_at"].startswith("2026-11-05T10:00:00")
+    assert saved["request_text"] == "Ask the clinic to confirm the appointment time."
+    assert saved["verification_rule"] == "The appointment time is confirmed in a saved clinic message."
+    assert saved["priority"] == deferred["priority"]
+    assert saved["priority_reasons"] == deferred["priority_reasons"]
+    assert all(item["id"] != deferred["id"] for item in second_assessment["open_loops"]["items"])
