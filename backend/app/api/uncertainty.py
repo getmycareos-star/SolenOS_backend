@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session\nfrom sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
