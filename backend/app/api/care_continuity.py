@@ -2954,6 +2954,7 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
                 "question": description,
                 "subject_type": row.get("subject_type") or "care_record",
                 "subject_id": row.get("subject_id") or scoped_person_id,
+                "field": row.get("field"),
                 "priority": str(row.get("priority") or "informational"),
                 "reason": str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
                 "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
