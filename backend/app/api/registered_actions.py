@@ -316,12 +316,30 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
         raise HTTPException(status_code=422, detail="A reason is required for this status change")
     if payload.deferred_until is not None and payload.status != "deferred":
         raise HTTPException(status_code=422, detail="deferred_until is only valid when deferring an action")
+    linked_reminder = db.query(CareReminder).filter(
+        CareReminder.action_id == action.id,
+        CareReminder.person_id == person_id,
+    ).with_for_update().first()
+    if payload.status == "deferred" and linked_reminder and payload.deferred_until is None:
+        raise HTTPException(status_code=422, detail="Choose a new due date when deferring an action that has a linked reminder")
     action.status = payload.status
     action.deferred_until = payload.deferred_until.astimezone(timezone.utc) if payload.deferred_until else None
     if payload.status == "completed":
         action.completed_at = datetime.now(timezone.utc)
     if payload.status == "cancelled":
         action.cancelled_at = datetime.now(timezone.utc)
+    if linked_reminder and linked_reminder.status == "open":
+        if payload.status == "completed":
+            linked_reminder.status = "completed"
+            linked_reminder.completed_at = datetime.now(timezone.utc)
+            linked_reminder.completed_by_caregiver_id = caregiver_id
+            linked_reminder.completion_note = "Linked registered action was explicitly confirmed completed."
+        elif payload.status == "cancelled":
+            linked_reminder.status = "cancelled"
+            linked_reminder.cancelled_at = datetime.now(timezone.utc)
+            linked_reminder.cancelled_by_caregiver_id = caregiver_id
+        elif payload.status == "deferred":
+            linked_reminder.due_at = payload.deferred_until.astimezone(timezone.utc)
     _audit(db, action, caregiver_id, old_status, payload.status,
            payload.reason.strip() if payload.reason else (
                "Caregiver explicitly confirmed completion" if payload.status == "completed" else None
