@@ -277,7 +277,8 @@ jobs:
               "handoff_recipients",
               "handoff_access_logs",
               "handoff_acknowledgements",
-              "delivery_failure_events"
+              "delivery_failure_events",
+              "clarification_review_events"
           }
           conn = psycopg2.connect(os.environ["DATABASE_URL"])
           with conn.cursor() as cur:
@@ -286,7 +287,7 @@ jobs:
               missing = required_tables - existing
               if missing:
                   raise SystemExit(f"missing privacy/delivery tables: {sorted(missing)}")
-              for table in sorted(required_tables):
+              for table in sorted(required_tables - {"clarification_review_events"}):
                   cur.execute(
                       "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%s",
                       (table,),
@@ -296,6 +297,16 @@ jobs:
                   missing_columns = required_columns - columns
                   if missing_columns:
                       raise SystemExit(f"{table} missing common envelope columns: {sorted(missing_columns)}")
+              cur.execute(
+                  "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='clarification_review_events'"
+              )
+              clarification_columns = {row[0] for row in cur.fetchall()}
+              clarification_required = {"id", "question_id", "answer_event_id", "answer_version", "person_id", "decision", "rationale", "reviewed_by_caregiver_id", "resulting_assertion_id", "reconciliation_status", "evidence_review_ids", "resulting_gap_ids", "created_at"}
+              if clarification_required - clarification_columns:
+                  raise SystemExit(f"clarification_review_events missing columns: {sorted(clarification_required - clarification_columns)}")
+              cur.execute("SELECT 1 FROM pg_trigger WHERE tgname='trg_clarification_review_events_immutable' AND NOT tgisinternal")
+              if cur.fetchone() is None:
+                  raise SystemExit("clarification review append-only trigger is missing")
               cur.execute(
                   "SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='notification_read_receipts' AND indexname='uq_notification_read_receipt_reader'"
               )
