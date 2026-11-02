@@ -61,11 +61,11 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute("""
-            CREATE FUNCTION reject_action_audit_mutation() RETURNS trigger AS $
+            CREATE FUNCTION reject_action_audit_mutation() RETURNS trigger AS $action_audit$
             BEGIN
                 RAISE EXCEPTION 'action lifecycle audit is append-only';
             END;
-            $ LANGUAGE plpgsql
+            $action_audit$ LANGUAGE plpgsql
         """)
         op.execute("""
             CREATE TRIGGER trg_action_lifecycle_audit_immutable
