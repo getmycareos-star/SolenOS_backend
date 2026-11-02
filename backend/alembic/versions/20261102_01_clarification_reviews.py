@@ -45,8 +45,36 @@ def upgrade() -> None:
     if "ix_clarification_review_person_created" not in indexes:
         op.create_index("ix_clarification_review_person_created", "clarification_review_events", ["person_id", "created_at"])
 
+    if bind.dialect.name == "postgresql":
+        op.execute("""
+            CREATE OR REPLACE FUNCTION prevent_clarification_review_event_mutation()
+            RETURNS trigger AS $
+            BEGIN
+                RAISE EXCEPTION 'Clarification review history is append-only and cannot be updated or deleted';
+            END;
+            $ LANGUAGE plpgsql;
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_clarification_review_events_immutable
+            BEFORE UPDATE OR DELETE ON clarification_review_events
+            FOR EACH ROW EXECUTE FUNCTION prevent_clarification_review_event_mutation();
+        """)
+    elif bind.dialect.name == "sqlite":
+        op.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_clarification_review_events_immutable_update
+            BEFORE UPDATE ON clarification_review_events
+            BEGIN
+                SELECT RAISE(ABORT, 'Clarification review history is append-only and cannot be updated or deleted');
+            END;
+        """)
+        op.execute("""
+            CREATE TRIGGER IF NOT EXISTS trg_clarification_review_events_immutable_delete
+            BEFORE DELETE ON clarification_review_events
+            BEGIN
+                SELECT RAISE(ABORT, 'Clarification review history is append-only and cannot be updated or deleted');
+            END;
+        """)
+
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    if inspect(bind).has_table("clarification_review_events"):
-        op.drop_table("clarification_review_events")
+    raise RuntimeError("Refusing to discard clarification review history.")
