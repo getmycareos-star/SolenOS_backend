@@ -2295,7 +2295,7 @@ def get_situation_understanding_snapshot(
 
 def persist_situation_understanding_assessment(db: Session, person_id: str, caregiver_id: str, commit: bool = True):
     """Persist the canonical bounded LCR assessment; optionally join a caller's transaction."""
-    if not inspect(db.get_bind()).has_table("care_delta_runs"):
+    if not inspect(db.connection()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     assessment = _build_situation_understanding_assessment(db, person_id)
