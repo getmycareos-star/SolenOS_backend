@@ -180,7 +180,7 @@ class ClarificationReviewEvent(Base):
     rationale = Column(Text, nullable=False)
     reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     resulting_assertion_id = Column(String, ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True)
-    resulting_assessment_id = Column(String, nullable=True)
+    resulting_assessment_id = Column(String, ForeignKey("care_delta_runs.id", ondelete="RESTRICT"), nullable=True)
     reconciliation_status = Column(String(32), nullable=False)
     evidence_review_ids = Column(JSONList, nullable=False, default=list)
     resulting_gap_ids = Column(JSONList, nullable=False, default=list)
