@@ -12,7 +12,7 @@ import app.main as main_module
 from app.main import app
 from app.models.care import Person, Caregiver, CareEvent, Evidence
 from app.models.anonymous_session import AnonymousSession
-from app.models.care_continuity import CareAssertion, EvidenceObservation
+from app.models.care_continuity import CareAssertion, EvidenceObservation, EvidenceReviewRecord
 from app.models.change import Baseline, Change, Pattern, ChangeConfirmationEvent
 from app.models.significance import SignificanceAssessment
 from app.models.observation_coverage import ObservationCoverage
@@ -1809,7 +1809,30 @@ def test_pattern_detail_returns_only_same_person_source_events():
             status="recorded", occurred_at=now - timedelta(days=9), title="Foreign mobility observation",
             created_by_caregiver_id=other_caregiver.id, evidence_ids=["foreign-evidence"],
         )
-        db.add_all([own_event, foreign_event])
+        own_evidence = Evidence(
+            id="pattern-detail-own-evidence", person_id=person.id, type="documented_record",
+            source_text="Source for the linked observation.", uploaded_by_caregiver_id=caregiver.id,
+        )
+        foreign_evidence = Evidence(
+            id="pattern-detail-foreign-evidence", person_id=other.id, type="documented_record",
+            source_text="Source from another care record.", uploaded_by_caregiver_id=other_caregiver.id,
+        )
+        own_review = EvidenceReviewRecord(
+            id="pattern-detail-own-review", evidence_id=own_evidence.id, person_id=person.id,
+            review_type="source_integrity", outcome="needs_review",
+            rationale="Source attribution still needs confirmation.", criteria=[],
+            policy_version="test-v1", source_attribution_snapshot="Caregiver-uploaded source.",
+            reviewed_by_caregiver_id=caregiver.id,
+        )
+        foreign_review = EvidenceReviewRecord(
+            id="pattern-detail-foreign-review", evidence_id=foreign_evidence.id, person_id=other.id,
+            review_type="source_integrity", outcome="verified",
+            rationale="Foreign record review.", criteria=[],
+            policy_version="test-v1", source_attribution_snapshot="Different person.",
+            reviewed_by_caregiver_id=other_caregiver.id,
+        )
+        own_event.evidence_ids = [own_evidence.id]
+        db.add_all([own_event, foreign_event, own_evidence, foreign_evidence, own_review, foreign_review])
         from app.core.change_enums import PatternType, PatternStrength, ChangeDirection
         pattern = Pattern(
             id="pattern-detail-id", person_id=person.id, subject_type="mobility", subject_id="",
@@ -1834,6 +1857,12 @@ def test_pattern_detail_returns_only_same_person_source_events():
         assert payload["pattern"]["id"] == "pattern-detail-id"
         assert [event["id"] for event in payload["events"]] == ["pattern-detail-own-event"]
         assert all(event["id"] != "pattern-detail-foreign-event" for event in payload["events"])
+        assert payload["events"][0]["contributor_id"] == "pattern-detail-caregiver"
+        assert payload["events"][0]["contributor_label"] == "Pattern detail caregiver"
+        assert [review["id"] for review in payload["evidence_reviews"]] == ["pattern-detail-own-review"]
+        assert payload["evidence_reviews"][0]["outcome"] == "needs_review"
+        assert payload["evidence_reviews"][0]["reviewed_by_caregiver_id"] == "pattern-detail-caregiver"
+        assert all(review["id"] != "pattern-detail-foreign-review" for review in payload["evidence_reviews"])
     finally:
         teardown_db()
 
