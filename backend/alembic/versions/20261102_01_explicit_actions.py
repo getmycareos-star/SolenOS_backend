@@ -15,7 +15,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("actions", sa.Column("registration_key", sa.String(length=128), nullable=True))
     op.add_column("actions", sa.Column("registration_request_sha256", sa.String(length=64), nullable=True))
-    op.add_column("actions", sa.Column("source_evidence_ids", sa.JSON(), nullable=True))
+    op.add_column("actions", sa.Column("source_evidence_ids", sa.Text(), nullable=True))
     op.add_column("actions", sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("actions", sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("actions", sa.Column("deferred_until", sa.DateTime(timezone=True), nullable=True))
@@ -39,7 +39,7 @@ def upgrade() -> None:
         sa.Column("previous_status", sa.String(), nullable=True),
         sa.Column("new_status", sa.String(), nullable=False),
         sa.Column("reason", sa.Text(), nullable=True),
-        sa.Column("evidence_ids", sa.JSON(), nullable=True),
+        sa.Column("evidence_ids", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_action_lifecycle_audit_action_id", "action_lifecycle_audit", ["action_id"])
