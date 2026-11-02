@@ -111,3 +111,43 @@ def test_temporal_relationship_review_decision_requires_a_same_person_link(monke
         )
     assert exc.value.status_code == 404
     assert "not found in this care record" in str(exc.value.detail)
+
+
+def test_evidence_source_relationship_review_decision_requires_same_person_link(monkeypatch):
+    from unittest.mock import Mock
+    from sqlalchemy import Column, MetaData, String, Table
+
+    from app.api import care_continuity
+
+    source_links = Table(
+        "evidence_source_relationships",
+        MetaData(),
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+    )
+    monkeypatch.setattr(
+        care_continuity,
+        "_table",
+        lambda _db, name: source_links if name == "evidence_source_relationships" else None,
+    )
+
+    db = Mock()
+    db.execute.return_value.first.return_value = ("source-link-a",)
+    care_continuity._validate_links(
+        db=db,
+        person_id="person-a",
+        resource="review-decisions",
+        payload={"target_type": "evidence_source_relationship", "target_id": "source-link-a"},
+    )
+    db.execute.assert_called_once()
+
+    db.execute.return_value.first.return_value = None
+    with pytest.raises(HTTPException) as exc:
+        care_continuity._validate_links(
+            db=db,
+            person_id="person-a",
+            resource="review-decisions",
+            payload={"target_type": "evidence_source_relationship", "target_id": "source-link-foreign"},
+        )
+    assert exc.value.status_code == 404
+    assert "not found in this care record" in str(exc.value.detail)
