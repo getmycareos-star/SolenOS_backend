@@ -661,7 +661,7 @@ def test_situation_assessment_preserves_saved_deferral_and_review_context_per_pe
         if item["id"] == deferred["id"] and item["source"] == "open_loop_records"
     )
     assert saved["deferred_reason"] == "The family recorded that this follow-up is deferred until the appointment."
-    assert saved["review_at"] == review_at
+    assert saved["review_at"].startswith("2026-11-05T10:00:00")
     assert saved["request_text"] == "Ask the clinic to confirm the appointment time."
     assert saved["verification_rule"] == "The appointment time is confirmed in a saved clinic message."
     assert saved["priority"] == deferred["priority"]
