@@ -308,6 +308,7 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
     )
     assert replay.status_code == 201, replay.text
     assert replay.json()["id"] == created.json()["id"]
+    assert replay.json()["linked_reminder_status"] == "open"
 
     reminders = client.get(
         f"/api/v1/reminders/{session['person']['id']}",
