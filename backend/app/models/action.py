@@ -93,7 +93,7 @@ class ActionAuthority(str):
 
 class Action(Base):
     __tablename__ = "actions"
-    __table_args__ = (UniqueConstraint("person_id", "registration_key", name="uq_actions_person_registration_key"),)
+    __table_args__ = (UniqueConstraint("person_id", "registration_key", name="uq_actions_person_registration_key"), UniqueConstraint("person_id", "suggestion_id", name="uq_actions_person_suggestion_id"),)
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
@@ -133,6 +133,7 @@ class Action(Base):
 
     status = Column(String, nullable=False, default=ActionStatus.DETECTED)
     registration_key = Column(String(128), nullable=True)
+    suggestion_id = Column(String(160), nullable=True)
     registration_request_sha256 = Column(String(64), nullable=True)
     source_evidence_ids = Column(JSONList, nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
