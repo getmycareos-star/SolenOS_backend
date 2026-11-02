@@ -15,6 +15,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column("actions", sa.Column("registration_key", sa.String(length=128), nullable=True))
     op.add_column("actions", sa.Column("suggestion_id", sa.String(length=160), nullable=True))
+    op.add_column("actions", sa.Column("action_identity_key", sa.String(length=64), nullable=True))
     op.add_column("actions", sa.Column("registration_request_sha256", sa.String(length=64), nullable=True))
     op.add_column("actions", sa.Column("source_evidence_ids", sa.Text(), nullable=True))
     op.add_column("actions", sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True))
@@ -26,6 +27,9 @@ def upgrade() -> None:
     )
     op.create_unique_constraint(
         "uq_actions_person_suggestion_id", "actions", ["person_id", "suggestion_id"]
+    )
+    op.create_unique_constraint(
+        "uq_actions_person_identity_key", "actions", ["person_id", "action_identity_key"]
     )
 
     op.add_column(
