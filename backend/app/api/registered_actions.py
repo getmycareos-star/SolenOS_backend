@@ -131,6 +131,13 @@ class RegisteredActionRead(BaseModel):
     linked_reminder_status: Optional[str] = None
 
 
+def _with_linked_reminder(db: Session, action: Action) -> Action:
+    linked = db.query(CareReminder).filter(CareReminder.action_id == action.id).first()
+    action.linked_reminder_due_at = linked.due_at if linked else None
+    action.linked_reminder_status = linked.status if linked else None
+    return action
+
+
 def _audit(db: Session, action: Action, actor_id: str, old: Optional[str], new: str,
            reason: Optional[str], evidence_ids: Optional[list[str]] = None) -> None:
     db.add(ActionLifecycleAudit(
@@ -183,7 +190,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     if existing:
         if existing.registration_request_sha256 != fingerprint:
             raise HTTPException(status_code=409, detail="This LCR suggestion is already registered with a different approved payload")
-        return existing
+        return _with_linked_reminder(db, existing)
     existing = db.query(Action).filter(
         Action.person_id == scoped_person_id,
         Action.action_identity_key == identity_key,
@@ -271,10 +278,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
             return existing
         raise HTTPException(status_code=409, detail="Action registration conflicted with an existing record")
     db.refresh(action)
-    linked = db.query(CareReminder).filter(CareReminder.action_id == action.id).first()
-    action.linked_reminder_due_at = linked.due_at if linked else None
-    action.linked_reminder_status = linked.status if linked else None
-    return action
+    return _with_linked_reminder(db, action)
 
 
 @router.get("/registered-actions/{person_id}", response_model=list[RegisteredActionRead])
