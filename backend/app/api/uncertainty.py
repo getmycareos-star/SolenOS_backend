@@ -31,7 +31,7 @@ from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Prior
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, CareAssertion, EvidenceReviewRecord
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
-from app.api.care_continuity import persist_situation_understanding_assessment
+from app.api.care_continuity import persist_situation_understanding_assessment, prepare_situation_understanding_assessment
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -153,6 +153,10 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
     """Append a caregiver decision for one immutable answer version."""
     if not engine.person_id or not engine.caregiver_id:
         raise HTTPException(status_code=403, detail="A session-bound caregiver identity is required")
+    # Preload reflected LCR schema before any row locks or writes. SQLite StaticPool
+    # shares one connection, and SQLAlchemy reflection can otherwise roll back the
+    # active transaction while composing the assessment.
+    prepare_situation_understanding_assessment(engine.db, engine.person_id)
     question = engine._target_query(OpenQuestionModel, question_id).with_for_update().first()
     if question is None:
         raise HTTPException(status_code=404, detail="Open question not found")
