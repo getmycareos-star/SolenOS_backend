@@ -107,6 +107,20 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
             evidence_ids=[event.id], is_active=True,
         )
         db.add(baseline)
+        db.flush()
+        prior_baseline = Baseline(
+            id="baseline-prior-a", person_id=person.id, subject_type="sleep", subject_id="",
+            baseline_type=BaselineType.PERSONAL_HISTORICAL,
+            window_start=datetime.now(timezone.utc) - timedelta(days=180),
+            window_end=datetime.now(timezone.utc) - timedelta(days=120),
+            event_count=1, confidence=BaselineConfidence.LOW, is_stable=False,
+            coverage_status="unknown", history_completeness="complete",
+            analysis_version="legacy-test", documentation_bias_flag=True,
+            evidence_ids=[event.id], is_active=False,
+            superseded_by_baseline_id="baseline-a",
+            created_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        db.add(prior_baseline)
         db.add(Correction(
             id="baseline-correction-a", person_id=person.id, target_type="evidence",
             target_id="baseline-source-a",
@@ -125,7 +139,10 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         payload = response.json()
         assert payload["person_id"] == person.id
         assert payload["read_only"] is True
-        assert [item["id"] for item in payload["baselines"]] == ["baseline-a"]
+        assert {item["id"] for item in payload["baselines"]} == {"baseline-a", "baseline-prior-a"}
+        prior = next(item for item in payload["baselines"] if item["id"] == "baseline-prior-a")
+        assert prior["is_active"] is False
+        assert prior["superseded_by_baseline_id"] == "baseline-a"
         assert "current-mobility-change" in {item["id"] for item in payload["changes"]}
         mobility_change = next(item for item in payload["changes"] if item["id"] == "current-mobility-change")
         assert mobility_change["attention_candidate"] is True
