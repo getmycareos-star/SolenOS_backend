@@ -384,3 +384,56 @@ def test_session_with_unlinked_caregiver_cannot_approve():
         json=approval_payload(evidence["id"]),
     )
     assert denied.status_code == 403, denied.text
+
+
+
+def test_deferring_action_reschedules_its_linked_reminder_and_requires_new_date():
+    client = TestClient(app)
+    session = create_session(client, "Deferred reminder recipient")
+    evidence = create_evidence(client, session)
+    due_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    created = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=approval_payload(
+            evidence["id"],
+            idempotency_key="deferred-reminder-approval-key-003",
+            suggestion_id="deferred-reminder-suggestion-003",
+            create_reminder=True,
+            reminder_due_at=due_at,
+        ),
+    )
+    assert created.status_code == 201, created.text
+
+    missing_new_date = client.patch(
+        f"/api/v1/registered-actions/{created.json()['id']}/status",
+        headers=headers(session),
+        json={
+            "status": "deferred",
+            "expected_version": created.json()["version"],
+            "reason": "Caregiver chose to postpone.",
+        },
+    )
+    assert missing_new_date.status_code == 422, missing_new_date.text
+
+    new_due_at = (datetime.now(timezone.utc) + timedelta(days=8)).isoformat()
+    deferred = client.patch(
+        f"/api/v1/registered-actions/{created.json()['id']}/status",
+        headers=headers(session),
+        json={
+            "status": "deferred",
+            "expected_version": created.json()["version"],
+            "reason": "Caregiver chose to postpone.",
+            "deferred_until": new_due_at,
+        },
+    )
+    assert deferred.status_code == 200, deferred.text
+
+    reminders = client.get(
+        f"/api/v1/reminders/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert reminders.status_code == 200, reminders.text
+    assert len(reminders.json()) == 1
+    assert reminders.json()[0]["status"] == "open"
+    assert reminders.json()[0]["due_at"].startswith(new_due_at[:16])
