@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
-from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel, ClarificationReviewEvent as ClarificationReviewEventModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel, ClarificationReviewEvent as ClarificationReviewEventModel, InformationGap as InformationGapModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -26,7 +26,7 @@ from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
 from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
-from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
+from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority, ResolutionMechanism
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, CareAssertion, EvidenceReviewRecord
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -188,6 +188,7 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
             "evidence_ids_requiring_review": sorted(set(evidence_ids) - reviewed_ids),
         })
     resulting_assertion = None
+    resulting_gap_ids = []
     reconciliation_status = "not_run_decision_not_accepted"
     now = datetime.now(timezone.utc)
     if review.decision == "accepted":
@@ -217,6 +218,32 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
             updated_by_caregiver_id=engine.caregiver_id,
         )
         engine.db.add(resulting_assertion)
+        # Resolve only a gap explicitly referenced by this question's persisted context.
+        # Never infer a gap link from a shared subject label alone.
+        linked_gap_ids = set()
+        for context_item in question.context or []:
+            if not isinstance(context_item, dict):
+                continue
+            source_kind = str(context_item.get("source_kind") or context_item.get("kind") or "").strip().lower()
+            source_id = context_item.get("source_id") or context_item.get("information_gap_id")
+            if source_kind in {"information_gap", "missing_information", "gap"} and isinstance(source_id, str) and source_id.strip():
+                linked_gap_ids.add(source_id.strip())
+        if len(linked_gap_ids) == 1:
+            linked_gap = engine.db.query(InformationGapModel).filter(
+                InformationGapModel.id == next(iter(linked_gap_ids)),
+                InformationGapModel.person_id == engine.person_id,
+                InformationGapModel.subject_type == source_claim.subject_type,
+                InformationGapModel.subject_id == source_claim.subject_id,
+                InformationGapModel.field == source_claim.field,
+            ).with_for_update().first()
+            if linked_gap is not None and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}:
+                linked_gap.lifecycle_status = GapLifecycleStatus.RESOLVED
+                linked_gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
+                linked_gap.resolution_date = now
+                linked_gap.resolution_notes = review.rationale.strip()
+                linked_gap.evidence_ids = list(dict.fromkeys([*(linked_gap.evidence_ids or []), *evidence_ids]))
+                linked_gap.updated_by_caregiver_id = engine.caregiver_id
+                resulting_gap_ids.append(linked_gap.id)
         question.status = "closed"
         question.closed_at = now
         question.closed_reason = review.rationale.strip()
@@ -239,6 +266,7 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         reviewed_by_caregiver_id=engine.caregiver_id,
         reconciliation_status=reconciliation_status,
         evidence_review_ids=[row.id for row in evidence_reviews],
+        resulting_gap_ids=resulting_gap_ids,
     )
     engine.db.add(event)
     try:
