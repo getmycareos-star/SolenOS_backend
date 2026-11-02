@@ -133,7 +133,6 @@ from app.services.temporal_intelligence import (
     classify_temporal_status,
     check_temporal_conflict,
 )
-from app.api.actions import router as actions_router
 
 logger = logging.getLogger(__name__)
 
@@ -1464,4 +1463,3 @@ def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = N
     return {"fact_id": fact_id, "temporal_status": status}
 
 
-router.include_router(actions_router, prefix="/actions", tags=["actions"])
