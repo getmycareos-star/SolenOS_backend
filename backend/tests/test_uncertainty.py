@@ -2641,6 +2641,58 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
 
         duplicate = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json=decision_payload)
         assert duplicate.status_code == 409
+
+        followup_question = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": person.id,
+            "question": "Is there an independent record confirming the visit?",
+            "subject_type": "care_routine",
+            "subject_id": "morning-routine",
+            "priority": "medium",
+        })
+        assert followup_question.status_code == 200, followup_question.text
+        followup_id = followup_question.json()["id"]
+        followup_answer = client.patch(f"/api/v1/uncertainty/questions/{followup_id}", json={
+            "status": "answered",
+            "answer": "No independent record has been located yet.",
+            "answer_provenance": "Caregiver checked the available record.",
+            "evidence_ids": [evidence_id],
+        })
+        assert followup_answer.status_code == 200, followup_answer.text
+        needs_more = client.post(f"/api/v1/uncertainty/questions/{followup_id}/reviews", json={
+            "answer_version": 1,
+            "decision": "needs_more_information",
+            "rationale": "The available evidence does not independently confirm attendance.",
+        })
+        assert needs_more.status_code == 201, needs_more.text
+        assert needs_more.json()["decision"] == "needs_more_information"
+        assert client.get(f"/api/v1/uncertainty/questions/{person.id}").json()
+        followup_rows = client.get(f"/api/v1/uncertainty/questions/{person.id}").json()
+        assert next(item for item in followup_rows if item["id"] == followup_id)["status"] == "open"
+
+        rejected_question = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": person.id,
+            "question": "Was the reported visit date accurate?",
+            "subject_type": "care_routine",
+            "subject_id": "morning-routine",
+            "priority": "medium",
+        })
+        assert rejected_question.status_code == 200, rejected_question.text
+        rejected_id = rejected_question.json()["id"]
+        rejected_answer = client.patch(f"/api/v1/uncertainty/questions/{rejected_id}", json={
+            "status": "answered",
+            "answer": "The date in the caregiver's first report was incorrect.",
+            "answer_provenance": "Caregiver corrected the earlier report.",
+            "evidence_ids": [evidence_id],
+        })
+        assert rejected_answer.status_code == 200, rejected_answer.text
+        rejected = client.post(f"/api/v1/uncertainty/questions/{rejected_id}/reviews", json={
+            "answer_version": 1,
+            "decision": "rejected",
+            "rationale": "The submitted answer conflicts with the cited source record.",
+        })
+        assert rejected.status_code == 201, rejected.text
+        rejected_rows = client.get(f"/api/v1/uncertainty/questions/{person.id}").json()
+        assert next(item for item in rejected_rows if item["id"] == rejected_id)["status"] == "unresolved"
     finally:
         teardown_db()
         Base.metadata.drop_all(bind=engine)
