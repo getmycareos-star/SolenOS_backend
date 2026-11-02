@@ -305,3 +305,64 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
         assert db.query(CareReminder).filter_by(action_id=created.json()["id"]).count() == 1
     finally:
         db.close()
+
+
+
+def test_same_evidence_and_action_cannot_be_registered_under_another_suggestion():
+    client = TestClient(app)
+    session = create_session(client, "Duplicate candidate recipient")
+    evidence = create_evidence(client, session)
+    first = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=approval_payload(evidence["id"]),
+    )
+    assert first.status_code == 201, first.text
+
+    duplicate_payload = approval_payload(
+        evidence["id"],
+        idempotency_key="different-idempotency-key-002",
+        suggestion_id="different-open-loop-candidate-002",
+    )
+    duplicate = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=duplicate_payload,
+    )
+    assert duplicate.status_code == 409, duplicate.text
+
+    listed = client.get(
+        f"/api/v1/registered-actions/{session['person']['id']}",
+        headers=headers(session),
+    )
+    assert len(listed.json()) == 1
+
+
+def test_session_with_unlinked_caregiver_cannot_approve():
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    from app.models.anonymous_session import AnonymousSession
+
+    client = TestClient(app)
+    first = create_session(client, "Scoped action recipient")
+    second = create_session(client, "Unlinked caregiver recipient")
+    evidence = create_evidence(client, first)
+    token = "forged-unlinked-caregiver-session-token"
+    db = TestSessionLocal()
+    try:
+        db.add(AnonymousSession(
+            person_id=first["person"]["id"],
+            caregiver_id=second["caregiver"]["id"],
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    denied = client.post(
+        f"/api/v1/registered-actions/{first['person']['id']}/approve",
+        headers={"Authorization": f"Bearer {token}"},
+        json=approval_payload(evidence["id"]),
+    )
+    assert denied.status_code == 403, denied.text
