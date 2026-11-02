@@ -2610,6 +2610,9 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         assert accepted_data["reviewed_by_caregiver_id"] == caregiver.id
         assert accepted_data["resulting_assertion_id"]
         assert accepted_data["reconciliation_status"] == "completed"
+        assertion_projection = client.get(f"/api/v1/care-continuity/assertions/{person.id}?limit=100")
+        assert assertion_projection.status_code == 200, assertion_projection.text
+        assert any(item["id"] == accepted_data["resulting_assertion_id"] for item in assertion_projection.json())
         assert accepted_data["resulting_gap_ids"] == [gap_id]
         gap_after = client.get(f"/api/v1/uncertainty/gaps/{person.id}")
         assert gap_after.status_code == 200, gap_after.text
