@@ -184,7 +184,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         Action.action_identity_key == identity_key,
     ).first()
     if existing:
-        return existing
+        raise HTTPException(status_code=409, detail="An action with the same evidence and wording is already registered")
     existing = db.query(Action).filter(
         Action.person_id == scoped_person_id,
         Action.registration_key == payload.idempotency_key,
@@ -253,7 +253,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
             Action.action_identity_key == identity_key,
         ).first()
         if existing:
-            return existing
+            raise HTTPException(status_code=409, detail="An action with the same evidence and wording is already registered")
         existing = db.query(Action).filter(
             Action.person_id == scoped_person_id,
             Action.registration_key == payload.idempotency_key,
