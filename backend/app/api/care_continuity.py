@@ -2293,10 +2293,8 @@ def get_situation_understanding_snapshot(
     }
 
 
-@router.post("/situation-understanding/reassess")
-def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
-    """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
-    person_id, caregiver_id = _scoped_identity(request, db)
+def persist_situation_understanding_assessment(db: Session, person_id: str, caregiver_id: str, commit: bool = True):
+    """Persist the canonical bounded LCR assessment; optionally join a caller's transaction."""
     if not inspect(db.get_bind()).has_table("care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
@@ -2314,7 +2312,6 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
             previous_assessment = {}
         previous_comparison = dict(previous_assessment) if isinstance(previous_assessment, dict) else {}
         current_comparison = dict(assessment)
-        # Compare semantic content, excluding the assessment clock.
         previous_comparison.pop("as_of", None)
         current_comparison.pop("as_of", None)
         previous_records = {
@@ -2344,11 +2341,23 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
             "changes": changes[:200],
             "interpretation_limit": "Projection differences only. Removal from a bounded projection does not establish deletion or clinical improvement/deterioration.",
         }
-        # Avoid a new snapshot when source content and coverage are semantically unchanged.
         previous_comparison.pop("evolution_since_previous_assessment", None)
         current_comparison.pop("evolution_since_previous_assessment", None)
         if previous_comparison == current_comparison and not changes:
-            return {"person_id": person_id, "status": "unchanged", "assessment_id": latest["id"], "assessment": previous_assessment, "source_freshness": {"status": "current_for_bounded_source_view", "reassessment_recommended": False, "source_of_truth": "current_person_scoped_lcr_context", "scope": "bounded_per_source_limit_50", "read_only": True, "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete."}}
+            return {
+                "person_id": person_id,
+                "status": "unchanged",
+                "assessment_id": latest["id"],
+                "assessment": previous_assessment,
+                "source_freshness": {
+                    "status": "current_for_bounded_source_view",
+                    "reassessment_recommended": False,
+                    "source_of_truth": "current_person_scoped_lcr_context",
+                    "scope": "bounded_per_source_limit_50",
+                    "read_only": True,
+                    "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete.",
+                },
+            }
     else:
         assessment["evolution_since_previous_assessment"] = {
             "comparison_available": False,
@@ -2371,9 +2380,6 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
         "source": "situation_understanding_assessment",
         "event_date": now,
         "source_event_id": None,
-        # This endpoint uses a reflected SQLAlchemy Table, which sees the
-        # JSONList TypeDecorator's TEXT storage as plain TEXT. Serialize explicitly
-        # rather than binding a Python list to a TEXT column.
         "evidence_ids": json.dumps(evidence_ids, separators=(",", ":")),
         "delta_json": serialized,
         "model_name": "deterministic-lcr-composition-v1",
@@ -2382,12 +2388,21 @@ def reassess_situation_understanding(request: Request, db: Session = Depends(get
     }
     try:
         db.execute(insert(table).values(**row))
-        db.commit()
+        if commit:
+            db.commit()
     except Exception as exc:
-        db.rollback()
+        if commit:
+            db.rollback()
         logger.exception("Situation assessment persistence failed for session-scoped person %s", person_id)
         raise HTTPException(status_code=503, detail="Situation assessment could not be persisted") from exc
     return {"person_id": person_id, "status": "created", "assessment_id": row["id"], "assessment": assessment, "source_freshness": {"status": "current_for_bounded_source_view", "reassessment_recommended": False, "source_of_truth": "current_person_scoped_lcr_context", "scope": "bounded_per_source_limit_50", "read_only": True, "limitation": "A matching fingerprint covers only the current bounded source view; it does not prove that all relevant sources exist or are complete."}}
+
+
+@router.post("/situation-understanding/reassess")
+def reassess_situation_understanding(request: Request, db: Session = Depends(get_db)):
+    """Persist an evidence-derived snapshot; repeated identical assessments are deduplicated."""
+    person_id, caregiver_id = _scoped_identity(request, db)
+    return persist_situation_understanding_assessment(db, person_id, caregiver_id, commit=True)
 
 
 @router.get("/summary")
