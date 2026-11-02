@@ -513,7 +513,12 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
-    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    person_query = db.query(PersonModel).filter(PersonModel.id == person_id)
+    # Serialize quick check-in writes per care recipient so concurrent retries
+    # cannot both pass the idempotency lookup on PostgreSQL.
+    if event_type == "quick_daily_checkin":
+        person_query = person_query.with_for_update()
+    person = person_query.first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     caregiver = (
@@ -528,6 +533,40 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     # Keep the submitted structured fields intact in the event record. The
     # existing schema has no separate medication/vitals/scales tables yet.
     detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
+    quick_check_in = detail.get("quick_check_in")
+    if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
+        idempotency_key = quick_check_in["idempotency_key"]
+        fingerprint_payload = {
+            "kind": quick_check_in.get("kind"),
+            "selected_areas": quick_check_in.get("selected_areas"),
+            "note": quick_check_in.get("note"),
+        }
+        request_fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        existing_events = db.query(CareEventModel).filter(
+            CareEventModel.person_id == person_id,
+            CareEventModel.created_by_caregiver_id == caregiver_id,
+            CareEventModel.event_type == "quick_daily_checkin",
+            CareEventModel.description.like(f'%"{idempotency_key}"%'),
+        ).all()
+        for existing_event in existing_events:
+            try:
+                existing_detail = json.loads(existing_event.description or "{}")
+                existing_quick = existing_detail.get("quick_check_in", {})
+            except (TypeError, ValueError):
+                continue
+            if existing_quick.get("idempotency_key") == idempotency_key:
+                if existing_quick.get("request_fingerprint") != request_fingerprint:
+                    raise HTTPException(status_code=409, detail="This check-in key was already used for different content")
+                return {
+                    "success": True,
+                    "id": existing_event.id,
+                    "event_type": existing_event.event_type,
+                    "recorded_at": existing_event.recorded_at,
+                    "idempotent_replay": True,
+                }
+        quick_check_in["request_fingerprint"] = request_fingerprint
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -663,6 +702,10 @@ def _validate_quick_check_in(payload: dict) -> None:
     note = quick.get("note")
     if note is not None and (not isinstance(note, str) or len(note) > 2000):
         raise HTTPException(status_code=422, detail="quick_check_in note must be at most 2000 characters")
+    idempotency_key = quick.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > 128:
+        raise HTTPException(status_code=422, detail="quick_check_in idempotency_key is required and must be at most 128 characters")
+
     reported_at = quick.get("caregiver_reported_at")
     if not isinstance(reported_at, str) or not reported_at.strip():
         raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at is required")
