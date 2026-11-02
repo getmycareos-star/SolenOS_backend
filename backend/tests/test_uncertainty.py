@@ -2595,6 +2595,12 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
         assertions = client.get("/api/v1/care-continuity/assertions/review-person-1")
         assert assertions.status_code == 200, assertions.text
         assert any(item["id"] == review["resulting_claim_id"] for item in assertions.json())
+        lcr_context = client.get("/api/v1/care-continuity/context")
+        assert lcr_context.status_code == 200, lcr_context.text
+        assert any(
+            item["id"] == review["resulting_claim_id"]
+            for item in lcr_context.json()["sources"]["assertions"]["items"]
+        )
 
         db = TestingSessionLocal()
         try:
