@@ -10,7 +10,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import CareEvent, Caregiver, Person, Evidence
+from app.models.care import CareEvent, Caregiver, Person, Evidence, Correction
 from app.models.change import Baseline
 from app.core.change_enums import BaselineConfidence, BaselineType
 
@@ -94,6 +94,13 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
             evidence_ids=[event.id], is_active=True,
         )
         db.add(baseline)
+        db.add(Correction(
+            id="baseline-correction-a", person_id=person.id, target_type="evidence",
+            target_id="baseline-source-a",
+            original_text="usual bedtime around 8 pm",
+            corrected_text="usual bedtime around 9 pm",
+            reason="Caregiver corrected the original time", caregiver_id=caregiver.id,
+        ))
         db.commit()
 
         client = TestClient(app)
@@ -111,6 +118,8 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
         assert [item["id"] for item in payload["source_evidence"]] == ["baseline-source-a"]
         assert payload["source_evidence"][0]["source_text"].startswith("The caregiver reports")
         assert payload["source_evidence"][0]["reported_by_label"] == "Family caregiver"
+        assert [item["id"] for item in payload["corrections"]] == ["baseline-correction-a"]
+        assert payload["corrections"][0]["corrected_text"] == "usual bedtime around 9 pm"
         assert "baseline-event-b" not in {item["id"] for item in payload["events"]}
 
         forbidden = client.get(
