@@ -220,7 +220,7 @@ def review_question_answer(
             assertion_kind=source_claim.assertion_kind,
             asserted_value=answer_event.answer,
             source_label="Reviewed caregiver clarification",
-            source_text=answer_event.answer,
+            source_text=f"Caregiver answer: {answer_event.answer}\\nSource or basis: {answer_event.answer_provenance}",
             evidence_ids=evidence_ids,
             assertion_status="reported",
             observed_at=source_claim.observed_at,
