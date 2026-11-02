@@ -194,6 +194,10 @@ def review_question_answer(
         ).first()
         if source_claim is None:
             raise HTTPException(status_code=409, detail="The linked care claim is no longer available in this care record")
+        if source_claim.assertion_kind == "current_state" and review.review_after_days is None:
+            raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires a caregiver-selected review interval")
+        if source_claim.assertion_kind == "time_bound_observation" and source_claim.observed_at is None:
+            raise HTTPException(status_code=422, detail="The linked time-bound claim has no actual event time; this clarification cannot inherit an invented timestamp")
         evidence_ids = list(answer_event.evidence_ids or [])
         if not evidence_ids:
             raise HTTPException(status_code=422, detail="An accepted clarification requires persisted supporting evidence")
@@ -218,6 +222,8 @@ def review_question_answer(
             source_text=answer_event.answer,
             evidence_ids=evidence_ids,
             assertion_status="reported",
+            observed_at=source_claim.observed_at,
+            review_after_days=review.review_after_days,
             created_by_caregiver_id=answer_event.answered_by_caregiver_id,
         )
         engine.db.add(resulting_claim)
