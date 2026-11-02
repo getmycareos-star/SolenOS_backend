@@ -499,3 +499,45 @@ def test_quick_daily_checkin_is_visible_as_caregiver_report_in_lcr_projection(mo
     finally:
         db.close()
         teardown_db()
+
+
+def test_same_as_usual_can_save_overall_impression_without_marking_domains_checked():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": (
+                    "Caregiver reports no significant change in their overall impression of care. "
+                    "No individual care areas were assessed by this check-in."
+                ),
+                "quick_check_in": {
+                    "schema_version": 1,
+                    "kind": "same_as_usual",
+                    "selected_areas": [],
+                    "scope": "overall_impression_only",
+                    "caregiver_reported_at": "2026-11-03T00:00:00+01:00",
+                    "epistemic_status": "caregiver_reported",
+                    "idempotency_key": "daily-checkin-overall-001",
+                    "note": None,
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
+        detail = json.loads(event.description)
+        assert detail["quick_check_in"]["selected_areas"] == []
+        assert detail["quick_check_in"]["scope"] == "overall_impression_only"
+        assert "No individual care areas were assessed" in detail["notes"]
+        db.close()
+    finally:
+        teardown_db()
