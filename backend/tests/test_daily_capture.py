@@ -141,7 +141,17 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         assert response.status_code == 200, response.text
         assert response.json()["success"] is True
 
+        replay = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json=json.loads(response.request.content),
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == response.json()["id"]
+        assert replay.json()["idempotent_replay"] is True
+
         db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 1
         event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
         detail = json.loads(event.description)
         assert event.person_id == "person-daily-test"
