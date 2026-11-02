@@ -229,6 +229,20 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
     assert [event["new_status"] for event in events] == ["approved", "in_progress", "completed"]
     assert all(event["actor_caregiver_id"] == session["caregiver"]["id"] for event in events)
 
+    from app.models.action import ActionLifecycleAudit
+    db = TestSessionLocal()
+    try:
+        audit = db.query(ActionLifecycleAudit).filter_by(action_id=action_id).first()
+        original_reason = audit.reason
+        audit.reason = "Attempted audit mutation"
+        with pytest.raises(ValueError, match="append-only"):
+            db.commit()
+        db.rollback()
+        persisted = db.query(ActionLifecycleAudit).filter_by(id=audit.id).one()
+        assert persisted.reason == original_reason
+    finally:
+        db.close()
+
 
 def test_deferred_action_retains_history_and_stale_writes_are_rejected():
     client = TestClient(app)
