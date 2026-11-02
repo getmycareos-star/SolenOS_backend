@@ -1312,7 +1312,7 @@ def current_care_projection(
     for row in (sources.get("events") or {}).get("items", []):
         event_type = str(row.get("event_type") or "").strip().lower()
         needs_attention = row.get("attention_candidate") is True or row.get("follow_up_candidate") is True
-        is_daily_capture = event_type in {"structured_daily_capture", "daily_care_entry"}
+        is_daily_capture = event_type in {"structured_daily_capture", "daily_care_entry", "quick_daily_checkin"}
         if needs_attention:
             add("events", row, "Care event needing attention", 5, require_open=True)
         elif is_daily_capture:
