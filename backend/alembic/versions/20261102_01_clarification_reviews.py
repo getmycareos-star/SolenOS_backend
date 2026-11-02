@@ -32,6 +32,7 @@ def upgrade() -> None:
             sa.Column("resulting_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True),
             sa.Column("reconciliation_status", sa.String(length=32), nullable=False),
             sa.Column("evidence_review_ids", sa.Text(), nullable=False, server_default=sa.text("'[]'")),
+            sa.Column("resulting_gap_ids", sa.Text(), nullable=False, server_default=sa.text("'[]'")),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("answer_event_id", name="uq_clarification_review_answer_event"),
         )
