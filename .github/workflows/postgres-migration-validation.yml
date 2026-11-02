@@ -247,6 +247,12 @@ jobs:
                         AND NOT tgisinternal
                   """).first()
                   assert answer_history_trigger is not None, "clarification answer history append-only trigger missing"
+                  clarification_review_trigger = connection.exec_driver_sql("""
+                      SELECT 1 FROM pg_trigger
+                      WHERE tgname = 'trg_clarification_review_events_immutable'
+                        AND NOT tgisinternal
+                  """).first()
+                  assert clarification_review_trigger is not None, "clarification review history append-only trigger missing"
                   for table in ("evidence_freshness_policies", "evidence_freshness_assessments"):
                       freshness_trigger = connection.exec_driver_sql(
                           "SELECT 1 FROM pg_trigger WHERE tgname = %s AND NOT tgisinternal",
