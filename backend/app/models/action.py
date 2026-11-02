@@ -140,7 +140,7 @@ class Action(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     deferred_until = Column(DateTime(timezone=True), nullable=True)
-    version = Column(Integer, nullable=False, default=1)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
     completion_evidence_ids = Column(JSONList, nullable=True)
     completion_confidence = Column(Float, nullable=True)
     superseded_by_action_id = Column(String, ForeignKey("actions.id"), nullable=True)
