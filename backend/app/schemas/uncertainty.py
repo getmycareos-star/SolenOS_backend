@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from app.core.uncertainty_enums import (
     EpistemicState,
     GapReason,
