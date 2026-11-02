@@ -20,6 +20,7 @@ def upgrade() -> None:
     op.add_column("actions", sa.Column("source_evidence_ids", sa.Text(), nullable=True))
     op.add_column("actions", sa.Column("approved_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("actions", sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("actions", sa.Column("responsible_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=True))
     op.add_column("actions", sa.Column("deferred_until", sa.DateTime(timezone=True), nullable=True))
     op.add_column("actions", sa.Column("version", sa.Integer(), nullable=False, server_default="1"))
     op.create_unique_constraint(
