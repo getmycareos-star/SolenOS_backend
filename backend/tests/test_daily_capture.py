@@ -494,7 +494,8 @@ def test_quick_daily_checkin_is_visible_as_caregiver_report_in_lcr_projection(mo
         assert item["kind"] == "Daily care entry"
         assert item["epistemic_status"] == "caregiver_reported"
         assert item["source_label"] == "Caregiver report"
-        assert item["occurred_at"] == report_time
+        assert item["occurred_at"] == "2026-11-02T23:00:00+00:00"
+        assert item["reported_at"] == report_time
     finally:
         db.close()
         teardown_db()
