@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session\nfrom sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
@@ -270,10 +270,17 @@ def review_question_answer(
         engine.db.commit()
         engine.db.refresh(event)
         return event
-    except Exception as exc:
+    except IntegrityError as exc:
         engine.db.rollback()
-        if "uq_open_question_review_answer_version" in str(exc):
-            raise HTTPException(status_code=409, detail="This answer version was reviewed concurrently; reload its review history") from exc
+        concurrent = engine.db.query(OpenQuestionReviewEventModel).filter(
+            OpenQuestionReviewEventModel.question_id == question.id,
+            OpenQuestionReviewEventModel.answer_version == answer_event.answer_version,
+        ).first()
+        if concurrent and concurrent.decision == review.decision and concurrent.rationale == review.rationale.strip():
+            return concurrent
+        raise HTTPException(status_code=409, detail="This answer version was reviewed concurrently; reload its review history") from exc
+    except Exception:
+        engine.db.rollback()
         raise
 
 
