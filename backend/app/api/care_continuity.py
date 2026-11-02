@@ -2950,13 +2950,19 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
             if str(row.get("lifecycle_status") or "open").casefold() not in {"open", "unresolved", "pending"}:
                 continue
             description = row.get("description") or f"Information gap for {row.get('subject_type') or 'care record'}: {row.get('field') or 'unspecified field'}"
+            gap_context = row.get("context") if isinstance(row.get("context"), list) else []
+            context_reason = next((
+                str(item.get("reason") or item.get("purpose")).strip()
+                for item in gap_context
+                if isinstance(item, dict) and (item.get("reason") or item.get("purpose"))
+            ), None)
             output.append({
                 "question": description,
                 "subject_type": row.get("subject_type") or "care_record",
                 "subject_id": row.get("subject_id") or scoped_person_id,
                 "field": row.get("field"),
                 "priority": str(row.get("priority") or "informational"),
-                "reason": str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
+                "reason": context_reason or str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
                 "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
                 "source_kind": "information_gap",
                 "source_id": row.get("id"),
