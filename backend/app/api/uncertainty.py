@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
@@ -309,6 +310,15 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         engine.db.commit()
         engine.db.refresh(event)
         return event
+    except IntegrityError as exc:
+        engine.db.rollback()
+        duplicate = engine.db.query(ClarificationReviewEventModel.id).filter(
+            ClarificationReviewEventModel.answer_event_id == answer_event.id,
+            ClarificationReviewEventModel.person_id == engine.person_id,
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another review") from exc
+        raise HTTPException(status_code=503, detail="Clarification review could not be committed; no decision was recorded") from exc
     except Exception as exc:
         engine.db.rollback()
         raise HTTPException(status_code=503, detail="Clarification review and LCR reconciliation failed; no decision was committed") from exc
