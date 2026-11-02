@@ -145,6 +145,16 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
         .all()
         if source_ids else []
     )
+    original_evidence_ids = {
+        evidence_id for event in events for evidence_id in (event.evidence_ids or []) if evidence_id
+    }
+    source_evidence = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id, Evidence.id.in_(original_evidence_ids))
+        .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+        .all()
+        if original_evidence_ids else []
+    )
     return {
         "person_id": person_id,
         "as_of": datetime.now(timezone.utc),
@@ -195,6 +205,26 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
                 "created_at": row.created_at,
             }
             for row in relevant_changes
+        ],
+        "source_evidence": [
+            {
+                "id": row.id,
+                "type": row.type,
+                "evidence_kind": row.evidence_kind,
+                "epistemic_status": row.epistemic_status,
+                "source_text": row.source_text,
+                "uploaded_at": row.uploaded_at,
+                "uploaded_by_caregiver_id": row.uploaded_by_caregiver_id,
+                "original_author": row.original_author,
+                "reported_by_label": row.reported_by_label,
+                "reported_by_caregiver_id": row.reported_by_caregiver_id,
+                "occurred_at": row.occurred_at,
+                "reported_at": row.reported_at,
+                "source_type": row.source_type,
+                "original_source_reference": row.original_source_reference,
+                "evidence_status": row.evidence_status,
+            }
+            for row in source_evidence
         ],
         "events": [
             {
