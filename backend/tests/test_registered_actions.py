@@ -537,3 +537,55 @@ def test_direct_medication_change_is_blocked_but_contacting_clinician_is_allowed
         headers=headers(session),
     )
     assert len(listed.json()) == 1
+
+
+
+def test_only_responsible_caregiver_can_change_registered_action():
+    import hashlib
+    from datetime import datetime, timedelta, timezone
+    from app.models.anonymous_session import AnonymousSession
+    from app.models.care import Caregiver
+
+    client = TestClient(app)
+    owner = create_session(client, "Shared care recipient")
+    evidence = create_evidence(client, owner)
+    created = client.post(
+        f"/api/v1/registered-actions/{owner['person']['id']}/approve",
+        headers=headers(owner),
+        json=approval_payload(evidence["id"]),
+    )
+    assert created.status_code == 201, created.text
+
+    token = "second-linked-caregiver-session-token"
+    db = TestSessionLocal()
+    try:
+        second_caregiver = Caregiver(
+            name="Second caregiver",
+            relationship="family",
+            person_id=owner["person"]["id"],
+        )
+        db.add(second_caregiver)
+        db.flush()
+        db.add(AnonymousSession(
+            person_id=owner["person"]["id"],
+            caregiver_id=second_caregiver.id,
+            token_hash=hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    denied = client.patch(
+        f"/api/v1/registered-actions/{created.json()['id']}/status",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"status": "in_progress", "expected_version": created.json()["version"]},
+    )
+    assert denied.status_code == 403, denied.text
+
+    visible = client.get(
+        f"/api/v1/registered-actions/{owner['person']['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert visible.status_code == 200, visible.text
+    assert len(visible.json()) == 1
