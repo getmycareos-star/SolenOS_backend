@@ -47,6 +47,7 @@ from app.models.uncertainty import (
     OpenQuestion as OpenQuestionModel,
     Contradiction as ContradictionModel,
     InformationGap as InformationGapModel,
+    ClarificationReviewEvent as ClarificationReviewEventModel,
 )
 from app.core.uncertainty_enums import GapLifecycleStatus
 from app.api.anonymous_sessions import router as anonymous_sessions_router
