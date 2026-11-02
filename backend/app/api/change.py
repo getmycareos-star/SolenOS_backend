@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Caregiver
 from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
@@ -401,6 +401,16 @@ def get_pattern_detail(
         .all()
         if change_ids else []
     )
+    contributor_ids = list(dict.fromkeys(
+        event.created_by_caregiver_id for event in events if event.created_by_caregiver_id
+    ))
+    contributors = (
+        db.query(Caregiver)
+        .filter(Caregiver.person_id == person_id, Caregiver.id.in_(contributor_ids))
+        .all()
+        if contributor_ids else []
+    )
+    contributor_labels = {str(item.id): item.name for item in contributors}
     return {
         "pattern": pattern,
         "events": [
@@ -414,6 +424,10 @@ def get_pattern_detail(
                 "description": event.description,
                 "evidence_ids": event.evidence_ids or [],
                 "time_provenance": event.time_provenance,
+                "contributor_id": event.created_by_caregiver_id,
+                "contributor_label": contributor_labels.get(
+                    str(event.created_by_caregiver_id)
+                ) if event.created_by_caregiver_id else None,
             }
             for event in events
         ],
