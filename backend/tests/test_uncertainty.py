@@ -2674,13 +2674,19 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             "status": "answered",
             "answer": "No independent record has been located yet.",
             "answer_provenance": "Caregiver checked the available record.",
-            "evidence_ids": [evidence_id],
         })
         assert followup_answer.status_code == 200, followup_answer.text
+        cannot_accept_without_evidence = client.post(f"/api/v1/uncertainty/questions/{followup_id}/reviews", json={
+            "answer_version": 1,
+            "decision": "accepted",
+            "rationale": "Attempted acceptance without persisted source evidence.",
+            "review_after_days": 30,
+        })
+        assert cannot_accept_without_evidence.status_code == 422
         needs_more = client.post(f"/api/v1/uncertainty/questions/{followup_id}/reviews", json={
             "answer_version": 1,
             "decision": "needs_more_information",
-            "rationale": "The available evidence does not independently confirm attendance.",
+            "rationale": "The caregiver report is retained, but supporting evidence is still missing.",
         })
         assert needs_more.status_code == 201, needs_more.text
         assert needs_more.json()["decision"] == "needs_more_information"
