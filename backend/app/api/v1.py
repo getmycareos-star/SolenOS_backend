@@ -619,8 +619,61 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     }
 
 
+def _validate_quick_check_in(payload: dict) -> None:
+    quick = payload.get("quick_check_in")
+    if quick is None:
+        return
+    if not isinstance(quick, dict) or quick.get("schema_version") != 1:
+        raise HTTPException(status_code=422, detail="quick_check_in must use schema version 1")
+
+    kind = quick.get("kind")
+    if kind not in {"same_as_usual", "change", "concern", "care_completed"}:
+        raise HTTPException(status_code=422, detail="quick_check_in kind is invalid")
+
+    care_areas = {
+        "sleep",
+        "eating_and_drinking",
+        "mobility",
+        "mood_and_behavior",
+        "communication",
+        "daily_routine",
+        "personal_care",
+    }
+    completed_care = {
+        "meal_support",
+        "personal_care",
+        "mobility_support",
+        "appointment_support",
+        "other_care",
+    }
+    allowed_areas = completed_care if kind == "care_completed" else care_areas
+    selected_areas = quick.get("selected_areas")
+    if (
+        not isinstance(selected_areas, list)
+        or not selected_areas
+        or any(not isinstance(area, str) or area not in allowed_areas for area in selected_areas)
+        or len(set(selected_areas)) != len(selected_areas)
+    ):
+        raise HTTPException(status_code=422, detail="quick_check_in must contain valid, unique selected areas")
+
+    if quick.get("scope") != "selected_areas_only":
+        raise HTTPException(status_code=422, detail="quick_check_in scope must be selected_areas_only")
+    if quick.get("epistemic_status") != "caregiver_reported":
+        raise HTTPException(status_code=422, detail="quick_check_in must be marked caregiver_reported")
+
+    note = quick.get("note")
+    if note is not None and (not isinstance(note, str) or len(note) > 2000):
+        raise HTTPException(status_code=422, detail="quick_check_in note must be at most 2000 characters")
+    reported_at = quick.get("caregiver_reported_at")
+    if not isinstance(reported_at, str) or not reported_at.strip():
+        raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at is required")
+
+
 @router.post("/daily/log")
 def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
+    if "quick_check_in" in payload:
+        _validate_quick_check_in(payload)
+        return _save_daily_capture_event(payload, "quick_daily_checkin", "Quick daily check-in", request, db)
     return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
 
 
