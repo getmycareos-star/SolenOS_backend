@@ -2539,6 +2539,19 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         assert evidence_response.status_code in {200, 201}, evidence_response.text
         evidence_id = evidence_response.json()["id"]
 
+        gap_response = client.post("/api/v1/uncertainty/gaps", json={
+            "person_id": person.id,
+            "subject_type": "care_routine",
+            "subject_id": "morning-routine",
+            "field": "attendance",
+            "epistemic_state": "unknown",
+            "gap_reason": "not_documented",
+            "priority": "high",
+            "description": "Visit attendance has not yet been established.",
+        })
+        assert gap_response.status_code == 200, gap_response.text
+        gap_id = gap_response.json()["id"]
+
         question_response = client.post("/api/v1/uncertainty/questions", json={
             "person_id": person.id,
             "question": "Was the scheduled visit attended?",
@@ -2549,6 +2562,7 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             "necessity_rationale": "Attendance status affects the current care continuity record.",
             "priority": "high",
             "evidence_ids": [],
+            "context": [{"source_kind": "information_gap", "source_id": gap_id, "reason": "Attendance status affects care continuity."}],
         })
         assert question_response.status_code == 200, question_response.text
         question_id = question_response.json()["id"]
@@ -2596,6 +2610,12 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         assert accepted_data["reviewed_by_caregiver_id"] == caregiver.id
         assert accepted_data["resulting_assertion_id"]
         assert accepted_data["reconciliation_status"] == "completed"
+        assert accepted_data["resulting_gap_ids"] == [gap_id]
+        gap_after = client.get(f"/api/v1/uncertainty/gaps/{person.id}")
+        assert gap_after.status_code == 200, gap_after.text
+        resolved_gap = next(item for item in gap_after.json() if item["id"] == gap_id)
+        assert resolved_gap["lifecycle_status"] == "resolved"
+        assert resolved_gap["resolution_mechanism"] == "new_evidence"
 
         question_after = client.get(f"/api/v1/uncertainty/questions/{person.id}").json()
         assert next(item for item in question_after if item["id"] == question_id)["status"] == "closed"
