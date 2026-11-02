@@ -373,6 +373,9 @@ def change_registered_action_status(action_id: str, payload: ActionStatusChange,
     action = db.query(Action).filter(Action.id == action_id, Action.person_id == person_id).with_for_update().first()
     if action is None or action.status not in REGISTERED_STATUSES:
         raise HTTPException(status_code=404, detail="Registered action not found")
+    action_owner_id = action.responsible_caregiver_id or action.created_by_caregiver_id
+    if action_owner_id != caregiver_id:
+        raise HTTPException(status_code=403, detail="Only the responsible caregiver can change this registered action")
     if action.version != payload.expected_version:
         raise HTTPException(status_code=409, detail="Action changed since it was loaded; refresh before retrying")
     old_status = action.status
