@@ -168,10 +168,10 @@ class ContradictionResolutionEvent(Base):
 @event.listens_for(Session, "before_flush")
 def prevent_question_answer_history_mutation(session, flush_context, instances):
     if any(
-        isinstance(item, OpenQuestionAnswerEvent)
+        isinstance(item, (OpenQuestionAnswerEvent, OpenQuestionReviewEvent))
         for item in list(session.dirty) + list(session.deleted)
     ):
-        raise ValueError("Question answer history is append-only and cannot be updated or deleted")
+        raise ValueError("Question answer and review history is append-only and cannot be updated or deleted")
 
 
 @event.listens_for(Session, "before_flush")
