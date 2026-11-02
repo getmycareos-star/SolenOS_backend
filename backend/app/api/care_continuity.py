@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
-from app.services.lcr_context import build_lcr_context
+from app.services.lcr_context import build_lcr_context, has_source_table
 from app.models.care import Evidence, Caregiver, CareEvent
 from app.models.collaboration import EvidenceUpload
 from app.models.change import Situation as SituationModel
@@ -955,8 +955,13 @@ WRITABLE = {
 }
 
 def _table(db: Session, name: str) -> Table:
+    cache = db.info.setdefault("_care_continuity_reflected_tables", {})
+    if name in cache:
+        return cache[name]
     try:
-        return Table(name, MetaData(), autoload_with=db.connection())
+        table = Table(name, MetaData(), autoload_with=db.connection())
+        cache[name] = table
+        return table
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Care-continuity schema is not ready: {name}") from exc
 
@@ -1827,7 +1832,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             attention_items.append(summary_item)
     # Observation coverage is distinct from event evidence: an unobserved interval
     # must never be represented as evidence that an event did not occur.
-    coverage_table_available = inspect(db.connection()).has_table("observation_coverage")
+    coverage_table_available = has_source_table(db, "observation_coverage")
     coverage_rows = []
     coverage_count = 0
     if coverage_table_available:
@@ -2293,9 +2298,17 @@ def get_situation_understanding_snapshot(
     }
 
 
+def prepare_situation_understanding_assessment(db: Session, person_id: str) -> None:
+    """Preload schema metadata before a caller starts an atomic care-record write."""
+    if not has_source_table(db, "care_delta_runs"):
+        raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
+    build_lcr_context(db, person_id, limit_per_source=50)
+    _table(db, "care_delta_runs")
+
+
 def persist_situation_understanding_assessment(db: Session, person_id: str, caregiver_id: str, commit: bool = True):
     """Persist the canonical bounded LCR assessment; optionally join a caller's transaction."""
-    if not inspect(db.connection()).has_table("care_delta_runs"):
+    if not has_source_table(db, "care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
     table = _table(db, "care_delta_runs")
     assessment = _build_situation_understanding_assessment(db, person_id)
