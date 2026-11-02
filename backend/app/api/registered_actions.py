@@ -30,6 +30,7 @@ MEDICATION_CHANGE_DIRECTIVE = re.compile(
     r"^\s*(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b.{0,100}\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\b",
     re.IGNORECASE,
 )
+CONDITIONAL_FOLLOWUP = re.compile(r"\\b(?:if|unless|until|only if|in case)\\b", re.IGNORECASE)
 MEDICATION_CHANGE_PREFIX = re.compile(
     r"^\s*(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\s*[:\-].*\b(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b",
     re.IGNORECASE,
@@ -193,6 +194,9 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     # instructions are not registered as actions.
     if MEDICATION_CHANGE_DIRECTIVE.search(payload.title.strip()) or MEDICATION_CHANGE_PREFIX.search(payload.title.strip()):
         raise HTTPException(status_code=422, detail="Direct medication changes cannot be registered. Reframe this as contacting the prescribing clinician or pharmacist.")
+
+    if CONDITIONAL_FOLLOWUP.search(payload.title.strip()):
+        raise HTTPException(status_code=422, detail="Conditional follow-ups cannot be registered as unconditional actions. Resolve the trigger or request clarification first.")
 
     safety_candidate = ActionCandidate(
         source_evidence_id=primary_evidence_id,
