@@ -435,3 +435,66 @@ def test_quick_daily_checkin_persists_uncertainty_without_inference():
         db.close()
     finally:
         teardown_db()
+
+
+def test_quick_daily_checkin_is_visible_as_caregiver_report_in_lcr_projection(monkeypatch):
+    from app.api import care_continuity as care_continuity_api
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        report_time = "2026-11-03T00:00:00+01:00"
+        event = {
+            "id": "quick-checkin-lcr-event",
+            "event_type": "quick_daily_checkin",
+            "status": "recorded",
+            "title": "Quick daily check-in",
+            "description": json.dumps({
+                "notes": "Caregiver reports no significant change in: Sleep.",
+                "quick_check_in": {
+                    "kind": "same_as_usual",
+                    "selected_areas": ["sleep"],
+                    "scope": "selected_areas_only",
+                    "caregiver_reported_at": report_time,
+                    "epistemic_status": "caregiver_reported",
+                },
+            }),
+            "occurred_at": "2026-11-02T23:00:00+00:00",
+            "recorded_at": "2026-11-02T23:00:01+00:00",
+            "created_by_caregiver_id": "caregiver-daily-test",
+            "evidence_ids": [],
+        }
+        monkeypatch.setattr(
+            care_continuity_api,
+            "_scoped_identity",
+            lambda request, session: ("person-daily-test", None),
+        )
+        monkeypatch.setattr(
+            care_continuity_api,
+            "build_lcr_context",
+            lambda session, person_id, limit_per_source: {
+                "person_id": person_id,
+                "as_of": report_time,
+                "history_coverage": "bounded_subset",
+                "schema_status": "complete",
+                "missing_required_sources": [],
+                "missing_optional_sources": [],
+                "sources": {"events": {"items": [event]}},
+            },
+        )
+
+        projection = care_continuity_api.current_care_projection(
+            request=None, limit_per_source=10, db=db
+        )
+        item = next(
+            item for item in projection["items"]
+            if item["id"] == "quick-checkin-lcr-event"
+        )
+        assert item["source_collection"] == "events"
+        assert item["kind"] == "Daily care entry"
+        assert item["epistemic_status"] == "caregiver_reported"
+        assert item["source_label"] == "Caregiver report"
+        assert item["occurred_at"] == report_time
+    finally:
+        db.close()
+        teardown_db()
