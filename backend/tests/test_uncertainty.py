@@ -2609,7 +2609,12 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         assert accepted_data["answer_version"] == answer_version
         assert accepted_data["reviewed_by_caregiver_id"] == caregiver.id
         assert accepted_data["resulting_assertion_id"]
+        assert accepted_data["resulting_assessment_id"]
         assert accepted_data["reconciliation_status"] == "completed"
+        situation_snapshot = client.get("/api/v1/care-continuity/situation-understanding")
+        assert situation_snapshot.status_code == 200, situation_snapshot.text
+        assert situation_snapshot.json()["assessment_id"] == accepted_data["resulting_assessment_id"]
+        assert accepted_data["resulting_assertion_id"] in str(situation_snapshot.json()["assessment"])
         assertion_projection = client.get(f"/api/v1/care-continuity/assertions/{person.id}?limit=100")
         assert assertion_projection.status_code == 200, assertion_projection.text
         assert any(item["id"] == accepted_data["resulting_assertion_id"] for item in assertion_projection.json())
