@@ -1827,7 +1827,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             attention_items.append(summary_item)
     # Observation coverage is distinct from event evidence: an unobserved interval
     # must never be represented as evidence that an event did not occur.
-    coverage_table_available = inspect(db.get_bind()).has_table("observation_coverage")
+    coverage_table_available = inspect(db.connection()).has_table("observation_coverage")
     coverage_rows = []
     coverage_count = 0
     if coverage_table_available:
