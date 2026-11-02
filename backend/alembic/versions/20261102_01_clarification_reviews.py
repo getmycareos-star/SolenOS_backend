@@ -51,11 +51,15 @@ def upgrade() -> None:
     if bind.dialect.name == "postgresql":
         op.execute("""
             CREATE OR REPLACE FUNCTION prevent_clarification_review_event_mutation()
-            RETURNS trigger AS $
+            RETURNS trigger AS $function$
             BEGIN
                 RAISE EXCEPTION 'Clarification review history is append-only and cannot be updated or deleted';
             END;
-            $ LANGUAGE plpgsql;
+            $function$ LANGUAGE plpgsql;
+        """)
+        op.execute("""
+            DROP TRIGGER IF EXISTS trg_clarification_review_events_immutable
+            ON clarification_review_events;
         """)
         op.execute("""
             CREATE TRIGGER trg_clarification_review_events_immutable
