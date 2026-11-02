@@ -203,7 +203,8 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         source_evidence_id=primary_evidence_id,
         source_evidence_ids=evidence_ids,
         source_passage=source_text,
-        source_authority="caregiver_record",
+        source_authority="caregiver",
+        extraction_confidence=None,
         provenance_notes="Caregiver-approved LCR follow-up. Rationale: " + payload.rationale
             + (("\nLimitations: " + payload.limitations) if payload.limitations else ""),
         actor_type="caregiver",
@@ -223,7 +224,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         approved_at=now,
         is_explicit=True,
         requires_confirmation=False,
-        risk_tier="moderate",
+        risk_tier="not_assessed",
         created_by_caregiver_id=caregiver_id,
         responsible_caregiver_id=caregiver_id,
         version=1,
