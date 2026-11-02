@@ -2610,6 +2610,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             assert resulting.assertion_status == "reported"
             assert resulting.review_after_days == 30
             assert resulting.created_by_caregiver_id == "review-caregiver-1"
+            assert "Direct report from the family caregiver." in resulting.source_text
 
             assessment = db.query(EvidenceClaimAssessment).filter(EvidenceClaimAssessment.id == review["claim_assessment_id"]).one()
             assert assessment.status == "unverified"
