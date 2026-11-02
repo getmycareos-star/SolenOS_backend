@@ -145,6 +145,121 @@ def list_question_answer_history(
     } for row in rows]
 
 
+
+@router.post("/questions/{question_id}/reviews", response_model=ClarificationReviewResponse, status_code=201)
+def review_question_answer(question_id: str, review: ClarificationReviewCreate, engine: UncertaintyEngine = Depends(get_engine)):
+    """Append a caregiver decision for one immutable answer version."""
+    if not engine.person_id or not engine.caregiver_id:
+        raise HTTPException(status_code=403, detail="A session-bound caregiver identity is required")
+    question = engine._target_query(OpenQuestionModel, question_id).with_for_update().first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    answer_event = engine.db.query(OpenQuestionAnswerEventModel).filter(
+        OpenQuestionAnswerEventModel.question_id == question_id,
+        OpenQuestionAnswerEventModel.person_id == engine.person_id,
+        OpenQuestionAnswerEventModel.answer_version == review.answer_version,
+    ).with_for_update().first()
+    if answer_event is None:
+        raise HTTPException(status_code=409, detail="The submitted answer version is unavailable")
+    if engine.db.query(ClarificationReviewEventModel.id).filter(
+        ClarificationReviewEventModel.answer_event_id == answer_event.id,
+        ClarificationReviewEventModel.person_id == engine.person_id,
+    ).first():
+        raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another review")
+    evidence_ids = list(answer_event.evidence_ids or [])
+    if not evidence_ids:
+        raise HTTPException(status_code=422, detail="A clarification decision requires persisted source evidence")
+    evidence_reviews = engine.db.query(EvidenceReviewRecord).filter(
+        EvidenceReviewRecord.person_id == engine.person_id,
+        EvidenceReviewRecord.evidence_id.in_(evidence_ids),
+    ).order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc()).all()
+    reviewed_ids = {row.evidence_id for row in evidence_reviews}
+    if reviewed_ids != set(evidence_ids):
+        raise HTTPException(status_code=409, detail={
+            "message": "Every answer evidence item must pass through the existing evidence-review workflow before a clarification decision.",
+            "evidence_ids_requiring_review": sorted(set(evidence_ids) - reviewed_ids),
+        })
+    resulting_assertion = None
+    reconciliation_status = "not_run_decision_not_accepted"
+    now = datetime.now(timezone.utc)
+    if review.decision == "accepted":
+        if question.status != "answered":
+            raise HTTPException(status_code=409, detail="Only a currently answered question can be accepted")
+        if not question.claim_id:
+            raise HTTPException(status_code=422, detail="Acceptance requires a source-linked care assertion")
+        source_claim = engine.db.query(CareAssertion).filter(
+            CareAssertion.id == question.claim_id,
+            CareAssertion.person_id == engine.person_id,
+        ).with_for_update().first()
+        if source_claim is None or source_claim.subject_type != question.subject_type or source_claim.subject_id != question.subject_id:
+            raise HTTPException(status_code=409, detail="The linked source claim is unavailable or outside the question subject scope")
+        if source_claim.assertion_kind == "current_state" and review.review_after_days is None:
+            raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires a caregiver-selected review window")
+        resulting_assertion = CareAssertion(
+            person_id=engine.person_id,
+            subject_type=source_claim.subject_type,
+            subject_id=source_claim.subject_id,
+            field=source_claim.field,
+            assertion_kind=source_claim.assertion_kind,
+            asserted_value=answer_event.answer,
+            source_label="Caregiver clarification response",
+            source_text=answer_event.answer,
+            evidence_ids=evidence_ids,
+            assertion_status="accepted",
+            review_after_days=review.review_after_days,
+            created_by_caregiver_id=engine.caregiver_id,
+            updated_by_caregiver_id=engine.caregiver_id,
+        )
+        engine.db.add(resulting_assertion)
+        question.status = "closed"
+        question.closed_at = now
+        question.closed_reason = review.rationale.strip()
+        reconciliation_status = "completed"
+    elif review.decision == "rejected":
+        question.status = "unresolved"
+        question.closed_at = None
+        question.closed_reason = review.rationale.strip()
+    else:
+        question.status = "open"
+        question.closed_at = None
+        question.closed_reason = None
+    event = ClarificationReviewEventModel(
+        question_id=question.id,
+        answer_event_id=answer_event.id,
+        answer_version=answer_event.answer_version,
+        person_id=engine.person_id,
+        decision=review.decision,
+        rationale=review.rationale.strip(),
+        reviewed_by_caregiver_id=engine.caregiver_id,
+        reconciliation_status=reconciliation_status,
+        evidence_review_ids=[row.id for row in evidence_reviews],
+    )
+    engine.db.add(event)
+    try:
+        engine.db.flush()
+        if resulting_assertion is not None:
+            event.resulting_assertion_id = resulting_assertion.id
+            reconcile_person_change_intelligence(engine.db, engine.person_id)
+            event.reconciliation_status = "completed"
+            engine.db.flush()
+        engine.db.commit()
+        engine.db.refresh(event)
+        return event
+    except Exception as exc:
+        engine.db.rollback()
+        raise HTTPException(status_code=503, detail="Clarification review and LCR reconciliation failed; no decision was committed") from exc
+
+
+@router.get("/questions/{question_id}/review-history", response_model=List[ClarificationReviewResponse])
+def list_question_review_history(question_id: str, engine: UncertaintyEngine = Depends(get_engine)):
+    question = engine._target_query(OpenQuestionModel, question_id).first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    return engine.db.query(ClarificationReviewEventModel).filter(
+        ClarificationReviewEventModel.question_id == question_id,
+        ClarificationReviewEventModel.person_id == engine.person_id,
+    ).order_by(ClarificationReviewEventModel.created_at.asc(), ClarificationReviewEventModel.id.asc()).all()
+
 @router.post("/contradictions", response_model=Contradiction)
 def create_contradiction(
     contradiction: ContradictionCreate, engine: UncertaintyEngine = Depends(get_engine)
