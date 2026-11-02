@@ -621,8 +621,6 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
 
 def _validate_quick_check_in(payload: dict) -> None:
     quick = payload.get("quick_check_in")
-    if quick is None:
-        return
     if not isinstance(quick, dict) or quick.get("schema_version") != 1:
         raise HTTPException(status_code=422, detail="quick_check_in must use schema version 1")
 
