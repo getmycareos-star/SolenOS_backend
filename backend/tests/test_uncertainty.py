@@ -2616,5 +2616,37 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             json={"decision": "rejected", "rationale": "Not authorized."},
         )
         assert rejected_without_answer_scope.status_code == 404
+
+        # A second question with a persisted answer can be rejected without
+        # creating a care assertion or claim assessment.
+        second_question = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": "review-person-1",
+            "question": "Was transport arranged?",
+            "subject_type": "appointment",
+            "subject_id": "review-appointment-1",
+            "claim_id": "review-source-claim-1",
+        })
+        assert second_question.status_code == 200, second_question.text
+        second_id = second_question.json()["id"]
+        second_answer = client.patch(f"/api/v1/uncertainty/questions/{second_id}", json={
+            "status": "answered",
+            "answer": "Transport details are not available.",
+            "answer_provenance": "Caregiver could not confirm transport arrangements.",
+            "evidence_ids": ["review-evidence-1"],
+        })
+        assert second_answer.status_code == 200, second_answer.text
+        rejected = client.post(f"/api/v1/uncertainty/questions/{second_id}/reviews", json={
+            "decision": "rejected",
+            "rationale": "The linked source does not support the submitted transport statement.",
+        })
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["resulting_claim_id"] is None
+        assert rejected.json()["claim_assessment_id"] is None
+        conflict = client.post(f"/api/v1/uncertainty/questions/{second_id}/reviews", json={
+            "decision": "needs_clarification",
+            "rationale": "A different decision for the same answer version must conflict.",
+        })
+        assert conflict.status_code == 409
+        assert client.get(f"/api/v1/uncertainty/questions/{second_id}/review-history").json()[0]["decision"] == "rejected"
     finally:
         teardown_db()
