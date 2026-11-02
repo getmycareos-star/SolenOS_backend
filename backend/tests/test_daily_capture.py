@@ -1,4 +1,5 @@
 import hashlib
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
@@ -91,6 +92,54 @@ def test_daily_capture_persists_for_linked_caregiver():
         assert event.person_id == "person-daily-test"
         assert event.created_by_caregiver_id == "caregiver-daily-test"
         assert "User-recorded note" in event.description
+        db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": (
+                    "Caregiver reports no significant change from usual in: Sleep. "
+                    "Other areas were not assessed by this check-in."
+                ),
+                "quick_check_in": {
+                    "schema_version": 1,
+                    "kind": "same_as_usual",
+                    "selected_areas": ["sleep"],
+                    "scope": "selected_areas_only",
+                    "caregiver_reported_at": "2026-11-03T00:00:00+01:00",
+                    "epistemic_status": "caregiver_reported",
+                    "note": None,
+                },
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["success"] is True
+
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
+        detail = json.loads(event.description)
+        assert event.person_id == "person-daily-test"
+        assert event.created_by_caregiver_id == "caregiver-daily-test"
+        assert detail["quick_check_in"]["kind"] == "same_as_usual"
+        assert detail["quick_check_in"]["selected_areas"] == ["sleep"]
+        assert detail["quick_check_in"]["scope"] == "selected_areas_only"
+        assert detail["quick_check_in"]["epistemic_status"] == "caregiver_reported"
+        assert "Other areas were not assessed" in detail["notes"]
         db.close()
     finally:
         teardown_db()
