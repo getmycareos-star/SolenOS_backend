@@ -135,11 +135,50 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         detail = json.loads(event.description)
         assert event.person_id == "person-daily-test"
         assert event.created_by_caregiver_id == "caregiver-daily-test"
+        assert event.event_type == "quick_daily_checkin"
+        assert event.title == "Quick daily check-in"
         assert detail["quick_check_in"]["kind"] == "same_as_usual"
         assert detail["quick_check_in"]["selected_areas"] == ["sleep"]
         assert detail["quick_check_in"]["scope"] == "selected_areas_only"
         assert detail["quick_check_in"]["epistemic_status"] == "caregiver_reported"
         assert "Other areas were not assessed" in detail["notes"]
+        db.close()
+    finally:
+        teardown_db()
+
+
+
+def test_quick_daily_checkin_rejects_unrecognized_or_unscoped_areas():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-daily-test",
+                "caregiver_id": "caregiver-daily-test",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Caregiver quick update",
+                "quick_check_in": {
+                    "schema_version": 1,
+                    "kind": "same_as_usual",
+                    "selected_areas": ["diagnosis"],
+                    "scope": "selected_areas_only",
+                    "caregiver_reported_at": "2026-11-03T00:00:00+01:00",
+                    "epistemic_status": "caregiver_reported",
+                    "note": None,
+                },
+            },
+        )
+        assert response.status_code == 422, response.text
+        assert response.json()["detail"] == "quick_check_in must contain valid, unique selected areas"
+
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 0
         db.close()
     finally:
         teardown_db()
