@@ -2507,7 +2507,15 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             relationship="Family",
             person_id=person.id,
         )
-        db.add_all([person, caregiver])
+        other_person = Person(id="clarification-review-other-person", name="Other Clarification Person")
+        other_caregiver = Caregiver(
+            id="clarification-review-other-caregiver",
+            name="Other Clarification Caregiver",
+            email="clarification-review-other@example.com",
+            relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([person, caregiver, other_person, other_caregiver])
         db.flush()
         claim = CareAssertion(
             person_id=person.id,
@@ -2528,6 +2536,7 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         db.close()
 
         client = authorized_client(person.id)
+        other_client = authorized_client(other_person.id)
         evidence_response = client.post("/api/v1/evidence", json={
             "person_id": person.id,
             "uploaded_by_caregiver_id": caregiver.id,
@@ -2580,6 +2589,7 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         })
         assert answer_response.status_code == 200, answer_response.text
         answer_version = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history").json()[0]["answer_version"]
+        assert other_client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history").status_code == 404
 
         decision_payload = {
             "answer_version": answer_version,
@@ -2587,6 +2597,8 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
             "rationale": "The submitted answer and its source evidence were reviewed for this care record.",
             "review_after_days": 30,
         }
+        foreign_decision = other_client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json=decision_payload)
+        assert foreign_decision.status_code == 404, foreign_decision.text
         blocked = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json=decision_payload)
         assert blocked.status_code == 409, blocked.text
         assert "evidence-review workflow" in blocked.json()["detail"]["message"]
