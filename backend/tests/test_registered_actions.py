@@ -504,6 +504,20 @@ def test_direct_medication_change_is_blocked_but_contacting_clinician_is_allowed
     assert conditional.status_code == 422, conditional.text
     assert "Conditional follow-ups cannot be registered" in conditional.text
 
+    clinical_payload = approval_payload(
+        evidence["id"],
+        idempotency_key="clinical-instruction-block-key-007",
+        suggestion_id="clinical-instruction-block-suggestion-007",
+        title="Prescribe an antibiotic",
+    )
+    clinical = client.post(
+        f"/api/v1/registered-actions/{session['person']['id']}/approve",
+        headers=headers(session),
+        json=clinical_payload,
+    )
+    assert clinical.status_code == 422, clinical.text
+    assert "Clinical diagnosis, treatment" in clinical.text
+
     allowed_payload = approval_payload(
         evidence["id"],
         idempotency_key="clinician-call-approval-key-005",
