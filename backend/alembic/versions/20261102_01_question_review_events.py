@@ -16,7 +16,7 @@ def upgrade() -> None:
     table = "open_question_review_events"
     required_columns = {
         "id", "question_id", "person_id", "answer_event_id", "answer_version",
-        "decision", "rationale", "reviewer_caregiver_id", "claim_assessment_id", "created_at",
+        "decision", "rationale", "reviewer_caregiver_id", "claim_assessment_id", "resulting_claim_id", "created_at",
     }
     if not inspector.has_table(table):
         op.create_table(
@@ -30,11 +30,15 @@ def upgrade() -> None:
             sa.Column("rationale", sa.Text(), nullable=False),
             sa.Column("reviewer_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("claim_assessment_id", sa.String(), sa.ForeignKey("evidence_claim_assessments.id"), nullable=True),
+            sa.Column("resulting_claim_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
             sa.UniqueConstraint("question_id", "answer_version", name="uq_open_question_review_answer_version"),
         )
     else:
         actual = {column["name"] for column in inspector.get_columns(table)}
+        if "resulting_claim_id" not in actual:
+            op.add_column(table, sa.Column("resulting_claim_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True))
+            actual.add("resulting_claim_id")
         missing = required_columns - actual
         if missing:
             raise RuntimeError(
