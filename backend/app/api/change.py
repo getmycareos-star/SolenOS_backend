@@ -5,7 +5,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 from app.core.database import get_db
 from app.models.care import CareEvent, Caregiver
-from app.models.care_continuity import CareAssertion, EvidenceObservation
+from app.models.care_continuity import CareAssertion, EvidenceObservation, EvidenceReviewRecord
 from app.models.anonymous_session import AnonymousSession
 from app.models.change import Baseline, Change, ChangeConfirmationEvent, Pattern, Situation
 from app.schemas.change import (
@@ -411,6 +411,19 @@ def get_pattern_detail(
         if contributor_ids else []
     )
     contributor_labels = {str(item.id): item.name for item in contributors}
+    linked_evidence_ids = list(dict.fromkeys(
+        evidence_id for event in events for evidence_id in (event.evidence_ids or [])
+    ))
+    evidence_reviews = (
+        db.query(EvidenceReviewRecord)
+        .filter(
+            EvidenceReviewRecord.person_id == person_id,
+            EvidenceReviewRecord.evidence_id.in_(linked_evidence_ids),
+        )
+        .order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc())
+        .all()
+        if linked_evidence_ids else []
+    )
     return {
         "pattern": pattern,
         "events": [
@@ -430,6 +443,19 @@ def get_pattern_detail(
                 ) if event.created_by_caregiver_id else None,
             }
             for event in events
+        ],
+        "evidence_reviews": [
+            {
+                "id": review.id,
+                "evidence_id": review.evidence_id,
+                "review_type": review.review_type,
+                "outcome": review.outcome,
+                "rationale": review.rationale,
+                "policy_version": review.policy_version,
+                "reviewed_at": review.created_at,
+                "reviewed_by_caregiver_id": review.reviewed_by_caregiver_id,
+            }
+            for review in evidence_reviews
         ],
         "changes": [
             {
