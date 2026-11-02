@@ -116,6 +116,7 @@ class OpenQuestionReviewResponse(BaseModel):
     rationale: str
     reviewer_caregiver_id: str
     claim_assessment_id: Optional[str] = None
+    resulting_claim_id: Optional[str] = None
     created_at: datetime
 
     class Config:
