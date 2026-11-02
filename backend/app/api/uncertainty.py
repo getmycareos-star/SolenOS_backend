@@ -273,23 +273,12 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         question.status = "open"
         question.closed_at = None
         question.closed_reason = None
-    event = ClarificationReviewEventModel(
-        question_id=question.id,
-        answer_event_id=answer_event.id,
-        answer_version=answer_event.answer_version,
-        person_id=engine.person_id,
-        decision=review.decision,
-        rationale=review.rationale.strip(),
-        reviewed_by_caregiver_id=engine.caregiver_id,
-        reconciliation_status=reconciliation_status,
-        evidence_review_ids=[row.id for row in evidence_reviews],
-        resulting_gap_ids=resulting_gap_ids,
-    )
-    engine.db.add(event)
     try:
-        engine.db.flush()
+        resulting_assessment_id = None
         if resulting_assertion is not None:
-            event.resulting_assertion_id = resulting_assertion.id
+            # Flush assertion, answer-linked evidence decisions, and question/gap
+            # lifecycle changes before rebuilding the authoritative LCR snapshot.
+            engine.db.flush()
             reconcile_person_change_intelligence(engine.db, engine.person_id)
             assessment_result = persist_situation_understanding_assessment(
                 engine.db,
@@ -297,11 +286,26 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
                 engine.caregiver_id,
                 commit=False,
             )
-            event.resulting_assessment_id = assessment_result.get("assessment_id")
-            if not event.resulting_assessment_id:
+            resulting_assessment_id = assessment_result.get("assessment_id")
+            if not resulting_assessment_id:
                 raise RuntimeError("The authoritative LCR assessment snapshot was not persisted")
-            event.reconciliation_status = "completed"
-            engine.db.flush()
+            reconciliation_status = "completed"
+        event = ClarificationReviewEventModel(
+            question_id=question.id,
+            answer_event_id=answer_event.id,
+            answer_version=answer_event.answer_version,
+            person_id=engine.person_id,
+            decision=review.decision,
+            rationale=review.rationale.strip(),
+            reviewed_by_caregiver_id=engine.caregiver_id,
+            resulting_assertion_id=resulting_assertion.id if resulting_assertion is not None else None,
+            resulting_assessment_id=resulting_assessment_id,
+            reconciliation_status=reconciliation_status,
+            evidence_review_ids=[row.id for row in evidence_reviews],
+            resulting_gap_ids=resulting_gap_ids,
+        )
+        engine.db.add(event)
+        engine.db.flush()
         engine.db.commit()
         engine.db.refresh(event)
         return event
