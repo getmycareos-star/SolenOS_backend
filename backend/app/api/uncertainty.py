@@ -161,6 +161,14 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
     ).with_for_update().first()
     if answer_event is None:
         raise HTTPException(status_code=409, detail="The submitted answer version is unavailable")
+    latest_answer_version = engine.db.query(OpenQuestionAnswerEventModel.answer_version).filter(
+        OpenQuestionAnswerEventModel.question_id == question_id,
+        OpenQuestionAnswerEventModel.person_id == engine.person_id,
+    ).order_by(OpenQuestionAnswerEventModel.answer_version.desc()).first()
+    if latest_answer_version is None or latest_answer_version[0] != review.answer_version:
+        raise HTTPException(status_code=409, detail="Only the latest submitted answer version can receive a review decision")
+    if question.status != "answered":
+        raise HTTPException(status_code=409, detail="Only a currently submitted answer can receive a review decision")
     if engine.db.query(ClarificationReviewEventModel.id).filter(
         ClarificationReviewEventModel.answer_event_id == answer_event.id,
         ClarificationReviewEventModel.person_id == engine.person_id,
@@ -174,17 +182,15 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         EvidenceReviewRecord.evidence_id.in_(evidence_ids),
     ).order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc()).all()
     reviewed_ids = {row.evidence_id for row in evidence_reviews}
-    if reviewed_ids != set(evidence_ids):
+    if review.decision == "accepted" and reviewed_ids != set(evidence_ids):
         raise HTTPException(status_code=409, detail={
-            "message": "Every answer evidence item must pass through the existing evidence-review workflow before a clarification decision.",
+            "message": "Every answer evidence item must pass through the existing evidence-review workflow before acceptance.",
             "evidence_ids_requiring_review": sorted(set(evidence_ids) - reviewed_ids),
         })
     resulting_assertion = None
     reconciliation_status = "not_run_decision_not_accepted"
     now = datetime.now(timezone.utc)
     if review.decision == "accepted":
-        if question.status != "answered":
-            raise HTTPException(status_code=409, detail="Only a currently answered question can be accepted")
         if not question.claim_id:
             raise HTTPException(status_code=422, detail="Acceptance requires a source-linked care assertion")
         source_claim = engine.db.query(CareAssertion).filter(
