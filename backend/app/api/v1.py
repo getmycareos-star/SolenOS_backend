@@ -664,7 +664,7 @@ def _validate_quick_check_in(payload: dict) -> None:
         raise HTTPException(status_code=422, detail="quick_check_in must use schema version 1")
 
     kind = quick.get("kind")
-    if not isinstance(kind, str) or kind not in {"same_as_usual", "change", "concern", "care_completed"}:
+    if not isinstance(kind, str) or kind not in {"same_as_usual", "change", "concern", "care_completed", "uncertain"}:
         raise HTTPException(status_code=422, detail="quick_check_in kind is invalid")
 
     care_areas = {
