@@ -96,6 +96,15 @@ def test_daily_capture_persists_for_linked_caregiver():
         assert replay.json()["id"] == response.json()["id"]
         assert replay.json()["idempotent_replay"] is True
 
+        changed_payload = json.loads(response.request.content)
+        changed_payload["notes"] += " Changed content."
+        conflict = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json=changed_payload,
+        )
+        assert conflict.status_code == 409, conflict.text
+
         db = TestingSessionLocal()
         assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 1
         event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
