@@ -27,11 +27,11 @@ from app.services.action_normalization import ActionNormalizationService
 router = APIRouter(tags=["registered care actions"])
 
 MEDICATION_CHANGE_DIRECTIVE = re.compile(
-    r"^\\s*(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\\b.{0,100}\\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\b",
+    r"^\s*(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b.{0,100}\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\b",
     re.IGNORECASE,
 )
 MEDICATION_CHANGE_PREFIX = re.compile(
-    r"^\\s*(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\s*[:\\-].*\\b(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\\b",
+    r"^\s*(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\s*[:\-].*\b(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b",
     re.IGNORECASE,
 )
 REGISTERED_STATUSES = {
@@ -205,7 +205,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         normalized_action=payload.title.strip(),
         modality="recommended",
         is_explicit=True,
-        is_medication_action=bool(re.search(r"\\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\b", payload.title, re.IGNORECASE)),
+        is_medication_action=bool(re.search(r"\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\b", payload.title, re.IGNORECASE)),
     )
     safety = ActionNormalizationService().safety_check(safety_candidate)
     if not safety.is_safe_to_create:
