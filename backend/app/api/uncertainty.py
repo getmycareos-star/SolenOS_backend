@@ -242,7 +242,7 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
             evidence_ids=evidence_ids,
             assertion_status="accepted",
             review_after_days=review.review_after_days,
-            created_by_caregiver_id=engine.caregiver_id,
+            created_by_caregiver_id=answer_event.answered_by_caregiver_id,
             updated_by_caregiver_id=engine.caregiver_id,
         )
         engine.db.add(resulting_assertion)
