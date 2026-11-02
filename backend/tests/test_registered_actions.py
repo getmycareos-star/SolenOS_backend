@@ -68,6 +68,7 @@ def approval_payload(evidence_id, **overrides):
     payload = {
         "explicit_approval": True,
         "idempotency_key": "care-action-approval-key-001",
+        "suggestion_id": "open-loop:clinic-follow-up-001",
         "title": "Call the clinic to confirm the appointment details",
         "action_type": "call",
         "rationale": "The saved caregiver report records a request for a follow-up call.",
