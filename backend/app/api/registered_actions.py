@@ -30,7 +30,7 @@ MEDICATION_CHANGE_DIRECTIVE = re.compile(
     r"^\s*(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b.{0,100}\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\b",
     re.IGNORECASE,
 )
-CONDITIONAL_FOLLOWUP = re.compile(r"\\b(?:if|unless|until|only if|in case)\\b", re.IGNORECASE)
+CONDITIONAL_FOLLOWUP = re.compile(r"\b(?:if|unless|until|only if|in case)\b", re.IGNORECASE)
 MEDICATION_CHANGE_PREFIX = re.compile(
     r"^\s*(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\s*[:\-].*\b(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\b",
     re.IGNORECASE,
