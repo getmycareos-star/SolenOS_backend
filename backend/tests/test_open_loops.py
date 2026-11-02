@@ -667,3 +667,85 @@ def test_situation_assessment_preserves_saved_deferral_and_review_context_per_pe
     assert saved["priority"] == deferred["priority"]
     assert saved["priority_reasons"] == deferred["priority_reasons"]
     assert all(item["id"] != deferred["id"] for item in second_assessment["open_loops"]["items"])
+
+
+def test_possible_relationship_source_review_persists_across_refresh_and_is_person_scoped():
+    client = TestClient(app)
+    first, first_headers = session(client, "Relationship review recipient")
+    second, second_headers = session(client, "Other relationship review recipient")
+    first_identity = {
+        "person_id": first["person"]["id"],
+        "caregiver_id": first["caregiver"]["id"],
+    }
+    source_id = create_source_evidence(first_identity, "First independently recorded source.")
+    related_id = create_source_evidence(first_identity, "Second independently recorded source.")
+    relationship = create_independent_corroboration(client, first_headers, source_id, related_id)
+
+    assert relationship["person_id"] == first["person"]["id"]
+    assert relationship["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
+    assert relationship["relationship_type"] == "corroborates"
+
+    visible_relationships = client.get(
+        "/api/v1/care-continuity/evidence-source-relationships?limit=100",
+        headers=first_headers,
+    )
+    assert visible_relationships.status_code == 200, visible_relationships.text
+    assert relationship["id"] in [row["id"] for row in visible_relationships.json()]
+
+    review_response = client.post(
+        "/api/v1/care-continuity/review-decisions",
+        headers=first_headers,
+        json={
+            "target_type": "evidence_source_relationship",
+            "target_id": relationship["id"],
+            "review_decision": "disputed",
+            "reason": "The sources may share an origin; independence needs review.",
+        },
+    )
+    assert review_response.status_code == 201, review_response.text
+    review = review_response.json()
+    assert review["person_id"] == first["person"]["id"]
+    assert review["target_type"] == "evidence_source_relationship"
+    assert review["target_id"] == relationship["id"]
+    assert review["review_decision"] == "disputed"
+    assert review["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
+
+    refreshed = client.post(
+        "/api/v1/sessions/refresh",
+        json={"refresh_token": first["refresh_token"]},
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    refreshed_headers = {"Authorization": f"Bearer {refreshed.json()['access_token']}"}
+    persisted_reviews = client.get(
+        "/api/v1/care-continuity/review-decisions?limit=100",
+        headers=refreshed_headers,
+    )
+    assert persisted_reviews.status_code == 200, persisted_reviews.text
+    assert review["id"] in [row["id"] for row in persisted_reviews.json()]
+
+    other_relationships = client.get(
+        "/api/v1/care-continuity/evidence-source-relationships?limit=100",
+        headers=second_headers,
+    )
+    assert other_relationships.status_code == 200, other_relationships.text
+    assert relationship["id"] not in [row["id"] for row in other_relationships.json()]
+
+    cross_person_review = client.post(
+        "/api/v1/care-continuity/review-decisions",
+        headers=second_headers,
+        json={
+            "target_type": "evidence_source_relationship",
+            "target_id": relationship["id"],
+            "review_decision": "not_applicable",
+            "reason": "This relationship belongs to a different care record.",
+        },
+    )
+    assert cross_person_review.status_code == 404, cross_person_review.text
+
+    unchanged_relationships = client.get(
+        "/api/v1/care-continuity/evidence-source-relationships?limit=100",
+        headers=refreshed_headers,
+    )
+    unchanged = next(row for row in unchanged_relationships.json() if row["id"] == relationship["id"])
+    assert unchanged["relationship_type"] == "corroborates"
+    assert unchanged["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
