@@ -30,6 +30,7 @@ from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Prior
 from app.api.care_delta import _scoped_identity
 from app.models.care_continuity import EvidenceClaimDependency, CareAssertion, EvidenceReviewRecord
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.api.care_continuity import persist_situation_understanding_assessment
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -284,6 +285,15 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         if resulting_assertion is not None:
             event.resulting_assertion_id = resulting_assertion.id
             reconcile_person_change_intelligence(engine.db, engine.person_id)
+            assessment_result = persist_situation_understanding_assessment(
+                engine.db,
+                engine.person_id,
+                engine.caregiver_id,
+                commit=False,
+            )
+            event.resulting_assessment_id = assessment_result.get("assessment_id")
+            if not event.resulting_assessment_id:
+                raise RuntimeError("The authoritative LCR assessment snapshot was not persisted")
             event.reconciliation_status = "completed"
             engine.db.flush()
         engine.db.commit()
