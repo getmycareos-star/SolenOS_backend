@@ -174,6 +174,7 @@ def get_baseline_comparison(person_id: str, request: Request, db: Session = Depe
                 "window_start": row.window_start,
                 "window_end": row.window_end,
                 "event_count": row.event_count,
+                "frequency_per_period": row.frequency_per_period,
                 "state_value": row.state_value,
                 "confidence": row.confidence.value if row.confidence else None,
                 "is_stable": bool(row.is_stable),
