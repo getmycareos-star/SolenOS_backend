@@ -100,6 +100,152 @@ def list_baselines(person_id: str, request: Request, subject_type: Optional[str]
     return query.order_by(Baseline.created_at.desc()).all()
 
 
+@router.get("/baselines/{person_id}/comparison")
+def get_baseline_comparison(person_id: str, request: Request, db: Session = Depends(get_db)):
+    """Return versioned baselines and same-person source evidence for LCR comparison.
+
+    This is a read-only projection. It does not create or rewrite baselines or
+    change assessments; clients must treat incomplete history as unknown.
+    """
+    _require_person_scope(request, db, person_id)
+    baselines = (
+        db.query(Baseline)
+        .filter(Baseline.person_id == person_id)
+        .order_by(Baseline.subject_type.asc(), Baseline.subject_id.asc(), Baseline.created_at.desc())
+        .all()
+    )
+    changes = (
+        db.query(Change)
+        .filter(Change.person_id == person_id)
+        .order_by(Change.created_at.desc())
+        .all()
+    )
+    baseline_keys = {(row.subject_type, row.subject_id) for row in baselines}
+    relevant_changes = [
+        row for row in changes
+        if (row.subject_type, row.subject_id) in baseline_keys
+        or row.baseline_id in {baseline.id for baseline in baselines}
+    ]
+    source_ids = {
+        evidence_id
+        for row in baselines
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    }
+    source_ids.update(
+        evidence_id
+        for row in relevant_changes
+        for evidence_id in (row.evidence_ids or [])
+        if evidence_id
+    )
+    events = (
+        db.query(CareEvent)
+        .filter(CareEvent.person_id == person_id, CareEvent.id.in_(source_ids))
+        .order_by(CareEvent.occurred_at.asc(), CareEvent.recorded_at.asc(), CareEvent.id.asc())
+        .all()
+        if source_ids else []
+    )
+    original_evidence_ids = {
+        evidence_id for event in events for evidence_id in (event.evidence_ids or []) if evidence_id
+    }
+    source_evidence = (
+        db.query(Evidence)
+        .filter(Evidence.person_id == person_id, Evidence.id.in_(original_evidence_ids))
+        .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
+        .all()
+        if original_evidence_ids else []
+    )
+    return {
+        "person_id": person_id,
+        "as_of": datetime.now(timezone.utc),
+        "baselines": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "subject_id": row.subject_id,
+                "baseline_type": row.baseline_type.value if row.baseline_type else None,
+                "window_start": row.window_start,
+                "window_end": row.window_end,
+                "event_count": row.event_count,
+                "state_value": row.state_value,
+                "confidence": row.confidence.value if row.confidence else None,
+                "is_stable": bool(row.is_stable),
+                "coverage_status": row.coverage_status,
+                "history_completeness": row.history_completeness,
+                "analysis_version": row.analysis_version,
+                "documentation_bias_flag": bool(row.documentation_bias_flag),
+                "evidence_ids": row.evidence_ids or [],
+                "created_at": row.created_at,
+                "updated_at": row.updated_at,
+                "is_active": bool(row.is_active),
+                "superseded_by_baseline_id": row.superseded_by_baseline_id,
+            }
+            for row in baselines
+        ],
+        "changes": [
+            {
+                "id": row.id,
+                "subject_type": row.subject_type,
+                "subject_id": row.subject_id,
+                "baseline_id": row.baseline_id,
+                "previous_state": row.previous_state,
+                "current_state": row.current_state,
+                "explanation": row.explanation,
+                "change_type": row.change_type.value if row.change_type else None,
+                "change_direction": row.change_direction.value if row.change_direction else None,
+                "confidence": row.confidence,
+                "confirmation_status": row.confirmation_status,
+                "comparison_window_start": row.comparison_window_start,
+                "comparison_window_end": row.comparison_window_end,
+                "persistence_days": row.persistence_days,
+                "is_persistent": row.is_persistent,
+                "evidence_ids": row.evidence_ids or [],
+                "is_active": bool(row.is_active),
+                "superseded_by_change_id": row.superseded_by_change_id,
+                "created_at": row.created_at,
+            }
+            for row in relevant_changes
+        ],
+        "source_evidence": [
+            {
+                "id": row.id,
+                "type": row.type,
+                "evidence_kind": row.evidence_kind,
+                "epistemic_status": row.epistemic_status,
+                "source_text": row.source_text,
+                "uploaded_at": row.uploaded_at,
+                "uploaded_by_caregiver_id": row.uploaded_by_caregiver_id,
+                "original_author": row.original_author,
+                "reported_by_label": row.reported_by_label,
+                "reported_by_caregiver_id": row.reported_by_caregiver_id,
+                "occurred_at": row.occurred_at,
+                "reported_at": row.reported_at,
+                "source_type": row.source_type,
+                "original_source_reference": row.original_source_reference,
+                "evidence_status": row.evidence_status,
+            }
+            for row in source_evidence
+        ],
+        "events": [
+            {
+                "id": row.id,
+                "event_type": row.event_type,
+                "status": row.status,
+                "title": row.title,
+                "description": row.description,
+                "occurred_at": row.occurred_at,
+                "recorded_at": row.recorded_at,
+                "created_by_caregiver_id": row.created_by_caregiver_id,
+                "time_provenance": row.time_provenance,
+                "evidence_ids": row.evidence_ids or [],
+            }
+            for row in events
+        ],
+        "read_only": True,
+        "notice": "Source records are returned only when they belong to this care record. Missing records are not evidence that an event did not occur.",
+    }
+
+
 @router.get("/changes/detect", response_model=List[ChangeSchema])
 def detect_changes(
     person_id: str,
