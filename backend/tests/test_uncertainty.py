@@ -2693,6 +2693,44 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         assert rejected.status_code == 201, rejected.text
         rejected_rows = client.get(f"/api/v1/uncertainty/questions/{person.id}").json()
         assert next(item for item in rejected_rows if item["id"] == rejected_id)["status"] == "unresolved"
+
+        gap_only = client.post("/api/v1/uncertainty/gaps", json={
+            "person_id": person.id,
+            "subject_type": "care_routine",
+            "subject_id": "evening-routine",
+            "field": "attendance",
+            "epistemic_state": "unknown",
+            "gap_reason": "not_documented",
+            "priority": "high",
+            "description": "Evening visit attendance has not been established.",
+        })
+        assert gap_only.status_code == 200, gap_only.text
+        gap_only_id = gap_only.json()["id"]
+        gap_only_question = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": person.id,
+            "question": "Was the evening visit attended?",
+            "subject_type": "care_routine",
+            "subject_id": "evening-routine",
+            "priority": "high",
+            "context": [{"source_kind": "information_gap", "source_id": gap_only_id, "reason": "Attendance is not documented."}],
+        })
+        assert gap_only_question.status_code == 200, gap_only_question.text
+        gap_only_question_id = gap_only_question.json()["id"]
+        gap_only_answer = client.patch(f"/api/v1/uncertainty/questions/{gap_only_question_id}", json={
+            "status": "answered",
+            "answer": "The caregiver reports the evening visit was attended.",
+            "answer_provenance": "Caregiver checked the available visit record.",
+            "evidence_ids": [evidence_id],
+        })
+        assert gap_only_answer.status_code == 200, gap_only_answer.text
+        gap_only_accept = client.post(f"/api/v1/uncertainty/questions/{gap_only_question_id}/reviews", json={
+            "answer_version": 1,
+            "decision": "accepted",
+            "rationale": "The caregiver's source evidence was reviewed and the report was accepted as a source-attributed current-state assertion.",
+            "review_after_days": 30,
+        })
+        assert gap_only_accept.status_code == 201, gap_only_accept.text
+        assert gap_only_accept.json()["resulting_gap_ids"] == [gap_only_id]
     finally:
         teardown_db()
         Base.metadata.drop_all(bind=engine)
