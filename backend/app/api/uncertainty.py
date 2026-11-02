@@ -247,7 +247,12 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
         )
         engine.db.add(resulting_assertion)
         # Resolve only an explicitly linked, same-subject, same-field information gap.
-        if linked_gap is not None and linked_gap.field == field_name and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}:
+        if (
+            linked_gap is not None
+            and linked_gap.field == field_name
+            and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}
+            and linked_gap.epistemic_state not in {EpistemicState.CONFLICTING, EpistemicState.AMBIGUOUS}
+        ):
             linked_gap.lifecycle_status = GapLifecycleStatus.RESOLVED
             linked_gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
             linked_gap.resolution_date = now
