@@ -685,7 +685,12 @@ def _validate_quick_check_in(payload: dict) -> None:
     }
     allowed_areas = completed_care if kind == "care_completed" else care_areas
     selected_areas = quick.get("selected_areas")
-    if (
+    overall_impression_only = (
+        kind == "same_as_usual"
+        and selected_areas == []
+        and quick.get("scope") == "overall_impression_only"
+    )
+    if not overall_impression_only and (
         not isinstance(selected_areas, list)
         or not selected_areas
         or len(selected_areas) > 7
@@ -694,8 +699,10 @@ def _validate_quick_check_in(payload: dict) -> None:
     ):
         raise HTTPException(status_code=422, detail="quick_check_in must contain valid, unique selected areas")
 
-    if quick.get("scope") != "selected_areas_only":
+    if not overall_impression_only and quick.get("scope") != "selected_areas_only":
         raise HTTPException(status_code=422, detail="quick_check_in scope must be selected_areas_only")
+    if overall_impression_only and kind != "same_as_usual":
+        raise HTTPException(status_code=422, detail="overall_impression_only is only valid for same_as_usual")
     if quick.get("epistemic_status") != "caregiver_reported":
         raise HTTPException(status_code=422, detail="quick_check_in must be marked caregiver_reported")
 
