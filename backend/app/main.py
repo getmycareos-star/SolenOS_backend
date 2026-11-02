@@ -23,6 +23,7 @@ from app.api.document_extract import router as document_extract_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
+from app.api.registered_actions import router as registered_actions_router
 from app.api.handoffs import router as handoffs_router
 from app.api.capture_review import router as capture_review_router
 from app.api.daily_care_intelligence import router as daily_care_intelligence_router
@@ -209,6 +210,7 @@ app.include_router(document_extract_router, prefix="/api")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
+app.include_router(registered_actions_router, prefix="/api/v1")
 app.include_router(handoffs_router, prefix="/api/v1")
 app.include_router(handoff_drafts_router, prefix="/api/v1")
 app.include_router(appointment_workspace_router, prefix="/api/v1")
