@@ -54,6 +54,34 @@ def upgrade() -> None:
     op.create_index("ix_action_lifecycle_audit_person_id", "action_lifecycle_audit", ["person_id"])
     op.create_index("ix_action_lifecycle_audit_actor_caregiver_id", "action_lifecycle_audit", ["actor_caregiver_id"])
 
+    # Enforce append-only history at the production database boundary as well
+    # as through SQLAlchemy ORM event guards.
+    bind = op.get_bind()
+    if bind.dialect.name == "postgresql":
+        op.execute("""
+            CREATE FUNCTION reject_action_audit_mutation() RETURNS trigger AS $
+            BEGIN
+                RAISE EXCEPTION 'action lifecycle audit is append-only';
+            END;
+            $ LANGUAGE plpgsql
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_action_lifecycle_audit_immutable
+            BEFORE UPDATE OR DELETE ON action_lifecycle_audit
+            FOR EACH ROW EXECUTE FUNCTION reject_action_audit_mutation()
+        """)
+    elif bind.dialect.name == "sqlite":
+        op.execute("""
+            CREATE TRIGGER trg_action_lifecycle_audit_no_update
+            BEFORE UPDATE ON action_lifecycle_audit
+            BEGIN SELECT RAISE(ABORT, 'action lifecycle audit is append-only'); END
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_action_lifecycle_audit_no_delete
+            BEFORE DELETE ON action_lifecycle_audit
+            BEGIN SELECT RAISE(ABORT, 'action lifecycle audit is append-only'); END
+        """)
+
 
 def downgrade() -> None:
     raise RuntimeError("Registered-action approval and audit history are durable care records; downgrade requires a reviewed data-preservation migration.")
