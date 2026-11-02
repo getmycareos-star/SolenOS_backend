@@ -30,7 +30,7 @@ def upgrade() -> None:
             sa.Column("rationale", sa.Text(), nullable=False),
             sa.Column("reviewed_by_caregiver_id", sa.String(), sa.ForeignKey("caregivers.id"), nullable=False),
             sa.Column("resulting_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True),
-            sa.Column("resulting_assessment_id", sa.String(), nullable=True),
+            sa.Column("resulting_assessment_id", sa.String(), sa.ForeignKey("care_delta_runs.id", ondelete="RESTRICT"), nullable=True),
             sa.Column("reconciliation_status", sa.String(length=32), nullable=False),
             sa.Column("evidence_review_ids", sa.Text(), nullable=False, server_default=sa.text("'[]'")),
             sa.Column("resulting_gap_ids", sa.Text(), nullable=False, server_default=sa.text("'[]'")),
