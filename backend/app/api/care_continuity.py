@@ -1026,7 +1026,7 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         "care_fact": "care_facts", "fact": "care_facts",
         "care_decision": "care_decisions", "decision": "care_decisions",
         "care_event": "care_events", "event": "care_events",
-        "evidence": "evidence", "change": "changes", "situation": "situations",
+        "evidence": "evidence", "change": "changes", "pattern": "patterns", "situation": "situations",
         "open_question": "open_questions", "information_gap": "information_gaps",
         "delta_item": "care_delta_items", "integrity_finding": "care_integrity_findings",
         "care_assertion": "care_assertions", "assertion": "care_assertions",
