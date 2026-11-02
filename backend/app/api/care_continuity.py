@@ -2956,11 +2956,17 @@ def list_persisted_next_questions(person_id: str, request: Request, db: Session 
                 for item in gap_context
                 if isinstance(item, dict) and (item.get("reason") or item.get("purpose"))
             ), None)
+            intended_answerer_role = next((
+                str(item.get("intended_answerer_role")).strip()
+                for item in gap_context
+                if isinstance(item, dict) and item.get("intended_answerer_role")
+            ), None)
             output.append({
                 "question": description,
                 "subject_type": row.get("subject_type") or "care_record",
                 "subject_id": row.get("subject_id") or scoped_person_id,
                 "field": row.get("field"),
+                "intended_answerer_role": intended_answerer_role,
                 "priority": str(row.get("priority") or "informational"),
                 "reason": context_reason or str(row.get("gap_reason") or "Persisted information gap; it has not been resolved."),
                 "evidence_ids": row.get("evidence_ids") if isinstance(row.get("evidence_ids"), list) else [],
