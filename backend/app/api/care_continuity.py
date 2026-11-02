@@ -1272,6 +1272,7 @@ def current_care_projection(
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "occurred_at": occurred_at,
+            "reported_at": row.get("reported_at"),
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
@@ -1324,7 +1325,7 @@ def current_care_projection(
                     **row,
                     "epistemic_status": "caregiver_reported",
                     "source_label": row.get("source_label") or "Caregiver report",
-                    "occurred_at": quick_check_in.get("caregiver_reported_at") or row.get("occurred_at"),
+                    "reported_at": quick_check_in.get("caregiver_reported_at") or row.get("reported_at"),
                 }
         needs_attention = row.get("attention_candidate") is True or row.get("follow_up_candidate") is True
         is_daily_capture = event_type in {"structured_daily_capture", "daily_care_entry", "quick_daily_checkin"}
