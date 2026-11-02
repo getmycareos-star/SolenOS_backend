@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from app.core.uncertainty_enums import (
     EpistemicState,
     GapReason,
@@ -95,6 +95,28 @@ class OpenQuestion(OpenQuestionBase):
     answered_by_caregiver_id: Optional[str] = None
     closed_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class OpenQuestionReviewCreate(BaseModel):
+    decision: Literal["accepted", "rejected", "needs_clarification"]
+    rationale: str = Field(..., min_length=3, max_length=4000)
+    claim_assessment: Optional[Dict[str, Any]] = None
+
+
+class OpenQuestionReviewResponse(BaseModel):
+    id: str
+    question_id: str
+    person_id: str
+    answer_event_id: str
+    answer_version: int
+    decision: str
+    rationale: str
+    reviewer_caregiver_id: str
+    claim_assessment_id: Optional[str] = None
+    created_at: datetime
 
     class Config:
         from_attributes = True
