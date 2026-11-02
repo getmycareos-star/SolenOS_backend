@@ -135,6 +135,10 @@ def test_suggestion_is_not_registered_until_explicit_approval_and_persists():
     db = TestSessionLocal()
     try:
         assert db.query(Action).filter_by(person_id=session["person"]["id"]).count() == 1
+        stored_action = db.query(Action).filter_by(person_id=session["person"]["id"]).one()
+        assert stored_action.extraction_confidence is None
+        assert stored_action.risk_tier == "not_assessed"
+        assert stored_action.responsible_caregiver_id == session["caregiver"]["id"]
     finally:
         db.close()
 
