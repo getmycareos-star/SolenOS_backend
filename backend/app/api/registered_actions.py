@@ -112,6 +112,7 @@ class RegisteredActionRead(BaseModel):
     person_id: str
     source_evidence_id: str
     source_evidence_ids: Optional[list[str]] = None
+    suggestion_id: str
     normalized_action: str
     original_text: str
     action_type: str
