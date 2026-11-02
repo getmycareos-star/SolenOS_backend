@@ -102,7 +102,7 @@ class Action(Base):
     source_passage = Column(Text, nullable=False)
     source_document_type = Column(String, nullable=True)
     source_authority = Column(String, nullable=False, default=ActionAuthority.UNKNOWN)
-    extraction_confidence = Column(Float, nullable=False, default=1.0)
+    extraction_confidence = Column(Float, nullable=True, default=None)
     provenance_notes = Column(Text, nullable=True)
 
     actor_type = Column(String, nullable=False, default=ActorType.UNKNOWN)
