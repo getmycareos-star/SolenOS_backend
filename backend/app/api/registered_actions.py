@@ -171,9 +171,17 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     fingerprint = hashlib.sha256(
         json.dumps(request_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+    identity_material = "|".join([scoped_person_id, ",".join(sorted(evidence_ids)), payload.title.strip().casefold()])
+    identity_key = hashlib.sha256(identity_material.encode("utf-8")).hexdigest()
     existing = db.query(Action).filter(
         Action.person_id == scoped_person_id,
         Action.suggestion_id == payload.suggestion_id,
+    ).first()
+    if existing:
+        return existing
+    existing = db.query(Action).filter(
+        Action.person_id == scoped_person_id,
+        Action.action_identity_key == identity_key,
     ).first()
     if existing:
         return existing
@@ -207,6 +215,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         status="approved",
         registration_key=payload.idempotency_key,
         suggestion_id=payload.suggestion_id,
+        action_identity_key=identity_key,
         registration_request_sha256=fingerprint,
         approved_at=now,
         is_explicit=True,
@@ -236,6 +245,12 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         existing = db.query(Action).filter(
             Action.person_id == scoped_person_id,
             Action.suggestion_id == payload.suggestion_id,
+        ).first()
+        if existing:
+            return existing
+        existing = db.query(Action).filter(
+            Action.person_id == scoped_person_id,
+            Action.action_identity_key == identity_key,
         ).first()
         if existing:
             return existing
