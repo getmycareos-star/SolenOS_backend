@@ -132,7 +132,7 @@ def test_baseline_comparison_returns_only_same_person_linked_source_records():
 
         client = TestClient(app)
         response = client.get(
-            f"/change/baselines/{person.id}/comparison",
+            f"/api/v1/change/baselines/{person.id}/comparison",
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
