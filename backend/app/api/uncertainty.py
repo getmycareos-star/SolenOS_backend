@@ -176,13 +176,13 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
     ).first():
         raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another review")
     evidence_ids = list(answer_event.evidence_ids or [])
-    if not evidence_ids:
-        raise HTTPException(status_code=422, detail="A clarification decision requires persisted source evidence")
     evidence_reviews = engine.db.query(EvidenceReviewRecord).filter(
         EvidenceReviewRecord.person_id == engine.person_id,
         EvidenceReviewRecord.evidence_id.in_(evidence_ids),
     ).order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc()).all()
     reviewed_ids = {row.evidence_id for row in evidence_reviews}
+    if review.decision == "accepted" and not evidence_ids:
+        raise HTTPException(status_code=422, detail="An answer without persisted source evidence can remain a caregiver report or request more information, but cannot be accepted into the LCR")
     if review.decision == "accepted" and reviewed_ids != set(evidence_ids):
         raise HTTPException(status_code=409, detail={
             "message": "Every answer evidence item must pass through the existing evidence-review workflow before acceptance.",
