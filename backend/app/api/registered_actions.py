@@ -5,6 +5,7 @@ when an authenticated caregiver submits an explicit approval.
 """
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Literal, Optional
@@ -20,9 +21,19 @@ from app.models.action import Action, ActionLifecycleAudit
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence
 from app.models.reminder import CareReminder
+from app.schemas.action import ActionCandidate
+from app.services.action_normalization import ActionNormalizationService
 
 router = APIRouter(tags=["registered care actions"])
 
+MEDICATION_CHANGE_DIRECTIVE = re.compile(
+    r"^\\s*(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\\b.{0,100}\\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\b",
+    re.IGNORECASE,
+)
+MEDICATION_CHANGE_PREFIX = re.compile(
+    r"^\\s*(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\s*[:\\-].*\\b(?:start|stop|increase|decrease|adjust|change|hold|skip|double|halve|switch|replace|discontinue|continue|take)\\b",
+    re.IGNORECASE,
+)
 REGISTERED_STATUSES = {
     "approved", "in_progress", "completed", "cancelled", "deferred", "needs_clarification"
 }
@@ -176,6 +187,32 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     source_text = evidence_by_id[primary_evidence_id].source_text
     if not source_text or not source_text.strip():
         raise HTTPException(status_code=422, detail="The primary evidence item has no source text")
+
+    # Caregiver approval cannot authorize a medication change. A follow-up to
+    # contact a clinician about medication is allowed; direct medication
+    # instructions are not registered as actions.
+    if MEDICATION_CHANGE_DIRECTIVE.search(payload.title.strip()) or MEDICATION_CHANGE_PREFIX.search(payload.title.strip()):
+        raise HTTPException(status_code=422, detail="Direct medication changes cannot be registered. Reframe this as contacting the prescribing clinician or pharmacist.")
+
+    safety_candidate = ActionCandidate(
+        source_evidence_id=primary_evidence_id,
+        source_passage=source_text,
+        original_text=payload.title.strip(),
+        extraction_confidence=1.0,  # validation-only; never persisted as extraction confidence
+        actor_type="caregiver",
+        actor_label="Caregiver",
+        action_type=payload.action_type,
+        normalized_action=payload.title.strip(),
+        modality="recommended",
+        is_explicit=True,
+        is_medication_action=bool(re.search(r"\\b(?:medication|medicine|drug|dose|dosage|pill|tablet|insulin|injection|prescription)\\b", payload.title, re.IGNORECASE)),
+    )
+    safety = ActionNormalizationService().safety_check(safety_candidate)
+    if not safety.is_safe_to_create:
+        raise HTTPException(
+            status_code=422,
+            detail=safety.blocked_reason or "This follow-up is not safe to register as an action",
+        )
 
     request_data = payload.model_dump(mode="json", exclude={"explicit_approval"})
     fingerprint = hashlib.sha256(
