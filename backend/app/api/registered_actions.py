@@ -61,7 +61,7 @@ class ApprovedActionCreate(BaseModel):
     # This literal is deliberately required: omission or false cannot register.
     explicit_approval: Literal[True]
     idempotency_key: str = Field(min_length=16, max_length=128)
-    suggestion_id: Optional[str] = Field(default=None, max_length=160)
+    suggestion_id: str = Field(min_length=1, max_length=160)
     title: str = Field(min_length=3, max_length=500)
     action_type: Literal[
         "schedule", "call", "attend", "monitor", "ask", "obtain", "submit",
@@ -172,6 +172,12 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     ).hexdigest()
     existing = db.query(Action).filter(
         Action.person_id == scoped_person_id,
+        Action.suggestion_id == payload.suggestion_id,
+    ).first()
+    if existing:
+        return existing
+    existing = db.query(Action).filter(
+        Action.person_id == scoped_person_id,
         Action.registration_key == payload.idempotency_key,
     ).first()
     if existing:
@@ -199,6 +205,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         deadline=payload.reminder_due_at.astimezone(timezone.utc) if payload.reminder_due_at else None,
         status="approved",
         registration_key=payload.idempotency_key,
+        suggestion_id=payload.suggestion_id,
         registration_request_sha256=fingerprint,
         approved_at=now,
         is_explicit=True,
@@ -225,6 +232,12 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         db.commit()
     except IntegrityError:
         db.rollback()
+        existing = db.query(Action).filter(
+            Action.person_id == scoped_person_id,
+            Action.suggestion_id == payload.suggestion_id,
+        ).first()
+        if existing:
+            return existing
         existing = db.query(Action).filter(
             Action.person_id == scoped_person_id,
             Action.registration_key == payload.idempotency_key,
