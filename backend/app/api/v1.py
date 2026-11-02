@@ -666,6 +666,12 @@ def _validate_quick_check_in(payload: dict) -> None:
     reported_at = quick.get("caregiver_reported_at")
     if not isinstance(reported_at, str) or not reported_at.strip():
         raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at is required")
+    try:
+        parsed_reported_at = datetime.fromisoformat(reported_at.replace("Z", "+00:00"))
+        if parsed_reported_at.tzinfo is None or parsed_reported_at.utcoffset() is None:
+            raise ValueError("Timezone offset is required")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at must include a timezone offset")
 
 
 @router.post("/daily/log")
