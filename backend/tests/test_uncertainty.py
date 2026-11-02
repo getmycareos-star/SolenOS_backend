@@ -2551,6 +2551,11 @@ def test_clarification_review_requires_reviewed_evidence_and_acceptance_reconcil
         })
         assert gap_response.status_code == 200, gap_response.text
         gap_id = gap_response.json()["id"]
+        candidates = client.post(f"/api/v1/care-continuity/next-questions/{person.id}")
+        assert candidates.status_code == 200, candidates.text
+        gap_candidate = next(item for item in candidates.json() if item["source_id"] == gap_id)
+        assert gap_candidate["source_kind"] == "information_gap"
+        assert gap_candidate["field"] == "attendance"
 
         question_response = client.post("/api/v1/uncertainty/questions", json={
             "person_id": person.id,
