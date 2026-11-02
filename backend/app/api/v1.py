@@ -540,6 +540,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             "kind": quick_check_in.get("kind"),
             "selected_areas": quick_check_in.get("selected_areas"),
             "note": quick_check_in.get("note"),
+            "notes": payload.get("notes"),
         }
         request_fingerprint = hashlib.sha256(
             json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
