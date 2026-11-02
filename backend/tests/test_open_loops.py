@@ -13,6 +13,8 @@ from app.api.care_continuity import _build_situation_understanding_assessment
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Evidence
+from app.models.change import Pattern
+from app.core.change_enums import PatternType, PatternStrength
 
 pytestmark = pytest.mark.session_security
 
@@ -681,6 +683,29 @@ def test_possible_relationship_source_review_persists_across_refresh_and_is_pers
     related_id = create_source_evidence(first_identity, "Second independently recorded source.")
     relationship = create_independent_corroboration(client, first_headers, source_id, related_id)
 
+    db = TestSessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        pattern = Pattern(
+            id="possible-relationship-pattern-review",
+            person_id=first["person"]["id"],
+            subject_type="mobility",
+            subject_id="",
+            pattern_type=PatternType.RECURRENCE,
+            pattern_strength=PatternStrength.EMERGING,
+            event_ids=[],
+            change_ids=[],
+            temporal_start=now - timedelta(days=2),
+            temporal_end=now,
+            evidence_count=2,
+            alternative_interpretations=["The observations may share another explanation."],
+            is_active=True,
+        )
+        db.add(pattern)
+        db.commit()
+    finally:
+        db.close()
+
     assert relationship["person_id"] == first["person"]["id"]
     assert relationship["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
     assert relationship["relationship_type"] == "corroborates"
@@ -710,6 +735,24 @@ def test_possible_relationship_source_review_persists_across_refresh_and_is_pers
     assert review["review_decision"] == "disputed"
     assert review["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
 
+    pattern_review_response = client.post(
+        "/api/v1/care-continuity/review-decisions",
+        headers=first_headers,
+        json={
+            "target_type": "pattern",
+            "target_id": "possible-relationship-pattern-review",
+            "review_decision": "not_applicable",
+            "reason": "The caregiver has additional context that makes this pattern inapplicable.",
+        },
+    )
+    assert pattern_review_response.status_code == 201, pattern_review_response.text
+    pattern_review = pattern_review_response.json()
+    assert pattern_review["person_id"] == first["person"]["id"]
+    assert pattern_review["target_type"] == "pattern"
+    assert pattern_review["target_id"] == "possible-relationship-pattern-review"
+    assert pattern_review["review_decision"] == "not_applicable"
+    assert pattern_review["reviewed_by_caregiver_id"] == first["caregiver"]["id"]
+
     refreshed = client.post(
         "/api/v1/sessions/refresh",
         json={"refresh_token": first["refresh_token"]},
@@ -722,6 +765,7 @@ def test_possible_relationship_source_review_persists_across_refresh_and_is_pers
     )
     assert persisted_reviews.status_code == 200, persisted_reviews.text
     assert review["id"] in [row["id"] for row in persisted_reviews.json()]
+    assert pattern_review["id"] in [row["id"] for row in persisted_reviews.json()]
 
     other_relationships = client.get(
         "/api/v1/care-continuity/evidence-source-relationships?limit=100",
@@ -741,6 +785,18 @@ def test_possible_relationship_source_review_persists_across_refresh_and_is_pers
         },
     )
     assert cross_person_review.status_code == 404, cross_person_review.text
+
+    cross_person_pattern_review = client.post(
+        "/api/v1/care-continuity/review-decisions",
+        headers=second_headers,
+        json={
+            "target_type": "pattern",
+            "target_id": "possible-relationship-pattern-review",
+            "review_decision": "disputed",
+            "reason": "This pattern belongs to a different care record.",
+        },
+    )
+    assert cross_person_pattern_review.status_code == 404, cross_person_pattern_review.text
 
     unchanged_relationships = client.get(
         "/api/v1/care-continuity/evidence-source-relationships?limit=100",
