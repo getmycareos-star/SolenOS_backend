@@ -157,6 +157,7 @@ class Action(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    responsible_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
 
     __mapper_args__ = {"version_id_col": version}
 
