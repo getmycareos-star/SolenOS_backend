@@ -91,9 +91,8 @@ def test_daily_capture_persists_for_linked_caregiver():
         )
         assert response.status_code == 200, response.text
         assert response.json()["success"] is True
-
-
-
+    finally:
+        teardown_db()
 
 
 def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution():
