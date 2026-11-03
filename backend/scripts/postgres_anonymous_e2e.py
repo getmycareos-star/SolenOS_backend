@@ -1763,16 +1763,25 @@ def main():
         # LCR assertion and correction endpoints must enforce the same
         # person boundary as evidence retrieval; a valid foreign session cannot
         # enumerate assertions or attach a correction to another person's claim.
+        own_assertion_status, own_assertions = request(
+            "GET",
+            f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            token=token_a,
+        )
+        require(
+            own_assertion_status == 200
+            and isinstance(own_assertions, list)
+            and any(row.get("id") == continuity_assertion_id for row in own_assertions),
+            f"authenticated caregiver could not retrieve their own persisted assertion: {own_assertion_status}: {own_assertions}",
+        )
         foreign_assertion_status, foreign_assertions = request(
             "GET",
             f"/api/v1/care-continuity/assertions/{continuity_person_id}",
             token=token_b,
         )
         require(
-            foreign_assertion_status == 200
-            and isinstance(foreign_assertions, list)
-            and all(row.get("id") != continuity_assertion_id for row in foreign_assertions),
-            f"cross-person assertion listing leaked a foreign assertion: {foreign_assertion_status}: {foreign_assertions}",
+            foreign_assertion_status == 403,
+            f"cross-person assertion listing must be denied without disclosing record contents: {foreign_assertion_status}: {foreign_assertions}",
         )
         foreign_correction_status, foreign_correction = request(
             "POST",
