@@ -1668,17 +1668,17 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
-    authorized_evidence_ids = set()
+    authorized_evidence_ids: set[str] = set()
+    authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_ids = {
-            str(value)
-            for value in db.execute(
-                select(Evidence.id).where(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(candidate_evidence_ids),
-                )
-            ).scalars().all()
+        authorized_evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(candidate_evidence_ids),
+        ).all()
+        authorized_evidence_by_id = {
+            str(row.id): row for row in authorized_evidence_rows
         }
+        authorized_evidence_ids = set(authorized_evidence_by_id)
     source_domains = {
         "events": "current_state_reconstruction",
         "facts": "current_care_reality",
@@ -1721,6 +1721,43 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 str(value) for value in raw_linked_ids
                 if value and str(value) in authorized_evidence_ids
             ]
+            linked_sources = [
+                authorized_evidence_by_id[evidence_id]
+                for evidence_id in normalized_row["evidence_ids"]
+                if evidence_id in authorized_evidence_by_id
+            ]
+            primary_source = linked_sources[0] if linked_sources else None
+            normalized_row["source_label"] = (
+                row.get("source_label")
+                or row.get("author_label")
+                or row.get("observer_label")
+                or (primary_source.reported_by_label if primary_source else None)
+                or (primary_source.original_author if primary_source else None)
+                or (
+                    "Caregiver report"
+                    if primary_source and primary_source.evidence_kind == "caregiver_report"
+                    else None
+                )
+            )
+            normalized_row["source_type"] = (
+                row.get("source_type")
+                or (primary_source.source_type if primary_source else None)
+                or "not_recorded"
+            )
+            normalized_row["epistemic_status"] = (
+                row.get("epistemic_status")
+                or row.get("epistemic_state")
+                or (primary_source.epistemic_status if primary_source else None)
+                or "not_specified"
+            )
+            normalized_row["reported_at"] = (
+                row.get("reported_at")
+                or (primary_source.reported_at if primary_source else None)
+            )
+            normalized_row["reported_by_caregiver_id"] = (
+                row.get("reported_by_caregiver_id")
+                or (primary_source.reported_by_caregiver_id if primary_source else None)
+            )
             normalized_row["evidence_link_validation"] = (
                 "same_care_record_evidence_reference_verified"
                 if normalized_row["evidence_ids"]
@@ -1837,6 +1874,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or source)[:240],
             "status": status or str(item.get("epistemic_state") or item.get("epistemic_status") or "not_recorded").lower(),
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
+            "source_label": item.get("source_label") or "Source label not recorded",
+            "source_type": item.get("source_type") or "not_recorded",
+            "reported_at": item.get("reported_at"),
+            "reported_by_caregiver_id": item.get("reported_by_caregiver_id"),
+            "evidence_link_validation": item.get("evidence_link_validation") or "no_authorized_evidence_reference_returned",
             "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": (
