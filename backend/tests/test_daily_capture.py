@@ -219,6 +219,9 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
             "subject_label": "Care recipient",
             "attribute": "mood",
             "value_text": "Unusually sad",
+            "context": "After the usual evening routine",
+            "observer_label": "family caregiver",
+            "observation_method": "caregiver report",
             "observed_at": "2026-11-03T09:00:00+00:00",
             "recorded_at": "2026-11-03T09:01:00+00:00",
             "source_passage": "unusually sad",
@@ -258,6 +261,9 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
         assert len(event_items[0]["derived_observations"]) == 1
         assert event_items[0]["derived_observations"][0]["id"] == observation["id"]
         assert event_items[0]["derived_observations"][0]["source_passage"] == "unusually sad"
+        assert event_items[0]["derived_observations"][0]["context"] == "After the usual evening routine"
+        assert event_items[0]["derived_observations"][0]["observer_label"] == "family caregiver"
+        assert event_items[0]["derived_observations"][0]["observation_method"] == "caregiver report"
         assert not any(
             item["source_collection"] == "evidence_observations"
             and item["id"] == observation["id"]
