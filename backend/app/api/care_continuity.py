@@ -1381,11 +1381,48 @@ def current_care_projection(
         for row in observation_rows
         if row.get("supersedes_observation_id")
     }
+    # An observation extracted from a caregiver report is not a second,
+    # independent care event. Keep the event as the top-level history item and
+    # attach its structured extraction beneath it when the evidence link is
+    # unambiguous. The observation remains separately persisted and auditable.
+    event_items_by_evidence: dict[str, list[dict[str, Any]]] = {}
+    for current_item in current_items:
+        if current_item.get("source_collection") != "events":
+            continue
+        for evidence_id in current_item.get("evidence_ids") or []:
+            event_items_by_evidence.setdefault(str(evidence_id), []).append(current_item)
+
     for row in observation_rows:
         # Current-care view shows the latest non-superseded version. Historical
         # versions remain in the immutable assessment trajectory and source endpoint.
-        if str(row.get("id") or "") not in superseded_observation_ids:
-            add("evidence_observations", row, "Structured evidence observation", 7)
+        if str(row.get("id") or "") in superseded_observation_ids:
+            continue
+        evidence_id = str(row.get("evidence_id") or "")
+        linked_events = event_items_by_evidence.get(evidence_id, []) if evidence_id else []
+        if len(linked_events) == 1:
+            linked_events[0].setdefault("derived_observations", []).append({
+                "id": str(row.get("id") or ""),
+                "observation_kind": row.get("observation_kind"),
+                "epistemic_status": row.get("epistemic_status"),
+                "subject_label": row.get("subject_label"),
+                "attribute": row.get("attribute"),
+                "value_text": row.get("value_text"),
+                "normalized_value": row.get("normalized_value"),
+                "units": row.get("units"),
+                "observed_at": row.get("observed_at"),
+                "recorded_at": row.get("recorded_at"),
+                "source_span_start": row.get("source_span_start"),
+                "source_span_end": row.get("source_span_end"),
+                "source_passage": row.get("source_passage"),
+                "negated": row.get("negated"),
+                "hedge_marker": row.get("hedge_marker"),
+                "ambiguity_note": row.get("ambiguity_note"),
+                "extraction_method": row.get("extraction_method"),
+                "supersedes_observation_id": row.get("supersedes_observation_id"),
+                "correction_rationale": row.get("correction_rationale"),
+            })
+            continue
+        add("evidence_observations", row, "Structured evidence observation", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
