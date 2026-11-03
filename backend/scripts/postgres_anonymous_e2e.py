@@ -164,6 +164,7 @@ def main():
         )
         require(status == 201, f"anonymous session creation expected 201, got {status}: {first}")
         token_a = first["access_token"]
+        original_session_token = token_a
         person_a = first["person"]["id"]
         caregiver_a = first["caregiver"]["id"]
 
@@ -912,6 +913,19 @@ def main():
             body={"email": account_email, "password": account_password},
         )
         require(status == 201, f"account linking expected 201, got {status}: {account_created}")
+
+        # Terminate the original session before the independent account login.
+        status, original_revoked = request(
+            "POST", "/api/v1/sessions/revoke", token=original_session_token, body={},
+        )
+        require(status == 200 and original_revoked.get("revoked") is True,
+                f"Original session termination failed: {status}: {original_revoked}")
+        status, original_session_read = request(
+            "GET", f"/api/v1/events/{person_a}", token=original_session_token,
+        )
+        require(status == 401,
+                f"Terminated original session must no longer read history: {status}: {original_session_read}")
+
         status, second_device = request(
             "POST",
             "/api/v1/accounts/login",
