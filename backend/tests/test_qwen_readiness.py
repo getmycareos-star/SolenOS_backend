@@ -261,3 +261,47 @@ def test_readiness_endpoint_uses_cached_probe_instead_of_forcing_each_request(mo
 
     assert result["failure_reason"] == "inference_timeout"
     assert calls == [False]
+
+
+def test_readiness_stays_unavailable_when_inventory_exists_but_inference_is_not_ready(monkeypatch):
+    from fastapi import HTTPException
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b'{"models":[{"name":"qwen2.5:0.5b"}]}'
+
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: ("http://ollama", "qwen2.5:0.5b", 20.0),
+    )
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_installation_status",
+        lambda: {"state": "installed"},
+    )
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
+
+    def unavailable_inference(*args, **kwargs):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "runtime_unreachable",
+                "reason": "ConnectionRefusedError",
+                "message": "SolenOS AI assistance is unavailable.",
+            },
+        )
+
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", unavailable_inference)
+    qwen_gateway._READINESS_CACHE.update({"checked_at": 0.0, "result": None})
+
+    result = qwen_gateway.qwen_readiness_status(force=True)
+
+    assert result["available"] is False
+    assert result["state"] == "unavailable"
+    assert result["failure_reason"] == "ConnectionRefusedError"
+    assert result["error_category"] == "runtime_unreachable"
