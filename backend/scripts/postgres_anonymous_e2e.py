@@ -928,6 +928,89 @@ def main():
         require(second_device_read.get("care_recipient_display_name") == updated_name,
                 "second-device login did not retrieve the persisted updated care record")
 
+        # Exercise the exact structured Daily Care -> CareEvent -> Evidence ->
+        # Recent History -> LCR -> persisted situation-assessment lifecycle.
+        daily_capture_payload = {
+            "person_id": person_a,
+            "caregiver_id": caregiver_a,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "PostgreSQL E2E caregiver report: sleep was interrupted twice overnight.",
+            "capture_idempotency_key": "postgres-daily-capture-restart-001",
+        }
+        status, daily_capture = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
+        )
+        require(status == 200 and daily_capture.get("success") is True,
+                f"Structured Daily Care capture failed: {status}: {daily_capture}")
+        daily_event_id = daily_capture.get("id")
+        daily_evidence_ids = daily_capture.get("evidence_ids") or []
+        require(daily_event_id and len(daily_evidence_ids) == 1,
+                f"Daily Care capture must return one event and one source evidence ID: {daily_capture}")
+        daily_evidence_id = daily_evidence_ids[0]
+
+        status, daily_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        require(status == 200, f"Recent History event read failed: {status}: {daily_history}")
+        history_matches = [row for row in daily_history if row.get("id") == daily_event_id]
+        require(len(history_matches) == 1
+                and history_matches[0].get("evidence_ids") == [daily_evidence_id],
+                f"Recent History did not return the same event/evidence IDs: {history_matches}")
+
+        status, daily_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=100", token=token_a,
+        )
+        require(status == 200, f"Current-care LCR read failed: {status}: {daily_lcr}")
+        lcr_matches = [row for row in daily_lcr.get("items", []) if row.get("id") == daily_event_id]
+        require(len(lcr_matches) == 1
+                and lcr_matches[0].get("evidence_ids") == [daily_evidence_id]
+                and lcr_matches[0].get("evidence_link_validation") == "same_care_record_evidence_reference_verified"
+                and lcr_matches[0].get("source_label") == "Caregiver"
+                and lcr_matches[0].get("source_type") == "caregiver_report",
+                f"LCR did not reconcile the same authorized caregiver source: {lcr_matches}")
+
+        status, daily_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200 and any(
+            row.get("id") == daily_evidence_id
+            and row.get("epistemic_status") == "caregiver_reported"
+            for row in daily_evidence
+        ), f"Authorized caregiver source evidence could not be retrieved: {status}: {daily_evidence}")
+
+        status, daily_assessment = request(
+            "POST", "/api/v1/care-continuity/situation-understanding/reassess", token=token_a,
+        )
+        require(status == 200, f"Situation assessment rebuild failed: {status}: {daily_assessment}")
+        assessment_records = [
+            row for row in daily_assessment.get("assessment", {}).get("current_care_reality", {}).get("records", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(len(assessment_records) == 1
+                and assessment_records[0].get("evidence_ids") == [daily_evidence_id]
+                and assessment_records[0].get("source_label") == "Caregiver",
+                f"Situation assessment did not rebuild from the verified source: {assessment_records}")
+
+        status, daily_replay = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
+        )
+        require(status == 200
+                and daily_replay.get("id") == daily_event_id
+                and daily_replay.get("evidence_ids") == [daily_evidence_id]
+                and daily_replay.get("idempotent_replay") is True,
+                f"Unchanged Daily Care retry created a duplicate or changed its IDs: {status}: {daily_replay}")
+        changed_daily_capture = {
+            **daily_capture_payload,
+            "notes": "Different report must not reuse the original request key.",
+        }
+        status, changed_retry = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=changed_daily_capture,
+        )
+        require(status == 409,
+                f"Changed content under the same request key must conflict: {status}: {changed_retry}")
+
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
         status, _ = request("GET", f"/api/v1/evidence/{person_a}")
