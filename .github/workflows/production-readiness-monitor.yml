@@ -53,6 +53,7 @@ jobs:
 
       # Core API readiness and actual Qwen inference are separate production acceptance gates.
       - name: Verify deployed Qwen model inventory and real inference
+        if: github.event_name != 'pull_request'
         run: |
           set -Eeuo pipefail
           base='https://solenosbackend-production.up.railway.app'
