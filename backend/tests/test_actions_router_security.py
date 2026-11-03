@@ -13,10 +13,9 @@ def test_legacy_action_routes_are_not_exposed():
 
 
 def test_existing_reminder_workflow_remains_mounted():
-    paths = {
-        getattr(route, "path", "")
-        for route in app.routes
-    }
+    # Newer FastAPI versions defer included-router expansion in app.routes;
+    # OpenAPI is the authoritative resolved route table.
+    paths = set(app.openapi()["paths"])
 
     assert "/api/v1/reminders" in paths
     assert "/api/v1/reminders/{person_id}" in paths
