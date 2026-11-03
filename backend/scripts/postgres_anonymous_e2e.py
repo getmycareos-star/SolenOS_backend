@@ -936,6 +936,7 @@ def main():
                 "second-device login did not restore the same care-recipient identity")
         require(second_device.get("caregiver_id") == caregiver_a,
                 "second-device login did not restore the same caregiver identity")
+        account_id = second_device["account"]["id"]
         token_a = second_device["access_token"]
         status, second_device_read = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"second-device read expected 200, got {status}: {second_device_read}")
@@ -1340,8 +1341,11 @@ def main():
         )
         require(status == 200, f"Independent account login after restart failed: {status}: {post_restart_login}")
         require(post_restart_login.get("person_id") == person_a
-                and post_restart_login.get("caregiver_id") == caregiver_a,
-                "Post-restart independent login changed the person or caregiver identity")
+                and post_restart_login.get("caregiver_id") == caregiver_a
+                and post_restart_login.get("account", {}).get("id") == account_id
+                and post_restart_login.get("session_id") != second_device.get("session_id")
+                and post_restart_login.get("access_token") != second_device.get("access_token"),
+                "Post-restart independent login changed the account/person/caregiver identity or reused the old session")
         token_a = post_restart_login["access_token"]
         status, post_restart_identity = request("GET", "/api/situation", token=token_a)
         require(status == 200
@@ -1533,8 +1537,8 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"record isolation failed after restart; expected 403, got {status}")
 
-        print("PASS: PostgreSQL readiness, anonymous session creation, durable capture/hydration,")
-        print("      cross-record denial, token rotation, and persistence after Uvicorn restart.")
+        print("PASS: PostgreSQL Daily Care capture, Evidence/LCR/history parity, original-session revocation,")
+        print("      independent account login after restart, unchanged IDs, cross-record denial, and persistence.")
     finally:
         if server.poll() is None:
             stop_server(server)
