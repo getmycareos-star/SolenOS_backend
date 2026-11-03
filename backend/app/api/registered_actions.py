@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -153,6 +153,16 @@ def _with_linked_reminder(db: Session, action: Action) -> Action:
 
 def _audit(db: Session, action: Action, actor_id: str, old: Optional[str], new: str,
            reason: Optional[str], evidence_ids: Optional[list[str]] = None) -> None:
+    previous_event = db.query(ActionLifecycleAudit).filter(
+        ActionLifecycleAudit.action_id == action.id,
+    ).order_by(ActionLifecycleAudit.created_at.desc()).first()
+    event_time = datetime.now(timezone.utc)
+    if previous_event is not None and previous_event.created_at is not None:
+        previous_time = previous_event.created_at
+        if previous_time.tzinfo is None or previous_time.utcoffset() is None:
+            previous_time = previous_time.replace(tzinfo=timezone.utc)
+        if event_time <= previous_time:
+            event_time = previous_time + timedelta(microseconds=1)
     db.add(ActionLifecycleAudit(
         action_id=action.id,
         person_id=action.person_id,
@@ -161,6 +171,7 @@ def _audit(db: Session, action: Action, actor_id: str, old: Optional[str], new: 
         new_status=new,
         reason=reason,
         evidence_ids=evidence_ids or action.source_evidence_ids or [action.source_evidence_id],
+        created_at=event_time,
     ))
 
 
