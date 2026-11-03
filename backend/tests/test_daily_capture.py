@@ -74,14 +74,15 @@ def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_daily_capture_persists_for_linked_caregiver():
+def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
     setup_db()
     try:
         seed_person_and_caregiver()
         client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
         response = client.post(
             "/api/v1/daily-care/entries",
-            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            headers=headers,
             json={
                 "person_id": "person-daily-test",
                 "caregiver_id": "caregiver-daily-test",
@@ -90,7 +91,53 @@ def test_daily_capture_persists_for_linked_caregiver():
             },
         )
         assert response.status_code == 200, response.text
-        assert response.json()["success"] is True
+        receipt = response.json()
+        assert receipt["success"] is True
+        assert len(receipt["evidence_ids"]) == 1
+
+        event_id = receipt["id"]
+        evidence_id = receipt["evidence_ids"][0]
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=event_id).one()
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert event.person_id == evidence.person_id == "person-daily-test"
+        assert event.created_by_caregiver_id == evidence.reported_by_caregiver_id == "caregiver-daily-test"
+        assert event.evidence_ids == [evidence.id]
+        assert evidence.evidence_kind == "caregiver_report"
+        assert evidence.epistemic_status == "caregiver_reported"
+        assert evidence.reported_by_label == "Caregiver"
+        source_payload = json.loads(evidence.source_text)
+        assert source_payload["original_capture"]["general_notes"] == "User-recorded note"
+        db.close()
+
+        # Recent History and the LCR must expose the same persisted event ID.
+        history = client.get("/api/v1/events/person-daily-test", headers=headers)
+        assert history.status_code == 200, history.text
+        history_matches = [item for item in history.json() if item["id"] == event_id]
+        assert len(history_matches) == 1
+        assert history_matches[0]["evidence_ids"] == [evidence_id]
+
+        current_care = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current_care.status_code == 200, current_care.text
+        lcr_matches = [item for item in current_care.json()["items"] if item["id"] == event_id]
+        assert len(lcr_matches) == 1
+        assert lcr_matches[0]["evidence_ids"] == [evidence_id]
+        assert lcr_matches[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert lcr_matches[0]["source_label"] == "Caregiver"
+        assert lcr_matches[0]["source_type"] == "caregiver_report"
+        assert lcr_matches[0]["epistemic_status"] == "caregiver_reported"
+
+        # The public evidence endpoint must serialize the caregiver-reported status.
+        evidence_response = client.get("/api/v1/evidence/person-daily-test", headers=headers)
+        assert evidence_response.status_code == 200, evidence_response.text
+        evidence_matches = [item for item in evidence_response.json() if item["id"] == evidence_id]
+        assert len(evidence_matches) == 1
+        assert evidence_matches[0]["epistemic_status"] == "caregiver_reported"
+
+        seed_second_person_and_caregiver()
+        other_headers = session_headers("person-other-test", "caregiver-other-test")
+        foreign_history = client.get("/api/v1/events/person-daily-test", headers=other_headers)
+        assert foreign_history.status_code == 403
     finally:
         teardown_db()
 
