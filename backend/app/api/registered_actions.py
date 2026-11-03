@@ -330,7 +330,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
             Action.registration_key == payload.idempotency_key,
         ).first()
         if existing and existing.registration_request_sha256 == fingerprint:
-            return existing
+            return _with_linked_reminder(db, existing)
         raise HTTPException(status_code=409, detail="Action registration conflicted with an existing record")
     db.refresh(action)
     return _with_linked_reminder(db, action)
