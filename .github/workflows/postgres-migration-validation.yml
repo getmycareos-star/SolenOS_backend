@@ -1,7 +1,7 @@
 name: PostgreSQL migration validation
 
 on:
-  push:
+  pull_request:
     branches: [main]
     paths:
       - "backend/alembic/**"
