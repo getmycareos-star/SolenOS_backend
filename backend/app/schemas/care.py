@@ -53,7 +53,7 @@ class EvidenceBase(BaseModel):
     ]] = None
     epistemic_status: Optional[Literal[
         "unverified", "uncertain", "unknown", "missing", "disputed",
-        "superseded", "withdrawn",
+        "caregiver_reported", "superseded", "withdrawn",
     ]] = None
     source_text: str
     original_file_path: Optional[str] = None
