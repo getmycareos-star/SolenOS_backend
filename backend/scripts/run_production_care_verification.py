@@ -2,8 +2,9 @@
 """Read-only production health verification.
 
 Production verification must never create identities, sessions, evidence, files,
-care records, or other synthetic data. All write/persistence/isolation tests run
-against disposable PostgreSQL in CI via postgres_anonymous_e2e.py.
+care records, or other synthetic data. Authoritative HTTP persistence, identity,
+and isolation verification runs against disposable PostgreSQL in CI via
+postgres_anonymous_e2e.py.
 """
 from __future__ import annotations
 
