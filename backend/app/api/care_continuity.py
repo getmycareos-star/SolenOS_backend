@@ -2298,7 +2298,7 @@ def get_situation_understanding_snapshot(
     }
 
 
-def prepare_situation_understanding_assessment(db: Session, person_id: str) -> None:
+def prepare_situation_understanding_assessment(db: Session) -> None:
     """Preload required schema metadata before a caller starts an atomic care-record write."""
     if not has_source_table(db, "care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
