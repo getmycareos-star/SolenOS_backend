@@ -1462,6 +1462,22 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
             CareEvent.status == "recorded",
         ).all()
         assert len(persisted_events) == 2, "the recurrence fixture must persist both source events"
+        from app.services.pattern_detection import MAX_PATTERN_LOOKBACK_DAYS
+        query_now = now
+        query_window_start = query_now - timedelta(days=MAX_PATTERN_LOOKBACK_DAYS)
+        eligible_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person.id,
+            CareEvent.event_type == "fall",
+            CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
+            CareEvent.occurred_at >= query_window_start,
+            CareEvent.occurred_at <= query_now,
+        ).all()
+        assert len(eligible_events) == 2, {
+            "eligible_count": len(eligible_events),
+            "window_start": query_window_start.isoformat(),
+            "now": query_now.isoformat(),
+            "events": [(event.id, event.status, event.occurred_at.isoformat()) for event in persisted_events],
+        }
         assert max(event.occurred_at for event in persisted_events) - min(
             event.occurred_at for event in persisted_events
         ) >= timedelta(days=1), "the recurrence fixture must span distinct reporting periods"
