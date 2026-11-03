@@ -2299,10 +2299,9 @@ def get_situation_understanding_snapshot(
 
 
 def prepare_situation_understanding_assessment(db: Session, person_id: str) -> None:
-    """Preload schema metadata before a caller starts an atomic care-record write."""
+    """Preload required schema metadata before a caller starts an atomic care-record write."""
     if not has_source_table(db, "care_delta_runs"):
         raise HTTPException(status_code=503, detail="Care-continuity assessment storage is unavailable")
-    build_lcr_context(db, person_id, limit_per_source=50)
     _table(db, "care_delta_runs")
 
 
