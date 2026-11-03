@@ -128,6 +128,16 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         assert response.status_code == 200, response.text
         assert response.json()["success"] is True
 
+        # Simulate a check-in written by the earlier event-only implementation.
+        # A safe retry must attach the missing source evidence without duplicating
+        # the care event or losing the original report.
+        db = TestingSessionLocal()
+        legacy_event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
+        legacy_event.evidence_ids = []
+        db.query(Evidence).filter(Evidence.id.in_(response.json()["evidence_ids"])).delete(synchronize_session=False)
+        db.commit()
+        db.close()
+
         replay = client.post(
             "/api/v1/daily/log",
             headers=session_headers("person-daily-test", "caregiver-daily-test"),
@@ -136,7 +146,7 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         assert replay.status_code == 200, replay.text
         assert replay.json()["id"] == response.json()["id"]
         assert replay.json()["idempotent_replay"] is True
-        assert replay.json()["evidence_ids"] == response.json()["evidence_ids"]
+        assert len(replay.json()["evidence_ids"]) == 1
 
         db = TestingSessionLocal()
         assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 1
