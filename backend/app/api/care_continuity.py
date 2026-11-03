@@ -1300,6 +1300,7 @@ def current_care_projection(
             "status": status,
             "epistemic_status": epistemic_status,
             "source_collection": source_name,
+            "source_event_type": row.get("event_type") if source_name == "events" else None,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
             "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
