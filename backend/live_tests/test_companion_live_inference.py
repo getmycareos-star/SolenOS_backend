@@ -327,6 +327,10 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
         assert not __import__("re").search(r"(?<!\d)\+?\d[\d\s().-]{6,}\d(?!\d)", data["reply"]), (
             f"Qwen invented a phone-like number: {data['reply']!r}"
         )
+        with TestingSessionLocal() as db:
+            assert db.query(CareEvent).filter_by(person_id=session["person"]["id"]).count() == 0, (
+                "Emergency-readiness assistance wrote a care event to the Living Care Record"
+            )
     finally:
         client.close()
         app.dependency_overrides.clear()
