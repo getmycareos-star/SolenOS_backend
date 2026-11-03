@@ -1401,7 +1401,7 @@ def main():
             {
                 "person_id": continuity_person_id,
                 "caregiver_id": continuity_caregiver_id,
-                "evidence_type": "care_document",
+                "evidence_type": "document",
                 "extracted_text": "CI-only synthetic document; no real personal data.",
             },
             "continuity-document.png",
