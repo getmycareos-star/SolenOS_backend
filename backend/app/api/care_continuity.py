@@ -1205,17 +1205,17 @@ def current_care_projection(
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
-    authorized_evidence_ids = set()
+    authorized_evidence_ids: set[str] = set()
+    authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_ids = {
-            str(value)
-            for value in db.execute(
-                select(Evidence.id).where(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(candidate_evidence_ids),
-                )
-            ).scalars().all()
+        authorized_evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(candidate_evidence_ids),
+        ).all()
+        authorized_evidence_by_id = {
+            str(row.id): row for row in authorized_evidence_rows
         }
+        authorized_evidence_ids = set(authorized_evidence_by_id)
     current_items: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -1250,8 +1250,39 @@ def current_care_projection(
             str(value) for value in evidence_ids
             if value and str(value) in authorized_evidence_ids
         ]
-        source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
-        origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
+        linked_sources = [
+            authorized_evidence_by_id[evidence_id]
+            for evidence_id in evidence_ids
+            if evidence_id in authorized_evidence_by_id
+        ]
+        primary_source = linked_sources[0] if linked_sources else None
+        source_label = (
+            row.get("source_label")
+            or row.get("author_label")
+            or row.get("observer_label")
+            or (primary_source.reported_by_label if primary_source else None)
+            or (primary_source.original_author if primary_source else None)
+            or (
+                "Caregiver report"
+                if primary_source and primary_source.evidence_kind == "caregiver_report"
+                else None
+            )
+        )
+        origin_type = (
+            row.get("source_type")
+            or row.get("extraction_method")
+            or (primary_source.source_type if primary_source else None)
+            or "not_recorded"
+        )
+        epistemic_status = (
+            row.get("epistemic_status")
+            or row.get("epistemic_state")
+            or row.get("assertion_status")
+            or row.get("decision_status")
+            or (primary_source.epistemic_status if primary_source else None)
+            or "not_specified"
+        )
+        reported_at = row.get("reported_at") or (primary_source.reported_at if primary_source else None)
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
             try:
@@ -1267,12 +1298,16 @@ def current_care_projection(
             "title": title[:240],
             "description": description[:1600],
             "status": status,
-            "epistemic_status": row.get("epistemic_status") or row.get("epistemic_state") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
+            "epistemic_status": epistemic_status,
             "source_collection": source_name,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
+            "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
+            "reported_by_label": row.get("reported_by_label") or (primary_source.reported_by_label if primary_source else None),
+            "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
+            "original_source_reference": row.get("original_source_reference") or (primary_source.original_source_reference if primary_source else None),
             "occurred_at": occurred_at,
-            "reported_at": row.get("reported_at"),
+            "reported_at": reported_at,
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
