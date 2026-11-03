@@ -296,7 +296,7 @@ _SOURCE_SCHEMA_CACHE: WeakKeyDictionary = WeakKeyDictionary()
 _SOURCE_SCHEMA_CACHE_LOCK = RLock()
 
 
-def _load_source_schema(bind: Any, connection: Any) -> tuple[frozenset[str], MetaData]:
+def _load_source_schema(db: Session) -> tuple[frozenset[str], MetaData]:
     """Reflect the care-source schema once per engine on the caller's active connection.
 
     Reusing the session connection is essential: opening an Engine connection while
@@ -305,10 +305,16 @@ def _load_source_schema(bind: Any, connection: Any) -> tuple[frozenset[str], Met
     schema state. The process is restarted after deployment migrations, so this
     engine-scoped cache is refreshed naturally on schema rollout.
     """
+    session_cached = db.info.get("_lcr_source_schema")
+    if session_cached is not None:
+        return session_cached
+    bind = db.get_bind()
     with _SOURCE_SCHEMA_CACHE_LOCK:
         cached = _SOURCE_SCHEMA_CACHE.get(bind)
         if cached is not None:
+            db.info["_lcr_source_schema"] = cached
             return cached
+        connection = db.connection()
         available_tables = frozenset(inspect(connection).get_table_names())
         metadata = MetaData()
         present = [
@@ -325,12 +331,13 @@ def _load_source_schema(bind: Any, connection: Any) -> tuple[frozenset[str], Met
             metadata.reflect(bind=connection, only=list(dict.fromkeys(present)))
         result = (available_tables, metadata)
         _SOURCE_SCHEMA_CACHE[bind] = result
+        db.info["_lcr_source_schema"] = result
         return result
 
 
 def has_source_table(db: Session, table_name: str) -> bool:
     """Check source-table availability using the active session connection."""
-    available_tables, _metadata = _load_source_schema(db.get_bind(), db.connection())
+    available_tables, _metadata = _load_source_schema(db)
     return table_name in available_tables
 
 
@@ -342,9 +349,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
     """
     limit = max(1, min(int(limit_per_source), 50))
     terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())))[:8]
-    bind = db.get_bind()
-    connection = db.connection()
-    available_tables, metadata = _load_source_schema(bind, connection)
+    available_tables, metadata = _load_source_schema(db)
 
     sources: dict[str, dict[str, Any]] = {}
     missing_required: list[str] = []
