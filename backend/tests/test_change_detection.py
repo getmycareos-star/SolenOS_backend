@@ -1455,7 +1455,20 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
         ))
         db.commit()
 
-        from app.services.pattern_detection import detect_patterns
+        from app.services.pattern_detection import detect_patterns, _build_recurrence_pattern
+        persisted_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person.id,
+            CareEvent.event_type == "fall",
+            CareEvent.status == "recorded",
+        ).all()
+        assert len(persisted_events) == 2, "the recurrence fixture must persist both source events"
+        assert max(event.occurred_at for event in persisted_events) - min(
+            event.occurred_at for event in persisted_events
+        ) >= timedelta(days=1), "the recurrence fixture must span distinct reporting periods"
+        direct_recurrence = _build_recurrence_pattern(
+            db, person.id, "fall", "", persisted_events, [], now
+        )
+        assert direct_recurrence is not None, "two persisted events across 30 days must form a recurrence candidate"
         patterns = detect_patterns(db, person.id, "fall", None, now)
         db.commit()
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
