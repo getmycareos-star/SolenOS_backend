@@ -1905,6 +1905,39 @@ def main():
             item.get("id") == continuity_version.get("id") for item in restarted_versions
         ), "LCR version history did not survive server restart")
 
+        restarted_snapshots_status, restarted_snapshots = request(
+            "GET", "/api/v1/care-continuity/record-snapshots", token=restarted_token,
+        )
+        restarted_snapshot = next(
+            (item for item in restarted_snapshots
+             if item.get("version_id") == continuity_version.get("id")),
+            None,
+        ) if restarted_snapshots_status == 200 else None
+        restarted_tables = (
+            (restarted_snapshot or {}).get("snapshot_payload") or {}
+        ).get("tables") or {}
+        require(
+            restarted_snapshot is not None
+            and any(
+                item.get("id") == continuity_assertion_id
+                and item.get("asserted_value") == continuity_assertion_source
+                and item.get("created_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("care_assertions") or [])
+            )
+            and any(
+                item.get("id") == continuity_correction_id
+                and item.get("target_id") == continuity_assertion_id
+                and item.get("requested_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("care_corrections") or [])
+            )
+            and any(
+                item.get("id") == continuity_evidence_id
+                and item.get("uploaded_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("evidence") or [])
+            ),
+            "LCR snapshot lost original evidence, assertion attribution, or correction lineage after server restart",
+        )
+
         print("PASS: PostgreSQL readiness, anonymous session creation, durable capture/hydration,")
         print("      cross-record denial, token rotation, and persistence after Uvicorn restart.")
     finally:
