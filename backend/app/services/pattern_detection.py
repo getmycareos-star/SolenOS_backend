@@ -443,9 +443,9 @@ def _build_recurrence_pattern(
     timestamps = [_ensure_utc(event.occurred_at) for event in ordered_events]
     distinct_times = sorted({timestamp for timestamp in timestamps if timestamp is not None})
     # Two captures in one session (or a short retry burst) are not enough
-    # to establish longitudinal recurrence. Require at least three distinct
-    # source-event times spanning a full day before creating this pattern.
-    if len(ordered_events) < 3 or len(distinct_times) < 3:
+    # to establish longitudinal recurrence. Preserve the existing two-event
+    # candidate threshold only when the source events span a full day.
+    if len(ordered_events) < 2 or len(distinct_times) < 2:
         return None
     span = distinct_times[-1] - distinct_times[0]
     if span < MIN_LONGITUDINAL_PATTERN_SPAN:
