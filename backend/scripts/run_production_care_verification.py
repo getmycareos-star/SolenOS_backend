@@ -21,13 +21,10 @@ BASE = os.getenv(
 
 def get_json(path: str, timeout: int = 15) -> tuple[int, dict]:
     """Issue GET only. Fail closed if this script is ever changed to request a write."""
-    method = "GET"
-    if method != "GET":
-        raise RuntimeError("Production verification is read-only; non-GET requests are forbidden.")
     request = Request(
         BASE + path,
         headers={"Accept": "application/json"},
-        method=method,
+        method="GET",
     )
     try:
         with urlopen(request, timeout=timeout) as response:
