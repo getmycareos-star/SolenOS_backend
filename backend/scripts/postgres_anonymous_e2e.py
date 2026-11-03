@@ -1732,6 +1732,22 @@ def main():
                 and {continuity_evidence_id, continuity_document_id}.issubset(
                     {item.get("id") for item in restarted_evidence}
                 ), "original evidence/document IDs did not survive server restart")
+        restarted_document_status, restarted_document_bytes = download_binary(
+            continuity_document_id, restarted_token,
+        )
+        require(
+            restarted_document_status == 200
+            and restarted_document_bytes == b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+            "uploaded document bytes did not survive PostgreSQL-backed application restart",
+        )
+        revoked_original_after_restart, revoked_original_body = request(
+            "GET", f"/api/v1/evidence/{continuity_person_id}", token=continuity_token,
+        )
+        require(
+            revoked_original_after_restart == 401,
+            f"original revoked anonymous capability became valid after restart: {revoked_original_after_restart}: {revoked_original_body}",
+        )
+
         restarted_question_status, restarted_questions = request(
             "GET", f"/api/v1/uncertainty/questions/{continuity_person_id}?status=open",
             token=restarted_token,
@@ -1742,9 +1758,15 @@ def main():
         restarted_loop_status, restarted_loop = request(
             "GET", f"/api/v1/open-loops/{continuity_loop_id}", token=restarted_token,
         )
-        require(restarted_loop_status == 200
-                and restarted_loop.get("loop", {}).get("id") == continuity_loop_id,
-                "decision/outcome history did not survive server restart")
+        require(
+            restarted_loop_status == 200
+            and restarted_loop.get("loop", {}).get("id") == continuity_loop_id
+            and any(item.get("text") == "CI-only action retained through account conversion"
+                    for item in restarted_loop.get("loop", {}).get("action_evidence", []))
+            and any(item.get("text") == "CI-only outcome reported after the synthetic action"
+                    for item in restarted_loop.get("loop", {}).get("outcome_evidence", [])),
+            "decision/action/outcome history did not survive server restart",
+        )
         restarted_decisions_status, restarted_decisions = request(
             "GET", "/api/v1/care-continuity/decisions", token=restarted_token,
         )
