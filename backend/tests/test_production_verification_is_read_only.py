@@ -23,7 +23,7 @@ def test_production_verification_uses_only_get_requests():
         elif isinstance(node, ast.ImportFrom) and node.module:
             imported_roots.add(node.module.split(".", 1)[0])
 
-    assert imported_roots <= {"json", "os", "sys", "urllib"}, (
+    assert imported_roots <= {"__future__", "json", "os", "sys", "urllib"}, (
         "Production verification must not import application/database clients "
         "or libraries capable of bypassing the GET-only HTTP boundary."
     )
