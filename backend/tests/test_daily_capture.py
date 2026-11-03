@@ -57,13 +57,18 @@ def seed_person_and_caregiver():
 
 def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
     token = f"daily-test-token-{person_id}-{caregiver_id}"
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
     db = TestingSessionLocal()
-    db.add(AnonymousSession(
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
-    ))
+    existing = db.query(AnonymousSession).filter_by(token_hash=token_hash).one_or_none()
+    if existing is None:
+        db.add(AnonymousSession(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            token_hash=token_hash,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        ))
+    else:
+        existing.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
     db.commit()
     db.close()
     return {"Authorization": f"Bearer {token}"}
