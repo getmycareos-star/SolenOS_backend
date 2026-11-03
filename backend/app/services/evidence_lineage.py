@@ -265,21 +265,16 @@ def load_evidence_lineage_scope(
     explicit parent/source references and persisted relationship edges count.
     """
     from types import SimpleNamespace
-    from sqlalchemy import MetaData, Table, func, or_, select
+    from sqlalchemy import func, or_, select
+    from app.services.lcr_context import _load_source_schema
 
     seeds = {str(value).strip() for value in seed_evidence_ids if str(value).strip()}
     if not seeds:
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
 
-    bind = db.get_bind()
-    available_tables = set(__import__("sqlalchemy").inspect(bind).get_table_names())
-    if "evidence" not in available_tables:
+    available_tables, metadata = _load_source_schema(db)
+    if "evidence" not in available_tables or "evidence" not in metadata.tables:
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
-    metadata = MetaData()
-    metadata.reflect(bind=bind, only=[
-        name for name in ("evidence", "evidence_source_relationships")
-        if name in available_tables
-    ])
     evidence = metadata.tables["evidence"]
     links = metadata.tables.get("evidence_source_relationships")
     if "id" not in evidence.c or "person_id" not in evidence.c:
