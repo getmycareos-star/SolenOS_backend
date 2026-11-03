@@ -1722,6 +1722,44 @@ def main():
             item.get("version_id") == continuity_version.get("id") for item in restored_snapshots
         ), "LCR snapshot history did not restore after account login")
 
+        continuity_snapshot = next(
+            (item for item in restored_snapshots
+             if item.get("version_id") == continuity_version.get("id")),
+            None,
+        )
+        continuity_snapshot_tables = (
+            (continuity_snapshot or {}).get("snapshot_payload") or {}
+        ).get("tables") or {}
+        snapshot_assertions = continuity_snapshot_tables.get("care_assertions") or []
+        snapshot_corrections = continuity_snapshot_tables.get("care_corrections") or []
+        snapshot_evidence = continuity_snapshot_tables.get("evidence") or []
+        snapshot_assertion = next(
+            (item for item in snapshot_assertions if item.get("id") == continuity_assertion_id),
+            None,
+        )
+        snapshot_correction = next(
+            (item for item in snapshot_corrections if item.get("id") == continuity_correction_id),
+            None,
+        )
+        snapshot_source = next(
+            (item for item in snapshot_evidence if item.get("id") == continuity_evidence_id),
+            None,
+        )
+        require(
+            continuity_snapshot is not None
+            and snapshot_assertion
+            and snapshot_assertion.get("asserted_value") == continuity_assertion_source
+            and snapshot_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and snapshot_assertion.get("evidence_ids") == [continuity_evidence_id]
+            and snapshot_correction
+            and snapshot_correction.get("target_id") == continuity_assertion_id
+            and snapshot_correction.get("requested_by_caregiver_id") == continuity_caregiver_id
+            and snapshot_correction.get("original_value") == continuity_assertion_source
+            and snapshot_source
+            and snapshot_source.get("uploaded_by_caregiver_id") == continuity_caregiver_id,
+            "LCR snapshot did not preserve original source evidence, reporter attribution, assertion, and separate correction",
+        )
+
         # Cross-record attempts with another person's valid session remain denied.
         cross_person_status, cross_person_body = request(
             "GET", f"/api/v1/evidence/{continuity_person_id}", token=token_b,
