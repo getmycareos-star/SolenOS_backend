@@ -329,6 +329,66 @@ def test_structured_daily_capture_retry_is_idempotent_and_changed_payload_confli
         teardown_db()
 
 
+def test_legacy_daily_capture_evidence_backfill_is_dry_run_by_default_and_idempotent():
+    from app.services.daily_capture_evidence_backfill import backfill_daily_capture_evidence
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        seed_person_and_caregiver()
+        original_source = '{"notes":"Original caregiver wording","mood":"Calm"}'
+        event = CareEvent(
+            id="legacy-daily-capture-event",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc),
+            title="Daily care update",
+            description=original_source,
+            created_by_caregiver_id="caregiver-daily-test",
+        )
+        empty_event = CareEvent(
+            id="legacy-daily-capture-no-source",
+            person_id="person-daily-test",
+            event_type="daily_care_entry",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc),
+            title="Daily care update without source text",
+            description=None,
+            created_by_caregiver_id="caregiver-daily-test",
+        )
+        db.add_all([event, empty_event])
+        db.commit()
+
+        dry_run = backfill_daily_capture_evidence(db, apply=False)
+        assert dry_run["mode"] == "dry_run"
+        assert dry_run["would_create"] == 1
+        assert dry_run["skipped_missing_source_text"] == 1
+        db.refresh(event)
+        assert event.evidence_ids in (None, [])
+        assert db.query(Evidence).filter_by(person_id="person-daily-test").count() == 0
+
+        applied = backfill_daily_capture_evidence(db, apply=True)
+        assert applied["created"] == 1
+        assert applied["skipped_missing_source_text"] == 1
+        db.refresh(event)
+        assert len(event.evidence_ids) == 1
+        evidence = db.query(Evidence).filter_by(id=event.evidence_ids[0]).one()
+        assert evidence.source_text == original_source
+        assert evidence.evidence_kind == "caregiver_report"
+        assert evidence.epistemic_status == "caregiver_reported"
+        assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
+        assert evidence.ingestion_key == "legacy-daily-capture:legacy-daily-capture-event"
+
+        repeated = backfill_daily_capture_evidence(db, apply=True)
+        assert repeated["created"] == 0
+        assert repeated["already_linked"] == 1
+        assert db.query(Evidence).filter_by(person_id="person-daily-test").count() == 1
+    finally:
+        db.close()
+        teardown_db()
+
+
 def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution():
     setup_db()
     try:
