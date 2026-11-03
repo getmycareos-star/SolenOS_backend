@@ -639,6 +639,34 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         )
         db.add(evidence)
         db.flush()
+    elif event_type in {"structured_daily_capture", "daily_care_entry"}:
+        # Ordinary Daily Care captures need the same durable source lineage as
+        # quick check-ins. Preserve the submitted fields verbatim as caregiver
+        # report evidence; this does not verify the reported care state.
+        evidence = EvidenceModel(
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=json.dumps(
+                {"original_capture": detail},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+            origin_channel=event_type,
+            collection_method="caregiver_form",
+            time_provenance="server_recorded_at",
+            occurred_at=occurred_at,
+        )
+        db.add(evidence)
+        db.flush()
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -691,7 +719,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             person_id=person_id,
             caregiver_id=caregiver_id,
             source_event_id=event.id,
-            source_evidence_id=None,
+            source_evidence_id=evidence.id if evidence is not None else None,
             source_text=source_text,
             extraction_status=qwen_status,
             candidates=qwen_candidates if qwen_status == "available" else None,
