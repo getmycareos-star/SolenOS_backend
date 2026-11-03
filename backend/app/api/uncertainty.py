@@ -156,7 +156,7 @@ def review_question_answer(question_id: str, review: ClarificationReviewCreate, 
     # Preload reflected LCR schema before any row locks or writes. SQLite StaticPool
     # shares one connection, and SQLAlchemy reflection can otherwise roll back the
     # active transaction while composing the assessment.
-    prepare_situation_understanding_assessment(engine.db, engine.person_id)
+    prepare_situation_understanding_assessment(engine.db)
     question = engine._target_query(OpenQuestionModel, question_id).with_for_update().first()
     if question is None:
         raise HTTPException(status_code=404, detail="Open question not found")
