@@ -1766,7 +1766,7 @@ def main():
         own_assertion_status, own_assertions = request(
             "GET",
             f"/api/v1/care-continuity/assertions/{continuity_person_id}",
-            token=token_a,
+            token=continuity_token,
         )
         require(
             own_assertion_status == 200
