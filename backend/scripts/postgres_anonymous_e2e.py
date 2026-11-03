@@ -1760,6 +1760,36 @@ def main():
             "LCR snapshot did not preserve original source evidence, reporter attribution, assertion, and separate correction",
         )
 
+        # LCR assertion and correction endpoints must enforce the same
+        # person boundary as evidence retrieval; a valid foreign session cannot
+        # enumerate assertions or attach a correction to another person's claim.
+        foreign_assertion_status, foreign_assertions = request(
+            "GET",
+            f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            token=token_b,
+        )
+        require(
+            foreign_assertion_status == 403,
+            f"cross-person assertion history must return 403: {foreign_assertion_status}: {foreign_assertions}",
+        )
+        foreign_correction_status, foreign_correction = request(
+            "POST",
+            "/api/v1/care-continuity/corrections",
+            token=token_b,
+            body={
+                "care_record_id": continuity_record_id,
+                "target_type": "care_assertion",
+                "target_id": continuity_assertion_id,
+                "original_value": continuity_assertion_source,
+                "corrected_value": "Foreign correction must never be persisted.",
+                "correction_reason": "Cross-person isolation test.",
+            },
+        )
+        require(
+            foreign_correction_status == 404,
+            f"cross-person correction write must return 404: {foreign_correction_status}: {foreign_correction}",
+        )
+
         # Cross-record attempts with another person's valid session remain denied.
         cross_person_status, cross_person_body = request(
             "GET", f"/api/v1/evidence/{continuity_person_id}", token=token_b,
