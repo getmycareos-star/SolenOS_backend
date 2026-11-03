@@ -529,3 +529,40 @@ def test_same_as_usual_can_save_overall_impression_without_marking_domains_check
         db.close()
     finally:
         teardown_db()
+
+
+def test_quick_daily_checkin_rejects_cross_recipient_session_scope():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        seed_second_person_and_caregiver()
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/daily/log",
+            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            json={
+                "person_id": "person-other-test",
+                "caregiver_id": "caregiver-other-test",
+                "medications": [],
+                "vitals": [],
+                "scales": [],
+                "notes": "Caregiver reports no significant change in their overall impression of care.",
+                "quick_check_in": {
+                    "schema_version": 1,
+                    "kind": "same_as_usual",
+                    "selected_areas": [],
+                    "scope": "overall_impression_only",
+                    "caregiver_reported_at": "2026-11-03T00:00:00+01:00",
+                    "epistemic_status": "caregiver_reported",
+                    "idempotency_key": "daily-checkin-cross-recipient-001",
+                    "note": None,
+                },
+            },
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "This session is not authorised for that care record"
+        db = TestingSessionLocal()
+        assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 0
+        db.close()
+    finally:
+        teardown_db()
