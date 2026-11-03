@@ -1366,6 +1366,350 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"record isolation failed after restart; expected 403, got {status}")
 
+
+        # Full anonymous -> account -> revoke -> independent login continuity.
+        # Every fixture below is synthetic and isolated to this disposable CI database.
+        continuity_session_status, continuity_session = request(
+            "POST", "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL account continuity person", "caregiver_name": "PostgreSQL account continuity caregiver"},
+        )
+        require(continuity_session_status == 201,
+                f"continuity anonymous session creation failed: {continuity_session_status}: {continuity_session}")
+        continuity_token = continuity_session["access_token"]
+        continuity_person_id = continuity_session["person"]["id"]
+        continuity_caregiver_id = continuity_session["caregiver"]["id"]
+        continuity_profile_id = continuity_session["caregiver"]["profile_id"]
+
+        continuity_evidence_status, continuity_evidence = request(
+            "POST", "/api/v1/evidence", token=continuity_token,
+            body={
+                "person_id": continuity_person_id,
+                "uploaded_by_caregiver_id": continuity_caregiver_id,
+                "type": "note",
+                "evidence_kind": "caregiver_report",
+                "epistemic_status": "unverified",
+                "source_text": "CI-only continuity fixture: caregiver reports a change in evening routine.",
+                "source_type": "account_continuity_e2e",
+                "ingestion_key": "postgres-account-continuity-source-001",
+            },
+        )
+        require(continuity_evidence_status in {200, 201} and continuity_evidence.get("id"),
+                f"continuity source evidence creation failed: {continuity_evidence_status}: {continuity_evidence}")
+        continuity_evidence_id = continuity_evidence["id"]
+
+        continuity_upload_status, continuity_upload = upload_request(
+            {
+                "person_id": continuity_person_id,
+                "caregiver_id": continuity_caregiver_id,
+                "evidence_type": "care_document",
+                "extracted_text": "CI-only synthetic document; no real personal data.",
+            },
+            "continuity-document.png",
+            b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+            continuity_token,
+        )
+        require(continuity_upload_status == 201 and continuity_upload.get("evidence_id"),
+                f"continuity document upload failed: {continuity_upload_status}: {continuity_upload}")
+        continuity_document_id = continuity_upload["evidence_id"]
+
+        continuity_record_status, continuity_record = request(
+            "POST", "/api/v1/care-continuity/living-records", token=continuity_token,
+            body={"record_status": "active", "schema_version": "lcr.v1"},
+        )
+        require(continuity_record_status == 201 and continuity_record.get("id"),
+                f"continuity Living Care Record creation failed: {continuity_record_status}: {continuity_record}")
+        continuity_record_id = continuity_record["id"]
+        continuity_version_status, continuity_version = request(
+            "POST", "/api/v1/care-continuity/record-versions", token=continuity_token,
+            body={"care_record_id": continuity_record_id, "reason": "PostgreSQL account continuity fixture"},
+        )
+        require(continuity_version_status == 201 and continuity_version.get("id"),
+                f"continuity LCR version creation failed: {continuity_version_status}: {continuity_version}")
+
+        continuity_question_status, continuity_question = request(
+            "POST", "/api/v1/uncertainty/questions", token=continuity_token,
+            body={
+                "person_id": continuity_person_id,
+                "question": "Does the evening routine change occur every day?",
+                "subject_type": "routine",
+                "subject_id": "postgres-account-continuity-routine",
+                "priority": "high",
+            },
+        )
+        require(continuity_question_status == 200 and continuity_question.get("id"),
+                f"continuity clarification creation failed: {continuity_question_status}: {continuity_question}")
+        continuity_question_id = continuity_question["id"]
+
+        continuity_loop_status, continuity_loop = request(
+            "POST", "/api/v1/open-loops", token=continuity_token,
+            body={
+                "loop_type": "follow_up",
+                "title": "CI-only continuity decision and outcome",
+                "description": "Synthetic follow-up retained across anonymous account conversion.",
+                "idempotency_key": "postgres-account-continuity-loop-001",
+                "evidence": [{"kind": "care_record_source", "evidence_id": continuity_evidence_id}],
+                "verification_rule": "The synthetic source evidence remains linked after account conversion.",
+            },
+        )
+        require(continuity_loop_status == 201 and continuity_loop.get("id"),
+                f"continuity decision/follow-up creation failed: {continuity_loop_status}: {continuity_loop}")
+        continuity_loop_id = continuity_loop["id"]
+        continuity_action_status, continuity_action = request(
+            "POST", f"/api/v1/open-loops/{continuity_loop_id}/actions", token=continuity_token,
+            body={
+                "text": "CI-only action retained through account conversion",
+                "evidence": [{"kind": "care_record_source", "evidence_id": continuity_evidence_id}],
+                "idempotency_key": "postgres-account-continuity-action-001",
+            },
+        )
+        require(continuity_action_status == 200,
+                f"continuity action persistence failed: {continuity_action_status}: {continuity_action}")
+        continuity_outcome_status, continuity_outcome = request(
+            "POST", f"/api/v1/open-loops/{continuity_loop_id}/outcomes", token=continuity_token,
+            body={
+                "text": "CI-only outcome reported after the synthetic action",
+                "evidence": [{"kind": "care_record_source", "evidence_id": continuity_evidence_id}],
+                "idempotency_key": "postgres-account-continuity-outcome-001",
+            },
+        )
+        require(continuity_outcome_status == 200,
+                f"continuity outcome persistence failed: {continuity_outcome_status}: {continuity_outcome}")
+
+        # A rejected registration must not leave a partially linked account.
+        interrupted_status, interrupted_body = request(
+            "POST", "/api/v1/accounts", token=continuity_token,
+            body={"email": "not-an-email", "password": "CI-only-strong-passphrase-2026!"},
+        )
+        require(interrupted_status == 422,
+                f"invalid registration must fail validation: {interrupted_status}: {interrupted_body}")
+        with SessionLocal() as db:
+            from app.models.caregiver_account import CaregiverAccount
+            require(
+                db.query(CaregiverAccount).filter_by(person_id=continuity_person_id).count() == 0,
+                "failed registration left a partial caregiver account",
+            )
+
+        continuity_email = f"postgres-continuity-{uuid.uuid4().hex[:12]}@example.test"
+        continuity_password = "CI-only-strong-passphrase-2026!"
+        registration_status, registration = request(
+            "POST", "/api/v1/accounts", token=continuity_token,
+            body={"email": continuity_email, "password": continuity_password},
+        )
+        require(registration_status == 201,
+                f"anonymous-to-account registration failed: {registration_status}: {registration}")
+        require(registration.get("caregiver_profile_id") == continuity_profile_id,
+                "registration replaced the existing caregiver profile identity")
+
+        # Duplicate email from a different anonymous identity must be rejected.
+        duplicate_email_status, duplicate_email_body = request(
+            "POST", "/api/v1/accounts", token=token_b,
+            body={"email": continuity_email, "password": continuity_password},
+        )
+        require(duplicate_email_status == 409,
+                f"duplicate email registration must return 409: {duplicate_email_status}: {duplicate_email_body}")
+
+        # Wrong password must not issue a session or disclose whether a record exists.
+        wrong_password_status, wrong_password_body = request(
+            "POST", "/api/v1/accounts/login",
+            body={"email": continuity_email, "password": "incorrect-ci-password"},
+        )
+        require(wrong_password_status == 401,
+                f"incorrect password must return 401: {wrong_password_status}: {wrong_password_body}")
+
+        # End the original anonymous session before testing a clean login context.
+        revoke_original_status, revoke_original = request(
+            "POST", "/api/v1/sessions/revoke", token=continuity_token, body={},
+        )
+        require(revoke_original_status == 200 and revoke_original.get("revoked") is True,
+                f"original anonymous session revocation failed: {revoke_original_status}: {revoke_original}")
+        old_session_status, old_session_body = request(
+            "GET", f"/api/v1/evidence/{continuity_person_id}", token=continuity_token,
+        )
+        require(old_session_status == 401,
+                f"revoked original session still accessed care data: {old_session_status}: {old_session_body}")
+
+        # No cookie, no browser storage and no prior bearer token are carried forward.
+        # This independent HTTP client context receives only the account credentials.
+        independent_login_status, independent_login = request(
+            "POST", "/api/v1/accounts/login",
+            body={"email": continuity_email, "password": continuity_password},
+        )
+        require(independent_login_status == 200,
+                f"independent account login failed: {independent_login_status}: {independent_login}")
+        require(independent_login.get("person_id") == continuity_person_id,
+                "independent login changed the person ID")
+        require(independent_login.get("caregiver_id") == continuity_caregiver_id,
+                "independent login changed the caregiver ID")
+        require(independent_login.get("caregiver_profile_id") == continuity_profile_id,
+                "independent login changed the caregiver profile ID")
+        continuity_login_token = independent_login["access_token"]
+        require(continuity_login_token != continuity_token,
+                "independent login reused the revoked anonymous bearer token")
+
+        restored_evidence_status, restored_evidence = request(
+            "GET", f"/api/v1/evidence/{continuity_person_id}", token=continuity_login_token,
+        )
+        require(restored_evidence_status == 200,
+                f"evidence restoration failed: {restored_evidence_status}: {restored_evidence}")
+        restored_evidence_by_id = {item.get("id"): item for item in restored_evidence}
+        require(continuity_evidence_id in restored_evidence_by_id,
+                "original caregiver evidence ID disappeared after account conversion")
+        require(
+            restored_evidence_by_id[continuity_evidence_id].get("source_text")
+            == continuity_evidence["source_text"],
+            "original caregiver evidence wording changed after account conversion",
+        )
+        require(continuity_document_id in restored_evidence_by_id,
+                "uploaded document evidence ID disappeared after account conversion")
+
+        restored_document_status, restored_document_bytes = download_binary(
+            continuity_document_id, continuity_login_token,
+        )
+        require(restored_document_status == 200
+                and restored_document_bytes == b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+                "uploaded document bytes did not survive account conversion")
+
+        restored_question_status, restored_questions = request(
+            "GET", f"/api/v1/uncertainty/questions/{continuity_person_id}?status=open",
+            token=continuity_login_token,
+        )
+        require(restored_question_status == 200 and any(
+            item.get("id") == continuity_question_id for item in restored_questions
+        ), "open clarification question did not restore after account login")
+
+        restored_loop_status, restored_loop = request(
+            "GET", f"/api/v1/open-loops/{continuity_loop_id}", token=continuity_login_token,
+        )
+        require(restored_loop_status == 200
+                and restored_loop.get("loop", {}).get("id") == continuity_loop_id
+                and any(item.get("text") == "CI-only action retained through account conversion"
+                        for item in restored_loop.get("loop", {}).get("action_evidence", []))
+                and any(item.get("text") == "CI-only outcome reported after the synthetic action"
+                        for item in restored_loop.get("loop", {}).get("outcome_evidence", [])),
+                f"decision/action/outcome history did not restore: {restored_loop_status}: {restored_loop}")
+
+        restored_versions_status, restored_versions = request(
+            "GET", "/api/v1/care-continuity/record-versions", token=continuity_login_token,
+        )
+        restored_snapshots_status, restored_snapshots = request(
+            "GET", "/api/v1/care-continuity/record-snapshots", token=continuity_login_token,
+        )
+        require(restored_versions_status == 200 and any(
+            item.get("id") == continuity_version.get("id") for item in restored_versions
+        ), "LCR version history did not restore after account login")
+        require(restored_snapshots_status == 200 and any(
+            item.get("version_id") == continuity_version.get("id") for item in restored_snapshots
+        ), "LCR snapshot history did not restore after account login")
+
+        # Cross-record attempts with another person's valid session remain denied.
+        cross_person_status, cross_person_body = request(
+            "GET", f"/api/v1/evidence/{continuity_person_id}", token=token_b,
+        )
+        require(cross_person_status == 403,
+                f"another person's session accessed this care record: {cross_person_status}: {cross_person_body}")
+        cross_loop_status, cross_loop_body = request(
+            "GET", f"/api/v1/open-loops/{continuity_loop_id}", token=token_b,
+        )
+        require(cross_loop_status == 404,
+                f"another person's session accessed this follow-up history: {cross_loop_status}: {cross_loop_body}")
+
+        # Expired sessions must fail closed even if the token hash still exists.
+        expired_status, expired_session = request(
+            "POST", "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL expired-session fixture", "caregiver_name": "CI-only caregiver"},
+        )
+        require(expired_status == 201, f"expired-session fixture creation failed: {expired_status}: {expired_session}")
+        with SessionLocal() as db:
+            from app.models.anonymous_session import AnonymousSession
+            expired_row = db.query(AnonymousSession).filter_by(id=expired_session["session_id"]).one()
+            expired_row.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+            db.commit()
+        expired_read_status, expired_read_body = request(
+            "GET", f"/api/v1/evidence/{expired_session['person']['id']}",
+            token=expired_session["access_token"],
+        )
+        require(expired_read_status == 401,
+                f"expired session was not rejected: {expired_read_status}: {expired_read_body}")
+
+        # Two simultaneous account conversions for one anonymous identity must
+        # converge to one account; database uniqueness is the final arbiter.
+        concurrent_session_status, concurrent_session = request(
+            "POST", "/api/v1/sessions/anonymous",
+            body={"name": "PostgreSQL concurrent registration fixture", "caregiver_name": "CI-only caregiver"},
+        )
+        require(concurrent_session_status == 201,
+                f"concurrent registration fixture failed: {concurrent_session_status}: {concurrent_session}")
+        concurrent_email = f"postgres-concurrent-{uuid.uuid4().hex[:12]}@example.test"
+        concurrent_payload = {"email": concurrent_email, "password": continuity_password}
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_registrations = list(pool.map(
+                lambda _: request("POST", "/api/v1/accounts",
+                                  token=concurrent_session["access_token"], body=concurrent_payload),
+                range(2),
+            ))
+        require(sorted(status for status, _ in concurrent_registrations) == [201, 409],
+                f"concurrent account conversion must have exactly one winner and one conflict: {concurrent_registrations}")
+        with SessionLocal() as db:
+            require(
+                db.query(CaregiverAccount).filter_by(person_id=concurrent_session["person"]["id"]).count() == 1,
+                "concurrent account conversion created duplicate accounts for one care record",
+            )
+
+        # A transport failure must not be mistaken for a successful registration.
+        # This probe deliberately targets a closed local port and cannot touch the database.
+        import urllib.error
+        failed_network_request = urllib.request.Request(
+            "http://127.0.0.1:1/api/v1/accounts",
+            data=json.dumps({"email": f"offline-{uuid.uuid4().hex[:8]}@example.test",
+                             "password": continuity_password}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(failed_network_request, timeout=1)
+            raise AssertionError("closed-port network failure probe unexpectedly connected")
+        except urllib.error.URLError:
+            pass
+
+        # Verify the same restored account and all its data after an actual server restart.
+        stop_server(server)
+        server = start_server()
+        restarted_login_status, restarted_login = request(
+            "POST", "/api/v1/accounts/login",
+            body={"email": continuity_email, "password": continuity_password},
+        )
+        require(restarted_login_status == 200
+                and restarted_login.get("person_id") == continuity_person_id
+                and restarted_login.get("caregiver_id") == continuity_caregiver_id,
+                f"account identity did not survive PostgreSQL-backed server restart: {restarted_login_status}: {restarted_login}")
+        restarted_token = restarted_login["access_token"]
+        restarted_evidence_status, restarted_evidence = request(
+            "GET", f"/api/v1/evidence/{continuity_person_id}", token=restarted_token,
+        )
+        require(restarted_evidence_status == 200
+                and {continuity_evidence_id, continuity_document_id}.issubset(
+                    {item.get("id") for item in restarted_evidence}
+                ), "original evidence/document IDs did not survive server restart")
+        restarted_question_status, restarted_questions = request(
+            "GET", f"/api/v1/uncertainty/questions/{continuity_person_id}?status=open",
+            token=restarted_token,
+        )
+        require(restarted_question_status == 200 and any(
+            item.get("id") == continuity_question_id for item in restarted_questions
+        ), "clarification history did not survive server restart")
+        restarted_loop_status, restarted_loop = request(
+            "GET", f"/api/v1/open-loops/{continuity_loop_id}", token=restarted_token,
+        )
+        require(restarted_loop_status == 200
+                and restarted_loop.get("loop", {}).get("id") == continuity_loop_id,
+                "decision/outcome history did not survive server restart")
+        restarted_versions_status, restarted_versions = request(
+            "GET", "/api/v1/care-continuity/record-versions", token=restarted_token,
+        )
+        require(restarted_versions_status == 200 and any(
+            item.get("id") == continuity_version.get("id") for item in restarted_versions
+        ), "LCR version history did not survive server restart")
+
         print("PASS: PostgreSQL readiness, anonymous session creation, durable capture/hydration,")
         print("      cross-record denial, token rotation, and persistence after Uvicorn restart.")
     finally:
