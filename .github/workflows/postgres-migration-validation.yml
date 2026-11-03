@@ -9,6 +9,14 @@ on:
       - "backend/tests/**"
       - "backend/scripts/**"
       - ".github/workflows/postgres-migration-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/alembic/**"
+      - "backend/app/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - ".github/workflows/postgres-migration-validation.yml"
 
 permissions:
   contents: read
