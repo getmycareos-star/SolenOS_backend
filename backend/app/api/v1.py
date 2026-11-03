@@ -513,7 +513,12 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
-    person = db.query(PersonModel).filter(PersonModel.id == person_id).first()
+    person_query = db.query(PersonModel).filter(PersonModel.id == person_id)
+    # Serialize quick check-in writes per care recipient so concurrent retries
+    # cannot both pass the idempotency lookup on PostgreSQL.
+    if event_type == "quick_daily_checkin":
+        person_query = person_query.with_for_update()
+    person = person_query.first()
     if not person:
         raise HTTPException(status_code=404, detail="Person not found")
     caregiver = (
@@ -528,6 +533,112 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     # Keep the submitted structured fields intact in the event record. The
     # existing schema has no separate medication/vitals/scales tables yet.
     detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
+    quick_check_in = detail.get("quick_check_in")
+    if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
+        idempotency_key = quick_check_in["idempotency_key"]
+        fingerprint_payload = {
+            "kind": quick_check_in.get("kind"),
+            "selected_areas": quick_check_in.get("selected_areas"),
+            "note": quick_check_in.get("note"),
+            "notes": payload.get("notes"),
+        }
+        request_fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        existing_events = db.query(CareEventModel).filter(
+            CareEventModel.person_id == person_id,
+            CareEventModel.created_by_caregiver_id == caregiver_id,
+            CareEventModel.event_type == "quick_daily_checkin",
+            CareEventModel.description.like(f'%"{idempotency_key}"%'),
+        ).all()
+        for existing_event in existing_events:
+            try:
+                existing_detail = json.loads(existing_event.description or "{}")
+                existing_quick = existing_detail.get("quick_check_in", {})
+            except (TypeError, ValueError):
+                continue
+            if existing_quick.get("idempotency_key") == idempotency_key:
+                if existing_quick.get("request_fingerprint") != request_fingerprint:
+                    raise HTTPException(status_code=409, detail="This check-in key was already used for different content")
+                linked_evidence_ids = list(existing_event.evidence_ids or [])
+                if not linked_evidence_ids:
+                    ingestion_key = f"daily-checkin:{caregiver_id}:{idempotency_key}"[:128]
+                    evidence = db.query(EvidenceModel).filter(
+                        EvidenceModel.person_id == person_id,
+                        EvidenceModel.ingestion_key == ingestion_key,
+                    ).first()
+                    if evidence is None:
+                        source_payload = {
+                            "original_notes": existing_detail.get("notes") or "",
+                            "quick_check_in": {
+                                key: value for key, value in existing_quick.items()
+                                if key != "request_fingerprint"
+                            },
+                        }
+                        evidence = EvidenceModel(
+                            person_id=person_id,
+                            type="note",
+                            evidence_kind="caregiver_report",
+                            epistemic_status="caregiver_reported",
+                            source_text=json.dumps(source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                            uploaded_by_caregiver_id=caregiver_id,
+                            reported_by_caregiver_id=caregiver_id,
+                            collected_by_caregiver_id=caregiver_id,
+                            reported_by_label="Caregiver",
+                            source_type="caregiver_report",
+                            origin_channel="daily_care_quick_checkin",
+                            collection_method="caregiver_check_in",
+                            time_provenance="caregiver_reported_at",
+                            reported_at=datetime.fromisoformat(existing_quick["caregiver_reported_at"].replace("Z", "+00:00")),
+                            occurred_at=existing_event.occurred_at,
+                            ingestion_key=ingestion_key,
+                        )
+                        db.add(evidence)
+                        db.flush()
+                    linked_evidence_ids = [evidence.id]
+                    existing_event.evidence_ids = linked_evidence_ids
+                    db.commit()
+                    db.refresh(existing_event)
+                return {
+                    "success": True,
+                    "id": existing_event.id,
+                    "event_type": existing_event.event_type,
+                    "recorded_at": existing_event.recorded_at,
+                    "evidence_ids": linked_evidence_ids,
+                    "idempotent_replay": True,
+                }
+        quick_check_in["request_fingerprint"] = request_fingerprint
+    evidence = None
+    if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
+        # Keep the original caregiver report as append-only source evidence.
+        # This records provenance; it does not verify the reported care state.
+        source_payload = {
+            "original_notes": payload.get("notes") or "",
+            "quick_check_in": {
+                key: value for key, value in quick_check_in.items()
+                if key != "request_fingerprint"
+            },
+        }
+        evidence = EvidenceModel(
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=json.dumps(source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+            origin_channel="daily_care_quick_checkin",
+            collection_method="caregiver_check_in",
+            time_provenance="caregiver_reported_at",
+            reported_at=datetime.fromisoformat(quick_check_in["caregiver_reported_at"].replace("Z", "+00:00")),
+            occurred_at=occurred_at,
+            ingestion_key=f"daily-checkin:{caregiver_id}:{quick_check_in['idempotency_key']}"[:128],
+        )
+        db.add(evidence)
+        db.flush()
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -535,6 +646,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         occurred_at=occurred_at,
         title=title,
         description=json.dumps(detail, ensure_ascii=False, default=str),
+        evidence_ids=[evidence.id] if evidence is not None else [],
         created_by_caregiver_id=caregiver_id,
         time_provenance="server_recorded_at",
         tags=["daily_capture"],
@@ -610,6 +722,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "change_intelligence_status": change_intelligence_status,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
+        "evidence_ids": list(event.evidence_ids or []),
         "learning_pipeline_status": learning_pipeline_status,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
@@ -619,8 +732,77 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     }
 
 
+def _validate_quick_check_in(payload: dict) -> None:
+    quick = payload.get("quick_check_in")
+    if not isinstance(quick, dict) or quick.get("schema_version") != 1:
+        raise HTTPException(status_code=422, detail="quick_check_in must use schema version 1")
+
+    kind = quick.get("kind")
+    if not isinstance(kind, str) or kind not in {"same_as_usual", "change", "concern", "care_completed", "uncertain"}:
+        raise HTTPException(status_code=422, detail="quick_check_in kind is invalid")
+
+    care_areas = {
+        "sleep",
+        "eating_and_drinking",
+        "mobility",
+        "mood_and_behavior",
+        "communication",
+        "daily_routine",
+        "personal_care",
+    }
+    completed_care = {
+        "meal_support",
+        "personal_care",
+        "mobility_support",
+        "appointment_support",
+        "other_care",
+    }
+    allowed_areas = completed_care if kind == "care_completed" else care_areas
+    selected_areas = quick.get("selected_areas")
+    overall_impression_only = (
+        kind == "same_as_usual"
+        and selected_areas == []
+        and quick.get("scope") == "overall_impression_only"
+    )
+    if not overall_impression_only and (
+        not isinstance(selected_areas, list)
+        or not selected_areas
+        or len(selected_areas) > 7
+        or any(not isinstance(area, str) or area not in allowed_areas for area in selected_areas)
+        or len(set(selected_areas)) != len(selected_areas)
+    ):
+        raise HTTPException(status_code=422, detail="quick_check_in must contain valid, unique selected areas")
+
+    if not overall_impression_only and quick.get("scope") != "selected_areas_only":
+        raise HTTPException(status_code=422, detail="quick_check_in scope must be selected_areas_only")
+    if overall_impression_only and kind != "same_as_usual":
+        raise HTTPException(status_code=422, detail="overall_impression_only is only valid for same_as_usual")
+    if quick.get("epistemic_status") != "caregiver_reported":
+        raise HTTPException(status_code=422, detail="quick_check_in must be marked caregiver_reported")
+
+    note = quick.get("note")
+    if note is not None and (not isinstance(note, str) or len(note) > 2000):
+        raise HTTPException(status_code=422, detail="quick_check_in note must be at most 2000 characters")
+    idempotency_key = quick.get("idempotency_key")
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip() or len(idempotency_key) > 128:
+        raise HTTPException(status_code=422, detail="quick_check_in idempotency_key is required and must be at most 128 characters")
+
+    reported_at = quick.get("caregiver_reported_at")
+    if not isinstance(reported_at, str) or not reported_at.strip():
+        raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at is required")
+    try:
+        parsed_reported_at = datetime.fromisoformat(reported_at.replace("Z", "+00:00"))
+        if parsed_reported_at.tzinfo is None or parsed_reported_at.utcoffset() is None:
+            raise ValueError("Timezone offset is required")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="quick_check_in caregiver_reported_at must include a timezone offset")
+
+
 @router.post("/daily/log")
 def create_structured_daily_log(payload: dict, request: Request, db: Session = Depends(get_db)):
+    if "quick_check_in" in payload:
+        _validate_quick_check_in(payload)
+        return _save_daily_capture_event(payload, "quick_daily_checkin", "Quick daily check-in", request, db)
     return _save_daily_capture_event(payload, "structured_daily_capture", "Structured daily capture", request, db)
 
 
