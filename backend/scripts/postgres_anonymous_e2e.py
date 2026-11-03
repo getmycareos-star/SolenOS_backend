@@ -1475,7 +1475,7 @@ def main():
         # The original assertion remains unchanged after a correction. The
         # correction is a separate append-only record, not a destructive edit.
         assertion_read_status, assertion_rows = request(
-            "GET", f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            "GET", "/api/v1/care-continuity/assertions",
             token=continuity_token,
         )
         correction_read_status, correction_rows = request(
@@ -1769,8 +1769,10 @@ def main():
             token=token_b,
         )
         require(
-            foreign_assertion_status == 403,
-            f"cross-person assertion history must return 403: {foreign_assertion_status}: {foreign_assertions}",
+            foreign_assertion_status == 200
+            and isinstance(foreign_assertions, list)
+            and all(row.get("id") != continuity_assertion_id for row in foreign_assertions),
+            f"cross-person assertion listing leaked a foreign assertion: {foreign_assertion_status}: {foreign_assertions}",
         )
         foreign_correction_status, foreign_correction = request(
             "POST",
