@@ -2621,7 +2621,7 @@ def test_clarification_review_accepts_report_without_marking_it_verified():
             dependency = db.query(EvidenceClaimDependency).filter(
                 EvidenceClaimDependency.claim_id == resulting.id,
                 EvidenceClaimDependency.depends_on_claim_id == "review-source-claim-1",
-                EvidenceClaimDependency.dependency_type == "contextualizes",
+                EvidenceClaimDependency.dependency_type == "qualifies",
             ).one()
             assert dependency.created_by_caregiver_id == "review-caregiver-1"
 
