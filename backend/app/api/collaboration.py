@@ -1958,13 +1958,24 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         options={"temperature": 0, "num_predict": 96},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
-    if (
-        _companion_reply_needs_revision(reply)
-        or _contains_unrequested_saba(reply, source_context)
-        or _contains_unsupported_care_claim(reply, source_context)
-        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
-        or _contains_unsupported_record_reference(reply, source_context)
-    ):
+
+    def response_rejection_reasons(candidate: str) -> list[str]:
+        reasons = []
+        if _companion_reply_needs_revision(candidate):
+            reasons.append("style_or_length")
+        if _contains_unrequested_saba(candidate, source_context):
+            reasons.append("unrequested_token")
+        if _contains_unsupported_care_claim(candidate, source_context):
+            reasons.append("unsupported_care_claim")
+        if _contains_unsupported_operational_claim(candidate, source_context, context_lines):
+            reasons.append("unsupported_operational_claim")
+        if _contains_unsupported_record_reference(candidate, source_context):
+            reasons.append("unsupported_record_reference")
+        return reasons
+
+    rejection_reasons = response_rejection_reasons(reply)
+    if rejection_reasons:
+        logger.warning("Qwen response rejected by grounding validators: %s", ",".join(rejection_reasons))
         # Ask the same local model to repair style and source fidelity. A second
         # unsupported high-impact claim is rejected instead of shown to a caregiver.
         reply = await asyncio.to_thread(
@@ -2000,13 +2011,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             ],
             options={"temperature": 0, "num_predict": 96},
         )
-    if (
-        _companion_reply_needs_revision(reply)
-        or _contains_unrequested_saba(reply, source_context)
-        or _contains_unsupported_care_claim(reply, source_context)
-        or _contains_unsupported_operational_claim(reply, source_context, context_lines)
-        or _contains_unsupported_record_reference(reply, source_context)
-    ):
+    rejection_reasons = response_rejection_reasons(reply)
+    if rejection_reasons:
+        logger.warning("Qwen repaired response rejected by grounding validators: %s", ",".join(rejection_reasons))
         raise HTTPException(
             status_code=503,
             detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
