@@ -134,6 +134,39 @@ def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
         assert len(evidence_matches) == 1
         assert evidence_matches[0]["epistemic_status"] == "caregiver_reported"
 
+        # Rebuild and persist situation understanding from the same verified
+        # source set; the assessment must retain the original event/evidence IDs.
+        reassessed = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert reassessed.status_code == 200, reassessed.text
+        assessment = reassessed.json()["assessment"]
+        assessed_records = [
+            item for item in assessment["current_care_reality"]["records"]
+            if item.get("id") == event_id
+        ]
+        assert len(assessed_records) == 1
+        assert assessed_records[0]["evidence_ids"] == [evidence_id]
+        assert assessed_records[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert any(
+            item["record_id"] == event_id and item["source"] == "events"
+            for item in assessment["situation_trajectory"]["entries"]
+        )
+
+        persisted_assessment = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert persisted_assessment.status_code == 200, persisted_assessment.text
+        assert persisted_assessment.json()["assessment"]["person_id"] == "person-daily-test"
+        persisted_records = [
+            item for item in persisted_assessment.json()["assessment"]["current_care_reality"]["records"]
+            if item.get("id") == event_id
+        ]
+        assert len(persisted_records) == 1
+        assert persisted_records[0]["evidence_ids"] == [evidence_id]
+
         seed_second_person_and_caregiver()
         other_headers = session_headers("person-other-test", "caregiver-other-test")
         foreign_history = client.get("/api/v1/events/person-daily-test", headers=other_headers)
