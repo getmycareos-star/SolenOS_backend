@@ -142,6 +142,95 @@ def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
         teardown_db()
 
 
+def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(monkeypatch):
+    from app.api import care_continuity as care_continuity_api
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        seed_person_and_caregiver()
+        evidence = Evidence(
+            id="grouped-source-evidence",
+            person_id="person-daily-test",
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="Caregiver reports that she has been unusually sad.",
+            uploaded_by_caregiver_id="caregiver-daily-test",
+            reported_by_caregiver_id="caregiver-daily-test",
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+        )
+        db.add(evidence)
+        db.flush()
+        event = {
+            "id": "grouped-source-event",
+            "event_type": "daily_care_entry",
+            "status": "recorded",
+            "title": "Daily care entry",
+            "description": "Caregiver reports that she has been unusually sad.",
+            "occurred_at": "2026-11-03T09:00:00+00:00",
+            "recorded_at": "2026-11-03T09:01:00+00:00",
+            "created_by_caregiver_id": "caregiver-daily-test",
+            "evidence_ids": [evidence.id],
+        }
+        observation = {
+            "id": "grouped-source-observation",
+            "evidence_id": evidence.id,
+            "observation_kind": "caregiver_report",
+            "epistemic_status": "uncertain",
+            "subject_label": "Care recipient",
+            "attribute": "mood",
+            "value_text": "Unusually sad",
+            "observed_at": "2026-11-03T09:00:00+00:00",
+            "recorded_at": "2026-11-03T09:01:00+00:00",
+            "source_passage": "unusually sad",
+            "source_span_start": 33,
+            "source_span_end": 46,
+            "extraction_method": "caregiver_reviewed",
+        }
+        monkeypatch.setattr(
+            care_continuity_api,
+            "_scoped_identity",
+            lambda request, session: ("person-daily-test", "caregiver-daily-test"),
+        )
+        monkeypatch.setattr(
+            care_continuity_api,
+            "build_lcr_context",
+            lambda session, person_id, limit_per_source: {
+                "person_id": person_id,
+                "as_of": "2026-11-03T09:01:00+00:00",
+                "history_coverage": "bounded_subset",
+                "schema_status": "complete",
+                "missing_required_sources": [],
+                "missing_optional_sources": [],
+                "sources": {
+                    "events": {"items": [event]},
+                    "evidence_observations": {"items": [observation]},
+                },
+            },
+        )
+
+        projection = care_continuity_api.current_care_projection(
+            request=None, limit_per_source=10, db=db
+        )
+        event_items = [item for item in projection["items"] if item["id"] == event["id"]]
+        assert len(event_items) == 1
+        assert event_items[0]["evidence_ids"] == [evidence.id]
+        assert event_items[0]["source_label"] == "Caregiver"
+        assert len(event_items[0]["derived_observations"]) == 1
+        assert event_items[0]["derived_observations"][0]["id"] == observation["id"]
+        assert event_items[0]["derived_observations"][0]["source_passage"] == "unusually sad"
+        assert not any(
+            item["source_collection"] == "evidence_observations"
+            and item["id"] == observation["id"]
+            for item in projection["items"]
+        )
+    finally:
+        db.close()
+        teardown_db()
+
+
 def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution():
     setup_db()
     try:
