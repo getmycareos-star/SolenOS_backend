@@ -1780,6 +1780,46 @@ def test_pattern_detection_finds_short_window_cluster_from_distinct_events():
         teardown_db()
 
 
+def test_same_session_capture_burst_is_not_longitudinal_recurrence_or_cluster():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-same-session-burst", name="Same-session burst person")
+        caregiver = Caregiver(
+            id="caregiver-same-session-burst",
+            name="Same-session burst caregiver",
+            email="same-session-burst@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index, seconds_ago in enumerate((120, 60, 0)):
+            db.add(CareEvent(
+                id=f"same-session-burst-{index}",
+                person_id=person.id,
+                event_type="mood_and_behavior",
+                status="recorded",
+                occurred_at=now - timedelta(seconds=seconds_ago),
+                title="Caregiver mood and behavior update",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"same-session-source-{index}"],
+            ))
+        db.commit()
+
+        from app.core.change_enums import PatternType
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mood_and_behavior", None, now)
+        assert not any(
+            item.pattern_type in {PatternType.RECURRENCE, PatternType.CLUSTERING}
+            for item in patterns
+        ), "Three captures in a two-minute burst must remain separate reports, not a longitudinal pattern"
+    finally:
+        db.close()
+        teardown_db()
+
+
 def test_pattern_detail_returns_only_same_person_source_events():
     setup_db()
     try:
@@ -1935,12 +1975,13 @@ def test_pattern_detection_does_not_mix_source_events_across_subjects():
         db.add_all([person, caregiver])
         db.commit()
         now = datetime.now(timezone.utc)
-        subject_a_ids = {"scope-a-1", "scope-a-2"}
+        subject_a_ids = {"scope-a-1", "scope-a-2", "scope-a-3"}
         subject_b_ids = {"scope-b-1", "scope-b-2"}
         from app.core.change_enums import ChangeType, ChangeDirection
         for event_id, subject_id, days_ago in (
             ("scope-a-1", "subject-a", 20),
-            ("scope-a-2", "subject-a", 5),
+            ("scope-a-2", "subject-a", 10),
+            ("scope-a-3", "subject-a", 5),
             ("scope-b-1", "subject-b", 18),
             ("scope-b-2", "subject-b", 3),
         ):
