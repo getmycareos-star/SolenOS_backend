@@ -136,9 +136,11 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         assert replay.status_code == 200, replay.text
         assert replay.json()["id"] == response.json()["id"]
         assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["evidence_ids"] == response.json()["evidence_ids"]
 
         db = TestingSessionLocal()
         assert db.query(CareEvent).filter_by(event_type="quick_daily_checkin").count() == 1
+        assert db.query(Evidence).filter_by(origin_channel="daily_care_quick_checkin").count() == 1
         event = db.query(CareEvent).filter_by(id=response.json()["id"]).one()
         detail = json.loads(event.description)
         assert event.person_id == "person-daily-test"
@@ -150,6 +152,17 @@ def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution()
         assert detail["quick_check_in"]["scope"] == "selected_areas_only"
         assert detail["quick_check_in"]["epistemic_status"] == "caregiver_reported"
         assert "Other areas were not assessed" in detail["notes"]
+        assert len(event.evidence_ids or []) == 1
+        evidence = db.query(Evidence).filter_by(id=event.evidence_ids[0]).one()
+        assert evidence.person_id == event.person_id
+        assert evidence.uploaded_by_caregiver_id == "caregiver-daily-test"
+        assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
+        assert evidence.epistemic_status == "caregiver_reported"
+        assert evidence.source_type == "caregiver_report"
+        assert evidence.origin_channel == "daily_care_quick_checkin"
+        original_source = json.loads(evidence.source_text)
+        assert "Other areas were not assessed" in original_source["original_notes"]
+        assert original_source["quick_check_in"]["caregiver_reported_at"] == "2026-11-03T00:00:00+01:00"
         db.close()
     finally:
         teardown_db()
