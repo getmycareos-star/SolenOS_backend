@@ -1315,6 +1315,76 @@ def main():
 
         stop_server(server)
         server = start_server()
+
+        # After the backend restart, authenticate again with the account
+        # credentials from a fresh request context. Do not reuse token_a or
+        # browser/session storage from before the restart.
+        status, post_restart_login = request(
+            "POST",
+            "/api/v1/accounts/login",
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 200, f"Independent account login after restart failed: {status}: {post_restart_login}")
+        require(post_restart_login.get("person_id") == person_a
+                and post_restart_login.get("caregiver_id") == caregiver_a,
+                "Post-restart independent login changed the person or caregiver identity")
+        token_a = post_restart_login["access_token"]
+        status, post_restart_identity = request("GET", "/api/situation", token=token_a)
+        require(status == 200
+                and post_restart_identity.get("care_recipient_display_name") == updated_name,
+                f"Independent login did not restore the original care record after restart: {status}: {post_restart_identity}")
+
+        status, post_restart_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        require(status == 200, f"Recent History read after restart failed: {status}: {post_restart_history}")
+        post_restart_history_matches = [
+            row for row in post_restart_history if row.get("id") == daily_event_id
+        ]
+        require(len(post_restart_history_matches) == 1
+                and post_restart_history_matches[0].get("evidence_ids") == [daily_evidence_id],
+                f"Original Recent History event/evidence IDs changed after restart/login: {post_restart_history_matches}")
+
+        status, post_restart_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200 and any(
+            row.get("id") == daily_evidence_id
+            and row.get("epistemic_status") == "caregiver_reported"
+            for row in post_restart_evidence
+        ), f"Original source evidence was not restored after restart/login: {status}: {post_restart_evidence}")
+
+        status, post_restart_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=100", token=token_a,
+        )
+        require(status == 200, f"LCR read after restart/login failed: {status}: {post_restart_lcr}")
+        post_restart_lcr_matches = [
+            row for row in post_restart_lcr.get("items", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(len(post_restart_lcr_matches) == 1
+                and post_restart_lcr_matches[0].get("evidence_ids") == [daily_evidence_id]
+                and post_restart_lcr_matches[0].get("source_label") == "Caregiver",
+                f"LCR did not restore the original source record after restart/login: {post_restart_lcr_matches}")
+
+        status, post_restart_assessment = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        persisted_assessment = post_restart_assessment.get("assessment", {}) if status == 200 else {}
+        persisted_assessment_records = [
+            row for row in persisted_assessment.get("current_care_reality", {}).get("records", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(status == 200 and len(persisted_assessment_records) == 1
+                and persisted_assessment_records[0].get("evidence_ids") == [daily_evidence_id],
+                f"Persisted situation assessment did not restore the original source after restart/login: {status}: {post_restart_assessment}")
+
+        status, foreign_after_restart = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_b,
+        )
+        require(status == 403,
+                f"Another person's session accessed Recent History after restart; expected 403, got {status}: {foreign_after_restart}")
+
         status, professional_after_restart = request(
             "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
         )
