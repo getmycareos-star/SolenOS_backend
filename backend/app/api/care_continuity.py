@@ -1410,6 +1410,9 @@ def current_care_projection(
                 "value_text": row.get("value_text"),
                 "normalized_value": row.get("normalized_value"),
                 "units": row.get("units"),
+                "context": row.get("context"),
+                "observer_label": row.get("observer_label"),
+                "observation_method": row.get("observation_method"),
                 "observed_at": row.get("observed_at"),
                 "recorded_at": row.get("recorded_at"),
                 "source_span_start": row.get("source_span_start"),
@@ -1419,6 +1422,7 @@ def current_care_projection(
                 "hedge_marker": row.get("hedge_marker"),
                 "ambiguity_note": row.get("ambiguity_note"),
                 "extraction_method": row.get("extraction_method"),
+                "extraction_version": row.get("extraction_version"),
                 "supersedes_observation_id": row.get("supersedes_observation_id"),
                 "correction_rationale": row.get("correction_rationale"),
             })
