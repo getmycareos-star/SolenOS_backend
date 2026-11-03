@@ -66,9 +66,16 @@ jobs:
           assert data.get("state") == "ready", f"Qwen readiness state is not ready: {data}"
           assert installation.get("state") == "installed", f"Configured model is not installed: {data}"
           assert data.get("model"), f"Configured model name is missing: {data}"
+          deployed_commit = data.get("deployment_commit")
+          if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+              expected_commit = os.environ.get("GITHUB_SHA")
+              assert deployed_commit == expected_commit, (
+                  f"Production is serving stale or unidentified code: "
+                  f"deployed={deployed_commit!r}, expected={expected_commit!r}"
+              )
           print(
               "PASS: production Qwen real inference is ready; "
-              f"model={data['model']}; deployment_commit={data.get('deployment_commit')}"
+              f"model={data['model']}; deployment_commit={deployed_commit}"
           )
           PY
 
