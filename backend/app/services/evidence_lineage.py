@@ -272,7 +272,7 @@ def load_evidence_lineage_scope(
     if not seeds:
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
 
-    available_tables, metadata = _load_source_schema(db)
+    available_tables, metadata = _load_source_schema(db.get_bind())
     if "evidence" not in available_tables or "evidence" not in metadata.tables:
         return {"evidence_rows": [], "relationships": [], "has_more": False, "truncated": False}
     evidence = metadata.tables["evidence"]
