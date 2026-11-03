@@ -318,6 +318,9 @@ jobs:
           APP_ENV: test
         run: python backend/scripts/postgres_anonymous_e2e.py
 
+      - name: Run persisted change-pattern lifecycle tests against PostgreSQL
+        run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
+
 
   qwen-image-build:
     # The full model-image/inference check is only needed for Qwen-specific PRs.
