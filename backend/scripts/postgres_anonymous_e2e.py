@@ -1405,7 +1405,7 @@ def main():
                 "extracted_text": "CI-only synthetic document; no real personal data.",
             },
             "continuity-document.png",
-            b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+            b"\x89PNG\r\n\x1a\nSolenOS account continuity document fixture",
             continuity_token,
         )
         require(continuity_upload_status == 201 and continuity_upload.get("evidence_id"),
@@ -1566,7 +1566,7 @@ def main():
             continuity_document_id, continuity_login_token,
         )
         require(restored_document_status == 200
-                and restored_document_bytes == b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+                and restored_document_bytes == b"\x89PNG\r\n\x1a\nSolenOS account continuity document fixture",
                 "uploaded document bytes did not survive account conversion")
 
         restored_question_status, restored_questions = request(
