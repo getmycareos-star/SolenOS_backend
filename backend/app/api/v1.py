@@ -560,12 +560,51 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             if existing_quick.get("idempotency_key") == idempotency_key:
                 if existing_quick.get("request_fingerprint") != request_fingerprint:
                     raise HTTPException(status_code=409, detail="This check-in key was already used for different content")
+                linked_evidence_ids = list(existing_event.evidence_ids or [])
+                if not linked_evidence_ids:
+                    ingestion_key = f"daily-checkin:{caregiver_id}:{idempotency_key}"[:128]
+                    evidence = db.query(EvidenceModel).filter(
+                        EvidenceModel.person_id == person_id,
+                        EvidenceModel.ingestion_key == ingestion_key,
+                    ).first()
+                    if evidence is None:
+                        source_payload = {
+                            "original_notes": existing_detail.get("notes") or "",
+                            "quick_check_in": {
+                                key: value for key, value in existing_quick.items()
+                                if key != "request_fingerprint"
+                            },
+                        }
+                        evidence = EvidenceModel(
+                            person_id=person_id,
+                            type="note",
+                            evidence_kind="caregiver_report",
+                            epistemic_status="caregiver_reported",
+                            source_text=json.dumps(source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                            uploaded_by_caregiver_id=caregiver_id,
+                            reported_by_caregiver_id=caregiver_id,
+                            collected_by_caregiver_id=caregiver_id,
+                            reported_by_label="Caregiver",
+                            source_type="caregiver_report",
+                            origin_channel="daily_care_quick_checkin",
+                            collection_method="caregiver_check_in",
+                            time_provenance="caregiver_reported_at",
+                            reported_at=datetime.fromisoformat(existing_quick["caregiver_reported_at"].replace("Z", "+00:00")),
+                            occurred_at=existing_event.occurred_at,
+                            ingestion_key=ingestion_key,
+                        )
+                        db.add(evidence)
+                        db.flush()
+                    linked_evidence_ids = [evidence.id]
+                    existing_event.evidence_ids = linked_evidence_ids
+                    db.commit()
+                    db.refresh(existing_event)
                 return {
                     "success": True,
                     "id": existing_event.id,
                     "event_type": existing_event.event_type,
                     "recorded_at": existing_event.recorded_at,
-                    "evidence_ids": list(existing_event.evidence_ids or []),
+                    "evidence_ids": linked_evidence_ids,
                     "idempotent_replay": True,
                 }
         quick_check_in["request_fingerprint"] = request_fingerprint
