@@ -264,6 +264,61 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
         teardown_db()
 
 
+def test_structured_daily_capture_retry_is_idempotent_and_changed_payload_conflicts():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "Caregiver reported a disrupted sleep routine.",
+            "capture_idempotency_key": "daily-capture-request-001",
+        }
+        first = client.post("/api/v1/daily/log", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_receipt = first.json()
+        assert first_receipt["success"] is True
+        assert first_receipt["idempotent_replay"] is False
+        assert len(first_receipt["evidence_ids"]) == 1
+
+        replay = client.post("/api/v1/daily/log", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_receipt = replay.json()
+        assert replay_receipt["id"] == first_receipt["id"]
+        assert replay_receipt["evidence_ids"] == first_receipt["evidence_ids"]
+        assert replay_receipt["idempotent_replay"] is True
+
+        changed = client.post(
+            "/api/v1/daily/log",
+            headers=headers,
+            json={**payload, "notes": "A different report under the same request key."},
+        )
+        assert changed.status_code == 409, changed.text
+
+        db = TestingSessionLocal()
+        try:
+            events = db.query(CareEvent).filter(
+                CareEvent.person_id == "person-daily-test",
+                CareEvent.event_type == "structured_daily_capture",
+            ).all()
+            evidence = db.query(Evidence).filter(
+                Evidence.person_id == "person-daily-test",
+                Evidence.ingestion_key == "daily-capture:caregiver-daily-test:daily-capture-request-001",
+            ).all()
+            assert len(events) == 1
+            assert len(evidence) == 1
+            assert events[0].evidence_ids == [evidence[0].id]
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
 def test_quick_daily_checkin_persists_selected_scope_and_caregiver_attribution():
     setup_db()
     try:
