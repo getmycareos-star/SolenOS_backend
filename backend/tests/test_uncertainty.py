@@ -293,7 +293,8 @@ def test_open_question_lifecycle():
         
         question_id = data["id"]
 
-        # A typed answer without persisted source evidence must remain open.
+        # A plain-language caregiver report can be saved without attachments,
+        # but remains a report rather than an accepted LCR fact.
         unsupported_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
@@ -302,8 +303,12 @@ def test_open_question_lifecycle():
                 "answer_provenance": "Caregiver report recorded during the current session.",
             },
         )
-        assert unsupported_answer.status_code == 422, unsupported_answer.text
-        assert client.get("/api/v1/uncertainty/questions/person-5?status=open").json()[0]["status"] == "open"
+        assert unsupported_answer.status_code == 200, unsupported_answer.text
+        assert unsupported_answer.json()["status"] == "answered"
+        unlinked_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
+        assert unlinked_history.status_code == 200, unlinked_history.text
+        assert len(unlinked_history.json()) == 1
+        assert unlinked_history.json()[0]["evidence_ids"] == []
 
         first_source = client.post(
             "/api/v1/evidence",
@@ -333,11 +338,13 @@ def test_open_question_lifecycle():
 
         first_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
         assert first_history.status_code == 200, first_history.text
-        assert len(first_history.json()) == 1
+        assert len(first_history.json()) == 2
         assert first_history.json()[0]["answer"] == "The caregiver reports that the appointment was attended."
         assert first_history.json()[0]["answered_by_caregiver_id"] == "caregiver-5"
-        assert first_history.json()[0]["evidence_ids"] == [first_evidence_id]
+        assert first_history.json()[0]["evidence_ids"] == []
         assert first_history.json()[0]["answer_version"] == 1
+        assert first_history.json()[1]["evidence_ids"] == [first_evidence_id]
+        assert first_history.json()[1]["answer_version"] == 2
         repeated_answer = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={
@@ -349,14 +356,14 @@ def test_open_question_lifecycle():
         )
         assert repeated_answer.status_code == 200, repeated_answer.text
         repeated_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
-        assert len(repeated_history.json()) == 1, "identical answer retries must not append duplicate answer events"
+        assert len(repeated_history.json()) == 2, "identical answer retries must not append duplicate answer events"
         metadata_only_update = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
             json={"context": [{"note": "Caregiver reviewed the question context."}]},
         )
         assert metadata_only_update.status_code == 200, metadata_only_update.text
         metadata_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
-        assert len(metadata_history.json()) == 1, "Metadata-only updates must not fabricate answer history"
+        assert len(metadata_history.json()) == 2, "Metadata-only updates must not fabricate answer history"
 
         reopened = client.patch(
             f"/api/v1/uncertainty/questions/{question_id}",
