@@ -1419,6 +1419,33 @@ def main():
         require(continuity_record_status == 201 and continuity_record.get("id"),
                 f"continuity Living Care Record creation failed: {continuity_record_status}: {continuity_record}")
         continuity_record_id = continuity_record["id"]
+        continuity_decision_status, continuity_decision = request(
+            "POST", "/api/v1/care-continuity/decisions", token=continuity_token,
+            body={
+                "title": "CI-only routine review decision",
+                "decision_text": "Continue recording the evening routine before deciding whether a change is needed.",
+                "decision_status": "reported",
+                "context": "Synthetic continuity test; not a clinical recommendation.",
+                "evidence_ids": [continuity_evidence_id],
+            },
+        )
+        require(continuity_decision_status == 201 and continuity_decision.get("id"),
+                f"continuity decision creation failed: {continuity_decision_status}: {continuity_decision}")
+        continuity_decision_id = continuity_decision["id"]
+        continuity_decision_outcome_status, continuity_decision_outcome = request(
+            "POST", "/api/v1/care-continuity/decision-outcomes", token=continuity_token,
+            body={
+                "decision_id": continuity_decision_id,
+                "outcome_status": "reported",
+                "description": "CI-only outcome: the routine was recorded again for review.",
+                "evidence_ids": [continuity_evidence_id],
+                "is_intended_outcome": True,
+            },
+        )
+        require(continuity_decision_outcome_status == 201 and continuity_decision_outcome.get("id"),
+                f"continuity decision outcome creation failed: {continuity_decision_outcome_status}: {continuity_decision_outcome}")
+        continuity_decision_outcome_id = continuity_decision_outcome["id"]
+
         continuity_version_status, continuity_version = request(
             "POST", "/api/v1/care-continuity/record-versions", token=continuity_token,
             body={"care_record_id": continuity_record_id, "reason": "PostgreSQL account continuity fixture"},
@@ -1588,6 +1615,21 @@ def main():
                         for item in restored_loop.get("loop", {}).get("outcome_evidence", [])),
                 f"decision/action/outcome history did not restore: {restored_loop_status}: {restored_loop}")
 
+        restored_decisions_status, restored_decisions = request(
+            "GET", "/api/v1/care-continuity/decisions", token=continuity_login_token,
+        )
+        restored_decision_outcomes_status, restored_decision_outcomes = request(
+            "GET", "/api/v1/care-continuity/decision-outcomes", token=continuity_login_token,
+        )
+        require(restored_decisions_status == 200 and any(
+            item.get("id") == continuity_decision_id for item in restored_decisions
+        ), "care decision ID did not restore after account login")
+        require(restored_decision_outcomes_status == 200 and any(
+            item.get("id") == continuity_decision_outcome_id
+            and item.get("decision_id") == continuity_decision_id
+            for item in restored_decision_outcomes
+        ), "decision outcome ID/link did not restore after account login")
+
         restored_versions_status, restored_versions = request(
             "GET", "/api/v1/care-continuity/record-versions", token=continuity_login_token,
         )
@@ -1703,6 +1745,20 @@ def main():
         require(restarted_loop_status == 200
                 and restarted_loop.get("loop", {}).get("id") == continuity_loop_id,
                 "decision/outcome history did not survive server restart")
+        restarted_decisions_status, restarted_decisions = request(
+            "GET", "/api/v1/care-continuity/decisions", token=restarted_token,
+        )
+        restarted_decision_outcomes_status, restarted_decision_outcomes = request(
+            "GET", "/api/v1/care-continuity/decision-outcomes", token=restarted_token,
+        )
+        require(restarted_decisions_status == 200 and any(
+            item.get("id") == continuity_decision_id for item in restarted_decisions
+        ), "care decision did not survive PostgreSQL server restart")
+        require(restarted_decision_outcomes_status == 200 and any(
+            item.get("id") == continuity_decision_outcome_id
+            for item in restarted_decision_outcomes
+        ), "decision outcome did not survive PostgreSQL server restart")
+
         restarted_versions_status, restarted_versions = request(
             "GET", "/api/v1/care-continuity/record-versions", token=restarted_token,
         )
