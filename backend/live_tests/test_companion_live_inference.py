@@ -295,7 +295,7 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
             "emergency plan", "emergency contact", "emergency information",
         )), f"Qwen did not identify the missing emergency-readiness category: {data['reply']!r}"
         assert len(data["reply"].split()) <= 35, data["reply"]
-        assert not __import__("re").search(r"(?<!\\d)\\+?\\d[\\d\\s().-]{6,}\\d(?!\\d)", data["reply"]), (
+        assert not __import__("re").search(r"(?<!\d)\+?\d[\d\s().-]{6,}\d(?!\d)", data["reply"]), (
             f"Qwen invented a phone-like number: {data['reply']!r}"
         )
     finally:
