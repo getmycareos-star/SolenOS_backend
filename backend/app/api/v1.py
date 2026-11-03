@@ -565,9 +565,41 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "id": existing_event.id,
                     "event_type": existing_event.event_type,
                     "recorded_at": existing_event.recorded_at,
+                    "evidence_ids": list(existing_event.evidence_ids or []),
                     "idempotent_replay": True,
                 }
         quick_check_in["request_fingerprint"] = request_fingerprint
+    evidence = None
+    if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
+        # Keep the original caregiver report as append-only source evidence.
+        # This records provenance; it does not verify the reported care state.
+        source_payload = {
+            "original_notes": payload.get("notes") or "",
+            "quick_check_in": {
+                key: value for key, value in quick_check_in.items()
+                if key != "request_fingerprint"
+            },
+        }
+        evidence = EvidenceModel(
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=json.dumps(source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+            origin_channel="daily_care_quick_checkin",
+            collection_method="caregiver_check_in",
+            time_provenance="caregiver_reported_at",
+            reported_at=datetime.fromisoformat(quick_check_in["caregiver_reported_at"].replace("Z", "+00:00")),
+            occurred_at=occurred_at,
+            ingestion_key=f"daily-checkin:{caregiver_id}:{quick_check_in['idempotency_key']}"[:128],
+        )
+        db.add(evidence)
+        db.flush()
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -575,6 +607,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         occurred_at=occurred_at,
         title=title,
         description=json.dumps(detail, ensure_ascii=False, default=str),
+        evidence_ids=[evidence.id] if evidence is not None else [],
         created_by_caregiver_id=caregiver_id,
         time_provenance="server_recorded_at",
         tags=["daily_capture"],
@@ -650,6 +683,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "change_intelligence_status": change_intelligence_status,
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
+        "evidence_ids": list(event.evidence_ids or []),
         "learning_pipeline_status": learning_pipeline_status,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,
