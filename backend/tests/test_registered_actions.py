@@ -148,6 +148,18 @@ def test_registered_action_requires_auth_and_isolated_to_care_recipient():
     first = create_session(client, "First recipient")
     second = create_session(client, "Second recipient")
     evidence = create_evidence(client, first)
+    foreign_evidence = create_evidence(client, second)
+    foreign_source_attempt = client.post(
+        f"/api/v1/registered-actions/{first['person']['id']}/approve",
+        headers=headers(first),
+        json=approval_payload(
+            foreign_evidence["id"],
+            idempotency_key="cross-recipient-evidence-key-008",
+            suggestion_id="cross-recipient-evidence-suggestion-008",
+        ),
+    )
+    assert foreign_source_attempt.status_code == 422, foreign_source_attempt.text
+
     action_response = client.post(
         f"/api/v1/registered-actions/{first['person']['id']}/approve",
         headers=headers(first),
