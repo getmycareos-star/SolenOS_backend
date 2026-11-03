@@ -300,6 +300,8 @@ def test_reminder_is_created_only_when_explicitly_requested_and_linked_once():
         json=payload,
     )
     assert created.status_code == 201, created.text
+    assert created.json()["deadline"] is None, "A caregiver-selected reminder date must not be represented as a source-established action deadline"
+    assert created.json()["linked_reminder_due_at"] is not None
 
     replay = client.post(
         f"/api/v1/registered-actions/{session['person']['id']}/approve",
