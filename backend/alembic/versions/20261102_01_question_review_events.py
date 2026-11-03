@@ -4,7 +4,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
-revision = "20261102_01_question_review_events"
+revision = "20261102_01_q_review_events"
 down_revision = "20261030_05_history_merge"
 branch_labels = None
 depends_on = None
