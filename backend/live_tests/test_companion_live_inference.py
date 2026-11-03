@@ -264,7 +264,12 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     client = TestClient(app)
     try:
-        session, _ = _create_synthetic_record(client)
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": "Synthetic emergency-readiness evaluator"},
+        )
+        assert created.status_code == 201, created.text
+        session = created.json()
         response = client.post(
             "/api/v1/assistant/assist",
             headers={"Authorization": f"Bearer {session['access_token']}"},
