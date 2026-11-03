@@ -1471,6 +1471,12 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
         assert direct_recurrence is not None, "two persisted events across 30 days must form a recurrence candidate"
         patterns = detect_patterns(db, person.id, "fall", None, now)
         db.commit()
+        assert patterns, {
+            "event_rows": [(event.id, event.event_type, event.status, event.occurred_at) for event in db.query(CareEvent).filter(CareEvent.person_id == person.id).all()],
+            "now": now.isoformat(),
+            "window_start": (now - timedelta(days=365)).isoformat(),
+            "direct_recurrence_id": direct_recurrence.id,
+        }
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
         assert recurrence.rate_per_period is not None
         assert recurrence.rate_per_period == pytest.approx(2.0 / 3.0)
