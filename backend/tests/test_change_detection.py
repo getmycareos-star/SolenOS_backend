@@ -172,12 +172,13 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         from app.core.change_enums import ChangeType, ChangeDirection, PatternType
         from app.services.pattern_detection import detect_patterns
         event_ids = []
-        for i in range(2):
+        for i in range(3):
+            days_ago = 30 + i * 30
             event = CareEvent(
                 person_id=person.id,
                 event_type="fall",
                 status="recorded",
-                occurred_at=now - timedelta(days=30 + i * 30),
+                occurred_at=now - timedelta(days=days_ago),
                 title=f"Persisted fall event {i + 1}",
                 created_by_caregiver_id=caregiver.id,
             )
@@ -197,7 +198,7 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
                     current_count=2 + i,
                     confidence=None,
                     evidence_ids=[event.id],
-                    created_at=now - timedelta(days=30 + i * 30),
+                    created_at=now - timedelta(days=days_ago),
                 )
             )
         db.commit()
@@ -208,7 +209,7 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         pattern = patterns[0]
         assert pattern.pattern_type.value == "recurrence"
         assert set(pattern.event_ids) == set(event_ids)
-        assert pattern.evidence_count == 2
+        assert pattern.evidence_count == 3
         assert pattern.confidence is None
         assert pattern.rate_per_period is None
         assert any(
