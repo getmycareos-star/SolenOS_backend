@@ -1935,10 +1935,17 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "document_validity_renewal": "Review only explicitly supplied or authorized document text for stated issue dates, expiry/valid-through dates, renewal instructions, issuing authority, and current status if explicitly recorded. Separate dates and instructions quoted from the source from calculations or interpretation; identify missing, unreadable, conflicting, or undated details. Do not infer legal or clinical validity, assume an expired-looking document is invalid without context, invent a renewal deadline or required action, contact an issuer, create reminders/tasks, or write to the Living Care Record. Cite supplied source IDs where available and recommend confirming ambiguous validity with the issuing organization or qualified professional.",
         "emergency_readiness": "Review emergency-readiness information already documented in the authorized care context. Separate recorded facts from missing, stale, conflicting, or unverified information. Summarize emergency contacts, emergency plan, communication needs, mobility/access considerations, clinician-provided emergency instructions, and relevant current medications only when supported by supplied records. For every category with no supporting record, explicitly name the category and say it is not recorded in the supplied care-record context; never answer only that no matching context was found. If the context is empty, explicitly say: 'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' Cite source IDs where available. Never invent phone numbers, addresses, diagnoses, medication details, instructions, or a safety rating; do not decide whether the person is safe, replace official emergency guidance, contact anyone, create tasks/reminders, or write to the Living Care Record. If immediate danger is described, direct the caregiver to local emergency services.",
     }[payload.workflow]
+    empty_context_emergency_readiness = payload.workflow == "emergency_readiness" and not context_lines
+    max_predict = 40 if empty_context_emergency_readiness else 96
+    empty_context_output_constraint = (
+        " For this empty-context emergency-readiness request, output exactly this one sentence and nothing else: "
+        "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.'"
+        if empty_context_emergency_readiness else ""
+    )
     prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
-        f"Task: {guidance} Use only the supplied text and authorized context. Never fabricate people, events, "
+        f"Task: {guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
         "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
         "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
@@ -1955,14 +1962,23 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     reply = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
-        options={"temperature": 0, "num_predict": 96},
+        options={"temperature": 0, "num_predict": max_predict},
     )
     source_context = payload.text + "\n" + "\n".join(context_lines)
 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
         if _companion_reply_needs_revision(candidate):
-            reasons.append("style_or_length")
+            words = re.findall(r"[^\\W_]+(?:['’][^\\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
+            if not words:
+                reasons.append("empty_response")
+            if len(words) > 55:
+                reasons.append(f"word_count_over_55:{len(words)}")
+            if any(words[index] == words[index + 1] == words[index + 2] for index in range(len(words) - 2)):
+                reasons.append("triple_repetition")
+            normalized = " ".join(words)
+            if any(term in normalized for term in ("system prompt", "hidden reasoning", "api key", "ollama", "qwen model", "provider configuration")):
+                reasons.append("internal_term")
         if _contains_unrequested_saba(candidate, source_context):
             reasons.append("unrequested_token")
         if _contains_unsupported_care_claim(candidate, source_context):
@@ -1992,7 +2008,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "Never ask for a password, verification code, one-time code or recovery secret. "
                         "If a detail is absent, "
                         "say it was not supplied or ask for clarification. Remove internal jargon and repetition. "
-                        "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
+                        + ("For an empty-context emergency-readiness request, return exactly this one sentence and nothing else: "
+                           "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' "
+                           if empty_context_emergency_readiness else "")
+                        + "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
                         "Return only the revised response, not an explanation."
                     ),
                 },
