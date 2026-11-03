@@ -1419,6 +1419,85 @@ def main():
         require(continuity_record_status == 201 and continuity_record.get("id"),
                 f"continuity Living Care Record creation failed: {continuity_record_status}: {continuity_record}")
         continuity_record_id = continuity_record["id"]
+
+        # Source-attributed caregiver assertion and explicit correction are
+        # separate durable records. The correction must not overwrite the
+        # original report or erase its reporter/evidence lineage.
+        continuity_assertion_source = (
+            "Caregiver's original wording: the evening routine was interrupted after dinner."
+        )
+        continuity_assertion_status, continuity_assertion = request(
+            "POST", "/api/v1/care-continuity/assertions", token=continuity_token,
+            body={
+                "subject_type": "routine",
+                "subject_id": "postgres-account-continuity-evening-routine",
+                "field": "evening_routine",
+                "assertion_kind": "current_state",
+                "asserted_value": continuity_assertion_source,
+                "source_label": "Caregiver report",
+                "source_text": continuity_assertion_source,
+                "evidence_ids": [continuity_evidence_id],
+                "review_after_days": 30,
+            },
+        )
+        require(
+            continuity_assertion_status == 201
+            and continuity_assertion.get("id")
+            and continuity_assertion.get("assertion_status") == "reported"
+            and continuity_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and continuity_assertion.get("source_text") == continuity_assertion_source
+            and continuity_evidence_id in (continuity_assertion.get("evidence_ids") or []),
+            f"Source-attributed assertion did not preserve original wording, reporter, and evidence link: {continuity_assertion_status}: {continuity_assertion}",
+        )
+        continuity_assertion_id = continuity_assertion["id"]
+
+        continuity_correction_status, continuity_correction = request(
+            "POST", "/api/v1/care-continuity/corrections", token=continuity_token,
+            body={
+                "care_record_id": continuity_record_id,
+                "target_type": "care_assertion",
+                "target_id": continuity_assertion_id,
+                "original_value": continuity_assertion_source,
+                "corrected_value": "Caregiver clarification: the interruption began before dinner.",
+                "correction_reason": "The caregiver clarified the timing; retain the original report and record this as a separate correction.",
+            },
+        )
+        require(
+            continuity_correction_status == 201
+            and continuity_correction.get("id")
+            and continuity_correction.get("requested_by_caregiver_id") == continuity_caregiver_id
+            and continuity_correction.get("target_id") == continuity_assertion_id
+            and continuity_correction.get("original_value") == continuity_assertion_source,
+            f"Correction did not preserve target, original wording, and requesting caregiver: {continuity_correction_status}: {continuity_correction}",
+        )
+        continuity_correction_id = continuity_correction["id"]
+
+        # The original assertion remains unchanged after a correction. The
+        # correction is a separate append-only record, not a destructive edit.
+        assertion_read_status, assertion_rows = request(
+            "GET", f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            token=continuity_token,
+        )
+        correction_read_status, correction_rows = request(
+            "GET", "/api/v1/care-continuity/corrections", token=continuity_token,
+        )
+        persisted_assertion = next(
+            (row for row in assertion_rows if row.get("id") == continuity_assertion_id), None
+        ) if isinstance(assertion_rows, list) else None
+        persisted_correction = next(
+            (row for row in correction_rows if row.get("id") == continuity_correction_id), None
+        ) if isinstance(correction_rows, list) else None
+        require(
+            assertion_read_status == 200
+            and persisted_assertion
+            and persisted_assertion.get("asserted_value") == continuity_assertion_source
+            and persisted_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and correction_read_status == 200
+            and persisted_correction
+            and persisted_correction.get("requested_by_caregiver_id") == continuity_caregiver_id,
+            f"Assertion/correction history did not persist independently: assertion={assertion_rows}, correction={correction_rows}",
+        )
+
         continuity_decision_status, continuity_decision = request(
             "POST", "/api/v1/care-continuity/decisions", token=continuity_token,
             body={
