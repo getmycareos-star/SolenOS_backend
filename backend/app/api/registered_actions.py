@@ -279,7 +279,8 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         normalized_action=payload.title.strip(),
         original_text=payload.title.strip(),
         modality="recommended",
-        deadline=payload.reminder_due_at.astimezone(timezone.utc) if payload.reminder_due_at else None,
+        # A caregiver-selected reminder time is not a source-established action deadline.
+        deadline=None,
         status="approved",
         registration_key=payload.idempotency_key,
         suggestion_id=payload.suggestion_id,
