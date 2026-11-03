@@ -398,12 +398,14 @@ def test_open_question_lifecycle():
 
         second_history = client.get(f"/api/v1/uncertainty/questions/{question_id}/answer-history")
         assert second_history.status_code == 200, second_history.text
-        assert len(second_history.json()) == 2
-        assert second_history.json()[0]["answer"] != second_history.json()[1]["answer"]
+        assert len(second_history.json()) == 3
+        assert second_history.json()[0]["answer"] == second_history.json()[1]["answer"]
+        assert second_history.json()[2]["answer"] != second_history.json()[1]["answer"]
         assert all(row["person_id"] == "person-5" for row in second_history.json())
-        assert second_history.json()[0]["evidence_ids"] == [first_evidence_id]
-        assert second_history.json()[1]["evidence_ids"] == [second_evidence_id]
-        assert [row["answer_version"] for row in second_history.json()] == [1, 2]
+        assert second_history.json()[0]["evidence_ids"] == []
+        assert second_history.json()[1]["evidence_ids"] == [first_evidence_id]
+        assert second_history.json()[2]["evidence_ids"] == [first_evidence_id, second_evidence_id]
+        assert [row["answer_version"] for row in second_history.json()] == [1, 2, 3]
         assert other_client.get(
             f"/api/v1/uncertainty/questions/{question_id}/answer-history"
         ).status_code == 404
