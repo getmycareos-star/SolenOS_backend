@@ -7,6 +7,7 @@ import json
 import logging
 import hashlib
 from app.core.database import get_db
+from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -133,7 +134,6 @@ from app.services.temporal_intelligence import (
     classify_temporal_status,
     check_temporal_conflict,
 )
-from app.api.actions import router as actions_router
 
 logger = logging.getLogger(__name__)
 
@@ -1757,4 +1757,8 @@ def get_temporal_status_endpoint(fact_id: str, reference_time: Optional[str] = N
     return {"fact_id": fact_id, "temporal_status": status}
 
 
-router.include_router(actions_router, prefix="/actions", tags=["actions"])
+
+
+# Only the session-scoped, explicit-approval API is exposed. The legacy
+# unscoped action router remains intentionally unmounted.
+router.include_router(registered_actions_router)

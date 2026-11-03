@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, ForeignKey, Integer, UniqueConstraint, event
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -41,6 +41,11 @@ class ActionModality(str):
 
 
 class ActionStatus(str):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    IN_PROGRESS = "in_progress"
+    DEFERRED = "deferred"
+    NEEDS_CLARIFICATION = "needs_clarification"
     DETECTED = "detected"
     PENDING_CONFIRMATION = "pending_confirmation"
     ACTIVE = "active"
@@ -88,6 +93,7 @@ class ActionAuthority(str):
 
 class Action(Base):
     __tablename__ = "actions"
+    __table_args__ = (UniqueConstraint("person_id", "registration_key", name="uq_actions_person_registration_key"), UniqueConstraint("person_id", "suggestion_id", name="uq_actions_person_suggestion_id"), UniqueConstraint("person_id", "action_identity_key", name="uq_actions_person_identity_key"),)
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
@@ -96,7 +102,7 @@ class Action(Base):
     source_passage = Column(Text, nullable=False)
     source_document_type = Column(String, nullable=True)
     source_authority = Column(String, nullable=False, default=ActionAuthority.UNKNOWN)
-    extraction_confidence = Column(Float, nullable=False, default=1.0)
+    extraction_confidence = Column(Float, nullable=True, default=None)
     provenance_notes = Column(Text, nullable=True)
 
     actor_type = Column(String, nullable=False, default=ActorType.UNKNOWN)
@@ -126,6 +132,15 @@ class Action(Base):
     depends_on_event_id = Column(String, ForeignKey("care_events.id"), nullable=True)
 
     status = Column(String, nullable=False, default=ActionStatus.DETECTED)
+    registration_key = Column(String(128), nullable=True)
+    suggestion_id = Column(String(160), nullable=True)
+    action_identity_key = Column(String(64), nullable=True)
+    registration_request_sha256 = Column(String(64), nullable=True)
+    source_evidence_ids = Column(JSONList, nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    deferred_until = Column(DateTime(timezone=True), nullable=True)
+    version = Column(Integer, nullable=False, default=1, server_default="1")
     completion_evidence_ids = Column(JSONList, nullable=True)
     completion_confidence = Column(Float, nullable=True)
     superseded_by_action_id = Column(String, ForeignKey("actions.id"), nullable=True)
@@ -142,3 +157,31 @@ class Action(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     created_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    responsible_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=True)
+
+    __mapper_args__ = {"version_id_col": version}
+
+
+class ActionLifecycleAudit(Base):
+    """Append-only actor-attributed record of every registered-action transition."""
+    __tablename__ = "action_lifecycle_audit"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    action_id = Column(String, ForeignKey("actions.id"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
+    actor_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False, index=True)
+    previous_status = Column(String, nullable=True)
+    new_status = Column(String, nullable=False)
+    reason = Column(Text, nullable=True)
+    evidence_ids = Column(JSONList, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(ActionLifecycleAudit, "before_update")
+def _prevent_action_audit_update(mapper, connection, target):
+    raise ValueError("Action lifecycle audit is append-only")
+
+
+@event.listens_for(ActionLifecycleAudit, "before_delete")
+def _prevent_action_audit_delete(mapper, connection, target):
+    raise ValueError("Action lifecycle audit is append-only")

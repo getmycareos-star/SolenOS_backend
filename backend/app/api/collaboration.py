@@ -589,6 +589,69 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
 
 
 
+
+_LCR_CONTEXT_SOURCE_PRIORITY = (
+    "conflicts", "reconciliations", "information_gaps", "missing_information",
+    "uncertainties", "uncertainty_assessments", "open_questions",
+    "decision_outcomes", "decisions", "corrections", "facts",
+    "evidence_observations", "caregiver_observations", "timeline",
+    "provenance", "follow_up_links", "open_loop_records",
+    "caregiver_contexts", "caregiver_perspectives",
+)
+
+
+def _rank_lcr_context_lines(query: str, lines: list[str], limit: int = 10) -> list[str]:
+    """Select relevant LCR context without allowing one source table to crowd out all others."""
+    if limit <= 0 or not lines:
+        return []
+
+    grouped: dict[str, list[str]] = {}
+    untyped: list[str] = []
+    for line in lines:
+        brace = (line or "").find("{")
+        if brace < 0:
+            untyped.append(line)
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            untyped.append(line)
+            continue
+        source_type = payload.get("source_type") if isinstance(payload, dict) else None
+        if not isinstance(source_type, str) or not source_type.strip():
+            untyped.append(line)
+            continue
+        grouped.setdefault(source_type, []).append(line)
+
+    ordered_types = [name for name in _LCR_CONTEXT_SOURCE_PRIORITY if name in grouped]
+    ordered_types.extend(name for name in grouped if name not in _LCR_CONTEXT_SOURCE_PRIORITY)
+    ranked_groups: list[list[str]] = []
+    for source_type in ordered_types:
+        candidates = _filter_context_lines_to_query(query, grouped[source_type])
+        if candidates:
+            ranked_groups.append(_rank_context_lines(query, candidates, limit))
+
+    if untyped:
+        candidates = _filter_context_lines_to_query(query, untyped)
+        if candidates:
+            ranked_groups.append(_rank_context_lines(query, candidates, limit))
+
+    selected: list[str] = []
+    depth = 0
+    while len(selected) < limit:
+        added = False
+        for group in ranked_groups:
+            if depth < len(group):
+                selected.append(group[depth])
+                added = True
+                if len(selected) >= limit:
+                    break
+        if not added:
+            break
+        depth += 1
+    return selected
+
+
 def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     """Remove unrelated records from model context after ranking, preserving broad queries."""
     query_terms = {
@@ -2298,7 +2361,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "record": item,
                         }, ensure_ascii=False, default=str)
                     )
-            shared_lcr_lines = _rank_context_lines(retrieval_query, shared_lcr_lines, 6)
+            shared_lcr_lines = _rank_lcr_context_lines(retrieval_query, shared_lcr_lines, 10)
             source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
             lcr_context_coverage = {
                 "schema_status": shared_lcr_context["schema_status"],
@@ -2429,7 +2492,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         model_context_lines = [
             *event_context, *assertion_context, *appointment_context, *evidence_context,
-            *freshness_context[:1], *shared_lcr_lines[:3],
+            *freshness_context[:1], *shared_lcr_lines[:6],
         ]
         if source_evidence_ids or re.search(
             r"\b(?:corroborat|independent source|source lineage|same source)\b",

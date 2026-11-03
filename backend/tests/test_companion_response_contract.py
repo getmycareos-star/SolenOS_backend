@@ -227,6 +227,41 @@ def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(mo
         teardown()
 
 
+
+def test_lcr_context_ranking_balances_conflicts_gaps_questions_and_outcomes():
+    import json
+
+    def line(source_type, source_id, description):
+        return "Shared LCR context: " + json.dumps({
+            "source_type": source_type,
+            "source_id": source_id,
+            "record": {"description": description},
+        })
+
+    lines = [
+        line("conflicts", "conflict-1", "Sleep reports conflict about overnight waking"),
+        line("conflicts", "conflict-2", "Sleep reports conflict about overnight waking"),
+        line("conflicts", "conflict-3", "Sleep reports conflict about overnight waking"),
+        line("information_gaps", "gap-1", "Missing information about overnight sleep"),
+        line("information_gaps", "gap-2", "Missing information about overnight sleep"),
+        line("open_questions", "question-1", "Was overnight sleep interrupted"),
+        line("open_questions", "question-2", "Was overnight sleep interrupted"),
+        line("decision_outcomes", "outcome-1", "Recorded outcome about overnight sleep"),
+        line("decision_outcomes", "outcome-2", "Recorded outcome about overnight sleep"),
+    ]
+
+    selected = collaboration._rank_lcr_context_lines("overnight sleep", lines, limit=6)
+    source_types = {
+        json.loads(item[item.index("{"):])["source_type"]
+        for item in selected
+    }
+
+    assert len(selected) == 6
+    assert source_types == {
+        "conflicts", "information_gaps", "open_questions", "decision_outcomes"
+    }
+
+
 def test_context_ranking_prefers_relevant_care_records_and_preserves_negation():
     recent_irrelevant = (
         'LCR event evidence: {"event_id":"meal-2","title":"Lunch observation",'

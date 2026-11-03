@@ -20,6 +20,7 @@ class CareReminderRead(BaseModel):
 
     id: str
     person_id: str
+    action_id: Optional[str] = None
     created_by_caregiver_id: str
     title: str
     note: Optional[str] = None
