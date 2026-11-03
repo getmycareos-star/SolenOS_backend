@@ -1766,7 +1766,10 @@ def main():
         own_assertion_status, own_assertions = request(
             "GET",
             f"/api/v1/care-continuity/assertions/{continuity_person_id}",
-            token=continuity_token,
+            # Account conversion intentionally revokes the original anonymous
+            # capability. Use the newly issued account session for post-conversion
+            # reads; the old token is separately verified as revoked after restart.
+            token=continuity_login_token,
         )
         require(
             own_assertion_status == 200
