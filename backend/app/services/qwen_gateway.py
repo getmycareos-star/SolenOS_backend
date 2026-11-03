@@ -326,9 +326,16 @@ def qwen_readiness_status(force: bool = False) -> dict:
         if model not in names:
             result = {"available": False, "state": "model_not_installed", "model": model, "installation": installation, "failure_reason": "configured_model_missing"}
         else:
+            try:
+                readiness_timeout = max(
+                    5.0,
+                    min(float(os.getenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")), 60.0),
+                )
+            except (TypeError, ValueError):
+                readiness_timeout = 45.0
             probe_answer = qwen_chat(
                 [{"role": "system", "content": "Reply with exactly READY."}, {"role": "user", "content": "Readiness probe. Reply READY."}],
-                timeout=min(timeout, 12.0),
+                timeout=min(timeout, readiness_timeout),
                 options={"temperature": 0, "num_predict": 8, "num_ctx": 256},
             )
             if probe_answer.strip().upper() != "READY":
