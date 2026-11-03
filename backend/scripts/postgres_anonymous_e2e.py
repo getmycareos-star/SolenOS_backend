@@ -974,7 +974,7 @@ def main():
                 f"Recent History did not return the same event/evidence IDs: {history_matches}")
 
         status, daily_lcr = request(
-            "GET", "/api/v1/care-continuity/current-care?limit_per_source=100", token=token_a,
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
         )
         require(status == 200, f"Current-care LCR read failed: {status}: {daily_lcr}")
         lcr_matches = [row for row in daily_lcr.get("items", []) if row.get("id") == daily_event_id]
@@ -1369,7 +1369,7 @@ def main():
         ), f"Original source evidence was not restored after restart/login: {status}: {post_restart_evidence}")
 
         status, post_restart_lcr = request(
-            "GET", "/api/v1/care-continuity/current-care?limit_per_source=100", token=token_a,
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
         )
         require(status == 200, f"LCR read after restart/login failed: {status}: {post_restart_lcr}")
         post_restart_lcr_matches = [
