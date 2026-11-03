@@ -1737,7 +1737,7 @@ def main():
         )
         require(
             restarted_document_status == 200
-            and restarted_document_bytes == b"\\x89PNG\\r\\n\\x1a\\nSolenOS account continuity document fixture",
+            and restarted_document_bytes == b"\x89PNG\r\n\x1a\nSolenOS account continuity document fixture",
             "uploaded document bytes did not survive PostgreSQL-backed application restart",
         )
         revoked_original_after_restart, revoked_original_body = request(
