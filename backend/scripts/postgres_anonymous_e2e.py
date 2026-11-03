@@ -869,14 +869,38 @@ def main():
         )
         require(status == 200, f"care capture expected 200, got {status}: {captured}")
         require(captured.get("person_id") == person_a, "capture response person scope mismatch")
+        observation_situation_id = captured.get("situation_id")
+        observation_event_id = captured.get("care_event_id")
+        observation_evidence_id = captured.get("evidence_id")
+        require(
+            observation_situation_id and observation_event_id and observation_evidence_id,
+            f"care capture did not return its persisted situation/event/evidence identifiers: {captured}",
+        )
 
         status, hydration = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration expected 200, got {status}: {hydration}")
-        raw_observations = [
-            item.get("raw_text")
-            for item in (hydration.get("active_care_situation") or {}).get("observations", [])
-        ]
-        require(observation in raw_observations, "capture did not appear in persisted hydration")
+        captured_situation = next(
+            (item for item in hydration.get("ui_situations", [])
+             if item.get("id") == observation_situation_id),
+            None,
+        )
+        require(
+            captured_situation is not None
+            and observation_event_id in (captured_situation.get("linked_event_ids") or [])
+            and observation_evidence_id in (captured_situation.get("linked_evidence_ids") or []),
+            f"capture did not hydrate in its own persisted situation thread: {captured_situation}",
+        )
+        captured_event = next(
+            (item for item in hydration.get("events", [])
+             if item.get("id") == observation_event_id),
+            None,
+        )
+        require(
+            captured_event is not None
+            and captured_event.get("description") == observation
+            and observation_evidence_id in (captured_event.get("evidence_ids") or []),
+            f"capture source event did not hydrate with its original wording/evidence link: {captured_event}",
+        )
 
         # Authenticated UPDATE must persist in PostgreSQL and be visible on a fresh read.
         updated_name = "PostgreSQL E2E person A updated"
@@ -1508,11 +1532,41 @@ def main():
             concurrent_capture_evidence_ids.issubset(restarted_evidence_ids),
             "Both concurrent source evidence records must survive application restart",
         )
-        observations_after_restart = [
-            item.get("raw_text")
-            for item in (hydration_after_restart.get("active_care_situation") or {}).get("observations", [])
-        ]
-        require(observation in observations_after_restart, "care evidence did not survive application restart")
+        restarted_observation_situation = next(
+            (item for item in hydration_after_restart.get("ui_situations", [])
+             if item.get("id") == observation_situation_id),
+            None,
+        )
+        require(
+            restarted_observation_situation is not None
+            and observation_event_id in (restarted_observation_situation.get("linked_event_ids") or [])
+            and observation_evidence_id in (restarted_observation_situation.get("linked_evidence_ids") or []),
+            f"original care situation/event/evidence links did not survive application restart: {restarted_observation_situation}",
+        )
+        restarted_observation_event = next(
+            (item for item in hydration_after_restart.get("events", [])
+             if item.get("id") == observation_event_id),
+            None,
+        )
+        require(
+            restarted_observation_event is not None
+            and restarted_observation_event.get("description") == observation
+            and observation_evidence_id in (restarted_observation_event.get("evidence_ids") or []),
+            f"original caregiver wording/event evidence link did not survive application restart: {restarted_observation_event}",
+        )
+        status, restarted_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200, f"evidence read after restart expected 200, got {status}: {restarted_evidence}")
+        restarted_observation_evidence = next(
+            (item for item in restarted_evidence if item.get("id") == observation_evidence_id),
+            None,
+        )
+        require(
+            restarted_observation_evidence is not None
+            and restarted_observation_evidence.get("source_text") == observation,
+            f"original source evidence did not survive application restart unchanged: {restarted_observation_evidence}",
+        )
         status, coverage_after_restart = request(
             "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_a,
         )
