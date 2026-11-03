@@ -255,3 +255,50 @@ def test_live_qwen_companion_grounding_follow_up_and_missing_information(monkeyp
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(monkeypatch):
+    """Real Qwen must distinguish missing emergency information from confirmed absence."""
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    try:
+        session, _ = _create_synthetic_record(client)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json={
+                "workflow": "emergency_readiness",
+                "text": (
+                    "No emergency plan or emergency contacts are supplied in the available "
+                    "care information. Identify what is missing without treating it as proof "
+                    "that the person has no plan or contacts."
+                ),
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["workflow"] == "emergency_readiness"
+        assert data["ai_generated"] is True
+        assert data["review_required"] is True
+        assert data["written_to_lcr"] is False
+        assert data["persistence"] == "read_only_assistance"
+        assert data["source_event_ids"] == []
+        assert data["source_evidence_ids"] == []
+        answer = data["reply"].casefold()
+        assert any(marker in answer for marker in (
+            "not recorded", "not supplied", "not provided", "not documented",
+            "not available in the provided", "information provided does not include",
+        )), f"Qwen treated missing emergency information as known: {data['reply']!r}"
+        assert any(marker in answer for marker in (
+            "emergency plan", "emergency contact", "emergency information",
+        )), f"Qwen did not identify the missing emergency-readiness category: {data['reply']!r}"
+        assert len(data["reply"].split()) <= 35, data["reply"]
+        assert not __import__("re").search(r"(?<!\\d)\\+?\\d[\\d\\s().-]{6,}\\d(?!\\d)", data["reply"]), (
+            f"Qwen invented a phone-like number: {data['reply']!r}"
+        )
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
