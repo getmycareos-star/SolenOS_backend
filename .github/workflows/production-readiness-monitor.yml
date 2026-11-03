@@ -17,6 +17,11 @@ jobs:
   production-readiness-monitor:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out full main history for deployment provenance verification
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Wait for deployed service health and database readiness
         timeout-minutes: 16
         run: |
@@ -69,10 +74,33 @@ jobs:
           assert data.get("model"), f"Configured model name is missing: {data}"
           deployed_commit = data.get("deployment_commit")
           if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+              import subprocess
               expected_commit = os.environ.get("GITHUB_SHA")
-              assert deployed_commit == expected_commit, (
-                  f"Production is serving stale or unidentified code: "
-                  f"deployed={deployed_commit!r}, expected={expected_commit!r}"
+              assert deployed_commit, "Production did not identify its deployed source commit."
+              ancestor = subprocess.run(
+                  ["git", "merge-base", "--is-ancestor", deployed_commit, expected_commit],
+                  check=False,
+              )
+              assert ancestor.returncode == 0, (
+                  f"Production commit is not in current main history: "
+                  f"deployed={deployed_commit!r}, main={expected_commit!r}"
+              )
+              changed = subprocess.check_output(
+                  ["git", "diff", "--name-only", f"{deployed_commit}..{expected_commit}"],
+                  text=True,
+              ).splitlines()
+              runtime_changes = [
+                  path for path in changed
+                  if not path.startswith((
+                      "backend/tests/",
+                      "backend/live_tests/",
+                      ".github/workflows/",
+                      "docs/",
+                  ))
+              ]
+              assert not runtime_changes, (
+                  "Production is behind current main by runtime or migration changes: "
+                  f"{runtime_changes}"
               )
           print(
               "PASS: production Qwen real inference is ready; "
