@@ -1969,7 +1969,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
         if _companion_reply_needs_revision(candidate):
-            words = re.findall(r"[^\\W_]+(?:['’][^\\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
+            words = re.findall(r"[a-z0-9]+(?:['’][a-z0-9]+)*", (candidate or "").casefold())
             if not words:
                 reasons.append("empty_response")
             if len(words) > 55:
