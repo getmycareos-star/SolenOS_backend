@@ -123,6 +123,7 @@ def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
         assert len(lcr_matches) == 1
         assert lcr_matches[0]["evidence_ids"] == [evidence_id]
         assert lcr_matches[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert lcr_matches[0]["source_event_type"] == "daily_care_entry"
         assert lcr_matches[0]["source_label"] == "Caregiver"
         assert lcr_matches[0]["source_type"] == "caregiver_report"
         assert lcr_matches[0]["epistemic_status"] == "caregiver_reported"
@@ -149,6 +150,9 @@ def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
         assert len(assessed_records) == 1
         assert assessed_records[0]["evidence_ids"] == [evidence_id]
         assert assessed_records[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert assessed_records[0]["source_label"] == "Caregiver"
+        assert assessed_records[0]["source_type"] == "caregiver_report"
+        assert assessed_records[0]["epistemic_status"] == "caregiver_reported"
         assert any(
             item["record_id"] == event_id and item["source"] == "events"
             for item in assessment["situation_trajectory"]["entries"]
