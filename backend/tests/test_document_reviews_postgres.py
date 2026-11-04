@@ -150,6 +150,32 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             ).one()
             assert shared_event.caregiver_id == caregiver_shared
 
+
+        # A later correction appends a new review version and supersedes, but preserves, the old assertion.
+        with Session() as db:
+            corrected_existing = review_document_candidate(
+                analysis_id,
+                DocumentCandidateDecision(
+                    candidate_index=0, decision="correct",
+                    corrected_observation="The caregiver corrected the report: breakfast was partly eaten.",
+                    rationale="The caregiver rechecked the original document.",
+                    idempotency_key="document-review-correct-after-accept-0001",
+                ),
+                _request(person_id, caregiver_id), db,
+            )
+            assert corrected_existing["written_to_lcr"] is True
+        with Session() as db:
+            prior_assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
+            new_assertion = db.query(CareAssertion).filter(
+                CareAssertion.id == corrected_existing["resulting_assertion_id"]
+            ).one()
+            correction_event = db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.id == corrected_existing["review_id"]
+            ).one()
+            assert prior_assertion.assertion_status == "superseded"
+            assert correction_event.superseded_assertion_id == assertion_id
+            assert "partly eaten" in new_assertion.asserted_value
+
         # Retrying the same idempotency key returns the same review and assertion.
         with Session() as db:
             retry = review_document_candidate(
@@ -244,6 +270,7 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                     DocumentCandidateReview.id == accepted["review_id"]
                 ).one()
                 assert restored.evidence_ids == [evidence_id]
+                assert restored.assertion_status == "superseded"
                 assert restored_review.source_quote == quote
         finally:
             restarted_engine.dispose()
