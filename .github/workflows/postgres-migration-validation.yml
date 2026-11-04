@@ -1,6 +1,14 @@
 name: PostgreSQL migration validation
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/alembic/**"
+      - "backend/app/**"
+      - "backend/tests/**"
+      - "backend/scripts/**"
+      - ".github/workflows/postgres-migration-validation.yml"
   push:
     branches: [main]
     paths:

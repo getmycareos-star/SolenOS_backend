@@ -1646,6 +1646,85 @@ def main():
         require(continuity_record_status == 201 and continuity_record.get("id"),
                 f"continuity Living Care Record creation failed: {continuity_record_status}: {continuity_record}")
         continuity_record_id = continuity_record["id"]
+
+        # Source-attributed caregiver assertion and explicit correction are
+        # separate durable records. The correction must not overwrite the
+        # original report or erase its reporter/evidence lineage.
+        continuity_assertion_source = (
+            "Caregiver's original wording: the evening routine was interrupted after dinner."
+        )
+        continuity_assertion_status, continuity_assertion = request(
+            "POST", "/api/v1/care-continuity/assertions", token=continuity_token,
+            body={
+                "subject_type": "routine",
+                "subject_id": "postgres-account-continuity-evening-routine",
+                "field": "evening_routine",
+                "assertion_kind": "current_state",
+                "asserted_value": continuity_assertion_source,
+                "source_label": "Caregiver report",
+                "source_text": continuity_assertion_source,
+                "evidence_ids": [continuity_evidence_id],
+                "review_after_days": 30,
+            },
+        )
+        require(
+            continuity_assertion_status == 201
+            and continuity_assertion.get("id")
+            and continuity_assertion.get("assertion_status") == "reported"
+            and continuity_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and continuity_assertion.get("source_text") == continuity_assertion_source
+            and continuity_evidence_id in (continuity_assertion.get("evidence_ids") or []),
+            f"Source-attributed assertion did not preserve original wording, reporter, and evidence link: {continuity_assertion_status}: {continuity_assertion}",
+        )
+        continuity_assertion_id = continuity_assertion["id"]
+
+        continuity_correction_status, continuity_correction = request(
+            "POST", "/api/v1/care-continuity/corrections", token=continuity_token,
+            body={
+                "care_record_id": continuity_record_id,
+                "target_type": "care_assertion",
+                "target_id": continuity_assertion_id,
+                "original_value": continuity_assertion_source,
+                "corrected_value": "Caregiver clarification: the interruption began before dinner.",
+                "correction_reason": "The caregiver clarified the timing; retain the original report and record this as a separate correction.",
+            },
+        )
+        require(
+            continuity_correction_status == 201
+            and continuity_correction.get("id")
+            and continuity_correction.get("requested_by_caregiver_id") == continuity_caregiver_id
+            and continuity_correction.get("target_id") == continuity_assertion_id
+            and continuity_correction.get("original_value") == continuity_assertion_source,
+            f"Correction did not preserve target, original wording, and requesting caregiver: {continuity_correction_status}: {continuity_correction}",
+        )
+        continuity_correction_id = continuity_correction["id"]
+
+        # The original assertion remains unchanged after a correction. The
+        # correction is a separate append-only record, not a destructive edit.
+        assertion_read_status, assertion_rows = request(
+            "GET", "/api/v1/care-continuity/assertions",
+            token=continuity_token,
+        )
+        correction_read_status, correction_rows = request(
+            "GET", "/api/v1/care-continuity/corrections", token=continuity_token,
+        )
+        persisted_assertion = next(
+            (row for row in assertion_rows if row.get("id") == continuity_assertion_id), None
+        ) if isinstance(assertion_rows, list) else None
+        persisted_correction = next(
+            (row for row in correction_rows if row.get("id") == continuity_correction_id), None
+        ) if isinstance(correction_rows, list) else None
+        require(
+            assertion_read_status == 200
+            and persisted_assertion
+            and persisted_assertion.get("asserted_value") == continuity_assertion_source
+            and persisted_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and correction_read_status == 200
+            and persisted_correction
+            and persisted_correction.get("requested_by_caregiver_id") == continuity_caregiver_id,
+            f"Assertion/correction history did not persist independently: assertion={assertion_rows}, correction={correction_rows}",
+        )
+
         continuity_decision_status, continuity_decision = request(
             "POST", "/api/v1/care-continuity/decisions", token=continuity_token,
             body={
@@ -1870,6 +1949,88 @@ def main():
             item.get("version_id") == continuity_version.get("id") for item in restored_snapshots
         ), "LCR snapshot history did not restore after account login")
 
+        continuity_snapshot = next(
+            (item for item in restored_snapshots
+             if item.get("version_id") == continuity_version.get("id")),
+            None,
+        )
+        continuity_snapshot_tables = (
+            (continuity_snapshot or {}).get("snapshot_payload") or {}
+        ).get("tables") or {}
+        snapshot_assertions = continuity_snapshot_tables.get("care_assertions") or []
+        snapshot_corrections = continuity_snapshot_tables.get("care_corrections") or []
+        snapshot_evidence = continuity_snapshot_tables.get("evidence") or []
+        snapshot_assertion = next(
+            (item for item in snapshot_assertions if item.get("id") == continuity_assertion_id),
+            None,
+        )
+        snapshot_correction = next(
+            (item for item in snapshot_corrections if item.get("id") == continuity_correction_id),
+            None,
+        )
+        snapshot_source = next(
+            (item for item in snapshot_evidence if item.get("id") == continuity_evidence_id),
+            None,
+        )
+        require(
+            continuity_snapshot is not None
+            and snapshot_assertion
+            and snapshot_assertion.get("asserted_value") == continuity_assertion_source
+            and snapshot_assertion.get("created_by_caregiver_id") == continuity_caregiver_id
+            and snapshot_assertion.get("evidence_ids") == [continuity_evidence_id]
+            and snapshot_correction
+            and snapshot_correction.get("target_id") == continuity_assertion_id
+            and snapshot_correction.get("requested_by_caregiver_id") == continuity_caregiver_id
+            and snapshot_correction.get("original_value") == continuity_assertion_source
+            and snapshot_source
+            and snapshot_source.get("uploaded_by_caregiver_id") == continuity_caregiver_id,
+            "LCR snapshot did not preserve original source evidence, reporter attribution, assertion, and separate correction",
+        )
+
+        # LCR assertion and correction endpoints must enforce the same
+        # person boundary as evidence retrieval; a valid foreign session cannot
+        # enumerate assertions or attach a correction to another person's claim.
+        own_assertion_status, own_assertions = request(
+            "GET",
+            f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            # Account conversion intentionally revokes the original anonymous
+            # capability. Use the newly issued account session for post-conversion
+            # reads; the old token is separately verified as revoked after restart.
+            token=continuity_login_token,
+        )
+        require(
+            own_assertion_status == 200
+            and isinstance(own_assertions, list)
+            and any(row.get("id") == continuity_assertion_id for row in own_assertions),
+            f"authenticated caregiver could not retrieve their own persisted assertion: {own_assertion_status}: {own_assertions}",
+        )
+        foreign_assertion_status, foreign_assertions = request(
+            "GET",
+            f"/api/v1/care-continuity/assertions/{continuity_person_id}",
+            token=token_b,
+        )
+        require(
+            foreign_assertion_status == 403,
+            f"cross-person assertion listing must be denied without disclosing record contents: {foreign_assertion_status}: {foreign_assertions}",
+        )
+        foreign_correction_status, foreign_correction = request(
+            "POST",
+            "/api/v1/care-continuity/corrections",
+            token=token_b,
+            body={
+                "care_record_id": continuity_record_id,
+                "target_type": "care_assertion",
+                "target_id": continuity_assertion_id,
+                "original_value": continuity_assertion_source,
+                "corrected_value": "Foreign correction must never be persisted.",
+                "correction_reason": "Cross-person isolation test.",
+            },
+        )
+        require(
+            foreign_correction_status == 404,
+            f"cross-person correction write must return 404: {foreign_correction_status}: {foreign_correction}",
+        )
+
         # Cross-record attempts with another person's valid session remain denied.
         cross_person_status, cross_person_body = request(
             "GET", f"/api/v1/evidence/{continuity_person_id}", token=token_b,
@@ -2014,6 +2175,39 @@ def main():
         require(restarted_versions_status == 200 and any(
             item.get("id") == continuity_version.get("id") for item in restarted_versions
         ), "LCR version history did not survive server restart")
+
+        restarted_snapshots_status, restarted_snapshots = request(
+            "GET", "/api/v1/care-continuity/record-snapshots", token=restarted_token,
+        )
+        restarted_snapshot = next(
+            (item for item in restarted_snapshots
+             if item.get("version_id") == continuity_version.get("id")),
+            None,
+        ) if restarted_snapshots_status == 200 else None
+        restarted_tables = (
+            (restarted_snapshot or {}).get("snapshot_payload") or {}
+        ).get("tables") or {}
+        require(
+            restarted_snapshot is not None
+            and any(
+                item.get("id") == continuity_assertion_id
+                and item.get("asserted_value") == continuity_assertion_source
+                and item.get("created_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("care_assertions") or [])
+            )
+            and any(
+                item.get("id") == continuity_correction_id
+                and item.get("target_id") == continuity_assertion_id
+                and item.get("requested_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("care_corrections") or [])
+            )
+            and any(
+                item.get("id") == continuity_evidence_id
+                and item.get("uploaded_by_caregiver_id") == continuity_caregiver_id
+                for item in (restarted_tables.get("evidence") or [])
+            ),
+            "LCR snapshot lost original evidence, assertion attribution, or correction lineage after server restart",
+        )
 
         print("PASS: PostgreSQL readiness, anonymous session creation, durable capture/hydration,")
         print("      cross-record denial, token rotation, and persistence after Uvicorn restart.")

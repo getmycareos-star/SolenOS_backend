@@ -3402,6 +3402,10 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         data["id"] = str(uuid.uuid4())
     if "created_by_caregiver_id" in table.c:
         data["created_by_caregiver_id"] = caregiver_id
+    # Corrections use a domain-specific attribution column. Bind it from the
+    # authenticated session; never accept a caller-supplied caregiver identity.
+    if resource == "corrections" and "requested_by_caregiver_id" in table.c:
+        data["requested_by_caregiver_id"] = caregiver_id
     # The legacy caregiver_id points to caregiver_profiles, not session caregivers.
     # New session attribution uses a separate server-bound column.
     if "caregiver_id" in table.c and resource not in ("caregiver-contexts", "caregiver-perspectives", "caregiver-observations"):
