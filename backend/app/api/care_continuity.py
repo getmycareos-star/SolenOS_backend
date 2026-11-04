@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.api.care_delta import _scoped_identity
 from app.core.caregiver_enums import ClaimType, ObservationType, InformationVisibility
 from app.services.lcr_context import build_lcr_context
-from app.models.care import Evidence, Caregiver, CareEvent
+from app.models.care import Evidence, Caregiver, CareEvent, Person
 from app.models.collaboration import EvidenceUpload
 from app.models.change import Situation as SituationModel
 from app.models.observation_coverage import ObservationCoverage
@@ -937,7 +937,7 @@ WRITABLE = {
     "record-provenance": {"care_record_id", "source_type", "source_id", "author_label", "method", "recorded_at", "occurred_at", "effective_from", "effective_to", "reason", "metadata"},
     "record-provenance-links": {"provenance_id", "target_type", "target_id", "relationship"},
     "record-change-sets": {"care_record_id", "operation", "status", "reason", "provenance_id"},
-    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "provenance_id"},
+    "record-change-items": {"change_set_id", "target_type", "target_id", "operation", "before_value", "after_value", "evidence_ids", "provenance_id"},
     "corrections": {"care_record_id", "target_type", "target_id", "original_value", "corrected_value", "correction_reason", "status", "provenance_id", "effective_at"},
     "amendments": {"care_record_id", "amendment_type", "reason", "status", "provenance_id"},
     "amendment-items": {"amendment_id", "target_type", "target_id", "field_name", "before_value", "after_value"},
@@ -1141,6 +1141,11 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
     if spec is None:
         raise HTTPException(status_code=422, detail="This target type does not have an LCR revision schema")
     revision_table_name, target_column = spec
+    # Serialize revision-number allocation for this care recipient. Both the
+    # target-specific history and aggregate as-of history must advance together;
+    # locking the person row prevents concurrent writers from allocating the
+    # same revision number for the same target.
+    db.query(Person.id).filter(Person.id == person_id).with_for_update().one()
     revision_table = _table(db, revision_table_name)
     target_id = data.get("target_id")
     latest = db.execute(
@@ -1163,6 +1168,55 @@ def _append_revision_for_change_item(db: Session, person_id: str, caregiver_id: 
         current_payload=data.get("after_value"),
         revision_reason=(change_set.get("reason") if change_set else None) or data.get("operation"),
         provenance_id=data.get("provenance_id") or (change_set.get("provenance_id") if change_set else None),
+        changed_by_caregiver_id=caregiver_id,
+        changed_at=datetime.now(timezone.utc),
+    ))
+    # Aggregate as-of reconstruction reads care_state_revisions. Mirror this
+    # target-specific change into that shared revision envelope in the same
+    # transaction, so every recorded change is historically reconstructable.
+    raw_evidence_ids = data.get("evidence_ids") or []
+    # The reflected legacy table stores JSONList values as TEXT. The generic
+    # write path serializes the request list before invoking this helper.
+    if isinstance(raw_evidence_ids, str):
+        try:
+            raw_evidence_ids = json.loads(raw_evidence_ids)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array") from exc
+    if not isinstance(raw_evidence_ids, list):
+        raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
+    state_latest = db.query(func.max(CareStateRevision.revision_number)).filter(
+        CareStateRevision.person_id == person_id,
+        CareStateRevision.target_type == target_type,
+        CareStateRevision.target_id == target_id,
+    ).scalar()
+    operation = str(data.get("operation") or "").strip().casefold()
+    change_kind = (
+        "created" if operation in {"create", "created", "add", "added"}
+        else "deleted" if operation in {"delete", "deleted", "remove", "removed", "retract", "retracted"}
+        else "updated"
+    )
+    # Use the ORM model so its JSONList TypeDecorator serializes correctly on
+    # both SQLite regression tests and PostgreSQL production databases. Reflected
+    # SQL tables lose that custom binder and cannot safely bind a Python list.
+    db.add(CareStateRevision(
+        id=str(uuid.uuid4()),
+        person_id=person_id,
+        target_type=target_type,
+        target_id=target_id,
+        revision_number=int(state_latest or 0) + 1,
+        change_kind=change_kind,
+        before_state=(
+            json.dumps(data.get("before_value"), sort_keys=True, default=str)
+            if data.get("before_value") is not None else None
+        ),
+        after_state=(
+            json.dumps(data.get("after_value"), sort_keys=True, default=str)
+            if data.get("after_value") is not None else None
+        ),
+        evidence_ids=[
+            str(value).strip() for value in raw_evidence_ids
+            if isinstance(value, (str, int)) and str(value).strip()
+        ],
         changed_by_caregiver_id=caregiver_id,
         changed_at=datetime.now(timezone.utc),
     ))
