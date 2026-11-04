@@ -41,7 +41,7 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
         scale = min(2.0, 1800 / max(image.width, 1))
         image = image.resize((int(image.width * scale), int(image.height * scale)))
     try:
-        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 3")
+        data = pytesseract.image_to_data(image, output_type=Output.DICT, config="--psm 3", timeout=20)
     except pytesseract.TesseractNotFoundError as exc:
         raise HTTPException(status_code=503, detail="The document OCR engine is not installed") from exc
     except Exception as exc:
@@ -50,7 +50,7 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
     words: list[str] = []
     confidences: list[float] = []
     word_boxes: list[dict[str, Any]] = []
-    for raw_word, raw_conf in zip(data.get("text", []), data.get("conf", [])):
+    for data_index, (raw_word, raw_conf) in enumerate(zip(data.get("text", []), data.get("conf", []))):
         word = str(raw_word).strip()
         try:
             confidence = float(raw_conf)
@@ -60,14 +60,13 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
             words.append(word)
             if confidence >= 0:
                 confidences.append(confidence)
-            index = len(words) - 1
-            if index < 5000:
+            if len(word_boxes) < 500:
                 word_boxes.append({
                     "text": word,
-                    "left": int(data["left"][index]),
-                    "top": int(data["top"][index]),
-                    "width": int(data["width"][index]),
-                    "height": int(data["height"][index]),
+                    "left": int(data["left"][data_index]),
+                    "top": int(data["top"][data_index]),
+                    "width": int(data["width"][data_index]),
+                    "height": int(data["height"][data_index]),
                 })
     extracted = " ".join(words).strip()
     mean_confidence = round(sum(confidences) / len(confidences), 2) if confidences else None
@@ -82,6 +81,7 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
         "processed_image_width": image.width,
         "processed_image_height": image.height,
         "word_boxes": word_boxes,
+        "coordinate_space": "processed_image_pixels",
         "quality": quality,
         "handwriting_warning": (
             "Handwriting recognition is not reliable. Caregiver verification is required."
