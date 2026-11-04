@@ -49,6 +49,7 @@ def _decision_response(row: DocumentCandidateReview) -> dict:
         "corrected_subject": row.corrected_subject,
         "corrected_observation": row.corrected_observation,
         "resulting_assertion_id": row.resulting_assertion_id,
+        "superseded_assertion_id": row.superseded_assertion_id,
         "created_at": row.created_at,
         "written_to_lcr": row.resulting_assertion_id is not None,
     }
@@ -92,8 +93,8 @@ def review_document_candidate(
         DocumentCandidateReview.analysis_id == analysis_id,
         DocumentCandidateReview.candidate_index == payload.candidate_index,
     ).order_by(DocumentCandidateReview.decision_version.desc()).first()
-    if latest and latest.decision in {"accept", "correct"}:
-        raise HTTPException(status_code=409, detail="An accepted candidate cannot be overwritten; preserve it and submit a separate correction record")
+    if latest and latest.decision in {"accept", "correct"} and payload.decision != "correct":
+        raise HTTPException(status_code=409, detail="An accepted candidate can only be changed through a new correction decision")
     if analysis.source_evidence_id is None:
         raise HTTPException(status_code=409, detail="The extraction is not linked to original evidence")
     source_evidence = db.query(Evidence).filter(
@@ -119,6 +120,17 @@ def review_document_candidate(
 
     version = (latest.decision_version if latest else 0) + 1
     assertion_id = None
+    superseded_assertion_id = None
+    if latest and latest.decision in {"accept", "correct"} and payload.decision == "correct":
+        prior_assertion = db.query(CareAssertion).filter(
+            CareAssertion.id == latest.resulting_assertion_id,
+            CareAssertion.person_id == person_id,
+        ).with_for_update().first()
+        if prior_assertion is None:
+            raise HTTPException(status_code=409, detail="The prior LCR assertion is unavailable; correction was not applied")
+        prior_assertion.assertion_status = "superseded"
+        superseded_assertion_id = prior_assertion.id
+
     if payload.decision in {"accept", "correct"}:
         subject = (payload.corrected_subject or candidate.get("subject") or "Care recipient").strip()
         observation = (payload.corrected_observation or candidate.get("observation") or "").strip()
@@ -158,6 +170,7 @@ def review_document_candidate(
         corrected_observation=(payload.corrected_observation or None),
         rationale=payload.rationale,
         resulting_assertion_id=assertion_id,
+        superseded_assertion_id=superseded_assertion_id,
         idempotency_key=payload.idempotency_key,
     )
     db.add(row)
