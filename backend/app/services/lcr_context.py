@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 import re
 from datetime import date, datetime
-from functools import lru_cache
 from typing import Any
+from functools import lru_cache
 
 from sqlalchemy import Enum as SAEnum, MetaData, String, Table, cast, desc, inspect, or_, select
 from sqlalchemy.orm import Session
@@ -295,10 +295,9 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
 def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     """Reflect the care-source schema once per SQLAlchemy engine.
 
-    The API process is restarted after deployment migrations, so the cache is
-    naturally refreshed on schema rollout. Keeping inspection out of each request
-    avoids repeating database catalog queries and table reflection on hot paths.
-    The returned metadata is treated as immutable by callers.
+    The application process is restarted after deployment migrations, so the cache
+    is naturally refreshed on schema rollout. Callers that will write and then
+    rebuild an LCR assessment must warm this cache before their first mutation.
     """
     available_tables = frozenset(inspect(bind).get_table_names())
     metadata = MetaData()
@@ -316,6 +315,11 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)))
     return available_tables, metadata
 
+def has_source_table(db: Session, table_name: str) -> bool:
+    """Check source-table availability using the active session connection."""
+    available_tables, _metadata = _load_source_schema(db.get_bind())
+    return table_name in available_tables
+
 
 def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20, query: str | None = None) -> dict[str, Any]:
     """Return a bounded, person-scoped LCR projection and explicit schema coverage.
@@ -325,8 +329,7 @@ def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20
     """
     limit = max(1, min(int(limit_per_source), 50))
     terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())))[:8]
-    bind = db.get_bind()
-    available_tables, metadata = _load_source_schema(bind)
+    available_tables, metadata = _load_source_schema(db.get_bind())
 
     sources: dict[str, dict[str, Any]] = {}
     missing_required: list[str] = []

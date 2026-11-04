@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Literal
 from app.core.uncertainty_enums import (
     EpistemicState,
     GapReason,
@@ -264,6 +264,33 @@ class ClaimDependency(BaseModel):
     dependency_type: str
     rationale: str
     created_by_caregiver_id: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ClarificationReviewCreate(BaseModel):
+    answer_version: int = Field(..., ge=1)
+    decision: Literal["accepted", "rejected", "needs_more_information"]
+    rationale: str = Field(..., min_length=3, max_length=4000)
+    review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
+
+
+class ClarificationReviewResponse(BaseModel):
+    id: str
+    question_id: str
+    answer_event_id: str
+    answer_version: int
+    person_id: str
+    decision: str
+    rationale: str
+    reviewed_by_caregiver_id: str
+    resulting_assertion_id: Optional[str] = None
+    resulting_assessment_id: Optional[str] = None
+    reconciliation_status: str
+    evidence_review_ids: List[str] = Field(default_factory=list)
+    resulting_gap_ids: List[str] = Field(default_factory=list)
     created_at: datetime
 
     class Config:

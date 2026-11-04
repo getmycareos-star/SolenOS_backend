@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, event
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint, event
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Session
 import uuid
@@ -160,3 +160,37 @@ def prevent_conflict_history_mutation(session, flush_context, instances):
         for item in list(session.dirty) + list(session.deleted)
     ):
         raise ValueError("Conflict resolution history is append-only and cannot be updated or deleted")
+
+
+class ClarificationReviewEvent(Base):
+    """Append-only human decision tied to one immutable clarification answer version."""
+    __tablename__ = "clarification_review_events"
+    __table_args__ = (
+        Index("ix_clarification_review_question_version", "question_id", "answer_version"),
+        Index("ix_clarification_review_person_created", "person_id", "created_at"),
+        UniqueConstraint("answer_event_id", name="uq_clarification_review_answer_event"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    question_id = Column(String, ForeignKey("open_questions.id", ondelete="RESTRICT"), nullable=False, index=True)
+    answer_event_id = Column(String, ForeignKey("open_question_answer_events.id", ondelete="RESTRICT"), nullable=False, index=True)
+    answer_version = Column(Integer, nullable=False)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    decision = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    reviewed_by_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    resulting_assertion_id = Column(String, ForeignKey("care_assertions.id", ondelete="RESTRICT"), nullable=True)
+    resulting_assessment_id = Column(String, ForeignKey("care_delta_runs.id", ondelete="RESTRICT"), nullable=True)
+    reconciliation_status = Column(String(32), nullable=False)
+    evidence_review_ids = Column(JSONList, nullable=False, default=list)
+    resulting_gap_ids = Column(JSONList, nullable=False, default=list)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(Session, "before_flush")
+def prevent_clarification_review_history_mutation(session, flush_context, instances):
+    if any(
+        isinstance(item, ClarificationReviewEvent)
+        for item in list(session.dirty) + list(session.deleted)
+    ):
+        raise ValueError("Clarification review history is append-only and cannot be updated or deleted")

@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from app.core.database import get_db
 from app.models.care import Evidence, Person
-from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel
+from app.models.uncertainty import Contradiction as ContradictionModel, OpenQuestion as OpenQuestionModel, OpenQuestionAnswerEvent as OpenQuestionAnswerEventModel, ClarificationReviewEvent as ClarificationReviewEventModel, InformationGap as InformationGapModel
 from app.schemas.uncertainty import (
     InformationGapCreate,
     InformationGapUpdate,
@@ -18,14 +20,18 @@ from app.schemas.uncertainty import (
     UncertaintyAssessment,
     EpistemicView,
     SubjectUncertaintySummary,
+    ClarificationReviewCreate,
+    ClarificationReviewResponse,
 )
 from app.services.uncertainty import UncertaintyEngine
 from app.services.uncertainty_intelligence import analyze_uncertainty, evidence_record_to_uncertainty_item
 from app.schemas.uncertainty import UncertaintyAnalysisRequest, UncertaintyAnalysisResponse
 from app.schemas.uncertainty import ClaimDependencyCreate, ClaimDependency
-from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority
+from app.core.uncertainty_enums import GapLifecycleStatus, EpistemicState, Priority, ResolutionMechanism
 from app.api.care_delta import _scoped_identity
-from app.models.care_continuity import EvidenceClaimDependency, CareAssertion
+from app.models.care_continuity import EvidenceClaimDependency, CareAssertion, EvidenceReviewRecord
+from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
+from app.api.care_continuity import persist_situation_understanding_assessment, prepare_situation_understanding_assessment
 
 router = APIRouter(prefix="/uncertainty", tags=["uncertainty"])
 
@@ -140,6 +146,197 @@ def list_question_answer_history(
         "created_at": row.created_at.isoformat() if row.created_at else None,
     } for row in rows]
 
+
+
+@router.post("/questions/{question_id}/reviews", response_model=ClarificationReviewResponse, status_code=201)
+def review_question_answer(question_id: str, review: ClarificationReviewCreate, engine: UncertaintyEngine = Depends(get_engine)):
+    """Append a caregiver decision for one immutable answer version."""
+    if not engine.person_id or not engine.caregiver_id:
+        raise HTTPException(status_code=403, detail="A session-bound caregiver identity is required")
+    # Preload reflected LCR schema before any row locks or writes. SQLite StaticPool
+    # shares one connection, and SQLAlchemy reflection can otherwise roll back the
+    # active transaction while composing the assessment.
+    prepare_situation_understanding_assessment(engine.db)
+    question = engine._target_query(OpenQuestionModel, question_id).with_for_update().first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    answer_event = engine.db.query(OpenQuestionAnswerEventModel).filter(
+        OpenQuestionAnswerEventModel.question_id == question_id,
+        OpenQuestionAnswerEventModel.person_id == engine.person_id,
+        OpenQuestionAnswerEventModel.answer_version == review.answer_version,
+    ).with_for_update().first()
+    if answer_event is None:
+        raise HTTPException(status_code=409, detail="The submitted answer version is unavailable")
+    latest_answer_version = engine.db.query(OpenQuestionAnswerEventModel.answer_version).filter(
+        OpenQuestionAnswerEventModel.question_id == question_id,
+        OpenQuestionAnswerEventModel.person_id == engine.person_id,
+    ).order_by(OpenQuestionAnswerEventModel.answer_version.desc()).first()
+    if latest_answer_version is None or latest_answer_version[0] != review.answer_version:
+        raise HTTPException(status_code=409, detail="Only the latest submitted answer version can receive a review decision")
+    if question.status != "answered":
+        raise HTTPException(status_code=409, detail="Only a currently submitted answer can receive a review decision")
+    if engine.db.query(ClarificationReviewEventModel.id).filter(
+        ClarificationReviewEventModel.answer_event_id == answer_event.id,
+        ClarificationReviewEventModel.person_id == engine.person_id,
+    ).first():
+        raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another review")
+    evidence_ids = list(answer_event.evidence_ids or [])
+    evidence_reviews = engine.db.query(EvidenceReviewRecord).filter(
+        EvidenceReviewRecord.person_id == engine.person_id,
+        EvidenceReviewRecord.evidence_id.in_(evidence_ids),
+    ).order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc()).all()
+    reviewed_ids = {row.evidence_id for row in evidence_reviews}
+    if review.decision == "accepted" and not evidence_ids:
+        raise HTTPException(status_code=422, detail="An answer without persisted source evidence can remain a caregiver report or request more information, but cannot be accepted into the LCR")
+    if review.decision == "accepted" and reviewed_ids != set(evidence_ids):
+        raise HTTPException(status_code=409, detail={
+            "message": "Every answer evidence item must pass through the existing evidence-review workflow before acceptance.",
+            "evidence_ids_requiring_review": sorted(set(evidence_ids) - reviewed_ids),
+        })
+    resulting_assertion = None
+    resulting_gap_ids = []
+    reconciliation_status = "not_run_decision_not_accepted"
+    now = datetime.now(timezone.utc)
+    if review.decision == "accepted":
+        if question.status != "answered":
+            raise HTTPException(status_code=409, detail="Only a currently submitted answer can be accepted")
+        linked_gap_ids = set()
+        for context_item in question.context or []:
+            if not isinstance(context_item, dict):
+                continue
+            source_kind = str(context_item.get("source_kind") or context_item.get("kind") or "").strip().lower()
+            explicit_gap_id = context_item.get("information_gap_id")
+            source_id = context_item.get("source_id")
+            if isinstance(explicit_gap_id, str) and explicit_gap_id.strip():
+                linked_gap_ids.add(explicit_gap_id.strip())
+            elif source_kind in {"information_gap", "missing_information", "gap"} and isinstance(source_id, str) and source_id.strip():
+                linked_gap_ids.add(source_id.strip())
+        source_claim = None
+        if question.claim_id:
+            source_claim = engine.db.query(CareAssertion).filter(
+                CareAssertion.id == question.claim_id,
+                CareAssertion.person_id == engine.person_id,
+            ).with_for_update().first()
+            if source_claim is None or source_claim.subject_type != question.subject_type or source_claim.subject_id != question.subject_id:
+                raise HTTPException(status_code=409, detail="The linked source claim is unavailable or outside the question subject scope")
+            if source_claim.assertion_status in {"retracted", "superseded"}:
+                raise HTTPException(status_code=409, detail="Retracted or superseded source claims cannot receive accepted clarification updates")
+        linked_gap = None
+        if len(linked_gap_ids) == 1:
+            linked_gap = engine.db.query(InformationGapModel).filter(
+                InformationGapModel.id == next(iter(linked_gap_ids)),
+                InformationGapModel.person_id == engine.person_id,
+                InformationGapModel.subject_type == question.subject_type,
+                InformationGapModel.subject_id == question.subject_id,
+            ).with_for_update().first()
+        if source_claim is None and linked_gap is None:
+            raise HTTPException(status_code=422, detail="Acceptance requires a linked same-person care assertion or an explicitly linked information gap")
+        field_name = source_claim.field if source_claim is not None else linked_gap.field
+        assertion_kind = source_claim.assertion_kind if source_claim is not None else "current_state"
+        if assertion_kind == "current_state" and review.review_after_days is None:
+            raise HTTPException(status_code=422, detail="Accepting a current-state clarification requires a caregiver-selected review window")
+        resulting_assertion = CareAssertion(
+            person_id=engine.person_id,
+            subject_type=question.subject_type,
+            subject_id=question.subject_id,
+            field=field_name,
+            assertion_kind=assertion_kind,
+            asserted_value=answer_event.answer,
+            source_label="Caregiver clarification response",
+            source_text=answer_event.answer,
+            evidence_ids=evidence_ids,
+            assertion_status="accepted",
+            observed_at=source_claim.observed_at if source_claim is not None else None,
+            review_after_days=review.review_after_days,
+            created_by_caregiver_id=answer_event.answered_by_caregiver_id,
+            updated_by_caregiver_id=engine.caregiver_id,
+        )
+        engine.db.add(resulting_assertion)
+        # Resolve only an explicitly linked, same-subject, same-field information gap.
+        if (
+            linked_gap is not None
+            and linked_gap.field == field_name
+            and linked_gap.lifecycle_status in {GapLifecycleStatus.OPEN, GapLifecycleStatus.REOPENED}
+            and linked_gap.epistemic_state not in {EpistemicState.CONFLICTING, EpistemicState.AMBIGUOUS}
+        ):
+            linked_gap.lifecycle_status = GapLifecycleStatus.RESOLVED
+            linked_gap.resolution_mechanism = ResolutionMechanism.NEW_EVIDENCE
+            linked_gap.resolution_date = now
+            linked_gap.resolution_notes = review.rationale.strip()
+            linked_gap.evidence_ids = list(dict.fromkeys([*(linked_gap.evidence_ids or []), *evidence_ids]))
+            linked_gap.updated_by_caregiver_id = engine.caregiver_id
+            resulting_gap_ids.append(linked_gap.id)
+        question.status = "closed"
+        question.closed_at = now
+        question.closed_reason = review.rationale.strip()
+        reconciliation_status = "completed"
+    elif review.decision == "rejected":
+        question.status = "unresolved"
+        question.closed_at = None
+        question.closed_reason = review.rationale.strip()
+    else:
+        question.status = "open"
+        question.closed_at = None
+        question.closed_reason = None
+    try:
+        resulting_assessment_id = None
+        if resulting_assertion is not None:
+            # Flush assertion, answer-linked evidence decisions, and question/gap
+            # lifecycle changes before rebuilding the authoritative LCR snapshot.
+            engine.db.flush()
+            reconcile_person_change_intelligence(engine.db, engine.person_id)
+            assessment_result = persist_situation_understanding_assessment(
+                engine.db,
+                engine.person_id,
+                engine.caregiver_id,
+                commit=False,
+            )
+            resulting_assessment_id = assessment_result.get("assessment_id")
+            if not resulting_assessment_id:
+                raise RuntimeError("The authoritative LCR assessment snapshot was not persisted")
+            reconciliation_status = "completed"
+        event = ClarificationReviewEventModel(
+            question_id=question.id,
+            answer_event_id=answer_event.id,
+            answer_version=answer_event.answer_version,
+            person_id=engine.person_id,
+            decision=review.decision,
+            rationale=review.rationale.strip(),
+            reviewed_by_caregiver_id=engine.caregiver_id,
+            resulting_assertion_id=resulting_assertion.id if resulting_assertion is not None else None,
+            resulting_assessment_id=resulting_assessment_id,
+            reconciliation_status=reconciliation_status,
+            evidence_review_ids=[row.id for row in evidence_reviews],
+            resulting_gap_ids=resulting_gap_ids,
+        )
+        engine.db.add(event)
+        engine.db.flush()
+        engine.db.commit()
+        engine.db.refresh(event)
+        return event
+    except IntegrityError as exc:
+        engine.db.rollback()
+        duplicate = engine.db.query(ClarificationReviewEventModel.id).filter(
+            ClarificationReviewEventModel.answer_event_id == answer_event.id,
+            ClarificationReviewEventModel.person_id == engine.person_id,
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="This answer version already has a review decision; submit a new answer version before another review") from exc
+        raise HTTPException(status_code=503, detail="Clarification review could not be committed; no decision was recorded") from exc
+    except Exception as exc:
+        engine.db.rollback()
+        raise HTTPException(status_code=503, detail="Clarification review and LCR reconciliation failed; no decision was committed") from exc
+
+
+@router.get("/questions/{question_id}/review-history", response_model=List[ClarificationReviewResponse])
+def list_question_review_history(question_id: str, engine: UncertaintyEngine = Depends(get_engine)):
+    question = engine._target_query(OpenQuestionModel, question_id).first()
+    if question is None:
+        raise HTTPException(status_code=404, detail="Open question not found")
+    return engine.db.query(ClarificationReviewEventModel).filter(
+        ClarificationReviewEventModel.question_id == question_id,
+        ClarificationReviewEventModel.person_id == engine.person_id,
+    ).order_by(ClarificationReviewEventModel.created_at.asc(), ClarificationReviewEventModel.id.asc()).all()
 
 @router.post("/contradictions", response_model=Contradiction)
 def create_contradiction(
