@@ -67,7 +67,12 @@ async def extract_document(
             "extracted_text_preview": result["text"][:240],
             "extracted_char_count": len(result["text"]),
             "ocr_confidence": mean_confidence,
-            "extraction_source": result["method"],
+            "extraction_source": (
+                "text" if result["method"] == "server_utf8_text"
+                else "pdf_text" if result["method"] == "server_pdf_text_and_ocr"
+                else result["method"]
+            ),
+            "extraction_method": result["method"],
             "pages": result["pages"],
             "truncated": result["truncated"],
             "clinical_confidence": None,
