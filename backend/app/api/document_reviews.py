@@ -75,7 +75,6 @@ def review_document_candidate(
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).with_for_update().first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document extraction not found")
@@ -100,7 +99,6 @@ def review_document_candidate(
     source_evidence = db.query(Evidence).filter(
         Evidence.id == analysis.source_evidence_id,
         Evidence.person_id == person_id,
-        Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).first()
     if source_evidence is None:
@@ -189,7 +187,6 @@ def get_document_candidate_reviews(
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document extraction not found")
