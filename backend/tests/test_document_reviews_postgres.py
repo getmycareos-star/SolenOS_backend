@@ -128,7 +128,7 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
 
         # Append-only corrections preserve the original candidate and corrected value.
         # Use a separate analysis to keep the first accepted assertion unchanged.
-        _, _, evidence_b, analysis_b, quote_b = _fixture(Session)
+        person_b, caregiver_b, evidence_b, analysis_b, quote_b = _fixture(Session)
         with Session() as db:
             corrected = review_document_candidate(
                 analysis_b,
@@ -138,7 +138,7 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                     rationale="Caregiver checked the original document.",
                     idempotency_key="document-review-correct-0001",
                 ),
-                _request(person_id, caregiver_id), db,
+                _request(person_b, caregiver_b), db,
             )
             assert corrected["written_to_lcr"] is True
         with Session() as db:
@@ -164,7 +164,7 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert denied.value.status_code == 404
 
         # Rejected candidates never create a CareAssertion.
-        _, _, _, rejected_analysis, _ = _fixture(Session)
+        person_rejected, caregiver_rejected, _, rejected_analysis, _ = _fixture(Session)
         with Session() as db:
             rejected = review_document_candidate(
                 rejected_analysis,
@@ -172,7 +172,7 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                     candidate_index=0, decision="reject",
                     idempotency_key="document-review-reject-0001",
                 ),
-                _request(person_id, caregiver_id), db,
+                _request(person_rejected, caregiver_rejected), db,
             )
             assert rejected["written_to_lcr"] is False
             assert rejected["resulting_assertion_id"] is None
@@ -180,7 +180,11 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert db.query(CareAssertion).filter(
                 CareAssertion.person_id == person_id,
                 CareAssertion.field == "document_observation",
-            ).count() == 2
+            ).count() == 1
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_rejected,
+                CareAssertion.field == "document_observation",
+            ).count() == 0
 
         # A new SQLAlchemy engine/session reconstructs the persisted review and LCR state.
         engine.dispose()
