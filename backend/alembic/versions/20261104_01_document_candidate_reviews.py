@@ -6,7 +6,7 @@ Revises: 20261102_01_explicit_actions
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20261104_01_document_candidate_reviews"
+revision = "20261104_01_doc_review"
 down_revision = "20261102_01_explicit_actions"
 branch_labels = None
 depends_on = None
