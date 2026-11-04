@@ -34,12 +34,42 @@ def _bytes(image: Image.Image, format="PNG") -> bytes:
     image.save(output, format=format)
     return output.getvalue()
 
+def _native_pdf(text: str) -> bytes:
+    stream = f"BT /F1 14 Tf 72 720 Td ({text}) Tj ET".encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    output = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode("ascii") + body + b"\nendobj\n")
+    xref_offset = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF".encode("ascii")
+    )
+    return bytes(output)
+
 
 def test_extract_utf8_text_preserves_content():
     result = extract_document("care.txt", "text/plain", b"Caregiver report: breakfast was missed.")
     assert result["text"] == "Caregiver report: breakfast was missed."
     assert result["method"] == "server_utf8_text"
     assert result["pages"][0]["quality"] == "review"
+
+
+def test_extract_native_pdf_embedded_text_without_ocr():
+    result = extract_document("native.pdf", "application/pdf", _native_pdf("Native PDF text is available."))
+    assert "Native PDF text is available." in result["text"]
+    assert result["pages"][0]["method"] == "native_pdf_text"
 
 
 def test_extract_docx_paragraphs_and_tables():
