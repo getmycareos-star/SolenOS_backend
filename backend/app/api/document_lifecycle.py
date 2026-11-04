@@ -17,6 +17,7 @@ from app.models.care import Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.services.document_extraction import extract_document
+from app.services.qwen_gateway import extract_review_candidates
 
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
@@ -107,13 +108,27 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     source_text = extraction["text"]
     method = extraction["method"]
     page_metadata = extraction["pages"]
+    candidate_extraction_status = "not_applicable"
+    candidates = {"observations": [], "open_questions": []}
+    if source_text:
+        try:
+            candidates = extract_review_candidates(
+                source_text,
+                source_event_id=None,
+                source_evidence_id=evidence_id,
+            )
+            candidate_extraction_status = "available"
+        except Exception:
+            # Extraction remains durable if the interpretation model is unavailable.
+            candidate_extraction_status = "unavailable"
+
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
         source_event_id=None,
         source_evidence_id=evidence_id,
         source_text=source_text,
-        extraction_status="available",
+        extraction_status="available" if source_text else "unreadable",
         candidates={
             "kind": "document_extraction_v1",
             "filename": upload.filename,
@@ -122,8 +137,9 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "extraction_method": method,
             "pages": page_metadata,
             "truncated": extraction["truncated"],
-            "observations": [],
-            "open_questions": [],
+            "candidate_extraction_status": candidate_extraction_status,
+            "observations": candidates.get("observations", []),
+            "open_questions": candidates.get("open_questions", []),
         },
         review_history=[],
     )
@@ -149,6 +165,9 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
     return {
         **_response(analysis),
         "extracted_text": analysis.source_text,
+        "candidates": details.get("observations", []),
+        "open_questions": details.get("open_questions", []),
+        "candidate_extraction_status": details.get("candidate_extraction_status", "not_applicable"),
         "document": {
             "filename": details.get("filename"),
             "mime_type": details.get("mime_type"),
