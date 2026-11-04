@@ -21,7 +21,7 @@ _READINESS_CACHE: dict[str, object] = {"checked_at": 0.0, "result": None}
 
 def get_ollama_config() -> tuple[str, str, float]:
     base = os.getenv("OLLAMA_BASE_URL", "").strip().rstrip("/")
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b").strip()
+    model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b").strip()
     try:
         timeout = max(5.0, min(float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180")), 180.0))
     except (TypeError, ValueError):
@@ -80,9 +80,9 @@ def qwen_chat(
         base, model, configured_timeout = get_ollama_config()
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        _log_inference_result(os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
+        _log_inference_result(os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
         raise
-    # Keep inference memory bounded for Railway deployments. The 1.5B model's
+    # Keep inference memory bounded for Railway deployments. The 4B model's
     # default context window can allocate a large KV cache and destabilize the
     # same container that hosts FastAPI. Every workflow uses the shared gateway,
     # so the limit applies consistently without changing model authority.
@@ -303,10 +303,10 @@ def qwen_installation_status() -> dict:
             "failure_reason": state.get("failure_reason") if status == "failed" else None,
         }
     except FileNotFoundError:
-        return {"state": "not_started", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "updated_at": None, "failure_reason": None}
+        return {"state": "not_started", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "updated_at": None, "failure_reason": None}
     except Exception:
         logger.exception("Could not read Qwen installation state")
-        return {"state": "failed", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "updated_at": None, "failure_reason": "state_file_unreadable"}
+        return {"state": "failed", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "updated_at": None, "failure_reason": "state_file_unreadable"}
 
 
 def qwen_readiness_status(force: bool = False) -> dict:
@@ -344,9 +344,9 @@ def qwen_readiness_status(force: bool = False) -> dict:
                 result = {"available": True, "state": "ready", "model": model, "installation": installation, "failure_reason": None}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {"reason": "readiness_inference_failed"}
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
+        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": detail.get("reason", "readiness_inference_failed"), "error_category": detail.get("code", "readiness_failed")}
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "installation": installation, "failure_reason": type(exc).__name__, "error_category": "runtime_unreachable"}
+        result = {"available": False, "state": "unavailable", "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "installation": installation, "failure_reason": type(exc).__name__, "error_category": "runtime_unreachable"}
     _READINESS_CACHE.update({"checked_at": now, "result": result})
     return dict(result)
 
@@ -368,6 +368,6 @@ def qwen_runtime_status() -> dict:
         return {"available": True, "installation": installation, "model": model, "provider": "local_ollama", "inference_api": "ollama_native_http", "hosted_inference_api": False, "runtime": "bundled_railway_sidecar" if os.getenv("OLLAMA_SIDECAR_ENABLED", "").casefold() == "true" else "private_railway_service"}
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
+        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": detail.get("code", "configuration_unavailable"), "failure_reason": detail.get("reason", "ollama_configuration_invalid")}
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
-        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}
+        return {"available": False, "installation": installation, "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"), "error_category": "runtime_unreachable", "failure_reason": type(exc).__name__}

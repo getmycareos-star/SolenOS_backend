@@ -366,7 +366,7 @@ jobs:
           trap cleanup EXIT
 
           ready=0
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 180); do
             if curl --fail --silent http://127.0.0.1:8080/ready >/tmp/solenos-ready.json; then
               ready=1
               break
@@ -390,7 +390,7 @@ jobs:
 
           echo "QWEN_E2E: wait for bundled model to finish downloading and become available"
           model_ready=0
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 180); do
             status_code=$(curl --silent --show-error --output /tmp/qwen-status.json --write-out '%{http_code}' --max-time 20 -H "$auth_header" \
               http://127.0.0.1:8080/api/v1/assistant/status || true)
             if [ "$status_code" = "200" ] && python - <<'PY'
@@ -413,7 +413,7 @@ jobs:
           done
           if [ "$model_ready" -ne 1 ]; then
             cat /tmp/qwen-status.json >&2 || true
-            echo "Bundled Qwen model did not become available within 15 minutes." >&2
+            echo "Bundled Qwen model did not become available within 30 minutes." >&2
             exit 1
           fi
 
@@ -477,7 +477,7 @@ jobs:
           # ready. Probe actual authenticated inference with retries instead.
           greeting=""
           greeting_ready=0
-          for attempt in $(seq 1 90); do
+          for attempt in $(seq 1 180); do
             if greeting=$(curl --fail --silent --show-error --max-time 30 \
               -H "$auth_header" -H "Content-Type: application/json" \
               -d "{\"person_id\":\"$person_id\",\"text\":\"hi\"}" \

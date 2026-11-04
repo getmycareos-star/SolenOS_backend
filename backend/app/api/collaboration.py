@@ -875,14 +875,56 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:was\s+)?(?:reported|provided|recorded|observed)\b",
         r"\b(?:professional|clinician|doctor|nurse)-reported information\b",
     )
-    for pattern in patterns:
+    for pattern_index, pattern in enumerate(patterns):
         for match in re.finditer(pattern, text):
             claim = match.group(0)
             # All meaningful terms in these high-impact phrases must be present
             # in source text; exact wording is intentionally required here.
             terms = re.findall(r"[a-z]+", claim)
             if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
+                logger.warning("Qwen care-grounding rejection: rule=phrase_pattern_%d", pattern_index)
                 return True
+    # Appointment status is a structured fact, not a semantic implication:
+    # "scheduled" does not mean "confirmed". Match claims against the status
+    # recorded on the authorized appointment context, and fail closed if the
+    # model upgrades or collapses the status.
+    appointment_contexts = re.findall(
+        r"recorded appointment \[[^\]]+\]: ([^\n]+)", source
+    )
+    appointment_statuses = []
+    for appointment_context in appointment_contexts:
+        status_match = re.search(r"\bstatus=([a-z_]+)\b", appointment_context)
+        if status_match:
+            appointment_statuses.append(status_match.group(1))
+    appointment_status_pattern = (
+        r"\b(?:appointment|(?:[a-z][a-z-]*\s+){0,2}(?:review|visit))\b"
+        r".{0,100}?\b(?:is|was|has been)\s+"
+        r"(?:(?:listed|recorded|shown)\s+as\s+)?(?:now\s+)?"
+        r"(scheduled|confirmed|cancelled|canceled|rescheduled|completed)\b"
+    )
+    appointment_status_claims = [
+        match.group(1) for match in re.finditer(appointment_status_pattern, text)
+    ]
+    if appointment_status_claims:
+        if appointment_contexts:
+            if not appointment_statuses or len(set(appointment_statuses)) != 1:
+                logger.warning("Qwen care-grounding rejection: rule=ambiguous_appointment_context")
+                return True
+            if any(claim != appointment_statuses[0] for claim in appointment_status_claims):
+                logger.warning("Qwen care-grounding rejection: rule=appointment_status_mismatch")
+                return True
+        else:
+            # Without a structured appointment row, only repeat an explicit
+            # status claim already present in the caregiver's supplied source.
+            source_status_claims = [
+                match.group(1) for match in re.finditer(appointment_status_pattern, source)
+            ]
+            if not source_status_claims or any(
+                claim not in source_status_claims for claim in appointment_status_claims
+            ):
+                logger.warning("Qwen care-grounding rejection: rule=unverified_appointment_status")
+                return True
+
     # A question can mention the same words as an unsupported delivery claim.
     # Do not treat word overlap as proof when the source explicitly lacks a receipt.
     missing_delivery_state = re.search(
@@ -896,6 +938,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         text,
     )
     if missing_delivery_state and delivery_status_claim:
+        logger.warning("Qwen care-grounding rejection: rule=missing_delivery_state")
         return True
 
     # Never ask caregivers to disclose credentials or one-time verification secrets.
@@ -904,6 +947,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:password|verification code|authentication code|one[- ]time code|otp|recovery code|security code)\b",
         text,
     ):
+        logger.warning("Qwen care-grounding rejection: rule=credential_request")
         return True
 
     # When authoritative state is explicitly missing, reject confident status claims.
@@ -922,6 +966,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:retained|available|saved|synced|verified|accepted|completed|deleted|archived)\b",
     )
     if missing_state and any(re.search(pattern, text) for pattern in unsupported_state_claims):
+        logger.warning("Qwen care-grounding rejection: rule=unsupported_state_claim")
         return True
     return False
 
@@ -1896,7 +1941,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "evidence_provenance": "Identify the source and status of each supplied claim. Distinguish caregiver report, document text, professional-reported information and inference; never upgrade a report into verified fact.",
         "uncertainty_contradictions": "Surface conflicts, ambiguous dates, missing sources and uncertainty. Do not resolve conflicts by guessing; ask a focused clarification.",
         "returning_caregiver": "Orient a returning caregiver using only supplied recent and relevant context. Prioritize changes, open questions and unknowns; do not invent a timeline.",
-        "appointment": "Prepare questions and organize recorded facts. Never invent appointment details, imply a request is confirmed, or recommend treatment.",
+        "appointment": "Prepare questions and organize recorded facts. Use the appointment status exactly as recorded; a scheduled appointment is not confirmed. Never invent appointment details, imply a request is confirmed, or recommend treatment.",
         "after_appointment": "Organize the supplied after-appointment report. Separate clinician-reported words, caregiver understanding, unanswered questions and reported next steps. If notes are absent, do not invent advice or outcomes.",
         "handoff": "Prepare a concise handoff from recorded and supplied facts. Mark unknowns and pending items. Do not create, assign, send or acknowledge a handoff or invent a recipient.",
         "professional_summary": "Organize a professional-facing summary from authorized recorded facts. Preserve dates, source attribution and uncertainty; never invent details or clinical conclusions.",
@@ -1935,6 +1980,27 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "document_validity_renewal": "Review only explicitly supplied or authorized document text for stated issue dates, expiry/valid-through dates, renewal instructions, issuing authority, and current status if explicitly recorded. Separate dates and instructions quoted from the source from calculations or interpretation; identify missing, unreadable, conflicting, or undated details. Do not infer legal or clinical validity, assume an expired-looking document is invalid without context, invent a renewal deadline or required action, contact an issuer, create reminders/tasks, or write to the Living Care Record. Cite supplied source IDs where available and recommend confirming ambiguous validity with the issuing organization or qualified professional.",
         "emergency_readiness": "Review emergency-readiness information already documented in the authorized care context. Separate recorded facts from missing, stale, conflicting, or unverified information. Summarize emergency contacts, emergency plan, communication needs, mobility/access considerations, clinician-provided emergency instructions, and relevant current medications only when supported by supplied records. For every category with no supporting record, explicitly name the category and say it is not recorded in the supplied care-record context; never answer only that no matching context was found. If the context is empty, explicitly say: 'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' Cite source IDs where available. Never invent phone numbers, addresses, diagnoses, medication details, instructions, or a safety rating; do not decide whether the person is safe, replace official emergency guidance, contact anyone, create tasks/reminders, or write to the Living Care Record. If immediate danger is described, direct the caregiver to local emergency services.",
     }[payload.workflow]
+    appointment_status_guidance = ""
+    if payload.workflow == "appointment":
+        recorded_statuses = []
+        for line in context_lines:
+            if line.startswith("Recorded appointment"):
+                status_match = re.search(r"\bstatus=([a-z_]+)\b", line)
+                if status_match:
+                    recorded_statuses.append(status_match.group(1))
+        if len(set(recorded_statuses)) == 1:
+            recorded_status = recorded_statuses[0]
+            appointment_status_guidance = (
+                f" The recorded appointment status is '{recorded_status}'. State that exact status only."
+            )
+            if recorded_status == "scheduled":
+                appointment_status_guidance += (
+                    " Scheduled does not mean confirmed; do not say the appointment is confirmed."
+                )
+        elif recorded_statuses:
+            appointment_status_guidance = (
+                " Multiple appointment statuses are recorded. Keep them separate and do not imply a single shared status."
+            )
     empty_context_emergency_readiness = payload.workflow == "emergency_readiness" and not context_lines
     max_predict = 40 if empty_context_emergency_readiness else 96
     empty_context_output_constraint = (
@@ -1945,7 +2011,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     prompt = (
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
-        f"Task: {guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
+        f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
         "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
         "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
@@ -2003,7 +2069,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
                         "Preserve only claims directly supported by the exact caregiver text or authorized context. "
                         "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
-                        "unreported clinical outcome into a fact. Do not infer diagnosis, treatment response, test results, "
+                        "unreported clinical outcome into a fact. "
+                        + appointment_status_guidance
+                        + " Do not infer diagnosis, treatment response, test results, "
                         "medication status, symptom change, appointments, tasks, owners or deadlines. "
                         "Never ask for a password, verification code, one-time code or recovery secret. "
                         "If a detail is absent, "
@@ -2041,7 +2109,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "workflow": payload.workflow,
         "reply": reply,
         "ai_generated": True,
-        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:0.5b"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
         "authority": "solenos_care_record_and_caregiver",
         "review_required": True,
         "written_to_lcr": False,

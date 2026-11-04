@@ -8,7 +8,7 @@ export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
 export OLLAMA_MODELS="${OLLAMA_MODELS:-/root/.ollama/models}"
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-30m}"
 export OLLAMA_BASE_URL="${OLLAMA_BASE_URL:-http://127.0.0.1:11434}"
-export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen2.5:0.5b}"
+export OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:4b}"
 
 ollama serve >/tmp/ollama-runtime.log 2>&1 &
 OLLAMA_PID=$!

@@ -1241,6 +1241,32 @@ def test_persistent_in_app_reminders_are_scoped_and_do_not_claim_delivery(monkey
         teardown()
 
 
+def test_qwen_grounding_guard_does_not_upgrade_scheduled_appointment_to_confirmed():
+    from app.api.collaboration import _contains_unsupported_care_claim
+
+    scheduled_source = (
+        "Recorded appointment [appt-1]: Neurology review; status=scheduled; "
+        "scheduled=2026-11-06T10:00:00+00:00"
+    )
+    assert _contains_unsupported_care_claim(
+        "Your scheduled neurology review on November 6 is confirmed.",
+        scheduled_source,
+    )
+    assert not _contains_unsupported_care_claim(
+        "Your neurology review is listed as scheduled for November 6.",
+        scheduled_source,
+    )
+
+    confirmed_source = (
+        "Recorded appointment [appt-2]: Neurology review; status=confirmed; "
+        "scheduled=2026-11-06T10:00:00+00:00"
+    )
+    assert not _contains_unsupported_care_claim(
+        "Your neurology review is confirmed for November 6.",
+        confirmed_source,
+    )
+
+
 def test_qwen_grounding_guard_rejects_unsupported_care_status_claims():
     from app.api.collaboration import _contains_unsupported_care_claim
 
