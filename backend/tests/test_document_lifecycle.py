@@ -135,3 +135,29 @@ def test_real_upload_endpoint_feeds_document_extraction(client):
     )
     assert retrieved.status_code == 200, retrieved.text
     assert retrieved.json()["extracted_text"] == "Uploaded through the real endpoint."
+
+
+def test_cached_extraction_rechecks_original_binary_integrity(client, monkeypatch):
+    from fastapi import HTTPException
+    from app.api import document_lifecycle
+
+    test_client, session = client
+    evidence_id = persist_document(session, b"Original saved care note")
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert first.status_code == 201, first.text
+
+    original_verify = document_lifecycle._verified_content
+    calls = 0
+
+    def fail_on_retry(upload):
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
+        return original_verify(upload)
+
+    monkeypatch.setattr(document_lifecycle, "_verified_content", fail_on_retry)
+    retry = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert retry.status_code == 500, retry.text
+    assert retry.json()["detail"] == "Stored evidence failed its integrity check"
