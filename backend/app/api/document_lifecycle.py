@@ -77,7 +77,6 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
-        Evidence.uploaded_by_caregiver_id == caregiver_id,
         Evidence.type == "document",
     ).with_for_update().first()
     if evidence is None:
@@ -91,7 +90,6 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     content = _verified_content(upload)
     existing = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
     ).order_by(CaptureAnalysis.created_at.desc()).all()
     for row in existing:
@@ -155,7 +153,6 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
-        CaptureAnalysis.caregiver_id == caregiver_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document extraction not found")
