@@ -276,6 +276,11 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert db.query(CareAssertion).filter(
                 CareAssertion.person_id == person_id,
                 CareAssertion.field == "document_observation",
+            ).count() == 2
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.field == "document_observation",
+                CareAssertion.assertion_status != "superseded",
             ).count() == 1
             assert db.query(CareAssertion).filter(
                 CareAssertion.person_id == person_rejected,
