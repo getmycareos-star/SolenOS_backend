@@ -895,21 +895,31 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         status_match = re.search(r"\bstatus=([a-z_]+)\b", appointment_context)
         if status_match:
             appointment_statuses.append(status_match.group(1))
+    appointment_status_pattern = (
+        r"\b(?:appointment|(?:[a-z][a-z-]*\s+){0,2}(?:review|visit))\b"
+        r".{0,100}?\b(?:is|was|has been)\s+"
+        r"(?:(?:listed|recorded|shown)\s+as\s+)?(?:now\s+)?"
+        r"(scheduled|confirmed|cancelled|canceled|rescheduled|completed)\b"
+    )
     appointment_status_claims = [
-        match.group(1)
-        for match in re.finditer(
-            r"\b(?:appointment|(?:[a-z][a-z-]*\s+){0,2}(?:review|visit))\b"
-            r".{0,100}?\b(?:is|was|has been)\s+"
-            r"(?:(?:listed|recorded|shown)\s+as\s+)?(?:now\s+)?"
-            r"(scheduled|confirmed|cancelled|canceled|rescheduled|completed)\b",
-            text,
-        )
+        match.group(1) for match in re.finditer(appointment_status_pattern, text)
     ]
     if appointment_status_claims:
-        if not appointment_statuses or len(set(appointment_statuses)) != 1:
-            return True
-        if any(claim != appointment_statuses[0] for claim in appointment_status_claims):
-            return True
+        if appointment_contexts:
+            if not appointment_statuses or len(set(appointment_statuses)) != 1:
+                return True
+            if any(claim != appointment_statuses[0] for claim in appointment_status_claims):
+                return True
+        else:
+            # Without a structured appointment row, only repeat an explicit
+            # status claim already present in the caregiver's supplied source.
+            source_status_claims = [
+                match.group(1) for match in re.finditer(appointment_status_pattern, source)
+            ]
+            if not source_status_claims or any(
+                claim not in source_status_claims for claim in appointment_status_claims
+            ):
+                return True
 
     # A question can mention the same words as an unsupported delivery claim.
     # Do not treat word overlap as proof when the source explicitly lacks a receipt.
