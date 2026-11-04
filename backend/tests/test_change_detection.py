@@ -172,12 +172,13 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         from app.core.change_enums import ChangeType, ChangeDirection, PatternType
         from app.services.pattern_detection import detect_patterns
         event_ids = []
-        for i in range(2):
+        for i in range(3):
+            days_ago = 30 + i * 30
             event = CareEvent(
                 person_id=person.id,
                 event_type="fall",
                 status="recorded",
-                occurred_at=now - timedelta(days=30 + i * 30),
+                occurred_at=now - timedelta(days=days_ago),
                 title=f"Persisted fall event {i + 1}",
                 created_by_caregiver_id=caregiver.id,
             )
@@ -197,7 +198,7 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
                     current_count=2 + i,
                     confidence=None,
                     evidence_ids=[event.id],
-                    created_at=now - timedelta(days=30 + i * 30),
+                    created_at=now - timedelta(days=days_ago),
                 )
             )
         db.commit()
@@ -208,7 +209,7 @@ def test_pattern_detection_recurrence_uses_persisted_events_and_is_idempotent():
         pattern = patterns[0]
         assert pattern.pattern_type.value == "recurrence"
         assert set(pattern.event_ids) == set(event_ids)
-        assert pattern.evidence_count == 2
+        assert pattern.evidence_count == 3
         assert pattern.confidence is None
         assert pattern.rate_per_period is None
         assert any(
@@ -1454,9 +1455,44 @@ def test_recurrence_rate_requires_complete_explicit_observation_coverage():
         ))
         db.commit()
 
-        from app.services.pattern_detection import detect_patterns
+        from app.services.pattern_detection import detect_patterns, _build_recurrence_pattern
+        persisted_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person.id,
+            CareEvent.event_type == "fall",
+            CareEvent.status == "recorded",
+        ).all()
+        assert len(persisted_events) == 2, "the recurrence fixture must persist both source events"
+        from app.services.pattern_detection import MAX_PATTERN_LOOKBACK_DAYS
+        query_now = now
+        query_window_start = query_now - timedelta(days=MAX_PATTERN_LOOKBACK_DAYS)
+        eligible_events = db.query(CareEvent).filter(
+            CareEvent.person_id == person.id,
+            CareEvent.event_type == "fall",
+            CareEvent.status.notin_(("invalidated", "superseded", "unparsed_raw")),
+            CareEvent.occurred_at >= query_window_start,
+            CareEvent.occurred_at <= query_now,
+        ).all()
+        assert len(eligible_events) == 2, {
+            "eligible_count": len(eligible_events),
+            "window_start": query_window_start.isoformat(),
+            "now": query_now.isoformat(),
+            "events": [(event.id, event.status, event.occurred_at.isoformat()) for event in persisted_events],
+        }
+        assert max(event.occurred_at for event in persisted_events) - min(
+            event.occurred_at for event in persisted_events
+        ) >= timedelta(days=1), "the recurrence fixture must span distinct reporting periods"
+        direct_recurrence = _build_recurrence_pattern(
+            db, person.id, "fall", "", persisted_events, [], now
+        )
+        assert direct_recurrence is not None, "two persisted events across 30 days must form a recurrence candidate"
         patterns = detect_patterns(db, person.id, "fall", None, now)
         db.commit()
+        assert patterns, {
+            "event_rows": [(event.id, event.event_type, event.status, event.occurred_at) for event in db.query(CareEvent).filter(CareEvent.person_id == person.id).all()],
+            "now": now.isoformat(),
+            "window_start": (now - timedelta(days=365)).isoformat(),
+            "direct_recurrence_id": direct_recurrence.id,
+        }
         recurrence = next(item for item in patterns if item.pattern_type.value == "recurrence")
         assert recurrence.rate_per_period is not None
         assert recurrence.rate_per_period == pytest.approx(2.0 / 3.0)
@@ -1780,6 +1816,46 @@ def test_pattern_detection_finds_short_window_cluster_from_distinct_events():
         teardown_db()
 
 
+def test_same_session_capture_burst_is_not_longitudinal_recurrence_or_cluster():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="person-same-session-burst", name="Same-session burst person")
+        caregiver = Caregiver(
+            id="caregiver-same-session-burst",
+            name="Same-session burst caregiver",
+            email="same-session-burst@example.com",
+            relationship="Family",
+            person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        now = datetime.now(timezone.utc)
+        for index, seconds_ago in enumerate((120, 60, 0)):
+            db.add(CareEvent(
+                id=f"same-session-burst-{index}",
+                person_id=person.id,
+                event_type="mood_and_behavior",
+                status="recorded",
+                occurred_at=now - timedelta(seconds=seconds_ago),
+                title="Caregiver mood and behavior update",
+                created_by_caregiver_id=caregiver.id,
+                evidence_ids=[f"same-session-source-{index}"],
+            ))
+        db.commit()
+
+        from app.core.change_enums import PatternType
+        from app.services.pattern_detection import detect_patterns
+        patterns = detect_patterns(db, person.id, "mood_and_behavior", None, now)
+        assert not any(
+            item.pattern_type in {PatternType.RECURRENCE, PatternType.CLUSTERING}
+            for item in patterns
+        ), "Three captures in a two-minute burst must remain separate reports, not a longitudinal pattern"
+    finally:
+        db.close()
+        teardown_db()
+
+
 def test_pattern_detail_returns_only_same_person_source_events():
     setup_db()
     try:
@@ -1935,12 +2011,13 @@ def test_pattern_detection_does_not_mix_source_events_across_subjects():
         db.add_all([person, caregiver])
         db.commit()
         now = datetime.now(timezone.utc)
-        subject_a_ids = {"scope-a-1", "scope-a-2"}
+        subject_a_ids = {"scope-a-1", "scope-a-2", "scope-a-3"}
         subject_b_ids = {"scope-b-1", "scope-b-2"}
         from app.core.change_enums import ChangeType, ChangeDirection
         for event_id, subject_id, days_ago in (
             ("scope-a-1", "subject-a", 20),
-            ("scope-a-2", "subject-a", 5),
+            ("scope-a-2", "subject-a", 10),
+            ("scope-a-3", "subject-a", 5),
             ("scope-b-1", "subject-b", 18),
             ("scope-b-2", "subject-b", 3),
         ):

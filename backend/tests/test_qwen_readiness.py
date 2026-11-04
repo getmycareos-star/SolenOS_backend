@@ -39,7 +39,8 @@ def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
         def read(self):
             return b'{"models":[{"name":"qwen2.5:0.5b"}]}'
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 90.0))
+    monkeypatch.setenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")
     monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "installed"})
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
     calls = []
@@ -50,7 +51,7 @@ def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
     assert result["available"] is True
     assert result["state"] == "ready"
     assert len(calls) == 1
-    assert calls[0][1]["timeout"] <= 12.0
+    assert calls[0][1]["timeout"] == 45.0
 
 
 def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):

@@ -54,3 +54,27 @@ def test_rejected_preflight_logs_origin_and_requested_headers_without_request_da
     # The logger receives header names only, never an Authorization value or
     # request body/care record data.
     assert "Authorization:" not in repr(warning.call_args)
+
+
+def test_owned_netlify_preview_origins_can_preflight_authenticated_upload():
+    client = TestClient(app)
+    preview_origins = (
+        "https://history-preview--solenosai.netlify.app",
+        "https://6aea3e3baffa78893a150a3a--solenosai.netlify.app",
+    )
+    for preview_origin in preview_origins:
+        response = client.options(
+            "/api/v1/upload",
+            headers={
+                "Origin": preview_origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+        assert response.status_code == 200, f"{preview_origin}: {response.status_code} {response.text}"
+        assert response.headers.get("access-control-allow-origin") == preview_origin
+        assert response.headers.get("access-control-allow-credentials") == "true"
+        assert "POST" in response.headers.get("access-control-allow-methods", "")
+        allowed_headers = response.headers.get("access-control-allow-headers", "").lower()
+        assert "authorization" in allowed_headers
+        assert "content-type" in allowed_headers

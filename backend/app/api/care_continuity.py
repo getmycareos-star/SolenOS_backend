@@ -1205,17 +1205,17 @@ def current_care_projection(
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
-    authorized_evidence_ids = set()
+    authorized_evidence_ids: set[str] = set()
+    authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_ids = {
-            str(value)
-            for value in db.execute(
-                select(Evidence.id).where(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(candidate_evidence_ids),
-                )
-            ).scalars().all()
+        authorized_evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(candidate_evidence_ids),
+        ).all()
+        authorized_evidence_by_id = {
+            str(row.id): row for row in authorized_evidence_rows
         }
+        authorized_evidence_ids = set(authorized_evidence_by_id)
     current_items: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
@@ -1250,8 +1250,39 @@ def current_care_projection(
             str(value) for value in evidence_ids
             if value and str(value) in authorized_evidence_ids
         ]
-        source_label = row.get("source_label") or row.get("author_label") or row.get("observer_label")
-        origin_type = row.get("source_type") or row.get("extraction_method") or "not_recorded"
+        linked_sources = [
+            authorized_evidence_by_id[evidence_id]
+            for evidence_id in evidence_ids
+            if evidence_id in authorized_evidence_by_id
+        ]
+        primary_source = linked_sources[0] if linked_sources else None
+        source_label = (
+            row.get("source_label")
+            or row.get("author_label")
+            or row.get("observer_label")
+            or (primary_source.reported_by_label if primary_source else None)
+            or (primary_source.original_author if primary_source else None)
+            or (
+                "Caregiver report"
+                if primary_source and primary_source.evidence_kind == "caregiver_report"
+                else None
+            )
+        )
+        origin_type = (
+            row.get("source_type")
+            or row.get("extraction_method")
+            or (primary_source.source_type if primary_source else None)
+            or "not_recorded"
+        )
+        epistemic_status = (
+            row.get("epistemic_status")
+            or row.get("epistemic_state")
+            or row.get("assertion_status")
+            or row.get("decision_status")
+            or (primary_source.epistemic_status if primary_source else None)
+            or "not_specified"
+        )
+        reported_at = row.get("reported_at") or (primary_source.reported_at if primary_source else None)
         claim_refs = row.get("claim_refs") or row.get("competing_claim_ids")
         if isinstance(claim_refs, str):
             try:
@@ -1267,12 +1298,17 @@ def current_care_projection(
             "title": title[:240],
             "description": description[:1600],
             "status": status,
-            "epistemic_status": row.get("epistemic_status") or row.get("epistemic_state") or row.get("assertion_status") or row.get("decision_status") or "not_specified",
+            "epistemic_status": epistemic_status,
             "source_collection": source_name,
+            "source_event_type": row.get("event_type") if source_name == "events" else None,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
+            "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
+            "reported_by_label": row.get("reported_by_label") or (primary_source.reported_by_label if primary_source else None),
+            "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
+            "original_source_reference": row.get("original_source_reference") or (primary_source.original_source_reference if primary_source else None),
             "occurred_at": occurred_at,
-            "reported_at": row.get("reported_at"),
+            "reported_at": reported_at,
             "due_at": row.get("due_at"),
             "recorded_at": recorded_at,
             "evidence_ids": evidence_ids[:50],
@@ -1346,11 +1382,52 @@ def current_care_projection(
         for row in observation_rows
         if row.get("supersedes_observation_id")
     }
+    # An observation extracted from a caregiver report is not a second,
+    # independent care event. Keep the event as the top-level history item and
+    # attach its structured extraction beneath it when the evidence link is
+    # unambiguous. The observation remains separately persisted and auditable.
+    event_items_by_evidence: dict[str, list[dict[str, Any]]] = {}
+    for current_item in current_items:
+        if current_item.get("source_collection") != "events":
+            continue
+        for evidence_id in current_item.get("evidence_ids") or []:
+            event_items_by_evidence.setdefault(str(evidence_id), []).append(current_item)
+
     for row in observation_rows:
         # Current-care view shows the latest non-superseded version. Historical
         # versions remain in the immutable assessment trajectory and source endpoint.
-        if str(row.get("id") or "") not in superseded_observation_ids:
-            add("evidence_observations", row, "Structured evidence observation", 7)
+        if str(row.get("id") or "") in superseded_observation_ids:
+            continue
+        evidence_id = str(row.get("evidence_id") or "")
+        linked_events = event_items_by_evidence.get(evidence_id, []) if evidence_id else []
+        if len(linked_events) == 1:
+            linked_events[0].setdefault("derived_observations", []).append({
+                "id": str(row.get("id") or ""),
+                "observation_kind": row.get("observation_kind"),
+                "epistemic_status": row.get("epistemic_status"),
+                "subject_label": row.get("subject_label"),
+                "attribute": row.get("attribute"),
+                "value_text": row.get("value_text"),
+                "normalized_value": row.get("normalized_value"),
+                "units": row.get("units"),
+                "context": row.get("context"),
+                "observer_label": row.get("observer_label"),
+                "observation_method": row.get("observation_method"),
+                "observed_at": row.get("observed_at"),
+                "recorded_at": row.get("recorded_at"),
+                "source_span_start": row.get("source_span_start"),
+                "source_span_end": row.get("source_span_end"),
+                "source_passage": row.get("source_passage"),
+                "negated": row.get("negated"),
+                "hedge_marker": row.get("hedge_marker"),
+                "ambiguity_note": row.get("ambiguity_note"),
+                "extraction_method": row.get("extraction_method"),
+                "extraction_version": row.get("extraction_version"),
+                "supersedes_observation_id": row.get("supersedes_observation_id"),
+                "correction_rationale": row.get("correction_rationale"),
+            })
+            continue
+        add("evidence_observations", row, "Structured evidence observation", 7)
     for row in (sources.get("assertions") or {}).get("items", []):
         add("assertions", row, "Reported information", 8, require_open=True)
     for row in (sources.get("decisions") or {}).get("items", []):
@@ -1595,17 +1672,17 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 candidate_evidence_ids.update(str(value) for value in linked if value)
             if source_name == "evidence_observations" and source_item.get("evidence_id"):
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
-    authorized_evidence_ids = set()
+    authorized_evidence_ids: set[str] = set()
+    authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_ids = {
-            str(value)
-            for value in db.execute(
-                select(Evidence.id).where(
-                    Evidence.person_id == person_id,
-                    Evidence.id.in_(candidate_evidence_ids),
-                )
-            ).scalars().all()
+        authorized_evidence_rows = db.query(Evidence).filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(candidate_evidence_ids),
+        ).all()
+        authorized_evidence_by_id = {
+            str(row.id): row for row in authorized_evidence_rows
         }
+        authorized_evidence_ids = set(authorized_evidence_by_id)
     source_domains = {
         "events": "current_state_reconstruction",
         "facts": "current_care_reality",
@@ -1648,6 +1725,43 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 str(value) for value in raw_linked_ids
                 if value and str(value) in authorized_evidence_ids
             ]
+            linked_sources = [
+                authorized_evidence_by_id[evidence_id]
+                for evidence_id in normalized_row["evidence_ids"]
+                if evidence_id in authorized_evidence_by_id
+            ]
+            primary_source = linked_sources[0] if linked_sources else None
+            normalized_row["source_label"] = (
+                row.get("source_label")
+                or row.get("author_label")
+                or row.get("observer_label")
+                or (primary_source.reported_by_label if primary_source else None)
+                or (primary_source.original_author if primary_source else None)
+                or (
+                    "Caregiver report"
+                    if primary_source and primary_source.evidence_kind == "caregiver_report"
+                    else None
+                )
+            )
+            normalized_row["source_type"] = (
+                row.get("source_type")
+                or (primary_source.source_type if primary_source else None)
+                or "not_recorded"
+            )
+            normalized_row["epistemic_status"] = (
+                row.get("epistemic_status")
+                or row.get("epistemic_state")
+                or (primary_source.epistemic_status if primary_source else None)
+                or "not_specified"
+            )
+            normalized_row["reported_at"] = (
+                row.get("reported_at")
+                or (primary_source.reported_at if primary_source else None)
+            )
+            normalized_row["reported_by_caregiver_id"] = (
+                row.get("reported_by_caregiver_id")
+                or (primary_source.reported_by_caregiver_id if primary_source else None)
+            )
             normalized_row["evidence_link_validation"] = (
                 "same_care_record_evidence_reference_verified"
                 if normalized_row["evidence_ids"]
@@ -1764,6 +1878,11 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or source)[:240],
             "status": status or str(item.get("epistemic_state") or item.get("epistemic_status") or "not_recorded").lower(),
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
+            "source_label": item.get("source_label") or "Source label not recorded",
+            "source_type": item.get("source_type") or "not_recorded",
+            "reported_at": item.get("reported_at"),
+            "reported_by_caregiver_id": item.get("reported_by_caregiver_id"),
+            "evidence_link_validation": item.get("evidence_link_validation") or "no_authorized_evidence_reference_returned",
             "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": (
