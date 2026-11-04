@@ -157,7 +157,7 @@ def test_cached_extraction_rechecks_original_binary_integrity(client, monkeypatc
     def fail_on_retry(upload):
         nonlocal calls
         calls += 1
-        if calls > 1:
+        if calls >= 1:
             raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
         return original_verify(upload)
 
