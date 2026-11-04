@@ -147,7 +147,11 @@ def test_cached_extraction_rechecks_original_binary_integrity(client, monkeypatc
     first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert first.status_code == 201, first.text
 
-    original_verify = document_lifecycle._verified_content
+    route = next(
+        route for route in test_client.app.routes
+        if getattr(route, "path", "") == "/api/v1/documents/{evidence_id}/extract"
+    )
+    original_verify = route.endpoint.__globals__["_verified_content"]
     calls = 0
 
     def fail_on_retry(upload):
@@ -157,7 +161,7 @@ def test_cached_extraction_rechecks_original_binary_integrity(client, monkeypatc
             raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
         return original_verify(upload)
 
-    monkeypatch.setattr(document_lifecycle, "_verified_content", fail_on_retry)
+    monkeypatch.setitem(route.endpoint.__globals__, "_verified_content", fail_on_retry)
     retry = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
     assert retry.status_code == 500, retry.text
     assert retry.json()["detail"] == "Stored evidence failed its integrity check"
