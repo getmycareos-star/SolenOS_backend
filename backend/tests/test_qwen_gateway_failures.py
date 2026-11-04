@@ -117,3 +117,30 @@ def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monke
     assert answer == "The synthetic record is unverified."
     assert captured["model"] == "qwen3.5:4b"
     assert captured["think"] is False
+
+
+def test_qwen35_gateway_rejects_thinking_only_response(monkeypatch):
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: ("http://ollama.internal", "qwen3.5:4b", 2.0),
+    )
+    response = {
+        "message": {
+            "role": "assistant",
+            "thinking": "private reasoning only",
+            "content": "",
+        }
+    }
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps(response).encode()),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "Confirm receipt."}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "empty_model_response"
+    assert error.value.detail["reason"] == "missing_message_content"
