@@ -11,7 +11,7 @@ def test_installation_state_is_machine_readable_and_restricts_failure_reason(tmp
     monkeypatch.setenv("QWEN_INSTALL_STATE_FILE", str(state_file))
     state_file.write_text(json.dumps({
         "state": "failed",
-        "model": "qwen2.5:0.5b",
+        "model": "qwen3.5:4b",
         "updated_at": "2026-10-31T00:00:00+00:00",
         "failure_reason": "ollama_pull_failed",
     }), encoding="utf-8")
@@ -19,7 +19,7 @@ def test_installation_state_is_machine_readable_and_restricts_failure_reason(tmp
     status = qwen_gateway.qwen_installation_status()
     assert status == {
         "state": "failed",
-        "model": "qwen2.5:0.5b",
+        "model": "qwen3.5:4b",
         "updated_at": "2026-10-31T00:00:00+00:00",
         "failure_reason": "ollama_pull_failed",
     }
@@ -37,9 +37,9 @@ def test_readiness_requires_installed_model_and_real_inference(monkeypatch):
         def __exit__(self, *args):
             return False
         def read(self):
-            return b'{"models":[{"name":"qwen2.5:0.5b"}]}'
+            return b'{"models":[{"name":"qwen3.5:4b"}]}'
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 90.0))
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 90.0))
     monkeypatch.setenv("OLLAMA_READINESS_TIMEOUT_SECONDS", "45")
     monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "installed"})
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
@@ -63,7 +63,7 @@ def test_readiness_fails_when_configured_model_is_not_installed(monkeypatch):
         def read(self):
             return b'{"models":[{"name":"another-model"}]}'
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
     monkeypatch.setattr(qwen_gateway, "qwen_installation_status", lambda: {"state": "downloading"})
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
     monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("inference must not run")))
@@ -141,7 +141,7 @@ def test_inference_telemetry_records_metadata_without_prompt_or_reply(monkeypatc
         def read(self):
             return b'{"message":{"content":"synthetic secret reply"}}'
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", lambda *args, **kwargs: Response())
     caplog.set_level(logging.INFO, logger=qwen_gateway.__name__)
 
@@ -149,7 +149,7 @@ def test_inference_telemetry_records_metadata_without_prompt_or_reply(monkeypatc
     assert answer == "synthetic secret reply"
     output = "\n".join(record.getMessage() for record in caplog.records)
     assert '"event":"qwen_inference"' in output
-    assert '"model":"qwen2.5:0.5b"' in output
+    assert '"model":"qwen3.5:4b"' in output
     assert '"duration_ms":' in output
     assert '"timeout_seconds":20.0' in output
     assert "synthetic secret prompt" not in output
@@ -163,7 +163,7 @@ def test_inference_timeout_is_classified_and_logged_without_content(monkeypatch,
     def timeout(*args, **kwargs):
         raise TimeoutError("synthetic timeout detail")
 
-    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen2.5:0.5b", 20.0))
+    monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama", "qwen3.5:4b", 20.0))
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", timeout)
     caplog.set_level(logging.INFO, logger=qwen_gateway.__name__)
 
