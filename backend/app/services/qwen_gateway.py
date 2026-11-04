@@ -249,10 +249,13 @@ def extract_review_candidates(
             continue
         if any(term in observation.casefold() for term in ("diagnosed with", "caused by", "should increase dose", "should stop medication")):
             continue
+        source_start = bounded_source.find(quote)
         candidate = {
             "subject": subject.strip()[:120],
             "observation": observation.strip()[:500],
             "source_quote": quote,
+            "source_span_start": source_start,
+            "source_span_end": source_start + len(quote),
             "review_status": "pending_review",
         }
         if source_event_id:
