@@ -155,7 +155,7 @@ def extract_document(filename: str, mime_type: str, content: bytes) -> dict[str,
         except HTTPException:
             raise
         except (UnidentifiedImageError, OSError, ImportError) as exc:
-            raise HTTPException(status_code=422, detail="The uploaded image format could not be decoded") from exc
+            raise HTTPException(status_code=415, detail="The uploaded image format could not be decoded") from exc
         return {
             "text": extracted[:MAX_EXTRACTED_CHARS],
             "method": "server_image_ocr",
