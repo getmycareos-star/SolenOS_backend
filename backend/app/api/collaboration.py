@@ -882,6 +882,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             # in source text; exact wording is intentionally required here.
             terms = re.findall(r"[a-z]+", claim)
             if not all(re.search(r"\b" + re.escape(term) + r"\b", source) for term in terms):
+                logger.warning("Qwen care-grounding rejection: rule=phrase_pattern_%d", pattern_index)
                 return True
     # Appointment status is a structured fact, not a semantic implication:
     # "scheduled" does not mean "confirmed". Match claims against the status
@@ -946,6 +947,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:password|verification code|authentication code|one[- ]time code|otp|recovery code|security code)\b",
         text,
     ):
+        logger.warning("Qwen care-grounding rejection: rule=credential_request")
         return True
 
     # When authoritative state is explicitly missing, reject confident status claims.
