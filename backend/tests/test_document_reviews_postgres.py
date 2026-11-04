@@ -236,6 +236,29 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                 )
             assert denied.value.status_code == 404
 
+
+        # Candidate text with an incorrect source span is never accepted into the LCR.
+        person_bad, caregiver_bad, _, analysis_bad, _ = _fixture(Session)
+        with Session() as db:
+            bad_analysis = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.id == analysis_bad
+            ).one()
+            bad_analysis.candidates["observations"][0]["source_span_start"] += 1
+            db.commit()
+        with Session() as db:
+            with pytest.raises(HTTPException) as invalid_quote:
+                review_document_candidate(
+                    analysis_bad,
+                    DocumentCandidateDecision(candidate_index=0, decision="accept"),
+                    _request(person_bad, caregiver_bad), db,
+                )
+            assert invalid_quote.value.status_code == 409
+        with Session() as db:
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_bad,
+                CareAssertion.field == "document_observation",
+            ).count() == 0
+
         # Rejected candidates never create a CareAssertion.
         person_rejected, caregiver_rejected, _, rejected_analysis, _ = _fixture(Session)
         with Session() as db:
