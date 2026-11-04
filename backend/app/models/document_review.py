@@ -17,7 +17,7 @@ class DocumentCandidateReview(Base):
     )
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     analysis_id = Column(String, ForeignKey("capture_analyses.id", ondelete="CASCADE"), nullable=False)
-    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
     caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
     source_evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), nullable=False)
     candidate_index = Column(Integer, nullable=False)
