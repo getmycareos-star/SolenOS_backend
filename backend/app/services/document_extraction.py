@@ -138,11 +138,11 @@ def extract_document(filename: str, mime_type: str, content: bytes) -> dict[str,
         }
 
     image_types = {
-        "image/jpeg", "image/png", "image/webp", "image/tiff", "image/bmp",
+        "image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff", "image/bmp",
         "image/heic", "image/heif",
     }
     image_extensions = (
-        ".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff", ".bmp", ".heic", ".heif"
+        ".jpg", ".jpeg", ".png", ".webp", ".gif", ".tif", ".tiff", ".bmp", ".heic", ".heif"
     )
     if mime in image_types or name.endswith(image_extensions):
         try:
