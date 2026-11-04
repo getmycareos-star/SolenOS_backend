@@ -17,7 +17,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: deployed-qwen-production-acceptance
+  group: deployed-qwen-production-acceptance-qwen-source
   cancel-in-progress: true
 
 jobs:
