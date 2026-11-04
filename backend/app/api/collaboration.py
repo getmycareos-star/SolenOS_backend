@@ -875,7 +875,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:was\s+)?(?:reported|provided|recorded|observed)\b",
         r"\b(?:professional|clinician|doctor|nurse)-reported information\b",
     )
-    for pattern in patterns:
+    for pattern_index, pattern in enumerate(patterns):
         for match in re.finditer(pattern, text):
             claim = match.group(0)
             # All meaningful terms in these high-impact phrases must be present
@@ -907,8 +907,10 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     if appointment_status_claims:
         if appointment_contexts:
             if not appointment_statuses or len(set(appointment_statuses)) != 1:
+                logger.warning("Qwen care-grounding rejection: rule=ambiguous_appointment_context")
                 return True
             if any(claim != appointment_statuses[0] for claim in appointment_status_claims):
+                logger.warning("Qwen care-grounding rejection: rule=appointment_status_mismatch")
                 return True
         else:
             # Without a structured appointment row, only repeat an explicit
@@ -919,6 +921,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
             if not source_status_claims or any(
                 claim not in source_status_claims for claim in appointment_status_claims
             ):
+                logger.warning("Qwen care-grounding rejection: rule=unverified_appointment_status")
                 return True
 
     # A question can mention the same words as an unsupported delivery claim.
@@ -934,6 +937,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         text,
     )
     if missing_delivery_state and delivery_status_claim:
+        logger.warning("Qwen care-grounding rejection: rule=missing_delivery_state")
         return True
 
     # Never ask caregivers to disclose credentials or one-time verification secrets.
@@ -960,6 +964,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
         r"(?:retained|available|saved|synced|verified|accepted|completed|deleted|archived)\b",
     )
     if missing_state and any(re.search(pattern, text) for pattern in unsupported_state_claims):
+        logger.warning("Qwen care-grounding rejection: rule=unsupported_state_claim")
         return True
     return False
 
