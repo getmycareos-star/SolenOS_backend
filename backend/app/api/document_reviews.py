@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+import hashlib
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -16,6 +17,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.document_review import DocumentCandidateReview
+from app.services.qwen_gateway import extract_review_candidates
 
 router = APIRouter(prefix="/documents", tags=["document review"])
 
@@ -189,6 +191,84 @@ def review_document_candidate(
         raise HTTPException(status_code=409, detail="A concurrent review was recorded; reload the candidate history") from exc
     return _decision_response(row)
 
+
+
+@router.post("/analyses/{analysis_id}/interpret")
+def retry_document_interpretation(
+    analysis_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Retry candidate interpretation only while no caregiver decisions exist."""
+    person_id, caregiver_id = _identity(request, db)
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+    ).with_for_update().first()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    metadata = dict(analysis.candidates) if isinstance(analysis.candidates, dict) else {}
+    if metadata.get("kind") != "document_extraction_v1":
+        raise HTTPException(status_code=404, detail="Document extraction not found")
+    existing_reviews = db.query(DocumentCandidateReview.id).filter(
+        DocumentCandidateReview.analysis_id == analysis_id,
+        DocumentCandidateReview.person_id == person_id,
+    ).first()
+    if existing_reviews is not None:
+        raise HTTPException(status_code=409, detail="Interpretation cannot be replaced after caregiver review has begun")
+
+    attempts = list(metadata.get("candidate_extraction_attempts") or [])
+    source_text = analysis.source_text or ""
+    if not source_text:
+        raise HTTPException(status_code=422, detail="No extracted source text is available to interpret")
+    try:
+        candidates = extract_review_candidates(
+            source_text,
+            source_event_id=None,
+            source_evidence_id=analysis.source_evidence_id,
+        )
+    except Exception as exc:
+        attempts.append({
+            "attempt": len(attempts) + 1,
+            "status": "unavailable",
+            "attempted_by_caregiver_id": caregiver_id,
+            "attempted_at": datetime.now(timezone.utc).isoformat(),
+            "candidate_count": 0,
+            "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+        })
+        metadata["candidate_extraction_attempts"] = attempts
+        metadata["candidate_extraction_status"] = "unavailable"
+        analysis.candidates = metadata
+        db.commit()
+        raise HTTPException(status_code=503, detail="Candidate interpretation is unavailable; the original and extracted text remain preserved") from exc
+
+    observations = candidates.get("observations", [])
+    metadata["observations"] = observations
+    metadata["open_questions"] = candidates.get("open_questions", [])
+    metadata["candidate_extraction_status"] = "available"
+    metadata["candidate_extraction_source_chars"] = min(len(source_text), 12_000)
+    metadata["candidate_extraction_truncated"] = len(source_text) > 12_000
+    attempts.append({
+        "attempt": len(attempts) + 1,
+        "status": "available",
+        "attempted_by_caregiver_id": caregiver_id,
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        "candidate_count": len(observations),
+        "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
+    })
+    metadata["candidate_extraction_attempts"] = attempts
+    analysis.candidates = metadata
+    db.commit()
+    db.refresh(analysis)
+    return {
+        "analysis_id": analysis_id,
+        "candidate_extraction_status": "available",
+        "candidate_count": len(observations),
+        "open_question_count": len(metadata["open_questions"]),
+        "attempt_count": len(attempts),
+        "review_required": True,
+        "written_to_lcr": False,
+    }
 
 @router.get("/analyses/{analysis_id}/reviews")
 def get_document_candidate_reviews(
