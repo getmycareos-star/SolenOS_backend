@@ -513,10 +513,16 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         raise HTTPException(status_code=422, detail="caregiver_id is required")
 
     _require_session_scope(request, db, person_id, caregiver_id)
+    capture_idempotency_key = payload.get("capture_idempotency_key")
+    if capture_idempotency_key is not None and (
+        not isinstance(capture_idempotency_key, str)
+        or not 8 <= len(capture_idempotency_key) <= 128
+    ):
+        raise HTTPException(status_code=422, detail="capture_idempotency_key must contain 8 to 128 characters")
     person_query = db.query(PersonModel).filter(PersonModel.id == person_id)
-    # Serialize quick check-in writes per care recipient so concurrent retries
-    # cannot both pass the idempotency lookup on PostgreSQL.
-    if event_type == "quick_daily_checkin":
+    # Serialize all idempotent Daily Care writes per care recipient so
+    # concurrent retries cannot both pass the lookup on PostgreSQL.
+    if event_type == "quick_daily_checkin" or capture_idempotency_key:
         person_query = person_query.with_for_update()
     person = person_query.first()
     if not person:
@@ -534,6 +540,77 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     # existing schema has no separate medication/vitals/scales tables yet.
     detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
     quick_check_in = detail.get("quick_check_in")
+    capture_request_fingerprint = None
+    if event_type in {"structured_daily_capture", "daily_care_entry"} and capture_idempotency_key:
+        fingerprint_payload = {
+            key: value for key, value in detail.items()
+            if key not in {"capture_idempotency_key", "capture_request_fingerprint"}
+        }
+        capture_request_fingerprint = hashlib.sha256(
+            json.dumps(fingerprint_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        existing_events = db.query(CareEventModel).filter(
+            CareEventModel.person_id == person_id,
+            CareEventModel.created_by_caregiver_id == caregiver_id,
+            CareEventModel.event_type == event_type,
+            CareEventModel.description.like(f'%"{capture_idempotency_key}"%'),
+        ).all()
+        for existing_event in existing_events:
+            try:
+                existing_detail = json.loads(existing_event.description or "{}")
+            except (TypeError, ValueError):
+                continue
+            if existing_detail.get("capture_idempotency_key") != capture_idempotency_key:
+                continue
+            if existing_detail.get("capture_request_fingerprint") != capture_request_fingerprint:
+                raise HTTPException(status_code=409, detail="This Daily Care request key was already used for different content")
+            linked_evidence_ids = list(existing_event.evidence_ids or [])
+            if not linked_evidence_ids:
+                ingestion_key = f"daily-capture:{caregiver_id}:{capture_idempotency_key}"[:128]
+                evidence = db.query(EvidenceModel).filter(
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.ingestion_key == ingestion_key,
+                ).first()
+                if evidence is None:
+                    source_payload = {
+                        "original_capture": {
+                            key: value for key, value in existing_detail.items()
+                            if key not in {"capture_idempotency_key", "capture_request_fingerprint"}
+                        }
+                    }
+                    evidence = EvidenceModel(
+                        person_id=person_id,
+                        type="note",
+                        evidence_kind="caregiver_report",
+                        epistemic_status="caregiver_reported",
+                        source_text=json.dumps(source_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str),
+                        uploaded_by_caregiver_id=caregiver_id,
+                        reported_by_caregiver_id=caregiver_id,
+                        collected_by_caregiver_id=caregiver_id,
+                        reported_by_label="Caregiver",
+                        source_type="caregiver_report",
+                        origin_channel=event_type,
+                        collection_method="caregiver_form",
+                        time_provenance="server_recorded_at",
+                        occurred_at=existing_event.occurred_at,
+                        ingestion_key=ingestion_key,
+                        ingestion_request_sha256=capture_request_fingerprint,
+                    )
+                    db.add(evidence)
+                    db.flush()
+                linked_evidence_ids = [evidence.id]
+                existing_event.evidence_ids = linked_evidence_ids
+                db.commit()
+                db.refresh(existing_event)
+            return {
+                "success": True,
+                "id": existing_event.id,
+                "event_type": existing_event.event_type,
+                "recorded_at": existing_event.recorded_at,
+                "evidence_ids": linked_evidence_ids,
+                "idempotent_replay": True,
+            }
+        detail["capture_request_fingerprint"] = capture_request_fingerprint
     if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
         idempotency_key = quick_check_in["idempotency_key"]
         fingerprint_payload = {
@@ -639,6 +716,39 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         )
         db.add(evidence)
         db.flush()
+    elif event_type in {"structured_daily_capture", "daily_care_entry"}:
+        # Ordinary Daily Care captures need the same durable source lineage as
+        # quick check-ins. Preserve the submitted fields verbatim as caregiver
+        # report evidence; this does not verify the reported care state.
+        evidence = EvidenceModel(
+            person_id=person_id,
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=json.dumps(
+                {"original_capture": detail},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ),
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+            origin_channel=event_type,
+            collection_method="caregiver_form",
+            time_provenance="server_recorded_at",
+            occurred_at=occurred_at,
+            ingestion_key=(
+                f"daily-capture:{caregiver_id}:{capture_idempotency_key}"[:128]
+                if capture_idempotency_key else None
+            ),
+            ingestion_request_sha256=capture_request_fingerprint,
+        )
+        db.add(evidence)
+        db.flush()
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -691,7 +801,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             person_id=person_id,
             caregiver_id=caregiver_id,
             source_event_id=event.id,
-            source_evidence_id=None,
+            source_evidence_id=evidence.id if evidence is not None else None,
             source_text=source_text,
             extraction_status=qwen_status,
             candidates=qwen_candidates if qwen_status == "available" else None,
@@ -723,6 +833,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         "event_type": event.event_type,
         "recorded_at": event.recorded_at,
         "evidence_ids": list(event.evidence_ids or []),
+        "idempotent_replay": False if capture_idempotency_key else None,
         "learning_pipeline_status": learning_pipeline_status,
         "qwen_extraction_status": qwen_status,
         "qwen_candidates": qwen_candidates,

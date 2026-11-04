@@ -14,6 +14,8 @@ MAX_PATTERN_CHANGE_ASSESSMENTS = 500
 # Keep a bounded but genuinely longitudinal source window. Ninety days hid
 # otherwise valid recurrence across longer care histories.
 MAX_PATTERN_LOOKBACK_DAYS = 365
+# A recurrence is longitudinal only when source events span at least a full day.
+MIN_LONGITUDINAL_PATTERN_SPAN = timedelta(days=1)
 
 
 def _utc_now() -> datetime:
@@ -440,11 +442,15 @@ def _build_recurrence_pattern(
     )
     timestamps = [_ensure_utc(event.occurred_at) for event in ordered_events]
     distinct_times = sorted({timestamp for timestamp in timestamps if timestamp is not None})
+    # Two captures in one session (or a short retry burst) are not enough
+    # to establish longitudinal recurrence. Preserve the existing two-event
+    # candidate threshold only when the source events span a full day.
     if len(ordered_events) < 2 or len(distinct_times) < 2:
         return None
-    span_days = (distinct_times[-1] - distinct_times[0]).total_seconds() / 86400.0
-    if span_days <= 0:
+    span = distinct_times[-1] - distinct_times[0]
+    if span < MIN_LONGITUDINAL_PATTERN_SPAN:
         return None
+    span_days = span.total_seconds() / 86400.0
 
     event_ids = [event.id for event in ordered_events]
     event_id_set = set(event_ids)
@@ -894,7 +900,16 @@ def _build_clustering_pattern(
             left += 1
         candidate = ordered[left:right + 1]
         distinct_times = {_ensure_utc(item.occurred_at) for item in candidate}
-        if len(candidate) >= 3 and len(distinct_times) >= 3 and len(candidate) > len(best_cluster):
+        candidate_span = (
+            _ensure_utc(candidate[-1].occurred_at) - _ensure_utc(candidate[0].occurred_at)
+            if candidate else timedelta(0)
+        )
+        if (
+            len(candidate) >= 3
+            and len(distinct_times) >= 3
+            and candidate_span >= MIN_LONGITUDINAL_PATTERN_SPAN
+            and len(candidate) > len(best_cluster)
+        ):
             best_cluster = candidate
     if len(best_cluster) < 3:
         return None

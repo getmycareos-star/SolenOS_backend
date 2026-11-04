@@ -184,6 +184,11 @@ cors_origins = list(dict.fromkeys([
 app.add_middleware(
     LoggingCORSMiddleware,
     allow_origins=cors_origins,
+    # Permit deploy previews belonging only to this Netlify site.
+    allow_origin_regex=r"^https://[a-z0-9-]+--solenosai\.netlify\.app$",
+    # Netlify deploy previews for this one site use <deploy-id>--solenosai.netlify.app.
+    # Keep the regex scoped to that exact site; do not allow arbitrary Netlify hosts.
+    allow_origin_regex=r"^https://[a-z0-9-]+--solenosai\.netlify\.app$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],

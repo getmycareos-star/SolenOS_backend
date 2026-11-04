@@ -164,6 +164,7 @@ def main():
         )
         require(status == 201, f"anonymous session creation expected 201, got {status}: {first}")
         token_a = first["access_token"]
+        original_session_token = token_a
         person_a = first["person"]["id"]
         caregiver_a = first["caregiver"]["id"]
 
@@ -868,14 +869,38 @@ def main():
         )
         require(status == 200, f"care capture expected 200, got {status}: {captured}")
         require(captured.get("person_id") == person_a, "capture response person scope mismatch")
+        observation_situation_id = captured.get("situation_id")
+        observation_event_id = captured.get("care_event_id")
+        observation_evidence_id = captured.get("evidence_id")
+        require(
+            observation_situation_id and observation_event_id and observation_evidence_id,
+            f"care capture did not return its persisted situation/event/evidence identifiers: {captured}",
+        )
 
         status, hydration = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"hydration expected 200, got {status}: {hydration}")
-        raw_observations = [
-            item.get("raw_text")
-            for item in (hydration.get("active_care_situation") or {}).get("observations", [])
-        ]
-        require(observation in raw_observations, "capture did not appear in persisted hydration")
+        captured_situation = next(
+            (item for item in hydration.get("ui_situations", [])
+             if item.get("id") == observation_situation_id),
+            None,
+        )
+        require(
+            captured_situation is not None
+            and observation_event_id in (captured_situation.get("linked_event_ids") or [])
+            and observation_evidence_id in (captured_situation.get("linked_evidence_ids") or []),
+            f"capture did not hydrate in its own persisted situation thread: {captured_situation}",
+        )
+        captured_event = next(
+            (item for item in hydration.get("events", [])
+             if item.get("id") == observation_event_id),
+            None,
+        )
+        require(
+            captured_event is not None
+            and captured_event.get("description") == observation
+            and observation_evidence_id in (captured_event.get("evidence_ids") or []),
+            f"capture source event did not hydrate with its original wording/evidence link: {captured_event}",
+        )
 
         # Authenticated UPDATE must persist in PostgreSQL and be visible on a fresh read.
         updated_name = "PostgreSQL E2E person A updated"
@@ -912,6 +937,19 @@ def main():
             body={"email": account_email, "password": account_password},
         )
         require(status == 201, f"account linking expected 201, got {status}: {account_created}")
+
+        # Terminate the original session before the independent account login.
+        status, original_revoked = request(
+            "POST", "/api/v1/sessions/revoke", token=original_session_token, body={},
+        )
+        require(status == 200 and original_revoked.get("revoked") is True,
+                f"Original session termination failed: {status}: {original_revoked}")
+        status, original_session_read = request(
+            "GET", f"/api/v1/events/{person_a}", token=original_session_token,
+        )
+        require(status == 401,
+                f"Terminated original session must no longer read history: {status}: {original_session_read}")
+
         status, second_device = request(
             "POST",
             "/api/v1/accounts/login",
@@ -922,11 +960,95 @@ def main():
                 "second-device login did not restore the same care-recipient identity")
         require(second_device.get("caregiver_id") == caregiver_a,
                 "second-device login did not restore the same caregiver identity")
+        account_id = second_device["account"]["id"]
         token_a = second_device["access_token"]
         status, second_device_read = request("GET", "/api/situation", token=token_a)
         require(status == 200, f"second-device read expected 200, got {status}: {second_device_read}")
         require(second_device_read.get("care_recipient_display_name") == updated_name,
                 "second-device login did not retrieve the persisted updated care record")
+
+        # Exercise the exact structured Daily Care -> CareEvent -> Evidence ->
+        # Recent History -> LCR -> persisted situation-assessment lifecycle.
+        daily_capture_payload = {
+            "person_id": person_a,
+            "caregiver_id": caregiver_a,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "PostgreSQL E2E caregiver report: sleep was interrupted twice overnight.",
+            "capture_idempotency_key": "postgres-daily-capture-restart-001",
+        }
+        status, daily_capture = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
+        )
+        require(status == 200 and daily_capture.get("success") is True,
+                f"Structured Daily Care capture failed: {status}: {daily_capture}")
+        daily_event_id = daily_capture.get("id")
+        daily_evidence_ids = daily_capture.get("evidence_ids") or []
+        require(daily_event_id and len(daily_evidence_ids) == 1,
+                f"Daily Care capture must return one event and one source evidence ID: {daily_capture}")
+        daily_evidence_id = daily_evidence_ids[0]
+
+        status, daily_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        require(status == 200, f"Recent History event read failed: {status}: {daily_history}")
+        history_matches = [row for row in daily_history if row.get("id") == daily_event_id]
+        require(len(history_matches) == 1
+                and history_matches[0].get("evidence_ids") == [daily_evidence_id],
+                f"Recent History did not return the same event/evidence IDs: {history_matches}")
+
+        status, daily_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        )
+        require(status == 200, f"Current-care LCR read failed: {status}: {daily_lcr}")
+        lcr_matches = [row for row in daily_lcr.get("items", []) if row.get("id") == daily_event_id]
+        require(len(lcr_matches) == 1
+                and lcr_matches[0].get("evidence_ids") == [daily_evidence_id]
+                and lcr_matches[0].get("evidence_link_validation") == "same_care_record_evidence_reference_verified"
+                and lcr_matches[0].get("source_label") == "Caregiver"
+                and lcr_matches[0].get("source_type") == "caregiver_report",
+                f"LCR did not reconcile the same authorized caregiver source: {lcr_matches}")
+
+        status, daily_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200 and any(
+            row.get("id") == daily_evidence_id
+            and row.get("epistemic_status") == "caregiver_reported"
+            for row in daily_evidence
+        ), f"Authorized caregiver source evidence could not be retrieved: {status}: {daily_evidence}")
+
+        status, daily_assessment = request(
+            "POST", "/api/v1/care-continuity/situation-understanding/reassess", token=token_a,
+        )
+        require(status == 200, f"Situation assessment rebuild failed: {status}: {daily_assessment}")
+        assessment_records = [
+            row for row in daily_assessment.get("assessment", {}).get("current_care_reality", {}).get("records", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(len(assessment_records) == 1
+                and assessment_records[0].get("evidence_ids") == [daily_evidence_id]
+                and assessment_records[0].get("source_label") == "Caregiver",
+                f"Situation assessment did not rebuild from the verified source: {assessment_records}")
+
+        status, daily_replay = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=daily_capture_payload,
+        )
+        require(status == 200
+                and daily_replay.get("id") == daily_event_id
+                and daily_replay.get("evidence_ids") == [daily_evidence_id]
+                and daily_replay.get("idempotent_replay") is True,
+                f"Unchanged Daily Care retry created a duplicate or changed its IDs: {status}: {daily_replay}")
+        changed_daily_capture = {
+            **daily_capture_payload,
+            "notes": "Different report must not reuse the original request key.",
+        }
+        status, changed_retry = request(
+            "POST", "/api/v1/daily/log", token=token_a, body=changed_daily_capture,
+        )
+        require(status == 409,
+                f"Changed content under the same request key must conflict: {status}: {changed_retry}")
 
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"cross-care-record evidence access must return 403, got {status}")
@@ -1232,6 +1354,79 @@ def main():
 
         stop_server(server)
         server = start_server()
+
+        # After the backend restart, authenticate again with the account
+        # credentials from a fresh request context. Do not reuse token_a or
+        # browser/session storage from before the restart.
+        status, post_restart_login = request(
+            "POST",
+            "/api/v1/accounts/login",
+            body={"email": account_email, "password": account_password},
+        )
+        require(status == 200, f"Independent account login after restart failed: {status}: {post_restart_login}")
+        require(post_restart_login.get("person_id") == person_a
+                and post_restart_login.get("caregiver_id") == caregiver_a
+                and post_restart_login.get("account", {}).get("id") == account_id
+                and post_restart_login.get("session_id") != second_device.get("session_id")
+                and post_restart_login.get("access_token") != second_device.get("access_token"),
+                "Post-restart independent login changed the account/person/caregiver identity or reused the old session")
+        token_a = post_restart_login["access_token"]
+        status, post_restart_identity = request("GET", "/api/situation", token=token_a)
+        require(status == 200
+                and post_restart_identity.get("care_recipient_display_name") == updated_name,
+                f"Independent login did not restore the original care record after restart: {status}: {post_restart_identity}")
+
+        status, post_restart_history = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_a,
+        )
+        require(status == 200, f"Recent History read after restart failed: {status}: {post_restart_history}")
+        post_restart_history_matches = [
+            row for row in post_restart_history if row.get("id") == daily_event_id
+        ]
+        require(len(post_restart_history_matches) == 1
+                and post_restart_history_matches[0].get("evidence_ids") == [daily_evidence_id],
+                f"Original Recent History event/evidence IDs changed after restart/login: {post_restart_history_matches}")
+
+        status, post_restart_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200 and any(
+            row.get("id") == daily_evidence_id
+            and row.get("epistemic_status") == "caregiver_reported"
+            for row in post_restart_evidence
+        ), f"Original source evidence was not restored after restart/login: {status}: {post_restart_evidence}")
+
+        status, post_restart_lcr = request(
+            "GET", "/api/v1/care-continuity/current-care?limit_per_source=50", token=token_a,
+        )
+        require(status == 200, f"LCR read after restart/login failed: {status}: {post_restart_lcr}")
+        post_restart_lcr_matches = [
+            row for row in post_restart_lcr.get("items", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(len(post_restart_lcr_matches) == 1
+                and post_restart_lcr_matches[0].get("evidence_ids") == [daily_evidence_id]
+                and post_restart_lcr_matches[0].get("source_label") == "Caregiver",
+                f"LCR did not restore the original source record after restart/login: {post_restart_lcr_matches}")
+
+        status, post_restart_assessment = request(
+            "GET", "/api/v1/care-continuity/situation-understanding", token=token_a,
+        )
+        persisted_assessment = post_restart_assessment.get("assessment", {}) if status == 200 else {}
+        persisted_assessment_records = [
+            row for row in persisted_assessment.get("current_care_reality", {}).get("records", [])
+            if row.get("id") == daily_event_id
+        ]
+        require(status == 200 and len(persisted_assessment_records) == 1
+                and persisted_assessment_records[0].get("evidence_ids") == [daily_evidence_id],
+                f"Persisted situation assessment did not restore the original source after restart/login: {status}: {post_restart_assessment}")
+
+        status, foreign_after_restart = request(
+            "GET", f"/api/v1/events/{person_a}", token=token_b,
+        )
+        require(status == 403,
+                f"Another person's session accessed Recent History after restart; expected 403, got {status}: {foreign_after_restart}")
+
         status, professional_after_restart = request(
             "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
         )
@@ -1337,11 +1532,41 @@ def main():
             concurrent_capture_evidence_ids.issubset(restarted_evidence_ids),
             "Both concurrent source evidence records must survive application restart",
         )
-        observations_after_restart = [
-            item.get("raw_text")
-            for item in (hydration_after_restart.get("active_care_situation") or {}).get("observations", [])
-        ]
-        require(observation in observations_after_restart, "care evidence did not survive application restart")
+        restarted_observation_situation = next(
+            (item for item in hydration_after_restart.get("ui_situations", [])
+             if item.get("id") == observation_situation_id),
+            None,
+        )
+        require(
+            restarted_observation_situation is not None
+            and observation_event_id in (restarted_observation_situation.get("linked_event_ids") or [])
+            and observation_evidence_id in (restarted_observation_situation.get("linked_evidence_ids") or []),
+            f"original care situation/event/evidence links did not survive application restart: {restarted_observation_situation}",
+        )
+        restarted_observation_event = next(
+            (item for item in hydration_after_restart.get("events", [])
+             if item.get("id") == observation_event_id),
+            None,
+        )
+        require(
+            restarted_observation_event is not None
+            and restarted_observation_event.get("description") == observation
+            and observation_evidence_id in (restarted_observation_event.get("evidence_ids") or []),
+            f"original caregiver wording/event evidence link did not survive application restart: {restarted_observation_event}",
+        )
+        status, restarted_evidence = request(
+            "GET", f"/api/v1/evidence/{person_a}", token=token_a,
+        )
+        require(status == 200, f"evidence read after restart expected 200, got {status}: {restarted_evidence}")
+        restarted_observation_evidence = next(
+            (item for item in restarted_evidence if item.get("id") == observation_evidence_id),
+            None,
+        )
+        require(
+            restarted_observation_evidence is not None
+            and restarted_observation_evidence.get("source_text") == observation,
+            f"original source evidence did not survive application restart unchanged: {restarted_observation_evidence}",
+        )
         status, coverage_after_restart = request(
             "GET", f"/api/v1/change/coverage/{person_a}?{coverage_query}", token=token_a,
         )
@@ -1366,6 +1591,8 @@ def main():
         status, _ = request("GET", f"/api/v1/evidence/{person_a}", token=token_b)
         require(status == 403, f"record isolation failed after restart; expected 403, got {status}")
 
+        print("PASS: PostgreSQL Daily Care capture, Evidence/LCR/history parity, original-session revocation,")
+        print("      independent account login after restart, unchanged IDs, cross-record denial, and persistence.")
 
         # Full anonymous -> account -> revoke -> independent login continuity.
         # Every fixture below is synthetic and isolated to this disposable CI database.

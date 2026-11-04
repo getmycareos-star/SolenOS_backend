@@ -74,14 +74,15 @@ def session_headers(person_id: str, caregiver_id: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def test_daily_capture_persists_for_linked_caregiver():
+def test_daily_capture_persists_one_authorized_source_across_history_and_lcr():
     setup_db()
     try:
         seed_person_and_caregiver()
         client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
         response = client.post(
             "/api/v1/daily-care/entries",
-            headers=session_headers("person-daily-test", "caregiver-daily-test"),
+            headers=headers,
             json={
                 "person_id": "person-daily-test",
                 "caregiver_id": "caregiver-daily-test",
@@ -90,8 +91,301 @@ def test_daily_capture_persists_for_linked_caregiver():
             },
         )
         assert response.status_code == 200, response.text
-        assert response.json()["success"] is True
+        receipt = response.json()
+        assert receipt["success"] is True
+        assert len(receipt["evidence_ids"]) == 1
+
+        event_id = receipt["id"]
+        evidence_id = receipt["evidence_ids"][0]
+        db = TestingSessionLocal()
+        event = db.query(CareEvent).filter_by(id=event_id).one()
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        assert event.person_id == evidence.person_id == "person-daily-test"
+        assert event.created_by_caregiver_id == evidence.reported_by_caregiver_id == "caregiver-daily-test"
+        assert event.evidence_ids == [evidence.id]
+        assert evidence.evidence_kind == "caregiver_report"
+        assert evidence.epistemic_status == "caregiver_reported"
+        assert evidence.reported_by_label == "Caregiver"
+        source_payload = json.loads(evidence.source_text)
+        assert source_payload["original_capture"]["general_notes"] == "User-recorded note"
+        db.close()
+
+        # Recent History and the LCR must expose the same persisted event ID.
+        history = client.get("/api/v1/events/person-daily-test", headers=headers)
+        assert history.status_code == 200, history.text
+        history_matches = [item for item in history.json() if item["id"] == event_id]
+        assert len(history_matches) == 1
+        assert history_matches[0]["evidence_ids"] == [evidence_id]
+
+        current_care = client.get("/api/v1/care-continuity/current-care", headers=headers)
+        assert current_care.status_code == 200, current_care.text
+        lcr_matches = [item for item in current_care.json()["items"] if item["id"] == event_id]
+        assert len(lcr_matches) == 1
+        assert lcr_matches[0]["evidence_ids"] == [evidence_id]
+        assert lcr_matches[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert lcr_matches[0]["source_event_type"] == "daily_care_entry"
+        assert lcr_matches[0]["source_label"] == "Caregiver"
+        assert lcr_matches[0]["source_type"] == "caregiver_report"
+        assert lcr_matches[0]["epistemic_status"] == "caregiver_reported"
+
+        # The public evidence endpoint must serialize the caregiver-reported status.
+        evidence_response = client.get("/api/v1/evidence/person-daily-test", headers=headers)
+        assert evidence_response.status_code == 200, evidence_response.text
+        evidence_matches = [item for item in evidence_response.json() if item["id"] == evidence_id]
+        assert len(evidence_matches) == 1
+        assert evidence_matches[0]["epistemic_status"] == "caregiver_reported"
+
+        # Rebuild and persist situation understanding from the same verified
+        # source set; the assessment must retain the original event/evidence IDs.
+        reassessed = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=headers,
+        )
+        assert reassessed.status_code == 200, reassessed.text
+        assessment = reassessed.json()["assessment"]
+        assessed_records = [
+            item for item in assessment["current_care_reality"]["records"]
+            if item.get("id") == event_id
+        ]
+        assert len(assessed_records) == 1
+        assert assessed_records[0]["evidence_ids"] == [evidence_id]
+        assert assessed_records[0]["evidence_link_validation"] == "same_care_record_evidence_reference_verified"
+        assert assessed_records[0]["source_label"] == "Caregiver"
+        assert assessed_records[0]["source_type"] == "caregiver_report"
+        assert assessed_records[0]["epistemic_status"] == "caregiver_reported"
+        assert any(
+            item["record_id"] == event_id and item["source"] == "events"
+            for item in assessment["situation_trajectory"]["entries"]
+        )
+
+        persisted_assessment = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=headers,
+        )
+        assert persisted_assessment.status_code == 200, persisted_assessment.text
+        assert persisted_assessment.json()["assessment"]["person_id"] == "person-daily-test"
+        persisted_records = [
+            item for item in persisted_assessment.json()["assessment"]["current_care_reality"]["records"]
+            if item.get("id") == event_id
+        ]
+        assert len(persisted_records) == 1
+        assert persisted_records[0]["evidence_ids"] == [evidence_id]
+
+        seed_second_person_and_caregiver()
+        other_headers = session_headers("person-other-test", "caregiver-other-test")
+        foreign_history = client.get("/api/v1/events/person-daily-test", headers=other_headers)
+        assert foreign_history.status_code == 403
     finally:
+        teardown_db()
+
+
+def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(monkeypatch):
+    from app.api import care_continuity as care_continuity_api
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        seed_person_and_caregiver()
+        evidence = Evidence(
+            id="grouped-source-evidence",
+            person_id="person-daily-test",
+            type="note",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text="Caregiver reports that she has been unusually sad.",
+            uploaded_by_caregiver_id="caregiver-daily-test",
+            reported_by_caregiver_id="caregiver-daily-test",
+            reported_by_label="Caregiver",
+            source_type="caregiver_report",
+        )
+        db.add(evidence)
+        db.flush()
+        event = {
+            "id": "grouped-source-event",
+            "event_type": "daily_care_entry",
+            "status": "recorded",
+            "title": "Daily care entry",
+            "description": "Caregiver reports that she has been unusually sad.",
+            "occurred_at": "2026-11-03T09:00:00+00:00",
+            "recorded_at": "2026-11-03T09:01:00+00:00",
+            "created_by_caregiver_id": "caregiver-daily-test",
+            "evidence_ids": [evidence.id],
+        }
+        observation = {
+            "id": "grouped-source-observation",
+            "evidence_id": evidence.id,
+            "observation_kind": "caregiver_report",
+            "epistemic_status": "uncertain",
+            "subject_label": "Care recipient",
+            "attribute": "mood",
+            "value_text": "Unusually sad",
+            "context": "After the usual evening routine",
+            "observer_label": "family caregiver",
+            "observation_method": "caregiver report",
+            "observed_at": "2026-11-03T09:00:00+00:00",
+            "recorded_at": "2026-11-03T09:01:00+00:00",
+            "source_passage": "unusually sad",
+            "source_span_start": 33,
+            "source_span_end": 46,
+            "extraction_method": "caregiver_reviewed",
+        }
+        monkeypatch.setattr(
+            care_continuity_api,
+            "_scoped_identity",
+            lambda request, session: ("person-daily-test", "caregiver-daily-test"),
+        )
+        monkeypatch.setattr(
+            care_continuity_api,
+            "build_lcr_context",
+            lambda session, person_id, limit_per_source: {
+                "person_id": person_id,
+                "as_of": "2026-11-03T09:01:00+00:00",
+                "history_coverage": "bounded_subset",
+                "schema_status": "complete",
+                "missing_required_sources": [],
+                "missing_optional_sources": [],
+                "sources": {
+                    "events": {"items": [event]},
+                    "evidence_observations": {"items": [observation]},
+                },
+            },
+        )
+
+        projection = care_continuity_api.current_care_projection(
+            request=None, limit_per_source=10, db=db
+        )
+        event_items = [item for item in projection["items"] if item["id"] == event["id"]]
+        assert len(event_items) == 1
+        assert event_items[0]["evidence_ids"] == [evidence.id]
+        assert event_items[0]["source_label"] == "Caregiver"
+        assert len(event_items[0]["derived_observations"]) == 1
+        assert event_items[0]["derived_observations"][0]["id"] == observation["id"]
+        assert event_items[0]["derived_observations"][0]["source_passage"] == "unusually sad"
+        assert event_items[0]["derived_observations"][0]["context"] == "After the usual evening routine"
+        assert event_items[0]["derived_observations"][0]["observer_label"] == "family caregiver"
+        assert event_items[0]["derived_observations"][0]["observation_method"] == "caregiver report"
+        assert not any(
+            item["source_collection"] == "evidence_observations"
+            and item["id"] == observation["id"]
+            for item in projection["items"]
+        )
+    finally:
+        db.close()
+        teardown_db()
+
+
+def test_structured_daily_capture_retry_is_idempotent_and_changed_payload_conflicts():
+    setup_db()
+    try:
+        seed_person_and_caregiver()
+        client = TestClient(app)
+        headers = session_headers("person-daily-test", "caregiver-daily-test")
+        payload = {
+            "person_id": "person-daily-test",
+            "caregiver_id": "caregiver-daily-test",
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+            "notes": "Caregiver reported a disrupted sleep routine.",
+            "capture_idempotency_key": "daily-capture-request-001",
+        }
+        first = client.post("/api/v1/daily/log", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_receipt = first.json()
+        assert first_receipt["success"] is True
+        assert first_receipt["idempotent_replay"] is False
+        assert len(first_receipt["evidence_ids"]) == 1
+
+        replay = client.post("/api/v1/daily/log", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        replay_receipt = replay.json()
+        assert replay_receipt["id"] == first_receipt["id"]
+        assert replay_receipt["evidence_ids"] == first_receipt["evidence_ids"]
+        assert replay_receipt["idempotent_replay"] is True
+
+        changed = client.post(
+            "/api/v1/daily/log",
+            headers=headers,
+            json={**payload, "notes": "A different report under the same request key."},
+        )
+        assert changed.status_code == 409, changed.text
+
+        db = TestingSessionLocal()
+        try:
+            events = db.query(CareEvent).filter(
+                CareEvent.person_id == "person-daily-test",
+                CareEvent.event_type == "structured_daily_capture",
+            ).all()
+            evidence = db.query(Evidence).filter(
+                Evidence.person_id == "person-daily-test",
+                Evidence.ingestion_key == "daily-capture:caregiver-daily-test:daily-capture-request-001",
+            ).all()
+            assert len(events) == 1
+            assert len(evidence) == 1
+            assert events[0].evidence_ids == [evidence[0].id]
+        finally:
+            db.close()
+    finally:
+        teardown_db()
+
+
+def test_legacy_daily_capture_evidence_backfill_is_dry_run_by_default_and_idempotent():
+    from app.services.daily_capture_evidence_backfill import backfill_daily_capture_evidence
+
+    setup_db()
+    db = TestingSessionLocal()
+    try:
+        seed_person_and_caregiver()
+        original_source = '{"notes":"Original caregiver wording","mood":"Calm"}'
+        event = CareEvent(
+            id="legacy-daily-capture-event",
+            person_id="person-daily-test",
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc),
+            title="Daily care update",
+            description=original_source,
+            created_by_caregiver_id="caregiver-daily-test",
+        )
+        empty_event = CareEvent(
+            id="legacy-daily-capture-no-source",
+            person_id="person-daily-test",
+            event_type="daily_care_entry",
+            status="recorded",
+            occurred_at=datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc),
+            title="Daily care update without source text",
+            description=None,
+            created_by_caregiver_id="caregiver-daily-test",
+        )
+        db.add_all([event, empty_event])
+        db.commit()
+
+        dry_run = backfill_daily_capture_evidence(db, apply=False)
+        assert dry_run["mode"] == "dry_run"
+        assert dry_run["would_create"] == 1
+        assert dry_run["skipped_missing_source_text"] == 1
+        db.refresh(event)
+        assert event.evidence_ids in (None, [])
+        assert db.query(Evidence).filter_by(person_id="person-daily-test").count() == 0
+
+        applied = backfill_daily_capture_evidence(db, apply=True)
+        assert applied["created"] == 1
+        assert applied["skipped_missing_source_text"] == 1
+        db.refresh(event)
+        assert len(event.evidence_ids) == 1
+        evidence = db.query(Evidence).filter_by(id=event.evidence_ids[0]).one()
+        assert evidence.source_text == original_source
+        assert evidence.evidence_kind == "caregiver_report"
+        assert evidence.epistemic_status == "caregiver_reported"
+        assert evidence.reported_by_caregiver_id == "caregiver-daily-test"
+        assert evidence.ingestion_key == "legacy-daily-capture:legacy-daily-capture-event"
+
+        repeated = backfill_daily_capture_evidence(db, apply=True)
+        assert repeated["created"] == 0
+        assert repeated["already_linked"] == 1
+        assert db.query(Evidence).filter_by(person_id="person-daily-test").count() == 1
+    finally:
+        db.close()
         teardown_db()
 
 

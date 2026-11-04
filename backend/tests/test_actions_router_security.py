@@ -21,3 +21,23 @@ def test_existing_reminder_workflow_remains_mounted():
     assert "/api/v1/reminders/{person_id}" in paths
     assert "/api/v1/reminders/{reminder_id}/complete" in paths
     assert "/api/v1/reminders/{reminder_id}/cancel" in paths
+
+
+def test_registered_action_routes_are_mounted_once_with_unique_operation_ids():
+    paths = app.openapi()["paths"]
+    expected = {
+        ("/api/v1/registered-actions/{person_id}/approve", "post"),
+        ("/api/v1/registered-actions/{person_id}", "get"),
+        ("/api/v1/registered-actions/{action_id}/history", "get"),
+        ("/api/v1/registered-actions/{action_id}/status", "patch"),
+    }
+    operation_ids = []
+    actual = set()
+    for path, methods in paths.items():
+        for method, operation in methods.items():
+            if method.lower() in {"get", "post", "patch", "put", "delete"}:
+                operation_ids.append(operation.get("operationId"))
+                if path.startswith("/api/v1/registered-actions/"):
+                    actual.add((path, method.lower()))
+    assert actual == expected
+    assert len(operation_ids) == len(set(operation_ids))
