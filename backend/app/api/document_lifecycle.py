@@ -6,11 +6,9 @@ It does not claim OCR for scanned images or create clinical assertions.
 from __future__ import annotations
 
 import hashlib
-import io
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -18,6 +16,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.care import Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
+from app.services.document_extraction import extract_document
 
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
 MAX_EXTRACTED_CHARS = 100_000
@@ -51,41 +50,9 @@ def _verified_content(upload: EvidenceUpload) -> bytes:
     return content
 
 
-def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str, str]:
-    content = _verified_content(upload) if content is None else content
-    mime = (upload.mime_type or "").split(";", 1)[0].lower()
-    filename = (upload.filename or "").lower()
-    if mime == "application/pdf" or filename.endswith(".pdf"):
-        try:
-            reader = PdfReader(io.BytesIO(content), strict=True)
-            if len(reader.pages) > MAX_PDF_PAGES:
-                raise HTTPException(status_code=413, detail="PDFs are limited to 100 pages")
-            extracted = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=422, detail="The saved PDF could not be read") from exc
-        if not extracted:
-            raise HTTPException(
-                status_code=422,
-                detail="No embedded PDF text was found. Scanned-image OCR is not available; the original document remains stored.",
-            )
-        return extracted[:MAX_EXTRACTED_CHARS], "server_pdf_text"
-    if mime.startswith("text/") or mime in {"application/json", "application/xml", "application/yaml"} or filename.endswith(
-        (".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml", ".log")
-    ):
-        try:
-            extracted = content.decode("utf-8-sig").strip()
-        except UnicodeDecodeError as exc:
-            raise HTTPException(status_code=415, detail="Saved text document is not UTF-8") from exc
-        if not extracted:
-            raise HTTPException(status_code=422, detail="The saved document contains no readable text")
-        return extracted[:MAX_EXTRACTED_CHARS], "server_utf8_text"
-    raise HTTPException(
-        status_code=415,
-        detail="Server extraction currently supports UTF-8 text and text-based PDF only. The original file remains preserved.",
-    )
-
+def _extract(upload: EvidenceUpload, content: bytes | None = None) -> dict:
+    verified = _verified_content(upload) if content is None else content
+    return extract_document(upload.filename, upload.mime_type, verified)
 
 def _response(analysis: CaptureAnalysis) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
@@ -136,7 +103,10 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 )
             return _response(row)
 
-    source_text, method = _extract(upload, content)
+    extraction = _extract(upload, content)
+    source_text = extraction["text"]
+    method = extraction["method"]
+    page_metadata = extraction["pages"]
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
@@ -150,6 +120,8 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "mime_type": upload.mime_type,
             "binary_sha256": upload.sha256,
             "extraction_method": method,
+            "pages": page_metadata,
+            "truncated": extraction["truncated"],
             "observations": [],
             "open_questions": [],
         },
@@ -181,5 +153,7 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
             "filename": details.get("filename"),
             "mime_type": details.get("mime_type"),
             "binary_sha256": details.get("binary_sha256"),
+            "pages": details.get("pages", []),
+            "truncated": details.get("truncated", False),
         },
     }
