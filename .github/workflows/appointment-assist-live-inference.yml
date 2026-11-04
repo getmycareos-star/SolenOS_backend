@@ -1,0 +1,67 @@
+name: Authenticated appointment-assist live Qwen acceptance
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/live_tests/test_appointment_assist_live_inference.py"
+      - ".github/workflows/appointment-assist-live-inference.yml"
+      - "backend/app/api/collaboration.py"
+      - "backend/app/services/qwen_gateway.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appointment-assist-live-qwen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  appointment-assist-live-inference:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      OLLAMA_MODEL: qwen3.5:4b
+      OLLAMA_TIMEOUT_SECONDS: "180"
+      OLLAMA_READINESS_TIMEOUT_SECONDS: "60"
+      OLLAMA_NUM_CTX: "1024"
+      OLLAMA_NUM_PREDICT: "96"
+      OLLAMA_NUM_THREADS: "2"
+      OLLAMA_SIDECAR_ENABLED: "true"
+      SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL: "1"
+      DATABASE_URL: sqlite:////tmp/solenos-appointment-assist-live.db
+      APP_ENV: test
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx
+      - name: Start isolated Ollama runtime
+        run: |
+          docker run -d --name solenos-appointment-ollama -p 11434:11434 ollama/ollama:latest
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs solenos-appointment-ollama
+          exit 1
+      - name: Download production Qwen model
+        run: docker exec solenos-appointment-ollama ollama pull "$OLLAMA_MODEL"
+      - name: Reproduce authenticated appointment-assist request
+        run: python -m pytest backend/live_tests/test_appointment_assist_live_inference.py -q -s
+      - name: Capture Ollama server logs
+        if: always()
+        run: docker logs solenos-appointment-ollama 2>&1 | tail -n 400 || true
+      - name: Stop isolated Ollama runtime
+        if: always()
+        run: docker rm -f solenos-appointment-ollama || true
