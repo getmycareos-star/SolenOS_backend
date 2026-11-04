@@ -21,6 +21,7 @@ from app.api.causal import router as causal_router
 from app.api.collaboration import router as collaboration_router, _ollama_url, _ollama_chat
 from app.api.document_extract import router as document_extract_router
 from app.api.document_lifecycle import router as document_lifecycle_router
+from app.api.document_reviews import router as document_reviews_router
 from app.api.care_delta import router as care_delta_router
 from app.api.care_continuity import router as care_continuity_router, RESOURCES as CARE_CONTINUITY_RESOURCES
 from app.api.reminders import router as reminders_router
@@ -59,6 +60,7 @@ from pydantic import BaseModel
 from app.services.situation import process_situation_input
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import persist_capture_analysis
+from app.models.document_review import DocumentCandidateReview  # register durable document review table
 from app.models.qwen_background_job import QwenBackgroundJob  # register durable job table
 from app.services.qwen_background_worker import qwen_worker_loop
 
@@ -213,6 +215,7 @@ collaboration_router.routes[:] = [
 app.include_router(collaboration_router, prefix="/api/v1")
 app.include_router(document_extract_router, prefix="/api")
 app.include_router(document_lifecycle_router, prefix="/api/v1")
+app.include_router(document_reviews_router, prefix="/api/v1")
 app.include_router(care_delta_router, prefix="/api/v1")
 app.include_router(care_continuity_router, prefix="/api/v1")
 app.include_router(reminders_router, prefix="/api/v1")
