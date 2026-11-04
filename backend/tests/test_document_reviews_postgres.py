@@ -327,10 +327,22 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
         }
 
     monkeypatch.setattr(document_lifecycle, "extract_review_candidates", grounded_candidates)
+
+    def extract_once():
+        with Session() as db:
+            return extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        extraction_results = list(pool.map(lambda _: extract_once(), range(2)))
+    assert extraction_results[0]["analysis_id"] == extraction_results[1]["analysis_id"]
+    extracted = extraction_results[0]
+    assert extracted["extraction_method"] == "server_utf8_text"
     with Session() as db:
-        extracted = extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
-        assert extracted["extraction_method"] == "server_utf8_text"
-        analysis_id = extracted["analysis_id"]
+        assert db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id == evidence_id,
+        ).count() == 1
+    analysis_id = extracted["analysis_id"]
 
     with Session() as db:
         reviewed = review_document_candidate(
