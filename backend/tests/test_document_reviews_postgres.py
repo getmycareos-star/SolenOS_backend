@@ -4,6 +4,8 @@ Run only against the disposable PostgreSQL service in document-intelligence CI.
 """
 import os
 import uuid
+import asyncio
+import io
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -11,12 +13,16 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
+from starlette.datastructures import Headers, UploadFile
 
 from app.api.document_reviews import DocumentCandidateDecision, review_document_candidate
+from app.api.collaboration import upload_evidence
+from app.api.document_lifecycle import extract_saved_document
 from app.models.care import Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.models.document_review import DocumentCandidateReview
+from app.models.collaboration import EvidenceUpload
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -202,6 +208,92 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             restarted_engine.dispose()
     finally:
         engine.dispose()
+
+
+def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connection(monkeypatch):
+    from app.api import document_lifecycle
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-e2e-person-{suffix}"
+    caregiver_id = f"doc-e2e-caregiver-{suffix}"
+    original = b"Care note: breakfast was mostly uneaten on Tuesday."
+    quote = "breakfast was mostly uneaten on Tuesday."
+
+    with Session() as db:
+        db.add(Person(id=person_id, name="Document E2E recipient"))
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id, name="Document E2E caregiver",
+            relationship="family", person_id=person_id,
+        ))
+        db.commit()
+
+    with Session() as db:
+        uploaded = asyncio.run(upload_evidence(
+            _request(person_id, caregiver_id),
+            UploadFile(
+                filename="care-note.txt",
+                file=io.BytesIO(original),
+                headers=Headers({"content-type": "text/plain"}),
+            ),
+            person_id, caregiver_id, "document", "", "not_provided", "0", "{}", "false", db,
+        ))
+        assert uploaded["persisted"] is True
+        evidence_id = uploaded["evidence_id"]
+
+    def grounded_candidates(source_text, *, source_event_id, source_evidence_id):
+        start = source_text.index(quote)
+        return {
+            "observations": [{
+                "subject": "Care recipient",
+                "observation": "Breakfast was mostly uneaten.",
+                "source_quote": quote,
+                "source_span_start": start,
+                "source_span_end": start + len(quote),
+                "source_evidence_id": source_evidence_id,
+                "review_status": "pending_review",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(document_lifecycle, "extract_review_candidates", grounded_candidates)
+    with Session() as db:
+        extracted = extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+        assert extracted["extraction_method"] == "server_utf8_text"
+        analysis_id = extracted["analysis_id"]
+
+    with Session() as db:
+        reviewed = review_document_candidate(
+            analysis_id,
+            DocumentCandidateDecision(
+                candidate_index=0, decision="accept",
+                idempotency_key=f"doc-e2e-{suffix}-accept",
+            ),
+            _request(person_id, caregiver_id), db,
+        )
+        assert reviewed["written_to_lcr"] is True
+        assertion_id = reviewed["resulting_assertion_id"]
+
+    engine.dispose()
+    restarted = create_engine(DATABASE_URL, pool_pre_ping=True)
+    RestartedSession = sessionmaker(bind=restarted, autoflush=False)
+    try:
+        with RestartedSession() as db:
+            binary = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).one()
+            analysis = db.query(CaptureAnalysis).filter(CaptureAnalysis.id == analysis_id).one()
+            review = db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.id == reviewed["review_id"]
+            ).one()
+            assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
+            assert bytes(binary.content) == original
+            assert analysis.source_text == original.decode("utf-8")
+            assert review.source_quote == quote
+            assert assertion.evidence_ids == [evidence_id]
+            assert assertion.source_text == quote
+    finally:
+        restarted.dispose()
 
 
 def test_concurrent_acceptance_creates_one_assertion_and_one_review():
