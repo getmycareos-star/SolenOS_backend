@@ -136,6 +136,13 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             "pages": page_metadata,
             "truncated": extraction["truncated"],
             "candidate_extraction_status": candidate_extraction_status,
+            "candidate_extraction_attempts": [{
+                "attempt": 1,
+                "status": candidate_extraction_status,
+                "attempted_by_caregiver_id": caregiver_id,
+                "attempted_at": datetime.now(timezone.utc).isoformat(),
+                "candidate_count": len(candidates.get("observations", [])),
+            }],
             "candidate_extraction_source_chars": min(len(source_text), 12_000),
             "candidate_extraction_truncated": len(source_text) > 12_000,
             "observations": candidates.get("observations", []),
@@ -168,6 +175,7 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
         "open_questions": details.get("open_questions", []),
         "candidate_extraction_status": details.get("candidate_extraction_status", "not_applicable"),
         "candidate_extraction_source_chars": details.get("candidate_extraction_source_chars", 0),
+        "candidate_extraction_attempts": details.get("candidate_extraction_attempts", []),
         "candidate_extraction_truncated": details.get("candidate_extraction_truncated", False),
         "document": {
             "filename": details.get("filename"),
