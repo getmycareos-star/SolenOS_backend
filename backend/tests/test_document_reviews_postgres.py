@@ -10,7 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 from starlette.datastructures import Headers, UploadFile
@@ -108,6 +109,46 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert assertion.source_text == quote
             assert assertion.assertion_status == "reported"
             assert db.query(CareAssertion).filter(CareAssertion.person_id == person_id).count() == 1
+
+
+        # PostgreSQL triggers prohibit direct SQL mutation/deletion of audit history.
+        with pytest.raises(DBAPIError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text("UPDATE document_candidate_reviews SET rationale = 'tampered' WHERE id = :id"),
+                    {"id": accepted["review_id"]},
+                )
+        with pytest.raises(DBAPIError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text("DELETE FROM document_candidate_reviews WHERE id = :id"),
+                    {"id": accepted["review_id"]},
+                )
+
+        # Another authorized caregiver in the same person record can review the source.
+        person_shared, caregiver_owner, _, analysis_shared, _ = _fixture(Session)
+        caregiver_shared = f"doc-review-shared-{uuid.uuid4().hex}"
+        with Session() as db:
+            db.add(Caregiver(
+                id=caregiver_shared, name="Second family caregiver",
+                relationship="family", person_id=person_shared,
+            ))
+            db.commit()
+        with Session() as db:
+            shared_review = review_document_candidate(
+                analysis_shared,
+                DocumentCandidateDecision(
+                    candidate_index=0, decision="reject",
+                    idempotency_key=f"shared-review-{uuid.uuid4().hex}",
+                ),
+                _request(person_shared, caregiver_shared), db,
+            )
+            assert shared_review["written_to_lcr"] is False
+        with Session() as db:
+            shared_event = db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.id == shared_review["review_id"]
+            ).one()
+            assert shared_event.caregiver_id == caregiver_shared
 
         # Retrying the same idempotency key returns the same review and assertion.
         with Session() as db:
