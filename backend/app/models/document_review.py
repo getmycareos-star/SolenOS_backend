@@ -13,6 +13,7 @@ class DocumentCandidateReview(Base):
         UniqueConstraint("person_id", "idempotency_key", name="uq_document_candidate_review_idempotency"),
         Index("ix_document_candidate_reviews_person_analysis", "person_id", "analysis_id"),
         Index("ix_document_candidate_reviews_analysis_candidate", "analysis_id", "candidate_index", "decision_version"),
+        UniqueConstraint("resulting_assertion_id", name="uq_document_candidate_review_assertion"),
     )
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     analysis_id = Column(String, ForeignKey("capture_analyses.id", ondelete="CASCADE"), nullable=False)
@@ -27,7 +28,7 @@ class DocumentCandidateReview(Base):
     corrected_subject = Column(String(160), nullable=True)
     corrected_observation = Column(Text, nullable=True)
     rationale = Column(Text, nullable=True)
-    resulting_assertion_id = Column(String, ForeignKey("care_assertions.id"), nullable=True, unique=True)
+    resulting_assertion_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
     idempotency_key = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
