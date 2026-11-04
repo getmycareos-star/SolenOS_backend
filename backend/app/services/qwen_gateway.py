@@ -196,7 +196,7 @@ def qwen_chat(
 def extract_review_candidates(
     source_text: str,
     *,
-    source_event_id: str,
+    source_event_id: str | None,
     source_evidence_id: str | None = None,
 ) -> dict:
     """Return only verbatim-grounded, explicitly review-required candidate observations."""
@@ -254,8 +254,9 @@ def extract_review_candidates(
             "observation": observation.strip()[:500],
             "source_quote": quote,
             "review_status": "pending_review",
-            "source_event_id": source_event_id,
         }
+        if source_event_id:
+            candidate["source_event_id"] = source_event_id
         if source_evidence_id:
             candidate["source_evidence_id"] = source_evidence_id
         observations.append(candidate)
