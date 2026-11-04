@@ -1,0 +1,49 @@
+name: Document lifecycle PostgreSQL integration
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  document-lifecycle-postgres:
+    name: Document upload, extraction, retry and isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: solenos_document
+          POSTGRES_PASSWORD: solenos_document_ci
+          POSTGRES_DB: solenos_document
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_document -d solenos_document"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+psycopg2://solenos_document:solenos_document_ci@localhost:5432/solenos_document
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - name: Install backend and PostgreSQL test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ./backend pytest httpx psycopg2-binary
+      - name: Apply reviewed PostgreSQL migrations
+        working-directory: backend
+        run: python -m alembic upgrade head
+      - name: Verify document lifecycle against real PostgreSQL
+        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py -q -s
