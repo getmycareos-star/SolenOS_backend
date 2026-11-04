@@ -43,10 +43,16 @@ def _identity(request: Request, db: Session) -> tuple[str, str]:
     return str(session.person_id), str(session.caregiver_id)
 
 
-def _extract(upload: EvidenceUpload) -> tuple[str, str]:
+def _verified_content(upload: EvidenceUpload) -> bytes:
+    """Verify the persisted original before both first extraction and cached retries."""
     content = bytes(upload.content)
     if len(content) != upload.size_bytes or hashlib.sha256(content).hexdigest() != upload.sha256:
         raise HTTPException(status_code=500, detail="Stored evidence failed its integrity check")
+    return content
+
+
+def _extract(upload: EvidenceUpload, content: bytes | None = None) -> tuple[str, str]:
+    content = _verified_content(upload) if content is None else content
     mime = (upload.mime_type or "").split(";", 1)[0].lower()
     filename = (upload.filename or "").lower()
     if mime == "application/pdf" or filename.endswith(".pdf"):
@@ -112,6 +118,9 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if upload is None:
         raise HTTPException(status_code=404, detail="Original document bytes are unavailable")
 
+    # Verify the immutable original on every request, including idempotent retries.
+    # A cached analysis must never hide later byte corruption or source replacement.
+    content = _verified_content(upload)
     existing = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.caregiver_id == caregiver_id,
@@ -120,9 +129,14 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     for row in existing:
         metadata = row.candidates if isinstance(row.candidates, dict) else {}
         if metadata.get("kind") == "document_extraction_v1":
+            if metadata.get("binary_sha256") != upload.sha256:
+                raise HTTPException(
+                    status_code=409,
+                    detail="The stored document bytes changed after extraction; cached text cannot be reused.",
+                )
             return _response(row)
 
-    source_text, method = _extract(upload)
+    source_text, method = _extract(upload, content)
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
