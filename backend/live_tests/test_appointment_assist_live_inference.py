@@ -106,6 +106,10 @@ def test_authenticated_appointment_assist_uses_real_qwen_and_remains_read_only(m
         assert appointment_id in data["source_appointment_ids"]
         assert isinstance(data["reply"], str) and data["reply"].strip()
         assert len(data["reply"].split()) <= 55
+        assert not __import__("re").search(
+            r"\b(?:is|was|has been)\s+confirmed\b",
+            data["reply"].casefold(),
+        ), f"Qwen upgraded a scheduled appointment to confirmed: {data['reply']!r}"
 
         with TestingSessionLocal() as db:
             assert db.query(CareEvent).filter_by(person_id=person_id).count() == 0
