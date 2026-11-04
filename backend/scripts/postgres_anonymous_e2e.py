@@ -1161,7 +1161,7 @@ def main():
         retry_action = {
             "text": "CI-only action with stable retry key",
             "evidence": [{"kind": "ci_fixture", "text": "same request retried"}],
-            "idempotency_key": "postgres-open-loop-action-retry-001",
+            "idempotency_key": "postgres-open-loop-action-retry-concurrent-002",
         }
         first_action_status, _ = request(
             "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
