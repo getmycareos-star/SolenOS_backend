@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.document_lifecycle import _identity
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
 from app.models.document_review import DocumentCandidateReview
 
@@ -96,12 +97,27 @@ def review_document_candidate(
         raise HTTPException(status_code=409, detail="An accepted candidate cannot be overwritten; preserve it and submit a separate correction record")
     if analysis.source_evidence_id is None:
         raise HTTPException(status_code=409, detail="The extraction is not linked to original evidence")
+    source_evidence = db.query(Evidence).filter(
+        Evidence.id == analysis.source_evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.uploaded_by_caregiver_id == caregiver_id,
+        Evidence.type == "document",
+    ).first()
+    if source_evidence is None:
+        raise HTTPException(status_code=409, detail="The original document evidence is unavailable in this care record")
+
+    if candidate.get("source_evidence_id") not in (None, analysis.source_evidence_id):
+        raise HTTPException(status_code=409, detail="Candidate provenance does not match the original document")
 
     source_quote = candidate.get("source_quote")
     if not isinstance(source_quote, str) or not source_quote.strip():
         raise HTTPException(status_code=409, detail="Candidate has no verifiable source quotation")
-    if source_quote not in (analysis.source_text or ""):
-        raise HTTPException(status_code=409, detail="Candidate quotation is not an exact substring of the persisted source text")
+    source_start = candidate.get("source_span_start")
+    source_end = candidate.get("source_span_end")
+    if not isinstance(source_start, int) or not isinstance(source_end, int):
+        raise HTTPException(status_code=409, detail="Candidate source offsets are missing")
+    if source_end - source_start != len(source_quote) or (analysis.source_text or "")[source_start:source_end] != source_quote:
+        raise HTTPException(status_code=409, detail="Candidate quotation and offsets do not match the persisted source text")
 
     version = (latest.decision_version if latest else 0) + 1
     assertion_id = None
