@@ -96,6 +96,20 @@ def test_cors_allows_netlify_preflight_and_rejects_unknown_origin():
     assert "authorization" in allowed_headers
     assert "content-type" in allowed_headers
 
+    preview = client.options(
+        "/api/v1/upload",
+        headers={
+            "Origin": "https://history-preview--solenosai.netlify.app",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert preview.status_code == 200
+    assert preview.headers.get("access-control-allow-origin") == "https://history-preview--solenosai.netlify.app"
+    preview_headers = preview.headers.get("access-control-allow-headers", "").lower()
+    assert "authorization" in preview_headers
+    assert "content-type" in preview_headers
+
     denied = client.options(
         "/api/v1/sessions/anonymous",
         headers={

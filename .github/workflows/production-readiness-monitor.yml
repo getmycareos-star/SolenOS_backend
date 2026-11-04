@@ -1,6 +1,9 @@
 name: Production readiness monitor
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/production-readiness-monitor.yml"
   workflow_dispatch:
   schedule:
     - cron: "*/15 * * * *"
@@ -14,6 +17,11 @@ jobs:
   production-readiness-monitor:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out full main history for deployment provenance verification
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Wait for deployed service health and database readiness
         timeout-minutes: 16
         run: |
@@ -48,7 +56,58 @@ jobs:
           done
           test "$ready" = "1"
 
-      # Qwen runtime readiness is intentionally not a deployment gate while work is focused on care continuity.
+      # Core API readiness and actual Qwen inference are separate production acceptance gates.
+      - name: Verify deployed Qwen model inventory and real inference
+        if: github.event_name != 'pull_request'
+        run: |
+          set -Eeuo pipefail
+          base='https://solenosbackend-production.up.railway.app'
+          response=$(curl --silent --show-error --fail --max-time 25 "${base}/api/v1/assistant/readiness")
+          RESPONSE="$response" python - <<'PY'
+          import json
+          import os
+          data = json.loads(os.environ["RESPONSE"])
+          installation = data.get("installation") or {}
+          assert data.get("available") is True, f"Qwen real inference is unavailable: {data}"
+          assert data.get("state") == "ready", f"Qwen readiness state is not ready: {data}"
+          assert installation.get("state") == "installed", f"Configured model is not installed: {data}"
+          assert data.get("model"), f"Configured model name is missing: {data}"
+          deployed_commit = data.get("deployment_commit")
+          if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+              import subprocess
+              expected_commit = os.environ.get("GITHUB_SHA")
+              assert deployed_commit, "Production did not identify its deployed source commit."
+              ancestor = subprocess.run(
+                  ["git", "merge-base", "--is-ancestor", deployed_commit, expected_commit],
+                  check=False,
+              )
+              assert ancestor.returncode == 0, (
+                  f"Production commit is not in current main history: "
+                  f"deployed={deployed_commit!r}, main={expected_commit!r}"
+              )
+              changed = subprocess.check_output(
+                  ["git", "diff", "--name-only", f"{deployed_commit}..{expected_commit}"],
+                  text=True,
+              ).splitlines()
+              runtime_changes = [
+                  path for path in changed
+                  if not path.startswith((
+                      "backend/tests/",
+                      "backend/live_tests/",
+                      ".github/workflows/",
+                      "docs/",
+                  ))
+              ]
+              assert not runtime_changes, (
+                  "Production is behind current main by runtime or migration changes: "
+                  f"{runtime_changes}"
+              )
+          print(
+              "PASS: production Qwen real inference is ready; "
+              f"model={data['model']}; deployment_commit={deployed_commit}"
+          )
+          PY
+
       - name: Verify deployed OpenAPI exposes core continuity routes
         run: |
           curl --silent --show-error --fail --max-time 20 'https://solenosbackend-production.up.railway.app/openapi.json' -o /tmp/solenos-openapi.json
@@ -92,6 +151,13 @@ jobs:
           status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/situation' -H 'Origin: https://solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type')
           echo "OPTIONS /api/situation returned HTTP $status"
           test "$status" = "200"
+          preview_status=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --max-time 20 -X OPTIONS 'https://solenosbackend-production.up.railway.app/api/v1/upload' -H 'Origin: https://history-preview--solenosai.netlify.app' -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: authorization,content-type')
+          echo "OPTIONS /api/v1/upload from history preview returned HTTP $preview_status"
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            test "$preview_status" = "200"
+          else
+            echo "Pre-merge preview CORS check is deferred until the exact-origin allowlist is deployed."
+          fi
 
       - name: Capture privacy-safe endpoint observation
         if: always()

@@ -174,6 +174,7 @@ app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 cors_origins_env = os.getenv("CORS_ORIGINS", "")
 cors_origins = list(dict.fromkeys([
     "https://solenosai.netlify.app",
+    "https://history-preview--solenosai.netlify.app",
     *[
         origin.strip().rstrip("/")
         for origin in cors_origins_env.split(",")
