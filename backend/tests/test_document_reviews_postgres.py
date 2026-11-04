@@ -17,6 +17,8 @@ from starlette.requests import Request
 from starlette.datastructures import Headers, UploadFile
 
 from app.api.document_reviews import DocumentCandidateDecision, review_document_candidate
+from app.api.capture_review import review_capture_candidate
+from app.schemas.capture_review import CaptureCandidateReview
 from app.api.collaboration import upload_evidence
 from app.api.document_lifecycle import extract_saved_document
 from app.models.care import Caregiver, Evidence, Person
@@ -371,6 +373,16 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
             CaptureAnalysis.source_evidence_id == evidence_id,
         ).count() == 1
     analysis_id = extracted["analysis_id"]
+
+    with Session() as db:
+        with pytest.raises(HTTPException) as legacy_review:
+            review_capture_candidate(
+                analysis_id,
+                CaptureCandidateReview(candidate_index=0, decision="accept"),
+                _request(person_id, caregiver_id),
+                db,
+            )
+        assert legacy_review.value.status_code == 409
 
     with Session() as db:
         reviewed = review_document_candidate(
