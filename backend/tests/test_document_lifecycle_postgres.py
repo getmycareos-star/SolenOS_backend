@@ -3,7 +3,9 @@
 Requires the migrated disposable PostgreSQL database supplied by CI. This is
 intentionally separate from the 10,000-journey longitudinal benchmark.
 """
+import asyncio
 import hashlib
+import io
 import os
 import uuid
 
@@ -11,10 +13,12 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from starlette.datastructures import Headers, UploadFile
 from starlette.requests import Request
 
 from app.models.care import Caregiver, Evidence, Person
 from app.models.collaboration import EvidenceUpload
+from app.api.collaboration import upload_evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 
@@ -59,24 +63,33 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
                 Caregiver(id=caregiver_b, name="Document caregiver B", relationship="family", person_id=person_b),
             ])
             db.flush()
-            db.add(Evidence(
-                id=evidence_id,
-                person_id=person_a,
-                type="document",
-                source_text="",
-                uploaded_by_caregiver_id=caregiver_a,
-                source_type="caregiver_upload",
-            ))
-            db.flush()
-            db.add(EvidenceUpload(
-                evidence_id=evidence_id,
-                filename="care-note.txt",
-                mime_type="text/plain",
-                content=original,
-                size_bytes=len(original),
-                sha256=digest,
-            ))
             db.commit()
+
+        # Exercise the actual multipart upload route against PostgreSQL. The
+        # endpoint creates Evidence and persists the original EvidenceUpload bytes.
+        with Session() as db:
+            upload_request = _request(person_a, caregiver_a)
+            uploaded = asyncio.run(upload_evidence(
+                upload_request,
+                UploadFile(
+                    filename="care-note.txt",
+                    file=io.BytesIO(original),
+                    headers=Headers({"content-type": "text/plain"}),
+                ),
+                person_a,
+                caregiver_a,
+                "document",
+                "",
+                "not_provided",
+                "0",
+                "{}",
+                "false",
+                db,
+            ))
+            assert uploaded["persisted"] is True
+            assert uploaded["size_bytes"] == len(original)
+            assert uploaded["sha256"] == digest
+            evidence_id = uploaded["evidence_id"]
 
         # Execute the production extraction route function against PostgreSQL.
         with Session() as db:
