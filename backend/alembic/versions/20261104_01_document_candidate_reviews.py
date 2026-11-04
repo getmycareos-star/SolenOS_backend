@@ -29,6 +29,7 @@ def upgrade() -> None:
         sa.Column("corrected_observation", sa.Text(), nullable=True),
         sa.Column("rationale", sa.Text(), nullable=True),
         sa.Column("resulting_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
+        sa.Column("superseded_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
         sa.Column("idempotency_key", sa.String(length=128), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("analysis_id", "candidate_index", "decision_version", name="uq_document_candidate_review_version"),
