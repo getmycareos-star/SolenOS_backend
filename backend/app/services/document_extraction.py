@@ -29,6 +29,14 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
     if image.width * image.height > MAX_IMAGE_PIXELS:
         raise HTTPException(status_code=413, detail="Image dimensions exceed the 40-megapixel limit")
     image = ImageOps.autocontrast(ImageOps.grayscale(image))
+    try:
+        orientation = pytesseract.image_to_osd(image, output_type=Output.DICT)
+        rotation = int(orientation.get("rotate", 0) or 0)
+        if rotation in {90, 180, 270}:
+            image = image.rotate(-rotation, expand=True)
+    except Exception:
+        # OSD is best-effort; OCR confidence remains explicit.
+        pass
     if image.width < 1800:
         scale = min(2.0, 1800 / max(image.width, 1))
         image = image.resize((int(image.width * scale), int(image.height * scale)))
@@ -41,6 +49,7 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
 
     words: list[str] = []
     confidences: list[float] = []
+    word_boxes: list[dict[str, Any]] = []
     for raw_word, raw_conf in zip(data.get("text", []), data.get("conf", [])):
         word = str(raw_word).strip()
         try:
@@ -51,6 +60,15 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
             words.append(word)
             if confidence >= 0:
                 confidences.append(confidence)
+            index = len(words) - 1
+            if index < 5000:
+                word_boxes.append({
+                    "text": word,
+                    "left": int(data["left"][index]),
+                    "top": int(data["top"][index]),
+                    "width": int(data["width"][index]),
+                    "height": int(data["height"][index]),
+                })
     extracted = " ".join(words).strip()
     mean_confidence = round(sum(confidences) / len(confidences), 2) if confidences else None
     quality = "unreadable" if not extracted else (
@@ -61,6 +79,9 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
         "method": "tesseract_ocr",
         "word_count": len(words),
         "mean_word_confidence": mean_confidence,
+        "processed_image_width": image.width,
+        "processed_image_height": image.height,
+        "word_boxes": word_boxes,
         "quality": quality,
         "handwriting_warning": (
             "Handwriting recognition is not reliable. Caregiver verification is required."
