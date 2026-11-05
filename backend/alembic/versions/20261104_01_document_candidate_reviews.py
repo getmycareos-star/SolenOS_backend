@@ -1,7 +1,7 @@
 """Create immutable document candidate review decisions.
 
-Revision ID: 20261104_01_document_candidate_reviews
-Revises: 20261102_01_explicit_actions
+Revision ID: 20261104_01_doc_review
+Revises: 20261102_02_workflow_integrity_merge
 """
 from alembic import op
 import sqlalchemy as sa
@@ -40,13 +40,39 @@ def upgrade() -> None:
     )
     op.create_index("ix_document_candidate_reviews_person_analysis", "document_candidate_reviews", ["person_id", "analysis_id"])
     op.create_index("ix_document_candidate_reviews_analysis_candidate", "document_candidate_reviews", ["analysis_id", "candidate_index", "decision_version"])
-    if op.get_bind().dialect.name == "postgresql":
+
+    dialect = op.get_bind().dialect.name
+    if dialect == "postgresql":
         op.execute("""
-            CREATE OR REPLACE FUNCTION reject_evidence_upload_mutation() RETURNS trigger AS $
+            CREATE OR REPLACE FUNCTION reject_document_extraction_source_mutation()
+            RETURNS trigger AS $$
+            BEGIN
+                IF OLD.source_text IS DISTINCT FROM NEW.source_text
+                   OR OLD.person_id IS DISTINCT FROM NEW.person_id
+                   OR OLD.caregiver_id IS DISTINCT FROM NEW.caregiver_id
+                   OR OLD.source_event_id IS DISTINCT FROM NEW.source_event_id
+                   OR OLD.source_evidence_id IS DISTINCT FROM NEW.source_evidence_id THEN
+                    RAISE EXCEPTION 'persisted document extraction source and identity are immutable';
+                END IF;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_document_extraction_source_immutable
+            BEFORE UPDATE OF source_text, person_id, caregiver_id, source_event_id, source_evidence_id
+            ON capture_analyses
+            FOR EACH ROW
+            WHEN (OLD.candidates->>'kind' = 'document_extraction_v1')
+            EXECUTE FUNCTION reject_document_extraction_source_mutation()
+        """)
+        op.execute("""
+            CREATE OR REPLACE FUNCTION reject_evidence_upload_mutation()
+            RETURNS trigger AS $$
             BEGIN
                 RAISE EXCEPTION 'original uploaded evidence is immutable';
             END;
-            $ LANGUAGE plpgsql
+            $$ LANGUAGE plpgsql
         """)
         op.execute("""
             CREATE TRIGGER trg_evidence_uploads_immutable
@@ -54,7 +80,8 @@ def upgrade() -> None:
             FOR EACH ROW EXECUTE FUNCTION reject_evidence_upload_mutation()
         """)
         op.execute("""
-            CREATE OR REPLACE FUNCTION reject_document_candidate_review_mutation() RETURNS trigger AS $$
+            CREATE OR REPLACE FUNCTION reject_document_candidate_review_mutation()
+            RETURNS trigger AS $$
             BEGIN
                 RAISE EXCEPTION 'document candidate review history is append-only';
             END;
@@ -65,12 +92,26 @@ def upgrade() -> None:
             BEFORE UPDATE OR DELETE ON document_candidate_reviews
             FOR EACH ROW EXECUTE FUNCTION reject_document_candidate_review_mutation()
         """)
+    elif dialect == "sqlite":
+        op.execute("""
+            CREATE TRIGGER trg_document_extraction_source_immutable
+            BEFORE UPDATE OF source_text, person_id, caregiver_id, source_event_id, source_evidence_id
+            ON capture_analyses
+            WHEN json_extract(OLD.candidates, '$.kind') = 'document_extraction_v1'
+                 AND (
+                    OLD.source_text IS NOT NEW.source_text
+                    OR OLD.person_id IS NOT NEW.person_id
+                    OR OLD.caregiver_id IS NOT NEW.caregiver_id
+                    OR OLD.source_event_id IS NOT NEW.source_event_id
+                    OR OLD.source_evidence_id IS NOT NEW.source_evidence_id
+                 )
+            BEGIN SELECT RAISE(ABORT, 'persisted document extraction source and identity are immutable'); END
+        """)
         op.execute("""
             CREATE TRIGGER trg_evidence_uploads_immutable
             BEFORE UPDATE OF filename, mime_type, content, size_bytes, sha256 ON evidence_uploads
             BEGIN SELECT RAISE(ABORT, 'original uploaded evidence is immutable'); END
         """)
-    elif op.get_bind().dialect.name == "sqlite":
         op.execute("""
             CREATE TRIGGER trg_document_candidate_reviews_no_update
             BEFORE UPDATE ON document_candidate_reviews
@@ -85,6 +126,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "Document candidate review history is durable care data; "
+        "Document review and source provenance are durable care data; "
         "use a reviewed preservation migration."
     )
