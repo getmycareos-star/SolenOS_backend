@@ -42,6 +42,18 @@ def upgrade() -> None:
     op.create_index("ix_document_candidate_reviews_analysis_candidate", "document_candidate_reviews", ["analysis_id", "candidate_index", "decision_version"])
     if op.get_bind().dialect.name == "postgresql":
         op.execute("""
+            CREATE OR REPLACE FUNCTION reject_evidence_upload_mutation() RETURNS trigger AS $
+            BEGIN
+                RAISE EXCEPTION 'original uploaded evidence is immutable';
+            END;
+            $ LANGUAGE plpgsql
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_evidence_uploads_immutable
+            BEFORE UPDATE OF filename, mime_type, content, size_bytes, sha256 ON evidence_uploads
+            FOR EACH ROW EXECUTE FUNCTION reject_evidence_upload_mutation()
+        """)
+        op.execute("""
             CREATE OR REPLACE FUNCTION reject_document_candidate_review_mutation() RETURNS trigger AS $$
             BEGIN
                 RAISE EXCEPTION 'document candidate review history is append-only';
@@ -52,6 +64,11 @@ def upgrade() -> None:
             CREATE TRIGGER trg_document_candidate_reviews_immutable
             BEFORE UPDATE OR DELETE ON document_candidate_reviews
             FOR EACH ROW EXECUTE FUNCTION reject_document_candidate_review_mutation()
+        """)
+        op.execute("""
+            CREATE TRIGGER trg_evidence_uploads_immutable
+            BEFORE UPDATE OF filename, mime_type, content, size_bytes, sha256 ON evidence_uploads
+            BEGIN SELECT RAISE(ABORT, 'original uploaded evidence is immutable'); END
         """)
     elif op.get_bind().dialect.name == "sqlite":
         op.execute("""
