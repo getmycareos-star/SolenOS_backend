@@ -6,6 +6,7 @@ It does not claim OCR for scanned images or create clinical assertions.
 from __future__ import annotations
 
 import hashlib
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -53,7 +54,17 @@ def _verified_content(upload: EvidenceUpload) -> bytes:
 
 def _extract(upload: EvidenceUpload, content: bytes | None = None) -> dict:
     verified = _verified_content(upload) if content is None else content
-    return extract_document(upload.filename, upload.mime_type, verified)
+    try:
+        evidence_metadata = json.loads(evidence.extra_metadata or "{}")
+    except (TypeError, ValueError):
+        evidence_metadata = {}
+    scan_processing = evidence_metadata.get("scan_processing", {})
+    return extract_document(
+        upload.filename,
+        upload.mime_type,
+        verified,
+        scan_processing=scan_processing if isinstance(scan_processing, dict) else None,
+    )
 
 def _response(analysis: CaptureAnalysis) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
