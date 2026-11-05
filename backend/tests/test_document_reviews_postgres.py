@@ -444,6 +444,14 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
             CaptureAnalysis.source_evidence_id == evidence_id,
         ).count() == 1
 
+    # The original binary and its digest are immutable at the PostgreSQL boundary.
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE evidence_uploads SET sha256 = :digest WHERE evidence_id = :id"),
+                {"digest": "0" * 64, "id": evidence_id},
+            )
+
     with Session() as db:
         with pytest.raises(HTTPException) as legacy_review:
             review_capture_candidate(
