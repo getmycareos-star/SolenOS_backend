@@ -16,6 +16,7 @@ from app.core.database import get_db
 from app.api.document_lifecycle import _identity
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import Evidence
+from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import CareAssertion
 from app.models.uncertainty import OpenQuestion
 from app.models.document_review import DocumentCandidateReview
@@ -130,10 +131,28 @@ def review_document_candidate(
         raise HTTPException(status_code=409, detail="Candidate has no verifiable source quotation")
     source_start = candidate.get("source_span_start")
     source_end = candidate.get("source_span_end")
-    if not isinstance(source_start, int) or not isinstance(source_end, int):
+    if type(source_start) is not int or type(source_end) is not int:
         raise HTTPException(status_code=409, detail="Candidate source offsets are missing")
-    if source_end - source_start != len(source_quote) or (analysis.source_text or "")[source_start:source_end] != source_quote:
+    persisted_source = analysis.source_text or ""
+    if (
+        source_start < 0
+        or source_end > len(persisted_source)
+        or source_end - source_start != len(source_quote)
+        or persisted_source[source_start:source_end] != source_quote
+    ):
         raise HTTPException(status_code=409, detail="Candidate quotation and offsets do not match the persisted source text")
+    original_upload = db.query(EvidenceUpload).filter(
+        EvidenceUpload.evidence_id == analysis.source_evidence_id,
+    ).first()
+    if original_upload is None:
+        raise HTTPException(status_code=409, detail="Original document bytes are unavailable for review")
+    original_bytes = bytes(original_upload.content)
+    if (
+        len(original_bytes) != original_upload.size_bytes
+        or hashlib.sha256(original_bytes).hexdigest() != original_upload.sha256
+        or original_upload.sha256 != metadata.get("binary_sha256")
+    ):
+        raise HTTPException(status_code=409, detail="Original document integrity check failed; review was not saved")
 
     version = (latest.decision_version if latest else 0) + 1
     assertion_id = None
@@ -249,7 +268,13 @@ def review_document_candidate(
                 DocumentCandidateReview.idempotency_key == payload.idempotency_key,
             ).first()
             if prior is not None:
-                return _decision_response(prior)
+                if (
+                    prior.analysis_id == analysis_id
+                    and prior.candidate_index == payload.candidate_index
+                    and prior.request_sha256 == request_sha256
+                ):
+                    return _decision_response(prior)
+                raise HTTPException(status_code=409, detail="Idempotency key was reused with a different review decision") from exc
         raise HTTPException(status_code=409, detail="A concurrent review was recorded; reload the candidate history") from exc
     return _decision_response(row)
 
