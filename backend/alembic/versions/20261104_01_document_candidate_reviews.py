@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20261104_01_doc_review"
-down_revision = "20261102_01_explicit_actions"
+down_revision = "20261102_02_workflow_integrity_merge"
 branch_labels = None
 depends_on = None
 
