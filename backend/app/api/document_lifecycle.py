@@ -1,7 +1,7 @@
-"""Persist extraction results against the immutable uploaded evidence artifact.
+"""Persist OCR/native extraction against immutable uploaded evidence.
 
-This first lifecycle stage deliberately performs deterministic text/PDF extraction only.
-It does not claim OCR for scanned images or create clinical assertions.
+Extracted text and model candidates remain source material. Only an explicit caregiver
+acceptance in document_reviews.py may create a reported, source-linked LCR assertion.
 """
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ from app.services.document_extraction import extract_document
 from app.services.qwen_gateway import extract_review_candidates
 
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
-MAX_EXTRACTED_CHARS = 100_000
-MAX_PDF_PAGES = 100
 
 
 def _identity(request: Request, db: Session) -> tuple[str, str]:
