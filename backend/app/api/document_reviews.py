@@ -262,8 +262,16 @@ def review_document_candidate(
         decision=payload.decision,
         original_candidate=dict(candidate),
         source_quote=source_quote,
-        corrected_subject=(effective_subject if payload.decision in {"correct", "accept"} else None),
-        corrected_observation=(effective_observation if payload.decision in {"correct", "accept"} else None),
+        corrected_subject=(
+            effective_subject
+            if payload.decision == "correct" or (payload.decision == "accept" and latest_correction is not None)
+            else None
+        ),
+        corrected_observation=(
+            effective_observation
+            if payload.decision == "correct" or (payload.decision == "accept" and latest_correction is not None)
+            else None
+        ),
         rationale=payload.rationale,
         resulting_assertion_id=assertion_id,
         superseded_assertion_id=superseded_assertion_id,
