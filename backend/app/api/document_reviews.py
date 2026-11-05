@@ -16,6 +16,7 @@ from app.api.document_lifecycle import _identity
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import Evidence
 from app.models.care_continuity import CareAssertion
+from app.models.uncertainty import OpenQuestion
 from app.models.document_review import DocumentCandidateReview
 from app.services.qwen_gateway import extract_review_candidates
 
@@ -52,6 +53,7 @@ def _decision_response(row: DocumentCandidateReview) -> dict:
         "corrected_observation": row.corrected_observation,
         "resulting_assertion_id": row.resulting_assertion_id,
         "superseded_assertion_id": row.superseded_assertion_id,
+        "resulting_question_id": row.resulting_question_id,
         "created_at": row.created_at,
         "written_to_lcr": row.resulting_assertion_id is not None,
     }
@@ -133,6 +135,7 @@ def review_document_candidate(
     version = (latest.decision_version if latest else 0) + 1
     assertion_id = None
     superseded_assertion_id = None
+    question_id = None
     effective_subject = (
         (payload.corrected_subject or "").strip()
         or ((latest.corrected_subject or "").strip() if latest and latest.decision == "correct" else "")
@@ -148,6 +151,32 @@ def review_document_candidate(
 
     # A correction is a proposed replacement, not approval. The prior accepted
     # assertion remains active until a separate explicit accept decision.
+    if payload.decision == "clarify":
+        question_id = str(uuid.uuid4())
+        clarification = OpenQuestion(
+            id=question_id,
+            person_id=person_id,
+            question=(
+                payload.rationale.strip()
+                if payload.rationale and payload.rationale.strip()
+                else f"Please verify this statement from the uploaded document: {source_quote}"
+            ),
+            subject_type="care_recipient",
+            subject_id=person_id,
+            intended_answerer_role="caregiver",
+            necessity="not_assessed",
+            status="open",
+            evidence_ids=[analysis.source_evidence_id],
+            context=[{
+                "kind": "document_candidate_clarification",
+                "analysis_id": analysis_id,
+                "candidate_index": payload.candidate_index,
+                "source_quote": source_quote,
+            }],
+            created_by_caregiver_id=caregiver_id,
+        )
+        db.add(clarification)
+
     if payload.decision == "accept":
         previous_accepted = db.query(DocumentCandidateReview).filter(
             DocumentCandidateReview.analysis_id == analysis_id,
@@ -200,6 +229,7 @@ def review_document_candidate(
         rationale=payload.rationale,
         resulting_assertion_id=assertion_id,
         superseded_assertion_id=superseded_assertion_id,
+        resulting_question_id=question_id,
         idempotency_key=payload.idempotency_key,
     )
     db.add(row)
