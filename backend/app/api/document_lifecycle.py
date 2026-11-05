@@ -52,7 +52,7 @@ def _verified_content(upload: EvidenceUpload) -> bytes:
     return content
 
 
-def _extract(upload: EvidenceUpload, content: bytes | None = None) -> dict:
+def _extract(upload: EvidenceUpload, evidence: Evidence, content: bytes | None = None) -> dict:
     verified = _verified_content(upload) if content is None else content
     try:
         evidence_metadata = json.loads(evidence.extra_metadata or "{}")
@@ -113,7 +113,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 )
             return _response(row)
 
-    extraction = _extract(upload, content)
+    extraction = _extract(upload, evidence, content)
     source_text = extraction["text"]
     method = extraction["method"]
     page_metadata = extraction["pages"]
