@@ -18,6 +18,7 @@ from app.models.care import CareEvent
 from app.models.collaboration import ConversationMessage
 from app.main import app
 import app.main as main_module
+from app.services.qwen_gateway import extract_review_candidates
 
 
 pytestmark = pytest.mark.skipif(
@@ -339,3 +340,31 @@ def test_live_qwen_emergency_readiness_labels_missing_details_without_invention(
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_live_qwen_document_candidates_keep_exact_source_quotes_and_offsets():
+    """Real Qwen document interpretation must return only exact, source-linked candidates."""
+    source_text = (
+        "Caregiver note from Tuesday morning: the care recipient ate only a few bites of breakfast. "
+        "The caregiver observed this during the morning visit. The note does not state a diagnosis "
+        "or recommend a medication change."
+    )
+    result = extract_review_candidates(
+        source_text,
+        source_event_id=None,
+        source_evidence_id="synthetic-document-evidence",
+    )
+    observations = result["observations"]
+    assert observations, "Live Qwen returned no reviewable care observation from a direct caregiver report"
+    for candidate in observations:
+        quote = candidate["source_quote"]
+        start = candidate["source_span_start"]
+        end = candidate["source_span_end"]
+        assert quote and quote in source_text
+        assert start >= 0 and end <= len(source_text)
+        assert end - start == len(quote)
+        assert source_text[start:end] == quote
+        assert candidate["source_evidence_id"] == "synthetic-document-evidence"
+        assert candidate["review_status"] == "pending_review"
+        assert "diagnosis" not in candidate["observation"].casefold()
+        assert "medication change" not in candidate["observation"].casefold()
