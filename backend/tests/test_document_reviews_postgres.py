@@ -153,7 +153,8 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert shared_event.caregiver_id == caregiver_shared
 
 
-        # A later correction appends a new review version and supersedes, but preserves, the old assertion.
+        # Correction is a pending proposal. The previously accepted assertion
+        # remains active until the caregiver explicitly accepts the correction.
         with Session() as db:
             corrected_existing = review_document_candidate(
                 analysis_id,
@@ -165,17 +166,35 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                 ),
                 _request(person_id, caregiver_id), db,
             )
-            assert corrected_existing["written_to_lcr"] is True
+            assert corrected_existing["written_to_lcr"] is False
+            assert corrected_existing["resulting_assertion_id"] is None
+        with Session() as db:
+            prior_assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
+            assert prior_assertion.assertion_status == "reported"
+        with Session() as db:
+            accepted_correction = review_document_candidate(
+                analysis_id,
+                DocumentCandidateDecision(
+                    candidate_index=0, decision="accept",
+                    idempotency_key="document-review-accept-correction-0001",
+                ),
+                _request(person_id, caregiver_id), db,
+            )
+            assert accepted_correction["written_to_lcr"] is True
         with Session() as db:
             prior_assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
             new_assertion = db.query(CareAssertion).filter(
-                CareAssertion.id == corrected_existing["resulting_assertion_id"]
+                CareAssertion.id == accepted_correction["resulting_assertion_id"]
             ).one()
             correction_event = db.query(DocumentCandidateReview).filter(
                 DocumentCandidateReview.id == corrected_existing["review_id"]
             ).one()
+            acceptance_event = db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.id == accepted_correction["review_id"]
+            ).one()
             assert prior_assertion.assertion_status == "superseded"
-            assert correction_event.superseded_assertion_id == assertion_id
+            assert correction_event.resulting_assertion_id is None
+            assert acceptance_event.superseded_assertion_id == assertion_id
             assert "partly eaten" in new_assertion.asserted_value
 
         # Retrying the same idempotency key returns the same review and assertion.
@@ -215,15 +234,31 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
                 ),
                 _request(person_b, caregiver_b), db,
             )
-            assert corrected["written_to_lcr"] is True
+            assert corrected["written_to_lcr"] is False
+            assert corrected["resulting_assertion_id"] is None
         with Session() as db:
             review = db.query(DocumentCandidateReview).filter(
                 DocumentCandidateReview.id == corrected["review_id"]
             ).one()
             assert review.original_candidate["source_quote"] == quote_b
             assert review.corrected_observation.startswith("The caregiver corrected")
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_b,
+                CareAssertion.field == "document_observation",
+            ).count() == 0
+        with Session() as db:
+            corrected_acceptance = review_document_candidate(
+                analysis_b,
+                DocumentCandidateDecision(
+                    candidate_index=0, decision="accept",
+                    idempotency_key="document-review-correct-accept-0001",
+                ),
+                _request(person_b, caregiver_b), db,
+            )
+            assert corrected_acceptance["written_to_lcr"] is True
+        with Session() as db:
             assertion = db.query(CareAssertion).filter(
-                CareAssertion.id == corrected["resulting_assertion_id"]
+                CareAssertion.id == corrected_acceptance["resulting_assertion_id"]
             ).one()
             assert "half of breakfast was eaten" in assertion.asserted_value
 
