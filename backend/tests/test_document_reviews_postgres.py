@@ -123,6 +123,10 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote
             assert assertion.assertion_status == "reported"
+            accepted_event = db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.id == accepted["review_id"]
+            ).one()
+            assert accepted_event.corrected_observation is None
             assert db.query(CareAssertion).filter(CareAssertion.person_id == person_id).count() == 1
 
 
