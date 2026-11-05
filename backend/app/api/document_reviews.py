@@ -123,8 +123,8 @@ def review_document_candidate(
     if source_evidence is None:
         raise HTTPException(status_code=409, detail="The original document evidence is unavailable in this care record")
 
-    if candidate.get("source_evidence_id") not in (None, analysis.source_evidence_id):
-        raise HTTPException(status_code=409, detail="Candidate provenance does not match the original document")
+    if candidate.get("source_evidence_id") != analysis.source_evidence_id:
+        raise HTTPException(status_code=409, detail="Candidate is not explicitly linked to the original document evidence")
 
     source_quote = candidate.get("source_quote")
     if not isinstance(source_quote, str) or not source_quote.strip():
