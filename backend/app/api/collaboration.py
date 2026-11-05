@@ -87,6 +87,7 @@ class CompanionCreate(BaseModel):
     person_id: str
     text: str = Field(min_length=1, max_length=4000)
     session_id: Optional[str] = None
+    client_turn_id: Optional[str] = Field(default=None, min_length=1, max_length=36)
 
 
 class QwenBackgroundJobCreate(BaseModel):
@@ -557,6 +558,140 @@ _CONTEXT_STOPWORDS = {
 }
 
 
+
+_CONTEXT_SYNONYM_GROUPS = (
+    {"sleep", "rest", "awake", "waking", "insomnia", "restless", "overnight", "nighttime"},
+    {"fall", "fell", "fallen", "slipped", "slip", "tumbled"},
+    {"appointment", "visit", "clinic", "consultation", "doctor", "nurse"},
+    {"medication", "medicine", "medicines", "pill", "pills", "dose", "doses", "drug"},
+    {"pain", "ache", "aching", "hurt", "hurting", "sore"},
+    {"confused", "confusion", "disoriented", "disorientation", "memory"},
+    {"wandering", "wandered", "roaming", "eloped"},
+    {"eating", "appetite", "meal", "meals", "food", "intake"},
+    {"drinking", "hydration", "dehydrated", "water", "fluids"},
+    {"breathing", "breathless", "breathlessness", "dyspnea"},
+    {"agitated", "agitation", "distressed", "distress", "upset"},
+)
+
+
+def _base_context_terms(text: str) -> set[str]:
+    return {
+        token for token in re.findall(r"[a-z0-9']{3,}", (text or "").casefold())
+        if token not in _CONTEXT_STOPWORDS
+    }
+
+
+def _expanded_context_terms(text: str) -> set[str]:
+    direct = _base_context_terms(text)
+    expanded = set(direct)
+    for group in _CONTEXT_SYNONYM_GROUPS:
+        if direct.intersection(group):
+            expanded.update(group)
+    return expanded
+
+
+def _rank_source_rows(query: str, rows: list, fields: tuple[str, ...], limit: int) -> list:
+    """Rank person-scoped source rows by direct and synonym relevance, then recency."""
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    scored = []
+    for index, row in enumerate(rows):
+        parts = []
+        for field in fields:
+            value = getattr(row, field, None)
+            if isinstance(value, (dict, list, tuple)):
+                value = json.dumps(value, ensure_ascii=False, default=str)
+            if value is not None:
+                parts.append(str(value))
+        record_terms = set(re.findall(r"[a-z0-9']{3,}", " ".join(parts).casefold()))
+        score = 3 * len(direct_terms & record_terms) + len(synonym_terms & record_terms)
+        timestamp = None
+        for field in ("occurred_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at"):
+            candidate = getattr(row, field, None)
+            if candidate is not None and hasattr(candidate, "timestamp"):
+                timestamp = candidate
+                break
+        recency = timestamp.timestamp() if timestamp is not None else 0
+        scored.append((score, recency, index, row))
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    return [row for _, _, _, row in scored[:limit]]
+
+
+def _companion_replay_response(
+    db: Session,
+    *,
+    client_turn_id: str | None,
+    request_sha256: str,
+    person_id: str,
+    caregiver_id: str,
+    requested_session_id: str | None,
+) -> dict | None:
+    """Replay a committed assistant turn only to its original authorized caregiver."""
+    if not client_turn_id:
+        return None
+    pair = (
+        db.query(ConversationMessage, ConversationSession)
+        .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationMessage.client_turn_id == client_turn_id,
+            ConversationMessage.role == "assistant",
+        )
+        .first()
+    )
+    if pair is None:
+        return None
+    assistant, saved_session = pair
+    if saved_session.person_id != person_id or saved_session.caregiver_id != caregiver_id:
+        raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+    if saved_session.status != "active":
+        raise HTTPException(status_code=409, detail="This turn ID belongs to an inactive conversation")
+    if requested_session_id and requested_session_id != saved_session.id:
+        raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
+    try:
+        metadata = json.loads(assistant.response_metadata_json or "{}")
+        source_record_refs = json.loads(assistant.source_record_refs_json or "[]")
+        evidence_ids = json.loads(assistant.evidence_ids_json or "[]")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=503, detail="The saved Companion response cannot be replayed safely")
+    if metadata.get("request_sha256") != request_sha256:
+        raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
+    history = (
+        db.query(ConversationMessage)
+        .filter_by(session_id=saved_session.id)
+        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
+        .all()
+    )
+    return {
+        "session_id": saved_session.id,
+        "person_id": person_id,
+        "reply": assistant.content,
+        "guard_verdict": assistant.guard_verdict,
+        "safety_note": assistant.safety_note,
+        "confidence": None,
+        "evidence_ids": evidence_ids,
+        "source_event_ids": metadata.get("source_event_ids", []),
+        "source_evidence_ids": metadata.get("source_evidence_ids", []),
+        "source_appointment_ids": metadata.get("source_appointment_ids", []),
+        "source_assertion_ids": metadata.get("source_assertion_ids", []),
+        "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
+        "source_freshness_assessment_ids": metadata.get("source_freshness_assessment_ids", []),
+        "freshness_source_status": metadata.get("freshness_source_status", "not_recorded"),
+        "source_record_refs": source_record_refs,
+        "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
+        "ai_generated": metadata.get("ai_generated", assistant.guard_verdict == "passed"),
+        "written_to_lcr": False,
+        "persistence": "conversation_only",
+        "idempotent_replay": True,
+        "messages": [{
+            "role": row.role,
+            "text": row.content,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "guard_verdict": row.guard_verdict,
+            "safety_note": row.safety_note,
+        } for row in history],
+    }
+
+
 def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """Put query-relevant authorized records first without changing their meaning.
 
@@ -565,10 +700,9 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     """
     if limit <= 0 or not lines:
         return []
-    query_terms = {
-        token for token in re.findall(r"[a-z0-9']{2,}", (query or "").casefold())
-        if token not in _CONTEXT_STOPWORDS
-    }
+    direct_terms = _base_context_terms(query)
+    synonym_terms = _expanded_context_terms(query) - direct_terms
+    query_terms = direct_terms | synonym_terms
     if not query_terms:
         return lines[:limit]
 
@@ -576,8 +710,9 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
     for index, line in enumerate(lines):
         text = (line or "").casefold()
         record_terms = set(re.findall(r"[a-z0-9']{2,}", text))
-        overlap = query_terms & record_terms
-        score = len(overlap)
+        direct_overlap = direct_terms & record_terms
+        synonym_overlap = synonym_terms & record_terms
+        score = 3 * len(direct_overlap) + len(synonym_overlap)
         # A matched multiword phrase is stronger than incidental single words.
         normalized_query = " ".join((query or "").casefold().split())
         for phrase in re.findall(r"[a-z0-9']+(?:\s+[a-z0-9']+){1,3}", normalized_query):
@@ -2184,6 +2319,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not person or not caregiver:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
 
+    client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
+    if payload.client_turn_id and not client_turn_id:
+        raise HTTPException(status_code=422, detail="client_turn_id cannot be blank")
+    request_sha256 = hashlib.sha256(user_text.encode("utf-8")).hexdigest()
+    replay = _companion_replay_response(
+        db,
+        client_turn_id=client_turn_id,
+        request_sha256=request_sha256,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        requested_session_id=payload.session_id,
+    )
+    if replay is not None:
+        return replay
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
@@ -2805,21 +2955,55 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+    response_metadata = {
+        "request_sha256": request_sha256,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "freshness_source_status": freshness_source_status,
+        "lcr_context_coverage": lcr_context_coverage,
+        "ai_generated": ai_generated,
+    }
+    turn_timestamp = datetime.now(timezone.utc)
     assistant_row = ConversationMessage(
         session_id=session.id, role="assistant", content=reply,
         guard_verdict=verdict, safety_note=safety_note,
         evidence_ids_json=json.dumps(evidence_ids),
         source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
+        client_turn_id=client_turn_id,
+        response_metadata_json=json.dumps(response_metadata, ensure_ascii=False, default=str),
+        created_at=turn_timestamp + timedelta(microseconds=1),
     )
     try:
         db.add(ConversationMessage(
             session_id=session.id, role="user", content=user_text,
             guard_verdict=None, safety_note=None, evidence_ids_json="[]",
             source_record_refs_json="[]",
+            created_at=turn_timestamp,
         ))
         db.add(assistant_row)
         db.commit()
         db.refresh(assistant_row)
+    except IntegrityError as exc:
+        db.rollback()
+        replay = _companion_replay_response(
+            db,
+            client_turn_id=client_turn_id,
+            request_sha256=request_sha256,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=payload.session_id,
+        )
+        if replay is not None:
+            return replay
+        raise HTTPException(
+            status_code=409 if client_turn_id else 503,
+            detail="This turn ID is already in use; retry with the same message and turn ID"
+            if client_turn_id else "Companion response could not be saved. Please retry.",
+        ) from exc
     except Exception as exc:
         db.rollback()
         logger.exception("Companion conversation pair failed to persist")
@@ -2853,6 +3037,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         "ai_generated": ai_generated,
         "written_to_lcr": False,
         "persistence": "conversation_only",
+        "idempotent_replay": False,
         "messages": [{
             "role": row.role,
             "text": row.content,
