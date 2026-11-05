@@ -60,6 +60,7 @@ def _fixture(Session):
         "source_span_start": source_text.index(quote),
         "source_span_end": source_text.index(quote) + len(quote),
         "review_status": "pending_review",
+        "source_evidence_id": evidence_id,
     }
     with Session() as db:
         db.add(Person(id=person_id, name="Document review test recipient"))
