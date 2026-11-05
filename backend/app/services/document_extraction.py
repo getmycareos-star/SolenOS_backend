@@ -6,6 +6,7 @@ quality only; it is not clinical confidence or evidence that an instruction is c
 from __future__ import annotations
 
 import io
+import math
 import shutil
 from typing import Any
 
@@ -22,7 +23,7 @@ MAX_PDF_PAGES = 100
 MAX_IMAGE_PIXELS = 40_000_000
 
 
-def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any]]:
+def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     if shutil.which("tesseract") is None:
         raise HTTPException(status_code=503, detail="The document OCR engine is not installed")
     image = ImageOps.exif_transpose(image).convert("RGB")
@@ -37,6 +38,35 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
     except Exception:
         # OSD is best-effort; OCR confidence remains explicit.
         pass
+    # Apply only the bounded crop/rotation metadata captured with the original
+    # upload. It changes an in-memory OCR copy; the stored original bytes never change.
+    processing = scan_processing if isinstance(scan_processing, dict) else {}
+    try:
+        manual_rotation = float(processing.get("rotation_degrees", 0) or 0)
+    except (TypeError, ValueError):
+        manual_rotation = 0
+    if math.isfinite(manual_rotation) and abs(manual_rotation) <= 3600 and manual_rotation % 360:
+        image = image.rotate(-manual_rotation, expand=True, fillcolor=255)
+    raw_crop = processing.get("crop_insets_percent", {})
+    if isinstance(raw_crop, dict):
+        try:
+            insets = {
+                edge: float(raw_crop.get(edge, 0) or 0)
+                for edge in ("top", "right", "bottom", "left")
+            }
+        except (TypeError, ValueError):
+            insets = {"top": 0, "right": 0, "bottom": 0, "left": 0}
+        if (
+            all(math.isfinite(value) and 0 <= value <= 80 for value in insets.values())
+            and insets["left"] + insets["right"] < 80
+            and insets["top"] + insets["bottom"] < 80
+        ):
+            left = int(image.width * insets["left"] / 100)
+            right = image.width - int(image.width * insets["right"] / 100)
+            top = int(image.height * insets["top"] / 100)
+            bottom = image.height - int(image.height * insets["bottom"] / 100)
+            if right > left and bottom > top:
+                image = image.crop((left, top, right, bottom))
     if image.width < 1800:
         scale = min(2.0, 1800 / max(image.width, 1))
         image = image.resize((int(image.width * scale), int(image.height * scale)))
@@ -89,7 +119,7 @@ def _ocr_image(image: Image.Image, page_number: int) -> tuple[str, dict[str, Any
     }
 
 
-def extract_document(filename: str, mime_type: str, content: bytes) -> dict[str, Any]:
+def extract_document(filename: str, mime_type: str, content: bytes, scan_processing: dict[str, Any] | None = None) -> dict[str, Any]:
     """Extract text and page-level metadata from a verified immutable upload."""
     if not content:
         raise HTTPException(status_code=422, detail="The saved document is empty")
@@ -116,7 +146,7 @@ def extract_document(filename: str, mime_type: str, content: bytes) -> dict[str,
                     })
                 else:
                     rendered = rendered_pdf[index].render(scale=2).to_pil()
-                    page_text, metadata = _ocr_image(rendered, index + 1)
+                    page_text, metadata = _ocr_image(rendered, index + 1, scan_processing)
                     page_texts.append(page_text)
                     pages.append(metadata)
             extracted = "\n\n".join(
@@ -151,7 +181,7 @@ def extract_document(filename: str, mime_type: str, content: bytes) -> dict[str,
                 register_heif_opener()
             image = Image.open(io.BytesIO(content))
             image.load()
-            extracted, metadata = _ocr_image(image, 1)
+            extracted, metadata = _ocr_image(image, 1, scan_processing)
         except HTTPException:
             raise
         except (UnidentifiedImageError, OSError, ImportError) as exc:
