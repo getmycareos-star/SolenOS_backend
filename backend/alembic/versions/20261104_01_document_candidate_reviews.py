@@ -32,6 +32,7 @@ def upgrade() -> None:
         sa.Column("resulting_question_id", sa.String(), sa.ForeignKey("open_questions.id"), nullable=True),
         sa.Column("superseded_assertion_id", sa.String(), sa.ForeignKey("care_assertions.id"), nullable=True),
         sa.Column("idempotency_key", sa.String(length=128), nullable=True),
+        sa.Column("request_sha256", sa.String(length=64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("analysis_id", "candidate_index", "decision_version", name="uq_document_candidate_review_version"),
         sa.UniqueConstraint("person_id", "idempotency_key", name="uq_document_candidate_review_idempotency"),
