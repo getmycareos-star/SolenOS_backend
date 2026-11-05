@@ -6,6 +6,7 @@ import os
 import uuid
 import asyncio
 import io
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -50,6 +51,8 @@ def _fixture(Session):
     analysis_id = f"doc-review-analysis-{suffix}"
     source_text = "Caregiver note: breakfast was mostly uneaten on Tuesday."
     quote = "breakfast was mostly uneaten on Tuesday."
+    original_bytes = f"document-review-fixture:{suffix}".encode("utf-8")
+    original_sha256 = hashlib.sha256(original_bytes).hexdigest()
     candidate = {
         "subject": "Care recipient",
         "observation": "Breakfast was mostly uneaten.",
@@ -72,13 +75,21 @@ def _fixture(Session):
             source_type="caregiver_upload",
         ))
         db.flush()
+        db.add(EvidenceUpload(
+            evidence_id=evidence_id,
+            filename="review-fixture.txt",
+            mime_type="text/plain",
+            content=original_bytes,
+            size_bytes=len(original_bytes),
+            sha256=original_sha256,
+        ))
         db.add(CaptureAnalysis(
             id=analysis_id, person_id=person_id, caregiver_id=caregiver_id,
             source_event_id=None, source_evidence_id=evidence_id,
             source_text=source_text, extraction_status="available",
             candidates={
                 "kind": "document_extraction_v1",
-                "binary_sha256": "a" * 64,
+                "binary_sha256": original_sha256,
                 "observations": [candidate],
                 "open_questions": [],
             },
