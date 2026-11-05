@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer, Boolean
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, UniqueConstraint, LargeBinary, Integer, Boolean, event, inspect as sa_inspect
 from sqlalchemy.sql import func
 import uuid
 from app.core.database import Base
@@ -63,6 +63,14 @@ class EvidenceUpload(Base):
     size_bytes = Column(Integer, nullable=False)
     sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+@event.listens_for(EvidenceUpload, "before_update")
+def _prevent_original_upload_mutation(mapper, connection, target):
+    state = sa_inspect(target)
+    immutable_fields = ("filename", "mime_type", "content", "size_bytes", "sha256")
+    if any(state.attrs[field].history.has_changes() for field in immutable_fields):
+        raise ValueError("Original uploaded evidence bytes and integrity metadata are immutable")
 
 
 class ShareIntake(Base):
