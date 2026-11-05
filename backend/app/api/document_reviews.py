@@ -71,8 +71,16 @@ def review_document_candidate(
             DocumentCandidateReview.idempotency_key == payload.idempotency_key,
         ).first()
         if prior is not None:
-            if prior.analysis_id != analysis_id or prior.candidate_index != payload.candidate_index:
-                raise HTTPException(status_code=409, detail="Idempotency key was used for another review")
+            same_request = (
+                prior.analysis_id == analysis_id
+                and prior.candidate_index == payload.candidate_index
+                and prior.decision == payload.decision
+                and prior.corrected_subject == payload.corrected_subject
+                and prior.corrected_observation == payload.corrected_observation
+                and prior.rationale == payload.rationale
+            )
+            if not same_request:
+                raise HTTPException(status_code=409, detail="Idempotency key was reused with a different review decision")
             return _decision_response(prior)
 
     analysis = db.query(CaptureAnalysis).filter(
@@ -95,7 +103,9 @@ def review_document_candidate(
         DocumentCandidateReview.analysis_id == analysis_id,
         DocumentCandidateReview.candidate_index == payload.candidate_index,
     ).order_by(DocumentCandidateReview.decision_version.desc()).first()
-    if latest and latest.decision in {"accept", "correct"} and payload.decision != "correct":
+    if latest and latest.decision == "reject":
+        raise HTTPException(status_code=409, detail="A rejected candidate is closed; create a new extraction to review changed source material")
+    if latest and latest.decision == "accept" and payload.decision != "correct":
         raise HTTPException(status_code=409, detail="An accepted candidate can only be changed through a new correction decision")
     if analysis.source_evidence_id is None:
         raise HTTPException(status_code=409, detail="The extraction is not linked to original evidence")
@@ -123,21 +133,38 @@ def review_document_candidate(
     version = (latest.decision_version if latest else 0) + 1
     assertion_id = None
     superseded_assertion_id = None
-    if latest and latest.decision in {"accept", "correct"} and payload.decision == "correct":
-        prior_assertion = db.query(CareAssertion).filter(
-            CareAssertion.id == latest.resulting_assertion_id,
-            CareAssertion.person_id == person_id,
-        ).with_for_update().first()
-        if prior_assertion is None:
-            raise HTTPException(status_code=409, detail="The prior LCR assertion is unavailable; correction was not applied")
-        prior_assertion.assertion_status = "superseded"
-        superseded_assertion_id = prior_assertion.id
+    effective_subject = (
+        (payload.corrected_subject or "").strip()
+        or ((latest.corrected_subject or "").strip() if latest and latest.decision == "correct" else "")
+        or (candidate.get("subject") or "Care recipient").strip()
+    )
+    effective_observation = (
+        (payload.corrected_observation or "").strip()
+        or ((latest.corrected_observation or "").strip() if latest and latest.decision == "correct" else "")
+        or (candidate.get("observation") or "").strip()
+    )
+    if payload.decision in {"accept", "correct"} and not effective_observation:
+        raise HTTPException(status_code=422, detail="The candidate has no observation text to review")
 
-    if payload.decision in {"accept", "correct"}:
-        subject = (payload.corrected_subject or candidate.get("subject") or "Care recipient").strip()
-        observation = (payload.corrected_observation or candidate.get("observation") or "").strip()
-        if not observation:
-            raise HTTPException(status_code=422, detail="The accepted candidate has no observation text")
+    # A correction is a proposed replacement, not approval. The prior accepted
+    # assertion remains active until a separate explicit accept decision.
+    if payload.decision == "accept":
+        previous_accepted = db.query(DocumentCandidateReview).filter(
+            DocumentCandidateReview.analysis_id == analysis_id,
+            DocumentCandidateReview.candidate_index == payload.candidate_index,
+            DocumentCandidateReview.decision.in_(["accept"]),
+            DocumentCandidateReview.resulting_assertion_id.is_not(None),
+        ).order_by(DocumentCandidateReview.decision_version.desc()).with_for_update().first()
+        if previous_accepted is not None:
+            prior_assertion = db.query(CareAssertion).filter(
+                CareAssertion.id == previous_accepted.resulting_assertion_id,
+                CareAssertion.person_id == person_id,
+            ).with_for_update().first()
+            if prior_assertion is None:
+                raise HTTPException(status_code=409, detail="The prior LCR assertion is unavailable; correction was not applied")
+            prior_assertion.assertion_status = "superseded"
+            superseded_assertion_id = prior_assertion.id
+
         assertion_id = str(uuid.uuid4())
         assertion = CareAssertion(
             id=assertion_id,
@@ -146,7 +173,7 @@ def review_document_candidate(
             subject_id=person_id,
             field="document_observation",
             assertion_kind="caregiver_reviewed_document_report",
-            asserted_value=f"{subject}: {observation}",
+            asserted_value=f"{effective_subject}: {effective_observation}",
             source_event_id=None,
             source_label="Caregiver-reviewed document",
             source_text=source_quote,
@@ -168,8 +195,8 @@ def review_document_candidate(
         decision=payload.decision,
         original_candidate=dict(candidate),
         source_quote=source_quote,
-        corrected_subject=(payload.corrected_subject or None),
-        corrected_observation=(payload.corrected_observation or None),
+        corrected_subject=(effective_subject if payload.decision in {"correct", "accept"} else None),
+        corrected_observation=(effective_observation if payload.decision in {"correct", "accept"} else None),
         rationale=payload.rationale,
         resulting_assertion_id=assertion_id,
         superseded_assertion_id=superseded_assertion_id,
