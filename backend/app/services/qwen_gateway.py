@@ -259,7 +259,7 @@ def extract_review_candidates(
             "source_span_end": source_start + len(quote),
             "review_status": "pending_review",
         }
-        page_markers = list(re.finditer(r"\\[Page\\s+(\\d+)\\]", bounded_source[:source_start]))
+        page_markers = list(re.finditer(r"\[Page\s+(\d+)\]", bounded_source[:source_start]))
         if page_markers:
             candidate["source_page_number"] = int(page_markers[-1].group(1))
         if source_event_id:
