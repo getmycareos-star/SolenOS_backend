@@ -25,6 +25,7 @@ from app.models.care import Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion
 from app.models.document_review import DocumentCandidateReview
+from app.models.uncertainty import OpenQuestion
 from app.models.collaboration import EvidenceUpload
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -493,5 +494,41 @@ def test_concurrent_acceptance_creates_one_assertion_and_one_review():
                 CareAssertion.person_id == person_id,
                 CareAssertion.field == "document_observation",
             ).count() == 1
+    finally:
+        engine.dispose()
+
+
+def test_clarification_decision_creates_open_question_without_lcr_assertion():
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    person_id, caregiver_id, evidence_id, analysis_id, quote = _fixture(Session)
+    try:
+        with Session() as db:
+            result = review_document_candidate(
+                analysis_id,
+                DocumentCandidateDecision(
+                    candidate_index=0,
+                    decision="clarify",
+                    rationale="The scan is unclear; confirm the wording with the family.",
+                    idempotency_key=f"doc-review-clarify-{uuid.uuid4().hex}",
+                ),
+                _request(person_id, caregiver_id),
+                db,
+            )
+            assert result["written_to_lcr"] is False
+            assert result["resulting_assertion_id"] is None
+            assert result["resulting_question_id"]
+        with Session() as db:
+            question = db.query(OpenQuestion).filter(
+                OpenQuestion.id == result["resulting_question_id"],
+                OpenQuestion.person_id == person_id,
+            ).one()
+            assert question.status == "open"
+            assert evidence_id in question.evidence_ids
+            assert quote in question.question
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.field == "document_observation",
+            ).count() == 0
     finally:
         engine.dispose()
