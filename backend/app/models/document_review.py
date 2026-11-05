@@ -29,6 +29,7 @@ class DocumentCandidateReview(Base):
     corrected_observation = Column(Text, nullable=True)
     rationale = Column(Text, nullable=True)
     resulting_assertion_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
+    resulting_question_id = Column(String, ForeignKey("open_questions.id"), nullable=True)
     superseded_assertion_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
     idempotency_key = Column(String(128), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
