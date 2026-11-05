@@ -322,3 +322,84 @@ def get_document_candidate_reviews(
         "reviews": [_decision_response(row) for row in rows],
         "review_count": len(rows),
     }
+
+
+@router.get("/intelligence")
+def list_document_intelligence(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """List only the authenticated person's persisted document analyses and latest review state."""
+    person_id, caregiver_id = _identity(request, db)
+    analyses = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.person_id == person_id,
+    ).order_by(CaptureAnalysis.created_at.desc()).limit(100).all()
+    items = []
+    for analysis in analyses:
+        metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+        if metadata.get("kind") != "document_extraction_v1":
+            continue
+        reviews = db.query(DocumentCandidateReview).filter(
+            DocumentCandidateReview.analysis_id == analysis.id,
+            DocumentCandidateReview.person_id == person_id,
+        ).order_by(
+            DocumentCandidateReview.candidate_index,
+            DocumentCandidateReview.decision_version.desc(),
+        ).all()
+        latest_by_index = {}
+        for review in reviews:
+            latest_by_index.setdefault(review.candidate_index, review)
+
+        observations = []
+        for index, raw_candidate in enumerate(metadata.get("observations", [])):
+            if not isinstance(raw_candidate, dict):
+                continue
+            candidate = dict(raw_candidate)
+            latest = latest_by_index.get(index)
+            if latest is None:
+                candidate["review_status"] = "pending_review"
+            elif latest.decision == "accept":
+                candidate["review_status"] = "accepted_by_caregiver"
+                candidate["review_decision"] = "accept"
+                candidate["reviewed_by_caregiver_id"] = latest.caregiver_id
+                candidate["review_id"] = latest.id
+                candidate["review_version"] = latest.decision_version
+                candidate["resulting_assertion_id"] = latest.resulting_assertion_id
+                candidate["subject"] = latest.corrected_subject or candidate.get("subject")
+                candidate["observation"] = latest.corrected_observation or candidate.get("observation")
+            elif latest.decision == "reject":
+                candidate["review_status"] = "rejected_by_caregiver"
+                candidate["review_decision"] = "reject"
+                candidate["review_id"] = latest.id
+                candidate["review_version"] = latest.decision_version
+            elif latest.decision == "correct":
+                candidate["review_status"] = "corrected_pending_approval"
+                candidate["review_decision"] = "correct"
+                candidate["review_id"] = latest.id
+                candidate["review_version"] = latest.decision_version
+                candidate["subject"] = latest.corrected_subject or candidate.get("subject")
+                candidate["observation"] = latest.corrected_observation or candidate.get("observation")
+            else:
+                candidate["review_status"] = "clarification_requested"
+                candidate["review_decision"] = "clarify"
+                candidate["review_id"] = latest.id
+                candidate["review_version"] = latest.decision_version
+            observations.append(candidate)
+
+        items.append({
+            "analysis_id": analysis.id,
+            "source_evidence_id": analysis.source_evidence_id,
+            "document_name": metadata.get("filename") or "Uploaded document",
+            "extraction_status": analysis.extraction_status,
+            "extraction_method": metadata.get("extraction_method"),
+            "pages": metadata.get("pages", []),
+            "observations": observations,
+            "open_questions": metadata.get("open_questions", []),
+            "candidate_extraction_status": metadata.get("candidate_extraction_status", "not_applicable"),
+            "review_required": any(
+                item.get("review_status") in {"pending_review", "corrected_pending_approval", "clarification_requested"}
+                for item in observations
+            ),
+            "written_to_lcr": False,
+        })
+    return {"items": items, "count": len(items)}
