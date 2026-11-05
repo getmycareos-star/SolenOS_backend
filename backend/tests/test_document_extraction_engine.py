@@ -136,3 +136,24 @@ def test_unsupported_file_type_fails_closed():
     with pytest.raises(HTTPException) as exc:
         extract_document("care.bin", "application/octet-stream", b"not a document")
     assert exc.value.status_code == 415
+
+
+@pytest.mark.skipif(not OCR_AVAILABLE, reason="Tesseract is installed in the document OCR CI job")
+def test_saved_scan_rotation_metadata_is_applied_before_ocr():
+    # The source file is physically rotated clockwise. The caregiver's
+    # counter-clockwise adjustment is stored as metadata and applied to the
+    # OCR copy, while the original file remains byte-for-byte unchanged.
+    rotated = _scan("Care note: the morning visit was completed.").rotate(-90, expand=True)
+    original = _bytes(rotated)
+    result = extract_document(
+        "adjusted-scan.png",
+        "image/png",
+        original,
+        scan_processing={
+            "rotation_degrees": -90,
+            "crop_insets_percent": {"top": 0, "right": 0, "bottom": 0, "left": 0},
+        },
+    )
+    assert "morning" in result["text"].lower()
+    assert result["pages"][0]["scan_rotation_degrees"] == -90
+    assert original == _bytes(rotated)
