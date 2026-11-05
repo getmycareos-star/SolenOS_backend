@@ -6,6 +6,7 @@ Ollama's native HTTP API; it never calls a hosted inference provider.
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 import time
@@ -258,6 +259,9 @@ def extract_review_candidates(
             "source_span_end": source_start + len(quote),
             "review_status": "pending_review",
         }
+        page_markers = list(re.finditer(r"\\[Page\\s+(\\d+)\\]", bounded_source[:source_start]))
+        if page_markers:
+            candidate["source_page_number"] = int(page_markers[-1].group(1))
         if source_event_id:
             candidate["source_event_id"] = source_event_id
         if source_evidence_id:
