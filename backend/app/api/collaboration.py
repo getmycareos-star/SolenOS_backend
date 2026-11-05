@@ -192,6 +192,8 @@ async def upload_evidence(
         "json": "application/json", "xml": "application/xml", "yaml": "application/yaml",
         "yml": "application/yaml", "pdf": "application/pdf", "jpg": "image/jpeg",
         "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp", "gif": "image/gif",
+        "tif": "image/tiff", "tiff": "image/tiff", "bmp": "image/bmp",
+        "heic": "image/heic", "heif": "image/heif",
         "doc": "application/msword",
         "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "rtf": "application/rtf", "eml": "message/rfc822", "msg": "application/vnd.ms-outlook",
