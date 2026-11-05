@@ -2569,12 +2569,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "person", "people", "observation", "observations", "note", "notes",
             "current", "recent", "history", "information", "does", "did",
         }
-        retrieval_terms = [
-            term for term in dict.fromkeys(
-                re.findall(r"[a-z0-9']{4,}", retrieval_query.casefold())
-            )
+        direct_terms = list(dict.fromkeys(
+            term for term in re.findall(r"[a-z0-9']{3,}", user_text.casefold())
             if term not in retrieval_stopwords
-        ][:6]
+        ))[:12]
+        ranking_terms = list(dict.fromkeys(
+            term for term in re.findall(r"[a-z0-9']{3,}", retrieval_query.casefold())
+            if term not in retrieval_stopwords
+        ))[:12]
+        synonym_terms = sorted(_expanded_context_terms(retrieval_query) - set(ranking_terms))[:12]
+        retrieval_terms = sorted(_expanded_context_terms(retrieval_query) - retrieval_stopwords)[:24]
         existing_event_ids = {str(event.id) for event in recent_events}
         if retrieval_terms:
             matching_events = (
@@ -2617,6 +2621,106 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 event_context.append(event_line)
                 source_context.append(event_line)
+
+            # Older caregiver-approved assertions must be searchable even when
+            # they fall outside the recent-record window. Pending proposals are
+            # deliberately excluded from Companion context.
+            existing_assertion_ids = set(_context_record_ids(assertion_context, "assertion_id"))
+            historical_assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.assertion_status == "caregiver_reviewed",
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        CareAssertion.field, CareAssertion.asserted_value,
+                        CareAssertion.source_label, CareAssertion.source_text,
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(CareAssertion.recorded_at.desc()).limit(250).all()
+            for assertion in _rank_source_rows(
+                retrieval_query, historical_assertions,
+                ("field", "asserted_value", "source_label", "source_text"), 12
+            ):
+                assertion_id = str(assertion.id)
+                if assertion_id in existing_assertion_ids:
+                    continue
+                existing_assertion_ids.add(assertion_id)
+                assertion_context.append("Caregiver-approved LCR assertion (source-attributed): " + json.dumps({
+                    "assertion_id": assertion_id, "field": assertion.field,
+                    "value": assertion.asserted_value, "assertion_kind": assertion.assertion_kind,
+                    "source_label": assertion.source_label,
+                    "source_event_id": str(assertion.source_event_id) if assertion.source_event_id else None,
+                    "evidence_ids": [str(value) for value in (assertion.evidence_ids or [])],
+                    "source_text": (assertion.source_text or "")[:500],
+                    "recorded_at": assertion.recorded_at.isoformat() if assertion.recorded_at else None,
+                    "status": assertion.assertion_status,
+                }, ensure_ascii=False))
+
+            existing_appointment_ids = set(_context_record_ids(appointment_context, "appointment_id"))
+            historical_appointments = db.query(Appointment).filter(
+                Appointment.person_id == person_id,
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        Appointment.title, Appointment.location, Appointment.provider,
+                        Appointment.healthcare_org, Appointment.status,
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(Appointment.scheduled_at.desc()).limit(250).all()
+            for appointment in _rank_source_rows(
+                retrieval_query, historical_appointments,
+                ("title", "location", "provider", "healthcare_org", "status"), 12
+            ):
+                appointment_id = str(appointment.id)
+                if appointment_id in existing_appointment_ids:
+                    continue
+                existing_appointment_ids.add(appointment_id)
+                appointment_context.append("LCR appointment evidence: " + json.dumps({
+                    "appointment_id": appointment_id, "title": appointment.title,
+                    "status": appointment.status,
+                    "scheduled_at": appointment.scheduled_at.isoformat() if appointment.scheduled_at else None,
+                    "location": appointment.location, "provider": appointment.provider,
+                    "healthcare_org": appointment.healthcare_org,
+                }, ensure_ascii=False))
+
+            existing_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
+            historical_evidence = db.query(EvidenceModel).filter(
+                EvidenceModel.person_id == person_id,
+                EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+                or_(*[
+                    column.ilike(f"%{term}%")
+                    for column in (
+                        EvidenceModel.source_text, EvidenceModel.extra_metadata, EvidenceModel.type
+                    )
+                    for term in retrieval_terms
+                ]),
+            ).order_by(EvidenceModel.uploaded_at.desc()).limit(250).all()
+            for evidence in _rank_source_rows(
+                retrieval_query, historical_evidence,
+                ("source_text", "extra_metadata", "type"), 12
+            ):
+                evidence_id = str(evidence.id)
+                if evidence_id in existing_evidence_ids:
+                    continue
+                existing_evidence_ids.add(evidence_id)
+                metadata = evidence.extra_metadata or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except (TypeError, ValueError):
+                        metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                evidence_context.append("Caregiver-provided evidence: " + json.dumps({
+                    "evidence_id": evidence_id, "type": evidence.type,
+                    "filename": metadata.get("filename"), "mime_type": metadata.get("mime_type"),
+                    "status": evidence.evidence_status, "source_type": evidence.source_type,
+                    "uploaded_at": evidence.uploaded_at.isoformat() if evidence.uploaded_at else None,
+                    "source_text": (evidence.source_text or "")[:700],
+                    "time_provenance": evidence.time_provenance, "confidence": evidence.confidence,
+                }, ensure_ascii=False))
 
         # Supplement purpose-specific retrieval with bounded, shared LCR sources.
         # Greetings do not need care-history reads; conversation remains non-evidence.
