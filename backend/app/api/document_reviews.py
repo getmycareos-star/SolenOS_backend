@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 import hashlib
+import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -67,6 +68,11 @@ def review_document_candidate(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _identity(request, db)
+    request_sha256 = hashlib.sha256(json.dumps(
+        payload.model_dump(exclude={"idempotency_key"}),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
     if payload.idempotency_key:
         prior = db.query(DocumentCandidateReview).filter(
             DocumentCandidateReview.person_id == person_id,
@@ -76,10 +82,7 @@ def review_document_candidate(
             same_request = (
                 prior.analysis_id == analysis_id
                 and prior.candidate_index == payload.candidate_index
-                and prior.decision == payload.decision
-                and prior.corrected_subject == payload.corrected_subject
-                and prior.corrected_observation == payload.corrected_observation
-                and prior.rationale == payload.rationale
+                and prior.request_sha256 == request_sha256
             )
             if not same_request:
                 raise HTTPException(status_code=409, detail="Idempotency key was reused with a different review decision")
@@ -227,6 +230,7 @@ def review_document_candidate(
         superseded_assertion_id=superseded_assertion_id,
         resulting_question_id=question_id,
         idempotency_key=payload.idempotency_key,
+        request_sha256=request_sha256,
     )
     db.add(row)
     try:
