@@ -449,6 +449,14 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
             CaptureAnalysis.source_evidence_id == evidence_id,
         ).count() == 1
 
+    # The extracted source text and its person/evidence binding are immutable.
+    with pytest.raises(DBAPIError):
+        with engine.begin() as connection:
+            connection.execute(
+                text("UPDATE capture_analyses SET source_text = 'tampered text' WHERE id = :id"),
+                {"id": analysis_id},
+            )
+
     # The original binary and its digest are immutable at the PostgreSQL boundary.
     with pytest.raises(DBAPIError):
         with engine.begin() as connection:
