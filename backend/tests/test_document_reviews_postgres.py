@@ -571,3 +571,37 @@ def test_clarification_decision_creates_open_question_without_lcr_assertion():
             ).count() == 0
     finally:
         engine.dispose()
+
+
+def test_concurrent_retry_with_same_idempotency_key_replays_one_review():
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    person_id, caregiver_id, _, analysis_id, _ = _fixture(Session)
+    key = f"document-review-concurrent-replay-{uuid.uuid4().hex}"
+
+    def accept():
+        with Session() as db:
+            return review_document_candidate(
+                analysis_id,
+                DocumentCandidateDecision(
+                    candidate_index=0, decision="accept", idempotency_key=key,
+                ),
+                _request(person_id, caregiver_id), db,
+            )
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: accept(), range(2)))
+        assert outcomes[0]["review_id"] == outcomes[1]["review_id"]
+        assert outcomes[0]["resulting_assertion_id"] == outcomes[1]["resulting_assertion_id"]
+        with Session() as db:
+            assert db.query(DocumentCandidateReview).filter(
+                DocumentCandidateReview.analysis_id == analysis_id,
+                DocumentCandidateReview.candidate_index == 0,
+            ).count() == 1
+            assert db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.field == "document_observation",
+            ).count() == 1
+    finally:
+        engine.dispose()
