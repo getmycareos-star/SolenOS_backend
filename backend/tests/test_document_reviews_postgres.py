@@ -350,14 +350,27 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
 
 def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connection(monkeypatch):
     from app.api import document_lifecycle
+    from PIL import Image, ImageDraw, ImageFont
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     person_id = f"doc-e2e-person-{suffix}"
     caregiver_id = f"doc-e2e-caregiver-{suffix}"
-    original = b"Care note: breakfast was mostly uneaten on Tuesday."
-    quote = "breakfast was mostly uneaten on Tuesday."
+    # Simulate a real camera scan rotated clockwise; the saved caregiver
+    # adjustment rotates the OCR copy counter-clockwise while preserving bytes.
+    image = Image.new("RGB", (2200, 700), "white")
+    draw = ImageDraw.Draw(image)
+    try:
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 58)
+    except OSError:
+        font = ImageFont.load_default()
+    draw.text((90, 150), "Care note: breakfast was mostly uneaten on Tuesday.", fill="black", font=font)
+    image = image.rotate(-90, expand=True)
+    original_buffer = io.BytesIO()
+    image.save(original_buffer, format="PNG")
+    original = original_buffer.getvalue()
+    extracted_quote = {"value": None}
 
     with Session() as db:
         db.add(Person(id=person_id, name="Document E2E recipient"))
@@ -372,16 +385,18 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
         uploaded = asyncio.run(upload_evidence(
             _request(person_id, caregiver_id),
             UploadFile(
-                filename="care-note.txt",
+                filename="care-note.png",
                 file=io.BytesIO(original),
-                headers=Headers({"content-type": "text/plain"}),
+                headers=Headers({"content-type": "image/png"}),
             ),
-            person_id, caregiver_id, "document", "", "not_provided", "0", "{}", "false", db,
+            person_id, caregiver_id, "document", "", "caregiver_reviewed", "-90", "{}", "true", db,
         ))
         assert uploaded["persisted"] is True
         evidence_id = uploaded["evidence_id"]
 
     def grounded_candidates(source_text, *, source_event_id, source_evidence_id):
+        quote = source_text.strip()
+        extracted_quote["value"] = quote
         start = source_text.index(quote)
         return {
             "observations": [{
@@ -406,13 +421,17 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
         extraction_results = list(pool.map(lambda _: extract_once(), range(2)))
     assert extraction_results[0]["analysis_id"] == extraction_results[1]["analysis_id"]
     extracted = extraction_results[0]
-    assert extracted["extraction_method"] == "server_utf8_text"
+    assert extracted["extraction_method"] == "server_image_ocr"
+    analysis_id = extracted["analysis_id"]
     with Session() as db:
+        analysis = db.query(CaptureAnalysis).filter(CaptureAnalysis.id == analysis_id).one()
+        extracted_text = analysis.source_text
+        assert "breakfast" in extracted_text.lower()
+        assert extracted_text == extracted_quote["value"]
         assert db.query(CaptureAnalysis).filter(
             CaptureAnalysis.person_id == person_id,
             CaptureAnalysis.source_evidence_id == evidence_id,
         ).count() == 1
-    analysis_id = extracted["analysis_id"]
 
     with Session() as db:
         with pytest.raises(HTTPException) as legacy_review:
@@ -448,10 +467,10 @@ def test_real_postgres_upload_extract_review_and_reconstruct_after_new_connectio
             ).one()
             assertion = db.query(CareAssertion).filter(CareAssertion.id == assertion_id).one()
             assert bytes(binary.content) == original
-            assert analysis.source_text == original.decode("utf-8")
-            assert review.source_quote == quote
+            assert analysis.source_text == extracted_text
+            assert review.source_quote == extracted_text
             assert assertion.evidence_ids == [evidence_id]
-            assert assertion.source_text == quote
+            assert assertion.source_text == extracted_text
     finally:
         restarted.dispose()
 
