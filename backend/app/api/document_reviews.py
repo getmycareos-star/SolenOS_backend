@@ -156,11 +156,7 @@ def review_document_candidate(
         clarification = OpenQuestion(
             id=question_id,
             person_id=person_id,
-            question=(
-                payload.rationale.strip()
-                if payload.rationale and payload.rationale.strip()
-                else f"Please verify this statement from the uploaded document: {source_quote}"
-            ),
+            question=f"Please verify this statement from the uploaded document: {source_quote}",
             subject_type="care_recipient",
             subject_id=person_id,
             intended_answerer_role="caregiver",
@@ -414,6 +410,7 @@ def list_document_intelligence(
                 candidate["review_decision"] = "clarify"
                 candidate["review_id"] = latest.id
                 candidate["review_version"] = latest.decision_version
+                candidate["resulting_question_id"] = latest.resulting_question_id
             observations.append(candidate)
 
         items.append({
