@@ -756,3 +756,186 @@ def test_companion_conflict_guard_does_not_merge_opposite_reports_from_different
     assert collaboration._contradictory_event_evidence_response(
         "Do the records agree about whether a fall happened overnight?", context
     ) is None
+
+
+def test_companion_client_turn_retry_replays_original_response_without_duplicate_messages(monkeypatch):
+    client = setup_client(monkeypatch)
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None):
+        calls.append(messages)
+        return "The available record does not establish a change over time."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        payload = {
+            "person_id": person_id,
+            "text": "Has the care situation changed?",
+            "client_turn_id": "retry-turn-0001",
+        }
+        first = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert first.status_code == 200, first.text
+        first_data = first.json()
+        retry = client.post("/api/v1/conversation/message", headers=headers, json=payload)
+        assert retry.status_code == 200, retry.text
+        replay = retry.json()
+        assert replay["idempotent_replay"] is True
+        assert replay["session_id"] == first_data["session_id"]
+        assert replay["reply"] == first_data["reply"]
+        assert replay["source_record_refs"] == first_data["source_record_refs"]
+        assert replay["written_to_lcr"] is False
+        assert len(calls) == 1
+
+        db = TestingSessionLocal()
+        try:
+            rows = db.query(ConversationMessage).all()
+            assert [row.role for row in rows] == ["user", "assistant"]
+            assert rows[1].client_turn_id == "retry-turn-0001"
+            assert rows[0].client_turn_id is None
+        finally:
+            db.close()
+
+        changed = {**payload, "text": "A different message using the same turn ID"}
+        conflict = client.post("/api/v1/conversation/message", headers=headers, json=changed)
+        assert conflict.status_code == 409, conflict.text
+
+        other_token, other_person_id, _ = create_session(client)
+        cross_person = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {other_token}"},
+            json={
+                "person_id": other_person_id,
+                "text": payload["text"],
+                "client_turn_id": payload["client_turn_id"],
+            },
+        )
+        assert cross_person.status_code == 409, cross_person.text
+        assert first_data["reply"] not in cross_person.text
+        assert len(calls) == 1
+    finally:
+        teardown()
+
+
+def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matching(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older record describes restless sleep overnight; it does not establish a trend."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        now = datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc)
+        db = TestingSessionLocal()
+        older = CareEvent(
+            person_id=person_id, event_type="observation", status="recorded",
+            occurred_at=now - timedelta(days=120), title="Overnight rest observation",
+            description="Caregiver reported restless sleep and waking several times overnight.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(60):
+            db.add(CareEvent(
+                person_id=person_id, event_type="daily_note", status="recorded",
+                occurred_at=now - timedelta(hours=index + 1),
+                title=f"Unrelated household note {index}",
+                description=f"Routine household update {index}; no additional details.",
+                evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_event_ids"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "waking several times overnight" in captured["messages"][-1]["content"]
+        assert data["written_to_lcr"] is False
+    finally:
+        teardown()
+
+
+def test_historical_document_outside_recent_window_is_retrieved_and_attributed(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "The older caregiver-provided note mentions restless sleep overnight."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        now = datetime.now(timezone.utc)
+        db = TestingSessionLocal()
+        older = Evidence(
+            person_id=person_id, type="document",
+            source_text="Older care note: restless sleep and waking several times overnight.",
+            original_file_path=None, uploaded_at=now - timedelta(days=120),
+            uploaded_by_caregiver_id=caregiver_id,
+            extra_metadata='{"filename":"older-care-note.pdf"}',
+            time_provenance="caregiver_reported", confidence=None,
+            evidence_status="recorded", source_type="document",
+        )
+        db.add(older)
+        db.flush()
+        older_id = str(older.id)
+        for index in range(60):
+            db.add(Evidence(
+                person_id=person_id, type="document",
+                source_text=f"Routine household paperwork {index}; unrelated content.",
+                original_file_path=None, uploaded_at=now - timedelta(hours=index + 1),
+                uploaded_by_caregiver_id=caregiver_id,
+                extra_metadata='{"filename":"household-paperwork.pdf"}',
+                time_provenance="caregiver_reported", confidence=None,
+                evidence_status="recorded", source_type="document",
+            ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What happened with Mum's sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert older_id in data["source_evidence_ids"]
+        assert {"record_type": "care_evidence", "record_id": older_id} in data["source_record_refs"]
+        assert older_id in captured["messages"][-1]["content"]
+        assert "restless sleep and waking several times overnight" in captured["messages"][-1]["content"]
+    finally:
+        teardown()
+
+
+def test_companion_source_ranking_prefers_relevance_over_recency_and_synonyms():
+    older_relevant = SimpleNamespace(
+        title="Overnight rest", description="Restless sleep and repeated waking.",
+        event_type="observation", status="recorded",
+        occurred_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    recent_unrelated = SimpleNamespace(
+        title="Lunch planning", description="Routine meal preparation.",
+        event_type="daily_note", status="recorded",
+        occurred_at=datetime(2026, 10, 29, tzinfo=timezone.utc),
+    )
+    assert collaboration._rank_source_rows(
+        "What happened with Mum's sleep?", [recent_unrelated, older_relevant],
+        ("title", "description", "event_type", "status"), 1,
+    ) == [older_relevant]

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, event
+from sqlalchemy import Column, String, DateTime, Text, Boolean, Float, Integer, ForeignKey, Enum as SQLEnum, Index, UniqueConstraint, event
 from sqlalchemy.sql import func
 from sqlalchemy.orm import Session
 import uuid
@@ -78,6 +78,27 @@ class OpenQuestionAnswerEvent(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class OpenQuestionReviewEvent(Base):
+    """Append-only reviewer decision for one immutable clarification answer version."""
+    __tablename__ = "open_question_review_events"
+    __table_args__ = (
+        UniqueConstraint("question_id", "answer_version", name="uq_open_question_review_answer_version"),
+        Index("ix_open_question_review_person_question", "person_id", "question_id", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    question_id = Column(String, ForeignKey("open_questions.id", ondelete="CASCADE"), nullable=False, index=True)
+    person_id = Column(String, ForeignKey("persons.id", ondelete="CASCADE"), nullable=False, index=True)
+    answer_event_id = Column(String, ForeignKey("open_question_answer_events.id", ondelete="RESTRICT"), nullable=False)
+    answer_version = Column(Integer, nullable=False)
+    decision = Column(String(32), nullable=False)
+    rationale = Column(Text, nullable=False)
+    reviewer_caregiver_id = Column(String, ForeignKey("caregivers.id"), nullable=False)
+    claim_assessment_id = Column(String, ForeignKey("evidence_claim_assessments.id"), nullable=True)
+    resulting_claim_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class Contradiction(Base):
     __tablename__ = "contradictions"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -147,10 +168,10 @@ class ContradictionResolutionEvent(Base):
 @event.listens_for(Session, "before_flush")
 def prevent_question_answer_history_mutation(session, flush_context, instances):
     if any(
-        isinstance(item, OpenQuestionAnswerEvent)
+        isinstance(item, (OpenQuestionAnswerEvent, OpenQuestionReviewEvent))
         for item in list(session.dirty) + list(session.deleted)
     ):
-        raise ValueError("Question answer history is append-only and cannot be updated or deleted")
+        raise ValueError("Question answer and review history is append-only and cannot be updated or deleted")
 
 
 @event.listens_for(Session, "before_flush")

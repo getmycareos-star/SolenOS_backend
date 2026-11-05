@@ -2490,3 +2490,185 @@ def test_historical_unresolved_questions_remain_retrievable_outside_recent_windo
         assert foreign.status_code == 403
     finally:
         teardown_db()
+
+
+def test_clarification_review_accepts_report_without_marking_it_verified():
+    setup_db()
+    try:
+        from app.core.database import get_db
+        from app.models.care_continuity import EvidenceClaimAssessment, EvidenceClaimDependency
+        from app.models.uncertainty import OpenQuestionReviewEvent
+        app.dependency_overrides[get_db] = override_get_db
+
+        db = TestingSessionLocal()
+        person = Person(id="review-person-1", name="Review Person")
+        caregiver = Caregiver(
+            id="review-caregiver-1", name="Review Caregiver",
+            email="review-caregiver-1@example.com", relationship="Family",
+            person_id=person.id,
+        )
+        evidence = Evidence(
+            id="review-evidence-1", person_id=person.id, type="caregiver_report",
+            source_text="Caregiver reports the appointment took place on 12 October.",
+            uploaded_by_caregiver_id=caregiver.id,
+        )
+        source_claim = CareAssertion(
+            id="review-source-claim-1", person_id=person.id,
+            subject_type="appointment", subject_id="review-appointment-1",
+            field="attendance", assertion_kind="current_state",
+            asserted_value="Attendance not yet established",
+            source_label="Existing care record", source_text="Attendance remains unclear.",
+            evidence_ids=[], assertion_status="reported",
+            created_by_caregiver_id=caregiver.id,
+        )
+        db.add_all([person, caregiver, evidence, source_claim])
+        db.commit()
+        db.close()
+
+        client = authorized_client("review-person-1")
+        other_person = Person(id="review-person-2", name="Other Review Person")
+        db = TestingSessionLocal()
+        other_caregiver = Caregiver(
+            id="review-caregiver-2", name="Other Review Caregiver",
+            email="review-caregiver-2@example.com", relationship="Family",
+            person_id=other_person.id,
+        )
+        db.add_all([other_person, other_caregiver])
+        db.commit()
+        db.close()
+        other_client = authorized_client("review-person-2")
+
+        created = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": "review-person-1",
+            "question": "Was the appointment attended?",
+            "subject_type": "appointment",
+            "subject_id": "review-appointment-1",
+            "claim_id": "review-source-claim-1",
+            "priority": "high",
+            "necessity": "necessary",
+            "necessity_rationale": "Attendance changes the follow-up context.",
+        })
+        assert created.status_code == 200, created.text
+        question_id = created.json()["id"]
+
+        answered = client.patch(f"/api/v1/uncertainty/questions/{question_id}", json={
+            "status": "answered",
+            "answer": "The caregiver reports that the appointment was attended on 12 October.",
+            "answer_provenance": "Direct report from the family caregiver.",
+            "evidence_ids": ["review-evidence-1"],
+        })
+        assert answered.status_code == 200, answered.text
+
+        missing_review_window = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
+            "decision": "accepted",
+            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+        })
+        assert missing_review_window.status_code == 422, missing_review_window.text
+
+        accepted = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
+            "decision": "accepted",
+            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+            "review_after_days": 30,
+        })
+        assert accepted.status_code == 200, accepted.text
+        review = accepted.json()
+        assert review["decision"] == "accepted"
+        assert review["reviewer_caregiver_id"] == "review-caregiver-1"
+        assert review["resulting_claim_id"]
+        assert review["claim_assessment_id"]
+
+        repeated = client.post(f"/api/v1/uncertainty/questions/{question_id}/reviews", json={
+            "decision": "accepted",
+            "rationale": "The attributed report and linked source were reviewed and admitted to the care record as an unverified report.",
+            "review_after_days": 30,
+        })
+        assert repeated.status_code == 200
+        assert repeated.json()["id"] == review["id"]
+
+        history = client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history")
+        assert history.status_code == 200
+        assert len(history.json()) == 1
+        assert other_client.get(f"/api/v1/uncertainty/questions/{question_id}/review-history").status_code == 404
+
+        # The accepted clarification must be retrievable through the existing
+        # person-scoped care-continuity assertion source used by LCR projections.
+        assertions = client.get("/api/v1/care-continuity/assertions/review-person-1")
+        assert assertions.status_code == 200, assertions.text
+        assert any(item["id"] == review["resulting_claim_id"] for item in assertions.json())
+        lcr_context = client.get("/api/v1/care-continuity/context")
+        assert lcr_context.status_code == 200, lcr_context.text
+        assert any(
+            item["id"] == review["resulting_claim_id"]
+            for item in lcr_context.json()["sources"]["assertions"]["items"]
+        )
+
+        db = TestingSessionLocal()
+        try:
+            resulting = db.query(CareAssertion).filter(CareAssertion.id == review["resulting_claim_id"]).one()
+            assert resulting.person_id == "review-person-1"
+            assert resulting.asserted_value == "The caregiver reports that the appointment was attended on 12 October."
+            assert resulting.assertion_status == "reported"
+            assert resulting.review_after_days == 30
+            assert resulting.created_by_caregiver_id == "review-caregiver-1"
+            assert "Direct report from the family caregiver." in resulting.source_text
+
+            assessment = db.query(EvidenceClaimAssessment).filter(EvidenceClaimAssessment.id == review["claim_assessment_id"]).one()
+            assert assessment.status == "unverified"
+            assert assessment.reviewed_by_caregiver_id == "review-caregiver-1"
+            assert assessment.evidence_links[0]["evidence_id"] == "review-evidence-1"
+            assert assessment.evidence_links[0]["relationship"] == "neutral"
+
+            dependency = db.query(EvidenceClaimDependency).filter(
+                EvidenceClaimDependency.claim_id == resulting.id,
+                EvidenceClaimDependency.depends_on_claim_id == "review-source-claim-1",
+                EvidenceClaimDependency.dependency_type == "qualifies",
+            ).one()
+            assert dependency.created_by_caregiver_id == "review-caregiver-1"
+
+            review_event = db.query(OpenQuestionReviewEvent).filter(OpenQuestionReviewEvent.id == review["id"]).one()
+            with pytest.raises(ValueError, match="append-only"):
+                review_event.rationale = "Attempted review history rewrite"
+                db.commit()
+            db.rollback()
+        finally:
+            db.close()
+
+        rejected_without_answer_scope = other_client.post(
+            f"/api/v1/uncertainty/questions/{question_id}/reviews",
+            json={"decision": "rejected", "rationale": "Not authorized."},
+        )
+        assert rejected_without_answer_scope.status_code == 404
+
+        # A second question with a persisted answer can be rejected without
+        # creating a care assertion or claim assessment.
+        second_question = client.post("/api/v1/uncertainty/questions", json={
+            "person_id": "review-person-1",
+            "question": "Was transport arranged?",
+            "subject_type": "appointment",
+            "subject_id": "review-appointment-1",
+            "claim_id": "review-source-claim-1",
+        })
+        assert second_question.status_code == 200, second_question.text
+        second_id = second_question.json()["id"]
+        second_answer = client.patch(f"/api/v1/uncertainty/questions/{second_id}", json={
+            "status": "answered",
+            "answer": "Transport details are not available.",
+            "answer_provenance": "Caregiver could not confirm transport arrangements.",
+            "evidence_ids": ["review-evidence-1"],
+        })
+        assert second_answer.status_code == 200, second_answer.text
+        rejected = client.post(f"/api/v1/uncertainty/questions/{second_id}/reviews", json={
+            "decision": "rejected",
+            "rationale": "The linked source does not support the submitted transport statement.",
+        })
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["resulting_claim_id"] is None
+        assert rejected.json()["claim_assessment_id"] is None
+        conflict = client.post(f"/api/v1/uncertainty/questions/{second_id}/reviews", json={
+            "decision": "needs_clarification",
+            "rationale": "A different decision for the same answer version must conflict.",
+        })
+        assert conflict.status_code == 409
+        assert client.get(f"/api/v1/uncertainty/questions/{second_id}/review-history").json()[0]["decision"] == "rejected"
+    finally:
+        teardown_db()
