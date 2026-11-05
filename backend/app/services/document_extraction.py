@@ -37,8 +37,11 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
         manual_rotation = float(processing.get("rotation_degrees", 0) or 0)
     except (TypeError, ValueError):
         manual_rotation = 0
-    if math.isfinite(manual_rotation) and abs(manual_rotation) <= 3600 and manual_rotation % 360:
-        image = image.rotate(-manual_rotation, expand=True, fillcolor=255)
+    applied_rotation = manual_rotation if math.isfinite(manual_rotation) and abs(manual_rotation) <= 3600 else 0
+    if applied_rotation % 360:
+        image = image.rotate(-applied_rotation, expand=True, fillcolor=255)
+    if image.width * image.height > MAX_IMAGE_PIXELS:
+        raise HTTPException(status_code=413, detail="Processed image dimensions exceed the 40-megapixel limit")
     raw_crop = processing.get("crop_insets_percent", {})
     insets = {"top": 0, "right": 0, "bottom": 0, "left": 0}
     if isinstance(raw_crop, dict):
@@ -113,7 +116,7 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
         "processed_image_height": image.height,
         "word_boxes": word_boxes,
         "coordinate_space": "processed_image_pixels",
-        "scan_rotation_degrees": manual_rotation if math.isfinite(manual_rotation) else 0,
+        "scan_rotation_degrees": applied_rotation,
         "scan_crop_insets_percent": insets,
         "quality": quality,
         "handwriting_warning": (
@@ -148,7 +151,10 @@ def extract_document(filename: str, mime_type: str, content: bytes, scan_process
                         "quality": "review",
                     })
                 else:
-                    rendered = rendered_pdf[index].render(scale=2).to_pil()
+                    pdf_page = rendered_pdf[index]
+                    page_width, page_height = pdf_page.get_size()
+                    pixel_scale = min(2.0, math.sqrt(MAX_IMAGE_PIXELS / max(page_width * page_height, 1)))
+                    rendered = pdf_page.render(scale=pixel_scale).to_pil()
                     page_text, metadata = _ocr_image(rendered, index + 1, scan_processing)
                     page_texts.append(page_text)
                     pages.append(metadata)
@@ -199,12 +205,19 @@ def extract_document(filename: str, mime_type: str, content: bytes, scan_process
     docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     if mime == docx_mime or name.endswith(".docx"):
         try:
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                expanded_size = sum(item.file_size for item in archive.infolist())
+                if expanded_size > 100 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="DOCX expands beyond the 100 MiB processing limit")
             document = DocxDocument(io.BytesIO(content))
             parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text.strip()]
             for table in document.tables:
                 for row in table.rows:
                     parts.append(" | ".join(cell.text.strip() for cell in row.cells))
             extracted = "\n".join(parts).strip()
+        except HTTPException:
+            raise
         except Exception as exc:
             raise HTTPException(status_code=422, detail="The saved DOCX document could not be read") from exc
         if not extracted:
