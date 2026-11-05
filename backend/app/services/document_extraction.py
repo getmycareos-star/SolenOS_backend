@@ -30,16 +30,8 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
     if image.width * image.height > MAX_IMAGE_PIXELS:
         raise HTTPException(status_code=413, detail="Image dimensions exceed the 40-megapixel limit")
     image = ImageOps.autocontrast(ImageOps.grayscale(image))
-    try:
-        orientation = pytesseract.image_to_osd(image, output_type=Output.DICT)
-        rotation = int(orientation.get("rotate", 0) or 0)
-        if rotation in {90, 180, 270}:
-            image = image.rotate(-rotation, expand=True)
-    except Exception:
-        # OSD is best-effort; OCR confidence remains explicit.
-        pass
-    # Apply only the bounded crop/rotation metadata captured with the original
-    # upload. It changes an in-memory OCR copy; the stored original bytes never change.
+    # Apply caregiver scan adjustments before automatic orientation detection.
+    # These transformations operate on an OCR copy; original upload bytes remain immutable.
     processing = scan_processing if isinstance(scan_processing, dict) else {}
     try:
         manual_rotation = float(processing.get("rotation_degrees", 0) or 0)
@@ -48,6 +40,7 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
     if math.isfinite(manual_rotation) and abs(manual_rotation) <= 3600 and manual_rotation % 360:
         image = image.rotate(-manual_rotation, expand=True, fillcolor=255)
     raw_crop = processing.get("crop_insets_percent", {})
+    insets = {"top": 0, "right": 0, "bottom": 0, "left": 0}
     if isinstance(raw_crop, dict):
         try:
             insets = {
@@ -67,6 +60,14 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
             bottom = image.height - int(image.height * insets["bottom"] / 100)
             if right > left and bottom > top:
                 image = image.crop((left, top, right, bottom))
+    try:
+        orientation = pytesseract.image_to_osd(image, output_type=Output.DICT)
+        rotation = int(orientation.get("rotate", 0) or 0)
+        if rotation in {90, 180, 270}:
+            image = image.rotate(-rotation, expand=True)
+    except Exception:
+        # OSD is best-effort; OCR confidence remains explicit.
+        pass
     if image.width < 1800:
         scale = min(2.0, 1800 / max(image.width, 1))
         image = image.resize((int(image.width * scale), int(image.height * scale)))
@@ -112,6 +113,8 @@ def _ocr_image(image: Image.Image, page_number: int, scan_processing: dict[str, 
         "processed_image_height": image.height,
         "word_boxes": word_boxes,
         "coordinate_space": "processed_image_pixels",
+        "scan_rotation_degrees": manual_rotation if math.isfinite(manual_rotation) else 0,
+        "scan_crop_insets_percent": insets,
         "quality": quality,
         "handwriting_warning": (
             "Handwriting recognition is not reliable. Caregiver verification is required."
