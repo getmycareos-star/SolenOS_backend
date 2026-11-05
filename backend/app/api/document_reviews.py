@@ -139,14 +139,19 @@ def review_document_candidate(
     assertion_id = None
     superseded_assertion_id = None
     question_id = None
+    latest_correction = db.query(DocumentCandidateReview).filter(
+        DocumentCandidateReview.analysis_id == analysis_id,
+        DocumentCandidateReview.candidate_index == payload.candidate_index,
+        DocumentCandidateReview.decision == "correct",
+    ).order_by(DocumentCandidateReview.decision_version.desc()).first()
     effective_subject = (
         (payload.corrected_subject or "").strip()
-        or ((latest.corrected_subject or "").strip() if latest and latest.decision == "correct" else "")
+        or ((latest_correction.corrected_subject or "").strip() if latest_correction else "")
         or (candidate.get("subject") or "Care recipient").strip()
     )
     effective_observation = (
         (payload.corrected_observation or "").strip()
-        or ((latest.corrected_observation or "").strip() if latest and latest.decision == "correct" else "")
+        or ((latest_correction.corrected_observation or "").strip() if latest_correction else "")
         or (candidate.get("observation") or "").strip()
     )
     if payload.decision in {"accept", "correct"} and not effective_observation:
@@ -386,6 +391,11 @@ def list_document_intelligence(
                 continue
             candidate = dict(raw_candidate)
             latest = latest_by_index.get(index)
+            latest_correction = next(
+                (review for review in reviews
+                 if review.candidate_index == index and review.decision == "correct"),
+                None,
+            )
             if latest is None:
                 candidate["review_status"] = "pending_review"
             elif latest.decision == "accept":
@@ -415,6 +425,9 @@ def list_document_intelligence(
                 candidate["review_id"] = latest.id
                 candidate["review_version"] = latest.decision_version
                 candidate["resulting_question_id"] = latest.resulting_question_id
+                if latest_correction is not None:
+                    candidate["subject"] = latest_correction.corrected_subject or candidate.get("subject")
+                    candidate["observation"] = latest_correction.corrected_observation or candidate.get("observation")
             observations.append(candidate)
 
         items.append({
