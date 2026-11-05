@@ -32,6 +32,7 @@ class DocumentCandidateReview(Base):
     resulting_question_id = Column(String, ForeignKey("open_questions.id"), nullable=True)
     superseded_assertion_id = Column(String, ForeignKey("care_assertions.id"), nullable=True)
     idempotency_key = Column(String(128), nullable=True)
+    request_sha256 = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 @event.listens_for(Session, "before_flush")
