@@ -245,7 +245,11 @@ def test_accept_reject_correct_isolation_idempotency_and_fresh_connection():
             bad_analysis = db.query(CaptureAnalysis).filter(
                 CaptureAnalysis.id == analysis_bad
             ).one()
-            bad_analysis.candidates["observations"][0]["source_span_start"] += 1
+            bad_candidates = dict(bad_analysis.candidates)
+            bad_observations = [dict(item) for item in bad_candidates["observations"]]
+            bad_observations[0]["source_span_start"] += 1
+            bad_candidates["observations"] = bad_observations
+            bad_analysis.candidates = bad_candidates
             db.commit()
         with Session() as db:
             with pytest.raises(HTTPException) as invalid_quote:
