@@ -95,6 +95,21 @@ def review_document_candidate(
     ).with_for_update().first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document extraction not found")
+    # Recheck after acquiring the per-analysis row lock. A concurrent retry with
+    # the same key may have committed while this request was waiting.
+    if payload.idempotency_key:
+        concurrent_prior = db.query(DocumentCandidateReview).filter(
+            DocumentCandidateReview.person_id == person_id,
+            DocumentCandidateReview.idempotency_key == payload.idempotency_key,
+        ).first()
+        if concurrent_prior is not None:
+            if (
+                concurrent_prior.analysis_id == analysis_id
+                and concurrent_prior.candidate_index == payload.candidate_index
+                and concurrent_prior.request_sha256 == request_sha256
+            ):
+                return _decision_response(concurrent_prior)
+            raise HTTPException(status_code=409, detail="Idempotency key was reused with a different review decision")
     metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
     if metadata.get("kind") != "document_extraction_v1":
         raise HTTPException(status_code=404, detail="Document extraction not found")
