@@ -7,26 +7,92 @@ both person and caregiver through the persisted conversation-session relation.
 """
 from __future__ import annotations
 
+import re
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.models.care import Caregiver
 from app.models.collaboration import ConversationMessage, ConversationSession
-from app.services.lcr_context import build_lcr_context
-
+from app.services.lcr_context import (
+    _SEARCH_STOPWORDS,
+    _expanded_search_terms,
+    _retrieval_score,
+    build_lcr_context,
+)
 
 MAX_CONVERSATION_CONTEXT_ITEMS = 8
 MAX_CONVERSATION_MESSAGE_CHARS = 1200
 MAX_QUERY_TERMS = 8
+_TEMPORAL_STOPWORDS = {"last", "past", "this", "week", "month", "year", "today", "yesterday", "days", "day", "since", "before", "after", "between", "and", "on"}
 
+def _temporal_window(
+    query: str | None,
+    *,
+    now: datetime | None = None,
+    timezone_name: str = "UTC",
+) -> dict[str, str] | None:
+    """Resolve explicit date/range language in the caregiver's local timezone."""
+    text = (query or "").casefold()
+    try:
+        local_timezone = ZoneInfo(timezone_name or "UTC")
+    except (ZoneInfoNotFoundError, ValueError):
+        local_timezone = UTC
+    current = now or datetime.now(local_timezone)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=local_timezone)
+    else:
+        current = current.astimezone(local_timezone)
+    today = current.date()
+    start = end = None
 
-def _query_terms(query: str | None) -> list[str]:
-    import re
+    date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", text)
+    if date_match and re.search(r"\b(?:on|for)\s+20\d{2}-\d{2}-\d{2}", text):
+        selected = datetime.fromisoformat(date_match.group(1)).date()
+        start, end = selected, selected
+    elif re.search(r"\byesterday\b", text):
+        start = end = today - timedelta(days=1)
+    elif re.search(r"\btoday\b", text):
+        start = end = today
+    elif re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text):
+        days = min(int(re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text).group(1)), 366)
+        start, end = today - timedelta(days=max(0, days - 1)), today
+    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text):
+        weeks = min(int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text).group(1)), 52)
+        start, end = today - timedelta(days=max(0, weeks * 7 - 1)), today
+    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text):
+        months = min(int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text).group(1)), 12)
+        start, end = today - timedelta(days=max(0, months * 30 - 1)), today
+    elif re.search(r"\blast week\b", text):
+        monday = today - timedelta(days=today.weekday())
+        start, end = monday - timedelta(days=7), monday - timedelta(days=1)
+    elif re.search(r"\bthis week\b", text):
+        start, end = today - timedelta(days=today.weekday()), today
+    elif re.search(r"\blast month\b", text):
+        first_this_month = today.replace(day=1)
+        last_month_end = first_this_month - timedelta(days=1)
+        start, end = last_month_end.replace(day=1), last_month_end
+    elif re.search(r"\bthis month\b", text):
+        start, end = today.replace(day=1), today
+    elif re.search(r"\bbetween\s+20\d{2}-\d{2}-\d{2}\s+and\s+20\d{2}-\d{2}-\d{2}", text) or re.search(r"\bfrom\s+20\d{2}-\d{2}-\d{2}\s+to\s+20\d{2}-\d{2}-\d{2}", text):
+        dates = re.findall(r"20\d{2}-\d{2}-\d{2}", text)
+        start, end = datetime.fromisoformat(dates[0]).date(), datetime.fromisoformat(dates[1]).date()
+    elif date_match and re.search(r"\b(?:since|after)\s+20\d{2}-\d{2}-\d{2}", text):
+        start, end = datetime.fromisoformat(date_match.group(1)).date(), today
+    elif date_match and re.search(r"\bbefore\s+20\d{2}-\d{2}-\d{2}", text):
+        start, end = date(2000, 1, 1), datetime.fromisoformat(date_match.group(1)).date()
+    if start is None or end is None:
+        return None
+    return {
+        "start": datetime.combine(start, datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+        "end": datetime.combine(end, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+        "timezone": str(local_timezone),
+        "basis": "explicit_user_temporal_expression",
+    }
 
-    return list(dict.fromkeys(
-        term for term in re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())
-    ))[:MAX_QUERY_TERMS]
 
 
 def _conversation_context(
@@ -36,6 +102,7 @@ def _conversation_context(
     caregiver_id: str,
     query: str | None,
     limit: int,
+    temporal_window: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Read relevant prior turns; keep all dialogue explicitly non-evidentiary."""
     statement = (
@@ -46,19 +113,29 @@ def _conversation_context(
             ConversationSession.caregiver_id == str(caregiver_id),
         )
     )
-    terms = _query_terms(query)
+    direct_terms = [
+        term for term in re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())
+        if term not in _SEARCH_STOPWORDS
+    ][:MAX_QUERY_TERMS]
+    terms = _expanded_search_terms(direct_terms)
+    if temporal_window:
+        statement = statement.filter(
+            ConversationMessage.created_at >= datetime.fromisoformat(temporal_window["start"]),
+            ConversationMessage.created_at <= datetime.fromisoformat(temporal_window["end"]),
+        )
     if terms:
         statement = statement.filter(or_(*[
             ConversationMessage.content.ilike(f"%{term}%") for term in terms
         ]))
+    bounded_limit = max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS))
+    candidate_limit = min(max(bounded_limit * 5, bounded_limit + 1), 100) if terms else bounded_limit
     rows = (
         statement.order_by(ConversationMessage.created_at.desc(), ConversationMessage.id.desc())
-        .limit(max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS)) + 1)
+        .limit(candidate_limit + 1)
         .all()
     )
-    bounded = rows[:max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS))]
     items = []
-    for message, conversation in bounded:
+    for message, conversation in rows:
         items.append({
             "id": str(message.id),
             "session_id": str(conversation.id),
@@ -72,14 +149,24 @@ def _conversation_context(
             "is_care_evidence": False,
             "source_attribution": "caregiver_companion_message",
         })
+    if direct_terms:
+        expanded_only = [term for term in terms if term not in direct_terms]
+        items.sort(
+            key=lambda item: (
+                _retrieval_score(item, query or "", direct_terms, expanded_only),
+                item.get("recorded_at") or "",
+            ),
+            reverse=True,
+        )
+    items = items[:bounded_limit]
     items.sort(key=lambda item: (item.get("recorded_at") or "", item["id"]))
     return {
         "status": "available" if items else "empty",
         "table": "conversation_messages",
         "items": items,
         "returned_count": len(items),
-        "has_more": len(rows) > len(bounded),
-        "limit": max(1, min(int(limit), MAX_CONVERSATION_CONTEXT_ITEMS)),
+        "has_more": len(rows) > len(items),
+        "limit": bounded_limit,
         "interpretation_limit": (
             "Prior Companion dialogue is conversational context only. It is not "
             "a verified care event, accepted LCR assertion, or independent evidence."
@@ -105,8 +192,16 @@ def build_unified_lcr_context(
     if not person_id or not caregiver_id:
         raise ValueError("Authorized person_id and caregiver_id are required")
 
+    caregiver_timezone = (
+        db.query(Caregiver.timezone)
+        .filter(Caregiver.id == str(caregiver_id), Caregiver.person_id == str(person_id))
+        .scalar()
+        or "UTC"
+    )
+    temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
     context = build_lcr_context(
-        db, str(person_id), limit_per_source=limit_per_source, query=query
+        db, str(person_id), caregiver_id=str(caregiver_id),
+        limit_per_source=limit_per_source, query=query, temporal_window=temporal_window,
     )
     conversation = _conversation_context(
         db,
@@ -114,6 +209,7 @@ def build_unified_lcr_context(
         caregiver_id=str(caregiver_id),
         query=query,
         limit=conversation_limit,
+        temporal_window=temporal_window,
     )
     context.setdefault("sources", {})["companion_conversation"] = conversation
     context["source_status"] = {
@@ -127,5 +223,7 @@ def build_unified_lcr_context(
         "conversation_is_evidence": False,
         "authoritative_record": "care_assertions_and_canonical_lcr_sources",
         "retrieval_is_bounded": True,
+        "retrieval_strategy": "hybrid_lexical_semantic_temporal",
+        "temporal_window": temporal_window,
     }
     return context

@@ -12,9 +12,9 @@ from datetime import date, datetime
 from functools import lru_cache
 from typing import Any
 
-from sqlalchemy import Enum as SAEnum, MetaData, String, Table, cast, desc, inspect, or_, select
+from sqlalchemy import Enum as SAEnum
+from sqlalchemy import MetaData, String, Table, and_, cast, desc, false, func, inspect, or_, select
 from sqlalchemy.orm import Session
-
 
 # Only caregiver-relevant fields are exposed. Internal storage paths, raw tokens,
 # and operational secrets are deliberately excluded.
@@ -33,483 +33,164 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "significance_verdict", "attention_candidate", "follow_up_candidate", "situation_id"],
         "order": ["occurred_at", "recorded_at", "created_at"],
     },
-    "evidence": {
-        "table": "evidence",
-        "required": True,
-        "fields": [
-            "id", "type", "evidence_kind", "epistemic_status", "source_text", "uploaded_at",
-            "uploaded_by_caregiver_id", "time_provenance", "location", "evidence_status",
-            "source_type", "source_span_start", "source_span_end", "original_author",
-            "reported_by_label", "reported_by_caregiver_id", "collected_by_caregiver_id",
-            "collected_at", "occurred_at", "occurred_at_timezone", "origin_channel",
-            "original_source_reference", "parent_evidence_id", "source_text_sha256",
-            "ingested_at", "reported_at", "collection_method", "origin_device_ref",
-            "transfer_source", "transfer_reference",
-        ],
-        "order": ["uploaded_at", "created_at"],
-    },
-    "evidence_observations": {
-        "table": "evidence_observations",
-        "required": False,
-        "fields": ["id", "evidence_id", "supersedes_observation_id", "correction_rationale",
-                   "observation_kind", "epistemic_status", "subject_label", "attribute", "value_text",
-                   "normalized_value", "units", "context", "occurred_at", "observed_at", "reported_at",
-                   "observer_label", "observer_caregiver_id", "observation_method", "source_passage",
-                   "source_span_start", "source_span_end", "negated", "hedge_marker", "ambiguity_note",
-                   "extraction_method", "extraction_version", "extraction_run_id",
-                   "created_by_caregiver_id", "recorded_at"],
-        # Prefer recording order so a recent correction is not hidden behind
-        # an older event-time value in a bounded source projection.
-        "order": ["recorded_at", "created_at", "occurred_at"],
-    },
-    "facts": {
-        "table": "care_facts",
-        "required": True,
-        "fields": ["id", "subject_type", "subject_id", "fact_type", "fact_value", "epistemic_status",
-                   "effective_at", "recorded_at", "created_at", "superseded_by_fact_id",
-                   "created_by_caregiver_id", "review_notes"],
-        "order": ["recorded_at", "created_at", "effective_at"],
-    },
-    "assertions": {
-        "table": "care_assertions",
-        "required": True,
-        "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
-                   "source_event_id", "source_label", "source_text", "evidence_ids", "assertion_status",
-                   "observed_at", "review_after_days", "created_by_caregiver_id", "recorded_at"],
-        "order": ["recorded_at", "created_at"],
-    },
-    "decisions": {
-        "table": "care_decisions",
-        "required": True,
-        "fields": ["id", "title", "decision_text", "decision_status", "decided_at", "context",
-                   "evidence_ids", "created_at", "created_by_caregiver_id"],
-        "order": ["decided_at", "created_at"],
-    },
-    "decision_outcomes": {
-        "table": "decision_outcomes",
-        "required": False,
-        "fields": ["id", "decision_id", "outcome_status", "observed_at", "description",
-                   "evidence_ids", "is_intended_outcome", "created_at"],
-        "order": ["observed_at", "created_at"],
-    },
-    "timeline": {
-        "table": "care_timeline_entries",
-        "required": False,
-        "fields": ["id", "source_type", "source_id", "entry_type", "title", "summary",
-                   "occurred_at", "evidence_ids", "epistemic_status", "is_projection", "created_at"],
-        "order": ["occurred_at", "created_at"],
-    },
-    "uncertainties": {
-        "table": "care_uncertainties",
-        "required": False,
-        "fields": ["id", "care_record_id", "target_type", "target_id", "question", "uncertainty_type",
-                   "status", "source_ids", "created_by_caregiver_id", "created_at", "resolved_at"],
-        "order": ["created_at"],
-    },
-    "uncertainty_assessments": {
-        "table": "uncertainty_assessments",
-        "required": False,
-        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "confidence",
-                   "known_value", "gap_reason", "context", "evidence_ids", "temporal_precision",
-                   "assessed_at", "assessed_by_caregiver_id", "superseded_by_assessment_id", "is_active"],
-        "order": ["assessed_at"],
-    },
-    "missing_information": {
-        "table": "care_missing_information",
-        "required": False,
-        "fields": ["id", "care_record_id", "topic", "description", "priority", "status", "created_at", "resolved_at"],
-        "order": ["created_at"],
-    },
-    "open_questions": {
-        "table": "open_questions",
-        "required": False,
-        "fields": ["id", "question", "status", "priority", "evidence_ids", "asked_at", "answered_at", "answer", "closed_at", "closed_reason", "created_by_caregiver_id"],
-        "order": ["asked_at"],
-    },
-    "open_loop_records": {
-        "table": "open_loop_records",
-        "required": False,
-        "fields": [
-            "id", "loop_type", "title", "description", "status", "outcome_status",
-            "owner_role", "owner_label", "uncertainty", "missing_information", "options",
-            "request_text", "recipient_label", "requested_at", "last_contact_at",
-            "verification_rule", "deadline_at", "deadline_source", "deadline_timezone",
-            "consequence_of_delay", "priority", "priority_reasons", "deferred_reason",
-            "review_at", "inactive_since", "closure_result", "closed_at",
-            "cancellation_reason", "recurrence_of_id", "created_at", "updated_at", "version",
-        ],
-        "order": ["updated_at", "created_at"],
-    },
-    "information_gaps": {
-        "table": "information_gaps",
-        "required": False,
-        "fields": ["id", "subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "priority", "lifecycle_status", "description", "expected_by", "resolution_date", "resolution_notes", "evidence_ids", "created_at", "updated_at", "created_by_caregiver_id"],
-        "order": ["created_at"],
-    },
-    "follow_up_links": {
-        "table": "care_follow_up_links",
-        "required": False,
-        "fields": ["id", "source_type", "source_id", "target_type", "target_id", "follow_up_kind", "status", "due_at", "completed_at", "notes", "evidence_ids", "created_by_caregiver_id", "created_at"],
-        "order": ["created_at"],
-    },
-    "reconciliations": {
-        "table": "care_reconciliation_records",
-        "required": False,
-        "fields": ["id", "target_type", "target_id", "reconciliation_status", "competing_claim_ids", "evidence_ids", "decision_notes", "reviewed_by_caregiver_id", "reviewed_at", "created_at"],
-        "order": ["created_at"],
-    },
-    "conflicts": {
-        "table": "care_conflicts",
-        "required": False,
-        "fields": ["id", "care_record_id", "conflict_type", "status", "claim_refs", "description",
-                   "resolution", "resolved_by_caregiver_id", "created_at", "resolved_at"],
-        "order": ["created_at"],
-    },
-    "provenance": {
-        "table": "record_provenance",
-        "required": False,
-        "fields": ["id", "care_record_id", "source_type", "source_id", "author_caregiver_id",
-                   "author_label", "method", "recorded_at", "occurred_at", "effective_from",
-                   "effective_to", "reason", "metadata", "created_at"],
-        "order": ["recorded_at", "created_at"],
-    },
-    "caregiver_observations": {
-        "table": "caregiver_observations",
-        "required": False,
-        "fields": ["id", "observation_category", "description", "observed_value", "observed_at",
-                   "recorded_at", "epistemic_status", "evidence_ids", "source_type", "source_id",
-                   "reported_by_caregiver_id", "created_at"],
-        "order": ["observed_at", "recorded_at", "created_at"],
-    },
-    "caregiver_contexts": {
-        "table": "caregiver_contexts",
-        "required": False,
-        "fields": ["id", "context_type", "context_payload", "epistemic_status", "source_type",
-                   "source_id", "recorded_at", "effective_from", "effective_to", "notes",
-                   "reported_by_caregiver_id", "created_at"],
-        "order": ["recorded_at", "created_at"],
-    },
-    "caregiver_perspectives": {
-        "table": "caregiver_perspectives",
-        "required": False,
-        "fields": ["id", "topic", "perspective_text", "epistemic_status", "evidence_ids",
-                   "source_type", "source_id", "recorded_at", "effective_from", "effective_to",
-                   "supersedes_id", "reported_by_caregiver_id", "created_at"],
-        "order": ["recorded_at", "created_at"],
-    },
-    "corrections": {
-        "table": "corrections",
-        "required": False,
-        "fields": ["id", "target_type", "target_id", "original_text", "corrected_text", "reason",
-                   "caregiver_id", "created_at"],
-        "order": ["created_at"],
-    },
-    "appointments": {
-        "table": "appointments",
-        "required": False,
-        "fields": ["id", "title", "status", "scheduled_at", "description", "created_at", "updated_at"],
-        "order": ["scheduled_at", "created_at"],
-    },
-}
+    "evidence":ХИZ®Лkєwµзkz»§В+a…жќю
+Ю§ыZЉWи­ыҐ–‹­¦лYK‚‚€Ъ[€]Y\ћH\И›ЭљYYXXЪЫЭ\ЩH\ИЩX\ЪYЪ]›Э[™Y^\›\И™Y›Ь™B€\Z[™И]И\‹\ЫЭ\ЩH[Z]И[]Z[X›HЫЭ\Щ\И™[XZ[€^XЪ]HX\љЩY‚€€€‚€[Z]HX^
+KZ[Љ[ќ
+[Z]Ь\—ЬЫЭ\ЩJKL
+JB€\™XЭЭ\›\ИHВ€\›H›Ь€\›H[€XЭ™њ›ЫZЩ^\К™K™љ[™[
+€–РKVK^ЊNWЛW^МЛH‹
+]Y\ћHЬ€€ЉKШ\ЩY›Ы
 
-SEARCH_FIELDS = {
-    "living_record": ["record_status"],
-    "events": ["event_type", "title", "description"],
-    "evidence": ["type", "source_text", "source_type"],
-    "evidence_observations": ["observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "context", "source_passage", "ambiguity_note"],
-    "facts": ["subject_type", "fact_type", "fact_value", "review_notes"],
-    "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "assertion_status"],
-    "decisions": ["title", "decision_text", "context", "decision_status"],
-    "decision_outcomes": ["outcome_status", "description"],
-    "timeline": ["entry_type", "title", "summary", "epistemic_status"],
-    "uncertainties": ["question", "uncertainty_type", "status"],
-    "uncertainty_assessments": ["subject_type", "subject_id", "field", "epistemic_state", "gap_reason", "known_value"],
-    "missing_information": ["topic", "description", "priority", "status"],
-    "conflicts": ["conflict_type", "description", "resolution", "status"],
-    "provenance": ["source_type", "author_label", "method", "reason"],
-    "caregiver_observations": ["observation_category", "description", "source_type"],
-    "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
-    "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
-    "corrections": ["target_type", "original_text", "corrected_text", "reason"],
-    "open_loop_records": ["loop_type", "title", "description", "status", "request_text", "recipient_label"],
-    "appointments": ["title", "status", "description"],
-}
+JJB€Y€\›H›Э[€ФСPTђТФХФУФ‘В€VОЋB€\›\ИHЩ^[™YЬЩX\ЪЭ\›\К\™XЭЭ\›\КB€љ[™H‹™Щ]Шљ[™
 
-def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
-    """Build safe lexical predicates for reflected text and enum columns.
+B€]Z[X›WЭX›\ЛY]Y]HHЫШYЬЫЭ\ЩWЬШЪ[XJљ[™
+B‚€ЫЭ\Щ\О€XЭЬЭ‹XЭЬЭ‹[ћWWHHЯB€Z\ЬЪ[™ЧЬ™\]Z\™Y€\ЭЬЭ—HHЧB€Z\ЬЪ[™ЧЫЬ[Ы[€\ЭЬЭ—HHЧB‚€›Ь€ЫЭ\ЩWЫ[YKЬXИ[€УХTђСWФФPФЛљ][\К
+N‚€X›WЫ[YHHЬXЦИќX›H—B€Y€X›WЫ[YH›Э[€]Z[X›WЭX›\О‚€
+Z\ЬЪ[™ЧЬ™\]Z\™YY€ЬXЦИњ™\]Z\™Y—H[ЩHZ\ЬЪ[™ЧЫЬ[Ы[
+K\[™
+ЫЭ\ЩWЫ[YJB€ЫЭ\Щ\ЦЬЫЭ\ЩWЫ[YWHHВ€њЭ]\ИЋ€ќ[]Z[X›WЬШЪ[XH‹€ќX›HЋ€X›WЫ[YK€љ][\ИЋ€ЧK€њ™]\›™YШЫЭ[ќЋ€€љ\ЧЫ[Ь™HЋ€[ЩK€›[Z]Ћ€[Z]€B€ЫЫќ[ќYB‚€X›N€X›HHY]Y]KќX›\ЦЭX›WЫ[YWB€Y€њ\њЫЫ—ЪY€›Э[€X›KО‚€
+Z\ЬЪ[™ЧЬ™\]Z\™YY€ЬXЦИњ™\]Z\™Y—H[ЩHZ\ЬЪ[™ЧЫЬ[Ы[
+K\[™
+ЫЭ\ЩWЫ[YJB€ЫЭ\Щ\ЦЬЫЭ\ЩWЫ[YWHHВ€њЭ]\ИЋ€ќ[]Z[X›WЬШЫЬH‹€ќX›HЋ€X›WЫ[YK€љ][\ИЋ€ЧK€њ™]\›™YШЫЭ[ќЋ€€љ\ЧЫ[Ь™HЋ€[ЩK€›[Z]Ћ€[Z]€B€ЫЫќ[ќYB‚€љY[Ы[Y\ИHЫ[YH›Ь€[YH[€ЬXЦИ™љY[И—HY€[YH[€X›KЧB€Y€љY€[€X›KИ[™љY€›Э[€љY[Ы[Y\О‚€љY[Ы[Y\Лљ[њЩ\ќ
+љYЉB€Щ[XЭYШЫЫ[[њИHЭX›KЦЫ[YWH›Ь€[YH[€љY[Ы[Y\ЧB€Э][Y[ќHЩ[XЭ
 
-    PostgreSQL ENUM values do not support ILIKE directly. Cast enum labels to
-    VARCHAR before applying the same bounded, parameterized lexical search.
-    Non-text, non-enum fields are deliberately excluded.
-    """
-    predicates = []
-    for name in SEARCH_FIELDS.get(source_name, []):
-        if name not in table.c:
-            continue
-        column = table.c[name]
-        if isinstance(column.type, SAEnum):
-            searchable_column = cast(column, String)
-        elif isinstance(column.type, String):
-            searchable_column = column
-        else:
-            continue
-        predicates.extend(
-            searchable_column.ilike(f"%{term}%")
-            for term in terms
-        )
-    return predicates
+њЩ[XЭYШЫЫ[[њКKќЪ\™JX›KЛњ\њЫЫ—ЪYOHЭЉ\њЫЫ—ЪY
+JB€Y€ЫЭ\ЩWЫ[YHOHќ[Щ\ќZ[ќWШ\ЬЩ\ЬЫY[ќИ€[™љ\ЧШXЭ]™H€[€X›KО‚€Э][Y[ќHЭ][Y[ќќЪ\™JX›KЛљ\ЧШXЭ]™Kљ\ЧКќYJJB€Y€ЫЭ\ЩWЫ[YHOH\ЬЩ\ќ[ЫњИ€[™\ЬЩ\ќ[Ы—ЬЭ]\И€[€X›KО‚€И^XЪ]HXШЩ\Y\ЬЩ\ќ[ЫњИ[™Ш\™YЪ]™\‹X]]Ь™Y™\ЬќИ\™B€И[YЪX›K€H™\ЬќYЫZ[H™[XZ[њИ[ќ™\љYљYYИ[Щ[[Ы›H›ЬЬШ[В€ИЪ]Э]Ш\™YЪ]™\€]љXќ][Ы€\™H^ЫYY‚€XШЩ\YЫЬ—ЫYШXЮHHX›KЛ\ЬЩ\ќ[Ы—ЬЭ]\Лљ[—К
+XШЩ\Y‹Ш\™YЪ]™\—Ь™]љY]ЩYЉJB€Ш\™YЪ]™\—Ь™\ЬќH[™К€X›KЛ\ЬЩ\ќ[Ы—ЬЭ]\ИOHњ™\ЬќY‹€X›KЛЬ™X]YШћWШШ\™YЪ]™\—ЪYљ\ЧЫ›Э
+›Ы™JK€
+HY€Ь™X]YШћWШШ\™YЪ]™\—ЪY€[€X›KИ[ЩH›Ы™B€Э][Y[ќHЭ][Y[ќќЪ\™JЬ—КXШЩ\YЫЬ—ЫYШXЮKШ\™YЪ]™\—Ь™\Ьќ
+HY€Ш\™YЪ]™\—Ь™\Ьќ\И›Э›Ы™H[ЩHXШЩ\YЫЬ—ЫYШXЮJB€Y€ЫЭ\ЩWЫ[YHOH™ШЭ[Y[ќЩ^XЭ[ЫњИЋ‚€Y€Ш\™YЪ]™\—ЪY[™Ш\™YЪ]™\—ЪY€[€X›KО‚€Э][Y[ќHЭ][Y[ќќЪ\™JX›KЛШ\™YЪ]™\—ЪYOHЭЉШ\™YЪ]™\—ЪY
+JB€Y€™^XЭ[Ы—ЬЭ]\И€[€X›KО‚€Э][Y[ќHЭ][Y[ќќЪ\™JX›KЛ™^XЭ[Ы—ЬЭ]\ИOH]Z[X›HЉB€Y€Ш[™Y]\И€[€X›KО‚€Э][Y[ќHЭ][Y[ќќЪ\™J€X›KЛШ[™Y]\ЦИљЪ[™—K\ЧЬЭљ[™К
+HOH™ШЭ[Y[ќЩ^XЭ[Ы—ЭЊH‚€
+B€Y€ЫЭ\ЩWЫ[YHOH™XЭИ€[™њЭ\\њЩYYШћWЩXЭЪY€[€X›KО‚€Э][Y[ќHЭ][Y[ќќЪ\™JX›KЛњЭ\\њЩYYШћWЩXЭЪYљ\ЧК›Ы™JJB€Y€[\Ь[ЭЪ[™ЭО‚€[\Ь[ЩљY[ИHВ€™]™[ќИЋ€
+›ШШЭ\њ™YШ]‹њ™XЫЬ™YШ]ЉK€™]љY[ЩHЋ€
+›ШШЭ\њ™YШ]‹ќ\ШYYШ]ЉK€™]љY[ЩWЫШњЩ\ќ][ЫњИЋ€
+›ШШЭ\њ™YШ]‹›ШњЩ\ќ™YШ]‹њ™XЫЬ™YШ]ЉK€™XЭИЋ€
+™Y™™XЭ]™WШ]‹њ™XЫЬ™YШ]ЉK€\ЬЩ\ќ[ЫњИЋ€
+›ШњЩ\ќ™YШ]‹њ™XЫЬ™YШ]ЉK€™ШЭ[Y[ќЩ^XЭ[ЫњИЋ€
+Ь™X]YШ]‹
+K€™XЪ\Ъ[ЫњИЋ€
+™XЪYYШ]‹Ь™X]YШ]ЉK€™XЪ\Ъ[Ы—ЫЭ]ЫЫY\ИЋ€
+›ШњЩ\ќ™YШ]‹Ь™X]YШ]ЉK€ќ[Y[[™HЋ€
+›ШШЭ\њ™YШ]‹Ь™X]YШ]ЉK€Ш\™YЪ]™\—ЫШњЩ\ќ][ЫњИЋ€
+›ШњЩ\ќ™YШ]‹њ™XЫЬ™YШ]ЉK€Ш\™YЪ]™\—ШЫЫќ^ИЋ€
+њ™XЫЬ™YШ]‹
+K€Ш\™YЪ]™\—Ь\њЬXЭ]™\ИЋ€
+њ™XЫЬ™YШ]‹
+K€\Ъ[ќY[ќИЋ€
+њШЪY[YШ]‹Ь™X]YШ]ЉK€›]љ[™ЧЬ™XЫЬ™Ћ€
+ќ\]YШ]‹Ь™X]YШ]ЉK€›Ь[—Ь]Y\Э[ЫњИЋ€
+\ЪЩYШ]‹Ь™X]YШ]ЉK€›Ь[—ЫЫЬЬ™XЫЬ™ИЋ€
+ќ\]YШ]‹Ь™X]YШ]ЉK€ќ[Щ\ќZ[ќY\ИЋ€
+Ь™X]YШ]‹
+K€›Z\ЬЪ[™ЧЪ[™›Ь›X][Ы€Ћ€
+Ь™X]YШ]‹
+K€K™Щ]
+ЫЭ\ЩWЫ[YK
+›ШШЭ\њ™YШ]‹›ШњЩ\ќ™YШ]‹™Y™™XЭ]™WШ]‹њШЪY[YШ]‹њ™XЫЬ™YШ]‹ќ\ШYYШ]‹Ь™X]YШ]‹ќ\]YШ]ЉJB€[\Ь[ШЫЫ[[њИHЭX›KЦЫ[YWH›Ь€[YH[€[\Ь[ЩљY[ИY€[YH[€X›KЧB€Y€[\Ь[ШЫЫ[[њО‚€[\Ь[Э[YHH[\Ь[ШЫЫ[[њЦМHY€[Љ[\Ь[ШЫЫ[[њКHOHH[ЩHќ[ЛЫШ[\ШЩJ
+ќ[\Ь[ШЫЫ[[њКB€Э\ќЭ[YHH]][YK™њ›ЫZ\ЫЩ›Ь›X]
+[\Ь[ЭЪ[™ЭЦИњЭ\ќ—JB€[™Э[YHH]][YK™њ›ЫZ\ЫЩ›Ь›X]
+[\Ь[ЭЪ[™ЭЦИ™[™—JB€Э][Y[ќHЭ][Y[ќќЪ\™J[\Ь[Э[YHЏHЭ\ќЭ[YK[\Ь[Э[YHH[™Э[YJB€[ЩN‚€И[™]YЫЭ\Щ\ИШ[››ЭШ]\ЩћH[€^XЪ][\Ь[]Y\ћK‚€Э][Y[ќHЭ][Y[ќќЪ\™J[ЩJ
+JB€Y€\›\О‚€ЩX\ЪЬ™YXШ]\ИHЭ^ЬЩX\ЪЬ™YXШ]\КX›KЫЭ\ЩWЫ[YK\›\КB€Y€ЩX\ЪЬ™YXШ]\О‚€Э][Y[ќHЭ][Y[ќќЪ\™JЬ—К
+њЩX\ЪЬ™YXШ]\КJB€Ь™\—ЩљY[H™^
 
+[YH›Ь€[YH[€ЬXЦИ›Ь™\€—HY€[YH[€X›KКK›Ы™JB€Y€Ь™\—ЩљY[‚€Э][Y[ќHЭ][Y[ќ›Ь™\—ШћJ\ШКX›KЦЫЬ™\—ЩљY[JJB€Y€љY€[€X›KИ[™Ь™\—ЩљY[OHљYЋ‚€Э][Y[ќHЭ][Y[ќ›Ь™\—ШћJ\ШКX›KЛљY
+JB€ЩX\ЪЫ[Z]HZ[ЉX^
+[Z]
+€K[Z]
+ИJKЌL
+HY€\›\И[ЩH[Z]€›ЭЬИH‹™^XЭ]JЭ][Y[ќ›[Z]
+ЩX\ЪЫ[Z]
+ИJJK›X\[™ЬК
+K[
 
-TEXT_FIELDS = {
-    "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
-    "decision_text", "context", "summary", "title", "question", "topic", "perspective_text",
-    "notes", "reason", "review_notes", "resolution",
-}
-MAX_TEXT_CHARS = 1600
-JSON_TEXT_FIELDS = {
-    "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
-    "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
-}
+B€\ЧЫ[Ь™HH[Љ›ЭЬКH€[Z]€][\ИHВ€ЪЩ^N€ЬШY™WЭ[YJ[YKЩ^JH›Ь€Щ^K[YH[€XЭ
+›ЭКKљ][\К
+_B€›Ь€›ЭИ[€›ЭЬЦОњЩX\ЪЫ[Z]B€B€›Ь€][H[€][\О‚€[™›Ь›X][Ы—ЬЭ]\Л[ќ\њ™]][Ы—Ы[Z]HЪ[™›Ь›X][Ы—ЬЭ]\КЫЭ\ЩWЫ[YK][JB€][VИљ[™›Ь›X][Ы—ЬЭ]\И—HH[™›Ь›X][Ы—ЬЭ]\В€][VИљ[ќ\њ™]][Ы—Ы[Z]—HH[ќ\њ™]][Ы—Ы[Z]€Y€\™XЭЭ\›\О‚€^[™YЫЫ›HHЭ\›H›Ь€\›H[€\›\ИY€\›H›Э[€\™XЭЭ\›\ЧB€][\ЛњЫЬќ
+€Щ^O[[X™H][N€Ь™]љY][ЬШЫЬ™J][K]Y\ћHЬ€€‹\™XЭЭ\›\Л^[™YЫЫ›JK€™]™\њЩOUќYK€
+B€][\ИH][\ЦО›[Z]B€ЫЭ\Щ\ЦЬЫЭ\ЩWЫ[YWHHВ€њЭ]\ИЋ€]Z[X›H€Y€][\И[ЩH™[\H‹€ќX›HЋ€X›WЫ[YK€љ][\ИЋ€][\Л€њ™]\›™YШЫЭ[ќЋ€[Љ][\КK€љ\ЧЫ[Ь™HЋ€\ЧЫ[Ь™K€›[Z]Ћ€[Z]€B‚€]љY[ЩWЫ[™XYЩN€XЭЬЭ‹[ћWHHВ€њЭ]\ИЋ€››ЭШ\ЬЩ\ЬЩY‹€™]љY[ЩWЪYЧШЫЫњЪY\™YЋ€ЧK€™Ь›Э\ИЋ€ЧK€њ™[][ЫњЪ\Ь™XЫЬ™ЧЩ^[Z[™YЋ€€њ™[][ЫњЪ\Ъ\ЭЬћWШ›Э[™YЋ€ќYK€љ[ќ\њ™]][Ы—Ы[Z]Ћ€
+€”ЫЭ\ЩH[™XYЩH\И\ЩYЫ›HЫ€^XЪ]\™[ќЬЫЭ\ЩH™Y™\™[Щ\И[™\њЪ\ЭY‚€њ™]љY]ЩY™[][ЫњЪ\Л€^Ъ[Z[\љ]KЪ\™Y›ШШXќ[\ћKЬ€[Щ[™\]][Ы€‚€™Щ\И›Э\ЭX›\ЪЫЫ[[Ы€ЬљYЪ[€Ь€[™\[™[ќЫЬњ›Ш›Ь][Ы‹€‚€
+K€B€ИЩYY[™XYЩHњ›ЫH]™\ћH]љY[ЩH™Y™\™[ЩH™\Щ[ќ[€H›Э[™YФ‚€И›Ъ™XЭ[Ы‹›ЭЫ›HH[ЬЭ™XЩ[ќ]љY[ЩH›ЭЬЛ€\И]ИHљ\ЪX›B€И]™[ќЩXЪ\Ъ[Ы‹Ш\Ъ[ќY[ќЪ[™Щ™€™Y™\™[ЩH™]Z[€H›Э™[[ЩHЩ€[‚€ИЫ\€ЫЭ\ЩH]\ИЭ]ЪYHHљ\ЪX›H]љY[ЩHYЩK‚€Щ[XЭYЪYО€Щ]ЬЭ—HHЩ]
 
+B‚€Y€ЫЫXЭЩ]љY[ЩWЪYК[YN€[ћKЩ^N€Э€H€ЉHO€›Ы™N‚€Y€\Ъ[њЭ[ЩJ[YKXЭ
+N‚€›Ь€Ъ[ЪЩ^KЪ[Э[YH[€[YKљ][\К
+N‚€Y€Ъ[ЪЩ^H[€И™]љY[ЩWЪY‹њЫЭ\ЩWЩ]љY[ЩWЪY‹њ™[]YЩ]љY[ЩWЪYџN‚€Y€\Ъ[њЭ[ЩJЪ[Э[YK
+Э‹[ќ
+JH[™ЭЉЪ[Э[YJKњЭљ\
 
-def _safe_value(value: Any, key: str | None = None) -> Any:
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, dict):
-        return {str(k): _safe_value(v, str(k)) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_safe_value(v, key) for v in value]
-    if isinstance(value, str) and key in JSON_TEXT_FIELDS and value.lstrip().startswith(("[", "{")):
-        try:
-            parsed = json.loads(value)
-            if isinstance(parsed, (list, dict)):
-                return _safe_value(parsed, key)
-        except (TypeError, json.JSONDecodeError):
-            pass
-    if isinstance(value, str) and key in TEXT_FIELDS and len(value) > MAX_TEXT_CHARS:
-        return value[:MAX_TEXT_CHARS] + "вЂ¦ [truncated]"
-    return value
+N‚€Щ[XЭYЪYЛY
+ЭЉЪ[Э[YJKњЭљ\
 
+JB€[Y€Ъ[ЪЩ^HOH™]љY[ЩWЪYИЋ‚€Y€\Ъ[њЭ[ЩJЪ[Э[YK
+\Э\KЩ]
+JN‚€Щ[XЭYЪYЛќ\]J€ЭЉ][JKњЭљ\
 
-@lru_cache(maxsize=16)
-def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
-    """Reflect the care-source schema once per SQLAlchemy engine.
+H›Ь€][H[€Ъ[Э[YB€Y€\Ъ[њЭ[ЩJ][K
+Э‹[ќ
+JH[™ЭЉ][JKњЭљ\
 
-    The API process is restarted after deployment migrations, so the cache is
-    naturally refreshed on schema rollout. Keeping inspection out of each request
-    avoids repeating database catalog queries and table reflection on hot paths.
-    The returned metadata is treated as immutable by callers.
-    """
-    available_tables = frozenset(inspect(bind).get_table_names())
-    metadata = MetaData()
-    present = [
-        spec["table"]
-        for spec in SOURCE_SPECS.values()
-        if spec["table"] in available_tables
-    ]
-    # Source lineage is auxiliary metadata for all LCR-facing workflows. Keep it
-    # outside SOURCE_SPECS so its absence does not falsely mark core schema coverage
-    # as incomplete on legacy databases.
-    if "evidence_source_relationships" in available_tables:
-        present.append("evidence_source_relationships")
-    if present:
-        metadata.reflect(bind=bind, only=list(dict.fromkeys(present)))
-    return available_tables, metadata
+B€
+B€[Y€\Ъ[њЭ[ЩJЪ[Э[YKЭЉN‚€\њЩYHЬШY™WЭ[YJЪ[Э[YK™]љY[ЩWЪYИЉB€Y€\Ъ[њЭ[ЩJ\њЩY\Э
+N‚€Щ[XЭYЪYЛќ\]J€ЭЉ][JKњЭљ\
 
+H›Ь€][H[€\њЩY€Y€\Ъ[њЭ[ЩJ][K
+Э‹[ќ
+JH[™ЭЉ][JKњЭљ\
 
-def build_lcr_context(db: Session, person_id: str, *, limit_per_source: int = 20, query: str | None = None) -> dict[str, Any]:
-    """Return a bounded, person-scoped LCR projection and explicit schema coverage.
+B€
+B€ЫЫXЭЩ]љY[ЩWЪYКЪ[Э[YKЪ[ЪЩ^JB€[Y€\Ъ[њЭ[ЩJ[YK
+\Э\JJN‚€›Ь€Ъ[[€[YN‚€ЫЫXЭЩ]љY[ЩWЪYКЪ[Щ^JB‚€ЫЫXЭЩ]љY[ЩWЪYКЫЭ\Щ\КB€]љY[ЩWЪ][\ИHЫЭ\Щ\Л™Щ]
+™]љY[ЩH‹ЯJK™Щ]
+љ][\И‹ЧJB€Щ[XЭYЪYЛќ\]J€ЭЉ][K™Щ]
+љYЉJKњЭљ\
 
-    When query is provided, each source is searched with bounded text terms before
-    applying its per-source limit; unavailable sources remain explicitly marked.
-    """
-    limit = max(1, min(int(limit_per_source), 50))
-    terms = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())))[:8]
-    bind = db.get_bind()
-    available_tables, metadata = _load_source_schema(bind)
+H›Ь€][H[€]љY[ЩWЪ][\В€Y€\Ъ[њЭ[ЩJ][KXЭ
+H[™][K™Щ]
+љYЉB€
+B‚€™[][ЫњЪ\ЭX›HHY]Y]KќX›\Л™Щ]
+™]љY[ЩWЬЫЭ\ЩWЬ™[][ЫњЪ\ИЉB€]љY[ЩWЭX›HHY]Y]KќX›\Л™Щ]
+™]љY[ЩHЉB€Y€Щ[XЭYЪYИ[™™[][ЫњЪ\ЭX›H\И›Э›Ы™H[™]љY[ЩWЭX›H\И›Э›Ы™N‚€њ›ЫH\њЩ\ќљXЩ\Л™]љY[ЩWЫ[™XYЩH[\Ьќ
+€ШYЩ]љY[ЩWЫ[™XYЩWЬШЫЬK€Э[[X\љ^™WЩ]љY[ЩWЫ[™XYЩK€
+B€[™XYЩWЬШЫЬHHШYЩ]љY[ЩWЫ[™XYЩWЬШЫЬJ‹ЭЉ\њЫЫ—ЪY
+KЩ[XЭYЪYКB€[™XYЩWЬЭ[[X\ћHHЭ[[X\љ^™WЩ]љY[ЩWЫ[™XYЩJ€[™XYЩWЬШЫЬVИ™]љY[ЩWЬ›ЭЬИ—K€[™XYЩWЬШЫЬVИњ™[][ЫњЪ\И—K€Щ[XЭYЪYЛ€
+B€]љY[ЩWЫ[™XYЩKќ\]JВ€
+Љ›[™XYЩWЬЭ[[X\ћK€њЭ]\ИЋ€\ЬЩ\ЬЩYШ›Э[™YЬЭXњЩ]‹€њ™[][ЫњЪ\Ь™XЫЬ™ЧЩ^[Z[™YЋ€[Љ[™XYЩWЬШЫЬVИњ™[][ЫњЪ\И—JK€њ™[][ЫњЪ\Ъ\ЭЬћWШ›Э[™YЋ€›ЫЫ
+[™XYЩWЬШЫЬVИљ\ЧЫ[Ь™H—JK€њШЫЬWЭќ[Ш]YЋ€›ЫЫ
+[™XYЩWЬШЫЬVИќќ[Ш]Y—JK€›[™XYЩWЫ›Щ\ЧЩ^[Z[™YЋ€[Љ[™XYЩWЬШЫЬVИ™]љY[ЩWЬ›ЭЬИ—JK€љ[ќ\њ™]][Ы—Ы[Z]Ћ€
+€[™XYЩWЬЭ[[X\ћVИљ[ќ\њ™]][Ы—Ы[Z]—B€
+И€™]љY][\И\њЫЫ‹\ШЫЬY[™›Э[™YИ[њ™]\›™Y[™XYЩH\И[љЫ›ЭЫ‹›ЭXњЩ[ќ€‚€
+K€JB€[Y€Щ[XЭYЪYО‚€]љY[ЩWЫ[™XYЩVИњЭ]\И—HHќ[]Z[X›WЬШЪ[XH‚€ШЪ[XWЬЭ]\ИHЫЫ\]H€Y€›ЭZ\ЬЪ[™ЧЬ™\]Z\™Y[™›ЭZ\ЬЪ[™ЧЫЬ[Ы[[ЩHњ\ќX[‚€™]\›€В€њ\њЫЫ—ЪYЋ€ЭЉ\њЫЫ—ЪY
+K€\ЧЫЩ€Ћ€]][YK››ЭК
+K\Э[Y^›Ы™J
+Kљ\ЫЩ›Ь›X]
 
-    sources: dict[str, dict[str, Any]] = {}
-    missing_required: list[str] = []
-    missing_optional: list[str] = []
-
-    for source_name, spec in SOURCE_SPECS.items():
-        table_name = spec["table"]
-        if table_name not in available_tables:
-            (missing_required if spec["required"] else missing_optional).append(source_name)
-            sources[source_name] = {
-                "status": "unavailable_schema",
-                "table": table_name,
-                "items": [],
-                "returned_count": 0,
-                "has_more": False,
-                "limit": limit,
-            }
-            continue
-
-        table: Table = metadata.tables[table_name]
-        if "person_id" not in table.c:
-            (missing_required if spec["required"] else missing_optional).append(source_name)
-            sources[source_name] = {
-                "status": "unavailable_scope",
-                "table": table_name,
-                "items": [],
-                "returned_count": 0,
-                "has_more": False,
-                "limit": limit,
-            }
-            continue
-
-        field_names = [name for name in spec["fields"] if name in table.c]
-        if "id" in table.c and "id" not in field_names:
-            field_names.insert(0, "id")
-        selected_columns = [table.c[name] for name in field_names]
-        statement = select(*selected_columns).where(table.c.person_id == str(person_id))
-        if source_name == "uncertainty_assessments" and "is_active" in table.c:
-            statement = statement.where(table.c.is_active.is_(True))
-        if terms:
-            search_predicates = _text_search_predicates(table, source_name, terms)
-            if search_predicates:
-                statement = statement.where(or_(*search_predicates))
-        order_field = next((name for name in spec["order"] if name in table.c), None)
-        if order_field:
-            statement = statement.order_by(desc(table.c[order_field]))
-        if "id" in table.c and order_field != "id":
-            statement = statement.order_by(desc(table.c.id))
-        rows = db.execute(statement.limit(limit + 1)).mappings().all()
-        has_more = len(rows) > limit
-        items = [
-            {key: _safe_value(value, key) for key, value in dict(row).items()}
-            for row in rows[:limit]
-        ]
-        sources[source_name] = {
-            "status": "available" if items else "empty",
-            "table": table_name,
-            "items": items,
-            "returned_count": len(items),
-            "has_more": has_more,
-            "limit": limit,
-        }
-
-    evidence_lineage: dict[str, Any] = {
-        "status": "not_assessed",
-        "evidence_ids_considered": [],
-        "groups": [],
-        "relationship_records_examined": 0,
-        "relationship_history_bounded": True,
-        "interpretation_limit": (
-            "Source lineage is based only on explicit parent/source references and persisted "
-            "reviewed relationships. Text similarity, shared vocabulary, or model repetition "
-            "does not establish common origin or independent corroboration."
-        ),
-    }
-    # Seed lineage from every evidence reference present in the bounded LCR
-    # projection, not only the most recent evidence rows. This lets a visible
-    # event/decision/appointment/handoff reference retain the provenance of an
-    # older source that is outside the visible evidence page.
-    selected_ids: set[str] = set()
-
-    def collect_evidence_ids(value: Any, key: str = "") -> None:
-        if isinstance(value, dict):
-            for child_key, child_value in value.items():
-                if child_key in {"evidence_id", "source_evidence_id", "related_evidence_id"}:
-                    if isinstance(child_value, (str, int)) and str(child_value).strip():
-                        selected_ids.add(str(child_value).strip())
-                elif child_key == "evidence_ids":
-                    if isinstance(child_value, (list, tuple, set)):
-                        selected_ids.update(
-                            str(item).strip() for item in child_value
-                            if isinstance(item, (str, int)) and str(item).strip()
-                        )
-                    elif isinstance(child_value, str):
-                        parsed = _safe_value(child_value, "evidence_ids")
-                        if isinstance(parsed, list):
-                            selected_ids.update(
-                                str(item).strip() for item in parsed
-                                if isinstance(item, (str, int)) and str(item).strip()
-                            )
-                collect_evidence_ids(child_value, child_key)
-        elif isinstance(value, (list, tuple)):
-            for child in value:
-                collect_evidence_ids(child, key)
-
-    collect_evidence_ids(sources)
-    evidence_items = sources.get("evidence", {}).get("items", [])
-    selected_ids.update(
-        str(item.get("id")).strip() for item in evidence_items
-        if isinstance(item, dict) and item.get("id")
-    )
-
-    relationship_table = metadata.tables.get("evidence_source_relationships")
-    evidence_table = metadata.tables.get("evidence")
-    if selected_ids and relationship_table is not None and evidence_table is not None:
-        from app.services.evidence_lineage import (
-            load_evidence_lineage_scope,
-            summarize_evidence_lineage,
-        )
-        lineage_scope = load_evidence_lineage_scope(db, str(person_id), selected_ids)
-        lineage_summary = summarize_evidence_lineage(
-            lineage_scope["evidence_rows"],
-            lineage_scope["relationships"],
-            selected_ids,
-        )
-        evidence_lineage.update({
-            **lineage_summary,
-            "status": "assessed_bounded_subset",
-            "relationship_records_examined": len(lineage_scope["relationships"]),
-            "relationship_history_bounded": bool(lineage_scope["has_more"]),
-            "scope_truncated": bool(lineage_scope["truncated"]),
-            "lineage_nodes_examined": len(lineage_scope["evidence_rows"]),
-            "interpretation_limit": (
-                lineage_summary["interpretation_limit"]
-                + " Retrieval is person-scoped and bounded; unreturned lineage is unknown, not absent."
-            ),
-        })
-    elif selected_ids:
-        evidence_lineage["status"] = "unavailable_schema"
-    schema_status = "complete" if not missing_required and not missing_optional else "partial"
-    return {
-        "person_id": str(person_id),
-        "as_of": datetime.now().astimezone().isoformat(),
-        "read_only": True,
-        "history_coverage": "bounded_subset",
-        "query_applied": bool(terms),
-        "schema_status": schema_status,
-        "missing_required_sources": missing_required,
-        "missing_optional_sources": missing_optional,
-        "sources": sources,
-        "evidence_lineage": evidence_lineage,
-    }
-
-
-def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
-    """Serialize context as bounded labelled data, never as instruction-bearing messages."""
-    header = (
-        "LCR context metadata: "
-        + json.dumps({
-            "schema_status": context.get("schema_status"),
-            "history_coverage": context.get("history_coverage"),
-            "missing_required_sources": context.get("missing_required_sources", []),
-            "missing_optional_sources": context.get("missing_optional_sources", []),
-            "evidence_lineage": context.get("evidence_lineage", {
-                "status": "not_assessed",
-                "interpretation_limit": "No source-lineage assessment was supplied.",
-            }),
-        }, ensure_ascii=False, separators=(",", ":"))
-    )
-    chunks = [header]
-    current_length = len(header)
-    for source_name, source in context.get("sources", {}).items():
-        section = f"\n[{source_name}; status={source.get('status')}; returned={source.get('returned_count', 0)}; has_more={source.get('has_more', False)}]"
-        if current_length + len(section) > max_chars:
-            chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
-            break
-        chunks.append(section)
-        current_length += len(section)
-        for item in source.get("items", []):
-            line = json.dumps(item, ensure_ascii=False, default=str, separators=(",", ":"))
-            if current_length + len(line) + 1 > max_chars:
-                chunks.append("\n[Context truncated because the safe prompt budget was reached.]")
-                return "".join(chunks)
-            chunks.extend(["\n", line])
-            current_length += len(line) + 1
-    return "".join(chunks)
+K€њ™XYЫЫ›HЋ€ќYK€љ\ЭЬћWШЫЭ™\YЩHЋ€›Э[™YЬЭXњЩ]‹€њ]Y\ћWШ\YYЋ€›ЫЫ
+\›\КK€њ™]љY][ЬЭ]YЮHЋ€љXњљYЫ^XШ[ЬЩ[X[ќXЧЭ[\Ь[€Y€]Y\ћHЬ€[\Ь[ЭЪ[™ЭИ[ЩH›Э[™YЬ™XЩ[ќЪ\ЭЬћH‹€ќ[\Ь[ЭЪ[™ЭИЋ€[\Ь[ЭЪ[™ЭЛ€њШЪ[XWЬЭ]\ИЋ€ШЪ[XWЬЭ]\Л€›Z\ЬЪ[™ЧЬ™\]Z\™YЬЫЭ\Щ\ИЋ€Z\ЬЪ[™ЧЬ™\]Z\™Y€›Z\ЬЪ[™ЧЫЬ[Ы[ЬЫЭ\Щ\ИЋ€Z\ЬЪ[™ЧЫЬ[Ы[€њЫЭ\Щ\ИЋ€ЫЭ\Щ\Л€™]љY[ЩWЫ[™XYЩHЋ€]љY[ЩWЫ[™XYЩK€B‚‚™Y€›Ь›X]ЫЬ—ШЫЫќ^Щ›Ь—Ь›Ы\
+ЫЫќ^€XЭЬЭ‹[ћWK
+‹X^ШЪ\њО€[ќHM
+HO€ЭЋ‚€€€”Щ\љX[^™HЫЫќ^\И›Э[™YX™[Y]K™]™\€\И[њЭќXЭ[Ы‹X™X\љ[™ИY\ЬШYЩ\Л€€€‚€XY\€H
+€“Ф€ЫЫќ^Y]Y]N€‚€
+ИњЫЫ‹™[\КВ€њШЪ[XWЬЭ]\ИЋ€ЫЫќ^™Щ]
+њШЪ[XWЬЭ]\ИЉK€љ\ЭЬћWШЫЭ™\YЩHЋ€ЫЫќ^™Щ]
+љ\ЭЬћWШЫЭ™\YЩHЉK€›Z\ЬЪ[™ЧЬ™\]Z\™YЬЫЭ\Щ\ИЋ€ЫЫќ^™Щ]
+›Z\ЬЪ[™ЧЬ™\]Z\™YЬЫЭ\Щ\И‹ЧJK€›Z\ЬЪ[™ЧЫЬ[Ы[ЬЫЭ\Щ\ИЋ€ЫЫќ^™Щ]
+›Z\ЬЪ[™ЧЫЬ[Ы[ЬЫЭ\Щ\И‹ЧJK€™]љY[ЩWЫ[™XYЩHЋ€ЫЫќ^™Щ]
+™]љY[ЩWЫ[™XYЩH‹В€њЭ]\ИЋ€››ЭШ\ЬЩ\ЬЩY‹€љ[ќ\њ™]][Ы—Ы[Z]Ћ€“›ИЫЭ\ЩK[[™XYЩH\ЬЩ\ЬЫY[ќШ\ИЭ\YY€‹€JK€K[њЭ\™WШ\ШЪZOQ[ЩKЩ\\]ЬњПJ‹‹Ћ€ЉJB€
+B€Ъ[љЬИHЪXY\—B€Э\њ™[ќЫ[™ЭH[ЉXY\ЉB€›Ь€ЫЭ\ЩWЫ[YKЫЭ\ЩH[€ЫЫќ^™Щ]
+њЫЭ\Щ\И‹ЯJKљ][\К
+N‚€ЩXЭ[Ы€H€—–ЮЬЫЭ\ЩWЫ[Y_NИЭ]\П^ЬЫЭ\ЩK™Щ]
+	ЬЭ]\ЙК_NИ™]\›™Y^ЬЫЭ\ЩK™Щ]
+	Ь™]\›™YШЫЭ[ќ	Л
+_NИ\ЧЫ[Ь™O^ЬЫЭ\ЩK™Щ]
+	Ъ\ЧЫ[Ь™IЛ[ЩJ_WH‚€Y€Э\њ™[ќЫ[™Э
+И[ЉЩXЭ[ЫЉH€X^ШЪ\њО‚€Ъ[љЬЛ\[™
+—–РЫЫќ^ќ[Ш]Y™XШ]\ЩHHШY™H›Ы\ќYЩ]Ш\И™XXЪY—HЉB€њ™XZВ€Ъ[љЬЛ\[™
+ЩXЭ[ЫЉB€Э\њ™[ќЫ[™Э
+ПH[ЉЩXЭ[ЫЉB€›Ь€][H[€ЫЭ\ЩK™Щ]
+љ][\И‹ЧJN‚€[™HHњЫЫ‹™[\К][K[њЭ\™WШ\ШЪZOQ[ЩKY][\Э‹Щ\\]ЬњПJ‹‹Ћ€ЉJB€Y€Э\њ™[ќЫ[™Э
+И[Љ[™JH
+ИH€X^ШЪ\њО‚€Ъ[љЬЛ\[™
+—–РЫЫќ^ќ[Ш]Y™XШ]\ЩHHШY™H›Ы\ќYЩ]Ш\И™XXЪY—HЉB€™]\›€€‹љ›Ъ[ЉЪ[љЬКB€Ъ[љЬЛ™^[™
+И—€‹[™WJB€Э\њ™[ќЫ[™Э
+ПH[Љ[™JH
+ИB€™]\›€€‹љ›Ъ[ЉЪ[љЬКB

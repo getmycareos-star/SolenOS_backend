@@ -46,4 +46,4 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
       - name: Verify document lifecycle against real PostgreSQL
-        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py -q -s
+        run: python -m pytest backend/tests/test_document_lifecycle_postgres.py backend/tests/test_document_lifecycle.py backend/tests/test_unified_lcr_retrieval.py -q -s
