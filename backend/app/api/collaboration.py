@@ -28,7 +28,7 @@ from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.care_continuity import CareAssertion, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy
 from app.services.qwen_gateway import extract_review_candidates, get_ollama_config, qwen_chat, qwen_runtime_status, qwen_readiness_status
-from app.services.lcr_context import build_lcr_context
+from app.services.unified_lcr_retrieval import build_unified_lcr_context
 from app.models.collaboration import CommunityPost, CommunityReaction, ConversationSession, ConversationMessage, EvidenceUpload, ShareIntake, ConsentRecord
 from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
@@ -2733,8 +2733,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
-            shared_lcr_context = build_lcr_context(
-                db, person_id, limit_per_source=20, query=retrieval_query
+            shared_lcr_context = build_unified_lcr_context(
+                db, person_id, caregiver_id, limit_per_source=20, query=retrieval_query
             )
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
