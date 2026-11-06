@@ -1,12 +1,12 @@
 """Merge explicit-action and clarification-review migrations.
 
-Revision ID: 20261102_02_workflow_integrity_merge
+Revision ID: 20261102_02_wf_integrity_merge
 Revises: 20261102_01_explicit_actions, 20261102_01_q_review_events
 
 This is a graph-only reconciliation. Both child migrations remain in the
 canonical history; no care data or schema objects are modified here.
 """
-revision = "20261102_02_workflow_integrity_merge"
+revision = "20261102_02_wf_integrity_merge"
 down_revision = (
     "20261102_01_explicit_actions",
     "20261102_01_q_review_events",
